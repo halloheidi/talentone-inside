@@ -14,6 +14,8 @@ export default function JobCreatives() {
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
+  const [expected, setExpected] = useState(0);   // wie viele neue Bilder erwartet
+  const pollRef = useRef(null);
   const [reworkTarget, setReworkTarget] = useState(null); // creative-Objekt zum Überarbeiten
   const [reworkMotiv, setReworkMotiv] = useState('');
   const [reworkBusy, setReworkBusy] = useState(false);
@@ -58,6 +60,46 @@ export default function JobCreatives() {
     }
   }
 
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  // Pollen nach neuen Creatives. Stop, sobald `expected` neue Bilder da sind oder 5min vorbei.
+  function startPolling(baselineCount, expectedNew) {
+    stopPolling();
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 5 * 60 * 1000;
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api(`/creatives?job_id=${job.id}`);
+        const list = res.creatives || [];
+        setCreatives(list);
+        const delta = list.length - baselineCount;
+        if (delta >= expectedNew) {
+          stopPolling();
+          setGenerating(false);
+          setExpected(0);
+          return;
+        }
+        if (Date.now() - startedAt > TIMEOUT_MS) {
+          stopPolling();
+          setGenerating(false);
+          setExpected(0);
+          setGenerateError('Generierung dauert ungewöhnlich lang. Bitte später nochmal prüfen oder Logs anschauen.');
+        }
+      } catch (err) {
+        console.warn('[poll]', err.message);
+      }
+    }, 4000);
+  }
+
+  // Polling beim Verlassen der Seite stoppen
+  useEffect(() => () => stopPolling(), []);
+
   async function onGenerate() {
     if (!motiv) {
       setGenerateError('Bitte ein Motiv wählen oder eigenes eintippen.');
@@ -65,18 +107,17 @@ export default function JobCreatives() {
     }
     setGenerating(true);
     setGenerateError('');
+    const baseline = creatives.length;
     try {
       const res = await api('/creatives/generate', {
         method: 'POST',
         body: { job_id: job.id, motiv, varianten },
       });
-      setCreatives(prev => [...(res.creatives || []), ...prev]);
-      if (res.errors?.length) {
-        setGenerateError(`Teilweise fehlgeschlagen: ${res.errors[0]}`);
-      }
+      const exp = res.expected || varianten * 2;
+      setExpected(exp);
+      startPolling(baseline, exp);
     } catch (err) {
       setGenerateError(err.message);
-    } finally {
       setGenerating(false);
     }
   }
@@ -181,10 +222,10 @@ export default function JobCreatives() {
           </label>
           <div className="generate-actions">
             <div className="generate-hint">
-              Erzeugt jeweils ein 1:1- und ein Story-Bild via gpt-image-2 — kann 30-60 Sekunden dauern.
+              Läuft im Hintergrund — Bilder erscheinen automatisch in der Galerie. Pro Bild ~30-90 Sekunden.
             </div>
             <button className="btn-primary" onClick={onGenerate} disabled={generating || !motiv}>
-              {generating ? 'Generiere…' : 'Creatives generieren'}
+              {generating ? `Generiere ${expected} Bilder…` : 'Creatives generieren'}
             </button>
           </div>
         </div>

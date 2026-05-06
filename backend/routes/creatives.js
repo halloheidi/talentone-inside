@@ -35,51 +35,48 @@ router.post('/motiv-vorschlaege', async (req, res) => {
 });
 
 /* POST /api/creatives/generate  body: { job_id, motiv, varianten?: 1-3 }
-   Erzeugt N Varianten (default 1), jede in beiden Formaten — Bilder werden
-   einzeln in talentone_creatives gespeichert (typ=bild). */
+   Antwortet SOFORT mit 202 + erwarteter Bilderzahl. Die eigentliche Generierung
+   läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
+   Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
   const { job_id, motiv, varianten = 1 } = req.body || {};
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht.' });
   const n = Math.min(Math.max(parseInt(varianten, 10) || 1, 1), 3);
 
-  try {
-    const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
-    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  // Job + Kunde vorab laden, damit Validation-Fehler sofort kommen.
+  const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
+  if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
 
-    // N Varianten parallel — jede ruft 2× OpenAI (1:1 + 2:3)
-    const variantResults = await Promise.all(
-      Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv })),
-    );
+  const expected = n * 2; // jede Variante × 2 Formate
+  res.status(202).json({ accepted: true, expected, message: 'Generierung gestartet — Bilder erscheinen automatisch in der Galerie.' });
 
-    const allOk = variantResults.flatMap(v => v.ok);
-    const allErrors = variantResults.flatMap(v => v.errors);
+  // Hintergrund-Job
+  (async () => {
+    console.log(`[generate-bg] job ${job_id}, ${n} Varianten (=${expected} Bilder)`);
+    try {
+      const variantResults = await Promise.all(
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv })),
+      );
+      const allOk = variantResults.flatMap(v => v.ok);
+      const allErrors = variantResults.flatMap(v => v.errors);
+      if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
-    if (allOk.length === 0) {
-      return res.status(503).json({ error: 'Bild-Generierung fehlgeschlagen.', details: allErrors });
+      if (allOk.length > 0) {
+        const rows = allOk.map(({ format, bildUrl, prompt }) => ({
+          job_id, format, typ: 'bild', bild_url: bildUrl, prompt, status: 'fertig',
+        }));
+        const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
+        if (insErr) console.error(`[generate-bg] DB-Insert: ${insErr.message}`);
+        else console.log(`[generate-bg] ${allOk.length} Creative(s) für job ${job_id} fertig.`);
+      } else {
+        console.error(`[generate-bg] Alle Bilder fehlgeschlagen für job ${job_id}`);
+      }
+    } catch (err) {
+      console.error(`[generate-bg] Fehler:`, err.message);
     }
-
-    // In DB speichern
-    const rows = allOk.map(({ format, bildUrl, prompt }) => ({
-      job_id,
-      format,
-      typ: 'bild',
-      bild_url: bildUrl,
-      prompt,
-      status: 'fertig',
-    }));
-    const { data: created, error: insErr } = await supabase
-      .from('talentone_creatives')
-      .insert(rows)
-      .select();
-    if (insErr) return res.status(500).json({ error: insErr.message });
-
-    res.status(201).json({ creatives: created, errors: allErrors });
-  } catch (err) {
-    console.error('[generate]', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  })().catch(err => console.error('[generate-bg] uncaught:', err));
 });
 
 /* POST /api/creatives/:id/regenerate  body: { motiv } — altes Creative löschen + neu im selben Format. */
