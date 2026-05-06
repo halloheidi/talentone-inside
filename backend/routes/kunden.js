@@ -72,6 +72,12 @@ router.post('/quick-create', async (req, res) => {
     res.status(201).json({ kunde, job });
   } catch (err) {
     console.error('[quick-create]', err.message);
+    if (/Claude API 529/.test(err.message)) {
+      return res.status(503).json({ error: 'Die KI ist gerade überlastet. Bitte in 1-2 Minuten erneut versuchen — oder Tab "Manuell" nutzen.' });
+    }
+    if (/Claude API 429/.test(err.message)) {
+      return res.status(503).json({ error: 'Rate-Limit erreicht. Bitte kurz warten und erneut versuchen.' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
