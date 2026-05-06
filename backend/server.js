@@ -35,6 +35,7 @@ app.use('/api/public', publicRouter);
 app.use('/api/kunden', requireAuth, kundenRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/creatives', requireAuth, creativesRouter);
+app.use('/api/adcopies', requireAuth, adcopiesRouter);
 
 app.use((err, req, res, _next) => {
   console.error('[Inside] Fehler:', err.message);
