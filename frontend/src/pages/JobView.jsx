@@ -20,8 +20,12 @@ export default function JobView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Lädt sowohl Job als auch Kunden neu — z.B. nach Logo-Upload, damit kunde.logo_url aktuell ist.
   function reload() {
-    return api(`/jobs/${jobId}`).then(r => setJob(r.job));
+    return Promise.all([
+      api(`/jobs/${jobId}`).then(r => setJob(r.job)),
+      api(`/kunden/${kundeId}`).then(r => setKunde(r.kunde)),
+    ]);
   }
 
   useEffect(() => {

@@ -77,14 +77,14 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
   const refHinweis = [];
   if (hasLogo && person) {
     refHinweis.push(
-      `MITGELIEFERTE BILDER:`,
-      `1) ERSTES Referenzbild = LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`,
-      `2) ZWEITES Referenzbild = FOTO einer realen Person${person.beschreibung ? ` (${person.beschreibung})` : ''}. Stelle DIESE Person in der unten beschriebenen Szene dar — die Person soll erkennbar bleiben (Gesichtszüge, Frisur, Statur), aber natürlich in die neue Situation eingebettet sein. Kleidung darf der Tätigkeit angepasst werden.`,
+      `MITGELIEFERTE BILDER (in dieser Reihenfolge):`,
+      `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. Diese Datei ist AUSSCHLIESSLICH ein Marken-Element für den Logo-Abdruck. Platziere das Logo klein und dezent oben rechts im Creative (ca. 10% der Bildbreite, klare Kanten, transparenter Hintergrund respektiert). VERWENDE DIESES BILD NICHT als Person, NICHT als Hintergrund, NICHT als Stil-Referenz, NICHT für Bildkomposition.`,
+      `[BILD 2 — DATEINAME "person"] = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. DIESE Person ist die Hauptfigur des Creatives. Übernimm Gesichtszüge, Hauttyp, Haarfarbe, Frisur und Statur aus diesem Foto und stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben. Kleidung darf der neuen Tätigkeit angepasst werden, das Gesicht NICHT.`,
     );
   } else if (hasLogo) {
-    refHinweis.push(`MITGELIEFERTES BILD: Das ist das LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`);
+    refHinweis.push(`MITGELIEFERTES BILD = FIRMENLOGO. Ausschließlich Marken-Element. Platziere es klein und dezent oben rechts im Creative (ca. 10% der Bildbreite). NICHT als Hauptmotiv, NICHT als Stil-Referenz verwenden — nur als Logo-Abdruck.`);
   } else if (person) {
-    refHinweis.push(`MITGELIEFERTES BILD: FOTO einer realen Person${person.beschreibung ? ` (${person.beschreibung})` : ''}. Stelle DIESE Person in der unten beschriebenen Szene dar — die Person soll erkennbar bleiben (Gesichtszüge, Frisur, Statur), aber natürlich in die neue Situation eingebettet sein. Kleidung darf der Tätigkeit angepasst werden.`);
+    refHinweis.push(`MITGELIEFERTES BILD = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. Übernimm Gesichtszüge, Hauttyp, Haarfarbe, Frisur und Statur und stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben.`);
   }
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im modernen Instagram/Facebook Stil.
@@ -120,10 +120,10 @@ function buildPromptFoto({ job, kunde, format, hasLogo }) {
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
 
   const refLines = hasLogo
-    ? `MITGELIEFERTE BILDER:
-1) ERSTES Bild = LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).
-2) ZWEITES Bild = HINTERGRUNDFOTO. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
-    : `MITGELIEFERTES BILD = HINTERGRUNDFOTO. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
+    ? `MITGELIEFERTE BILDER (in dieser Reihenfolge):
+[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. Ausschließlich Marken-Element. Platziere es klein und dezent oben rechts (ca. 10% Bildbreite). NICHT als Hauptmotiv, NICHT als Stil-Referenz verwenden.
+[BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
+    : `MITGELIEFERTES BILD = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
 
   return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im modernen Instagram/Facebook Stil.
 
@@ -192,14 +192,18 @@ export async function deleteFromStorage(publicUrl) {
   }
 }
 
-// Lädt URLs nacheinander als Buffer + Mime und liefert sie als Liste {buffer, contentType, name}.
+// Lädt URLs nacheinander als Buffer + Mime und liefert sie als Liste — isLogo wird durchgereicht!
 async function loadReferenceImages(refs) {
   const out = [];
   for (const ref of refs) {
     if (!ref?.url) continue;
     try {
       const { buffer, contentType } = await fetchAsBuffer(ref.url);
-      out.push({ buffer, contentType, name: ref.name || 'ref.png' });
+      out.push({
+        buffer, contentType,
+        name: ref.name || 'ref',
+        isLogo: !!ref.isLogo,
+      });
     } catch (err) {
       console.warn(`[ref-fetch] ${ref.url}: ${err.message}`);
     }
@@ -231,14 +235,20 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   let response;
   if (refs.length > 0) {
+    // Sortierung erzwingen: Logo IMMER zuerst → so erwartet's auch der Prompt
+    refs.sort((a, b) => (b.isLogo ? 1 : 0) - (a.isLogo ? 1 : 0));
+    console.log(`[imagegen] format=${format} mode=${mode} refs=[${refs.map(r => r.isLogo ? 'logo' : 'person').join(', ')}]`);
+
     const form = new FormData();
     form.append('model', 'gpt-image-2');
     form.append('prompt', prompt);
     form.append('size', size);
     form.append('quality', 'high');
     form.append('n', '1');
-    refs.forEach((r, i) => {
-      form.append('image[]', bufferToFile(r.buffer, `ref-${i}.${r.contentType.includes('png') ? 'png' : 'jpg'}`, r.contentType));
+    refs.forEach((r) => {
+      const ext = r.contentType.includes('png') ? 'png' : (r.contentType.includes('webp') ? 'webp' : 'jpg');
+      const fileName = r.isLogo ? `firmenlogo.${ext}` : (mode === 'foto' ? `hintergrundfoto.${ext}` : `person.${ext}`);
+      form.append('image[]', bufferToFile(r.buffer, fileName, r.contentType));
     });
     response = await fetch(OPENAI_EDITS_API, {
       method: 'POST',

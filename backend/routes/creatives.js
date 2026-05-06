@@ -40,6 +40,7 @@ router.post('/motiv-vorschlaege', async (req, res) => {
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
   const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id } = req.body || {};
+  console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten}`);
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
   if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
@@ -76,7 +77,8 @@ router.post('/generate', async (req, res) => {
 
   // Hintergrund-Job
   (async () => {
-    console.log(`[generate-bg] job ${job_id}, mode=${mode}, ${n} Varianten (=${expected} Bilder), refs=${referenceImages.length}`);
+    const refSummary = referenceImages.map(r => r.isLogo ? 'logo' : (mode === 'foto' ? 'hintergrund' : 'person')).join('+') || 'keine';
+    console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
         Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages })),
