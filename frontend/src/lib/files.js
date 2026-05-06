@@ -21,3 +21,23 @@ export async function uploadFile(file, postFn) {
     contentType: file.type || 'application/octet-stream',
   });
 }
+
+// Lädt eine (cross-origin) URL als Blob und triggert einen Download im Browser.
+// Direktes <a href download> reicht nicht für Cross-Origin (Supabase Storage),
+// daher der Umweg über fetch + ObjectURL.
+export async function downloadFromUrl(url, filename) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download fehlgeschlagen (${res.status})`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}

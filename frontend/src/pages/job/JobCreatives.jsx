@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
-import { fileToBase64 } from '../../lib/files.js';
+import { fileToBase64, downloadFromUrl } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
+import Icon from '../../components/Icon.jsx';
+import Lightbox from '../../components/Lightbox.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob } = useJob();
@@ -42,6 +44,24 @@ export default function JobCreatives() {
   const [reworkTarget, setReworkTarget] = useState(null);
   const [reworkMotiv, setReworkMotiv] = useState('');
   const [reworkBusy, setReworkBusy] = useState(false);
+
+  // Lightbox
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+  function buildFilename(c) {
+    const stelle = (job.stelle || 'creative').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    const ts = new Date(c.created_at).toISOString().slice(0, 10);
+    return `${stelle}-${c.format}-${ts}-${c.id.slice(0, 6)}.png`;
+  }
+
+  async function downloadCreative(c, e) {
+    e?.stopPropagation();
+    try {
+      await downloadFromUrl(c.bild_url, buildFilename(c));
+    } catch (err) {
+      alert(err.message);
+    }
+  }
 
   const requestedFor = useRef(null);
   const motiv = (eigenes.trim() || auswahl).trim();
@@ -442,16 +462,33 @@ export default function JobCreatives() {
         )}
         {creatives.length > 0 && (
           <div className="creative-grid">
-            {creatives.map(c => (
+            {creatives.map((c, i) => (
               <div key={c.id} className={`creative-card format-${c.format}`}>
-                <div className="creative-thumb">
+                <button
+                  type="button"
+                  className="creative-thumb"
+                  onClick={() => c.bild_url && setLightboxIndex(i)}
+                  title="Klicken für Vollansicht"
+                  aria-label="Vollansicht öffnen"
+                >
                   {c.bild_url
                     ? <img src={c.bild_url} alt="" loading="lazy" />
                     : <div className="creative-thumb-empty">kein Bild</div>}
                   <span className={`format-badge format-${c.format}`}>
                     {c.format === 'story' ? '9:16' : '1:1'}
                   </span>
-                </div>
+                  {c.bild_url && (
+                    <button
+                      type="button"
+                      className="thumb-download"
+                      title="Herunterladen"
+                      aria-label="Bild herunterladen"
+                      onClick={(e) => downloadCreative(c, e)}
+                    >
+                      <Icon name="download" size={16} />
+                    </button>
+                  )}
+                </button>
                 <div className="creative-foot">
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">
@@ -465,6 +502,16 @@ export default function JobCreatives() {
               </div>
             ))}
           </div>
+        )}
+
+        {lightboxIndex !== null && (
+          <Lightbox
+            items={creatives}
+            index={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+            onNavigate={setLightboxIndex}
+            filenameFor={buildFilename}
+          />
         )}
       </section>
 
