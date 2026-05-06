@@ -4,6 +4,7 @@ import { requireAuth } from './auth.js';
 import kundenRouter from './routes/kunden.js';
 import jobsRouter from './routes/jobs.js';
 import creativesRouter from './routes/creatives.js';
+import adcopiesRouter from './routes/adcopies.js';
 import publicRouter from './routes/public.js';
 
 const app = express();
