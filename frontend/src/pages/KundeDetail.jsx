@@ -6,6 +6,8 @@ import Modal from '../components/Modal.jsx';
 
 const EMPTY_JOB = { stelle: '', region: '', gehalt: '' };
 
+const DEFAULT_ANFRAGE = `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
+
 export default function KundeDetail() {
   const { kundeId } = useParams();
   const nav = useNavigate();
@@ -16,6 +18,13 @@ export default function KundeDetail() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_JOB);
   const [creating, setCreating] = useState(false);
+
+  const [showAnfrage, setShowAnfrage] = useState(false);
+  const [anfrageText, setAnfrageText] = useState(DEFAULT_ANFRAGE);
+  const [anfrageBusy, setAnfrageBusy] = useState(false);
+  const [anfrageMsg, setAnfrageMsg] = useState('');
+
+  const [referenzbilder, setReferenzbilder] = useState([]);
 
   function load() {
     setLoading(true);
@@ -29,6 +38,26 @@ export default function KundeDetail() {
   }
 
   useEffect(() => { load(); }, [kundeId]);
+
+  useEffect(() => {
+    api(`/kunden/${kundeId}/referenzbilder`)
+      .then(res => setReferenzbilder(res.referenzbilder || []))
+      .catch(() => {});
+  }, [kundeId]);
+
+  async function sendAnfrage() {
+    setAnfrageBusy(true);
+    setAnfrageMsg('');
+    try {
+      await api(`/kunden/${kundeId}/anfrage`, { method: 'POST', body: { customText: anfrageText } });
+      setAnfrageMsg(`Mail an ${kunde.email} verschickt.`);
+      setTimeout(() => { setShowAnfrage(false); setAnfrageMsg(''); }, 1500);
+    } catch (err) {
+      setAnfrageMsg(err.message);
+    } finally {
+      setAnfrageBusy(false);
+    }
+  }
 
   async function onCreate(e) {
     e?.preventDefault();
@@ -73,8 +102,34 @@ export default function KundeDetail() {
             {kunde.telefon && <span><strong>Telefon:</strong> {kunde.telefon}</span>}
           </div>
           {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
+          <div className="kunde-head-actions">
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => setShowAnfrage(true)}
+              title={kunde.email ? '' : 'Kunden-E-Mail fehlt'}
+              disabled={!kunde.email}
+            >
+              Fotos & Logo beim Kunden anfragen
+            </button>
+          </div>
         </div>
       </div>
+
+      {referenzbilder.length > 0 && (
+        <div className="ref-strip">
+          <div className="ref-strip-title">
+            Verfügbar: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)
+          </div>
+          <div className="ref-strip-grid">
+            {referenzbilder.slice(0, 8).map(r => (
+              <a key={r.id} href={r.bild_url} target="_blank" rel="noreferrer" className="ref-strip-thumb" title={r.typ}>
+                <img src={r.bild_url} alt="" />
+                {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="section-head">
         <div>
@@ -107,6 +162,30 @@ export default function KundeDetail() {
           ))}
         </div>
       )}
+
+      <Modal
+        open={showAnfrage}
+        onClose={() => !anfrageBusy && setShowAnfrage(false)}
+        title="Fotos & Logo anfragen"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setShowAnfrage(false)} disabled={anfrageBusy}>Abbrechen</button>
+            <button className="btn-primary" onClick={sendAnfrage} disabled={anfrageBusy || !kunde?.email}>
+              {anfrageBusy ? 'Sende…' : `Mail an ${kunde?.email || '—'} senden`}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Wir verschicken eine Mail an <strong>{kunde?.email || '(keine Mail hinterlegt)'}</strong> mit einem persönlichen Upload-Link.
+          Der Kunde kann dort Logo und Fotos ohne Login hochladen — die Dateien tauchen automatisch hier oben auf.
+        </p>
+        <label className="field field-full">
+          <span>Persönlicher Text (editierbar)</span>
+          <textarea rows={6} value={anfrageText} onChange={e => setAnfrageText(e.target.value)} />
+        </label>
+        {anfrageMsg && <div className="form-msg" style={{ marginTop: 8 }}>{anfrageMsg}</div>}
+      </Modal>
 
       <Modal
         open={showCreate}

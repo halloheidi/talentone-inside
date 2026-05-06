@@ -4,6 +4,7 @@ import { requireAuth } from './auth.js';
 import kundenRouter from './routes/kunden.js';
 import jobsRouter from './routes/jobs.js';
 import creativesRouter from './routes/creatives.js';
+import publicRouter from './routes/public.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,6 +28,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'TalentOne Inside Backend' });
 });
 
+// Public — KEIN Login (Kunde lädt Logo/Fotos via Token-Link hoch).
+app.use('/api/public', publicRouter);
+
+// Geschützt — nur eingeloggte Mitarbeiter.
 app.use('/api/kunden', requireAuth, kundenRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/creatives', requireAuth, creativesRouter);

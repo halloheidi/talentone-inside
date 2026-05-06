@@ -1,8 +1,17 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
+import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
+import { sendUploadAnfrage } from '../mail.js';
 
 const router = Router();
+
+const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
+
+function decodeBase64File(fileData) {
+  return Buffer.from(fileData, 'base64');
+}
 
 // Quick-Create: legt in einem Schritt Kunde + ersten Job an.
 // Modi:
@@ -131,6 +140,141 @@ router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_kunden').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* ─────────────────── Logo ─────────────────── */
+
+// POST /api/kunden/:id/logo  body: { fileData: base64, fileName, contentType? }
+router.post('/:id/logo', async (req, res) => {
+  const { fileData, fileName = 'logo.png', contentType = 'image/png' } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
+
+  const { data: existing } = await supabase
+    .from('talentone_kunden')
+    .select('id, logo_url')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  try {
+    const buffer = decodeBase64File(fileData);
+    const ext = extFromMime(contentType, 'png');
+    const stem = safeFilenameStem(fileName);
+    const path = `${req.params.id}/${Date.now()}-${stem}.${ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType });
+
+    if (existing.logo_url) await deleteFromBucket('talentone-logos', existing.logo_url);
+
+    const { data: updated, error: uErr } = await supabase
+      .from('talentone_kunden')
+      .update({ logo_url: publicUrl })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (uErr) return res.status(500).json({ error: uErr.message });
+
+    res.status(201).json({ kunde: updated });
+  } catch (err) {
+    console.error('[logo-upload]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/logo', async (req, res) => {
+  const { data: existing } = await supabase
+    .from('talentone_kunden').select('logo_url').eq('id', req.params.id).maybeSingle();
+  if (existing?.logo_url) await deleteFromBucket('talentone-logos', existing.logo_url);
+  await supabase.from('talentone_kunden').update({ logo_url: null }).eq('id', req.params.id);
+  res.json({ ok: true });
+});
+
+/* ─────────────────── Referenzbilder ─────────────────── */
+
+router.get('/:id/referenzbilder', async (req, res) => {
+  const { data, error } = await supabase
+    .from('talentone_referenzbilder')
+    .select('*')
+    .eq('kunde_id', req.params.id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ referenzbilder: data });
+});
+
+// POST /api/kunden/:id/referenzbilder body: { fileData (base64), fileName, contentType, label? }
+router.post('/:id/referenzbilder', async (req, res) => {
+  const { fileData, fileName = 'foto.jpg', contentType = 'image/jpeg', label } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
+
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('id').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  try {
+    const buffer = decodeBase64File(fileData);
+    const ext = extFromMime(contentType, 'jpg');
+    const stem = safeFilenameStem(fileName);
+    const path = `${req.params.id}/${Date.now()}-${stem}.${ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer, contentType });
+
+    const { data: row, error: insErr } = await supabase
+      .from('talentone_referenzbilder')
+      .insert({
+        kunde_id: req.params.id, bild_url: publicUrl,
+        typ: 'foto', label: label || null, uploaded_via: 'mitarbeiter',
+      })
+      .select().single();
+    if (insErr) return res.status(500).json({ error: insErr.message });
+
+    res.status(201).json({ referenzbild: row });
+  } catch (err) {
+    console.error('[ref-upload]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/referenzbilder/:id', async (req, res) => {
+  const { data: existing } = await supabase
+    .from('talentone_referenzbilder').select('bild_url').eq('id', req.params.id).maybeSingle();
+  if (existing?.bild_url) await deleteFromBucket('talentone-referenzbilder', existing.bild_url);
+  const { error } = await supabase.from('talentone_referenzbilder').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+/* ─────────────────── Upload-Anfrage per Mail ─────────────────── */
+
+// POST /api/kunden/:id/anfrage  body: { customText? } — schickt Mail mit Upload-Link
+router.post('/:id/anfrage', async (req, res) => {
+  const { customText } = req.body || {};
+  const { data: kunde, error: kErr } = await supabase
+    .from('talentone_kunden').select('*').eq('id', req.params.id).maybeSingle();
+  if (kErr || !kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  if (!kunde.email) return res.status(400).json({ error: 'Kunde hat keine E-Mail-Adresse.' });
+
+  // Upload-Token erzeugen falls noch keiner existiert
+  let token = kunde.upload_token;
+  if (!token) {
+    token = randomUUID();
+    const { error: uErr } = await supabase
+      .from('talentone_kunden').update({ upload_token: token }).eq('id', kunde.id);
+    if (uErr) return res.status(500).json({ error: uErr.message });
+  }
+
+  const uploadUrl = `${PUBLIC_BASE}/upload/${token}`;
+
+  try {
+    await sendUploadAnfrage({
+      to: kunde.email,
+      kundenname: kunde.firmenname || 'euer Team',
+      ansprechpartner: kunde.ansprechpartner,
+      uploadUrl,
+      customText,
+    });
+    res.json({ ok: true, uploadUrl });
+  } catch (err) {
+    console.error('[anfrage]', err.message);
+    res.status(503).json({ error: err.message });
+  }
 });
 
 export default router;

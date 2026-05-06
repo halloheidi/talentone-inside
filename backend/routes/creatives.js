@@ -39,7 +39,7 @@ router.post('/motiv-vorschlaege', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1 } = req.body || {};
+  const { job_id, motiv, varianten = 1, referenzbild_id } = req.body || {};
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht.' });
   const n = Math.min(Math.max(parseInt(varianten, 10) || 1, 1), 3);
@@ -49,15 +49,24 @@ router.post('/generate', async (req, res) => {
   if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
   const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
 
+  // Reference-Images zusammenstellen: Logo zuerst, dann optional das gewählte Referenzbild.
+  const referenceImages = [];
+  if (kunde?.logo_url) referenceImages.push({ url: kunde.logo_url, name: 'logo', isLogo: true });
+  if (referenzbild_id) {
+    const { data: ref } = await supabase
+      .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
+    if (ref?.bild_url) referenceImages.push({ url: ref.bild_url, name: 'stil-referenz', isLogo: false });
+  }
+
   const expected = n * 2; // jede Variante × 2 Formate
   res.status(202).json({ accepted: true, expected, message: 'Generierung gestartet — Bilder erscheinen automatisch in der Galerie.' });
 
   // Hintergrund-Job
   (async () => {
-    console.log(`[generate-bg] job ${job_id}, ${n} Varianten (=${expected} Bilder)`);
+    console.log(`[generate-bg] job ${job_id}, ${n} Varianten (=${expected} Bilder), refs=${referenceImages.length}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, referenceImages })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
@@ -79,9 +88,9 @@ router.post('/generate', async (req, res) => {
   })().catch(err => console.error('[generate-bg] uncaught:', err));
 });
 
-/* POST /api/creatives/:id/regenerate  body: { motiv } — altes Creative löschen + neu im selben Format. */
+/* POST /api/creatives/:id/regenerate  body: { motiv, referenzbild_id? } — altes Creative löschen + neu im selben Format. */
 router.post('/:id/regenerate', async (req, res) => {
-  const { motiv } = req.body || {};
+  const { motiv, referenzbild_id } = req.body || {};
   if (!motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht.' });
   try {
     const { data: existing, error: e1 } = await supabase
@@ -93,8 +102,16 @@ router.post('/:id/regenerate', async (req, res) => {
     const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
     const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
 
+    const referenceImages = [];
+    if (kunde?.logo_url) referenceImages.push({ url: kunde.logo_url, name: 'logo', isLogo: true });
+    if (referenzbild_id) {
+      const { data: ref } = await supabase
+        .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
+      if (ref?.bild_url) referenceImages.push({ url: ref.bild_url, name: 'stil-referenz', isLogo: false });
+    }
+
     const { generateOneCreative } = await import('../imagegen.js');
-    const result = await generateOneCreative({ job, kunde, motiv, format: existing.format });
+    const result = await generateOneCreative({ job, kunde, motiv, format: existing.format, referenceImages });
 
     // Erst neues Creative anlegen, dann altes löschen (Storage + DB)
     const { data: created, error: insErr } = await supabase

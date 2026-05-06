@@ -4,8 +4,10 @@
 //                            Upload nach Supabase Storage (Bucket: talentone-creatives).
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
+import { fetchAsBuffer } from './storage.js';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
+const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
 export const STORAGE_BUCKET = 'talentone-creatives';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
@@ -63,7 +65,7 @@ function pickBenefits(job) {
   return benefits.slice(0, 4);
 }
 
-export function buildCreativePrompt({ job, kunde, motiv, format }) {
+export function buildCreativePrompt({ job, kunde, motiv, format, hasLogo, hasReferenz }) {
   const stelle = job.stelle || 'Mitarbeiter:in';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const firmenname = kunde?.firmenname || '';
@@ -71,16 +73,28 @@ export function buildCreativePrompt({ job, kunde, motiv, format }) {
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
 
+  const refHinweis = [];
+  if (hasLogo && hasReferenz) {
+    refHinweis.push(
+      `MITGELIEFERTE BILDER: Das ERSTE Referenzbild ist das LOGO des Unternehmens — platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`,
+      `Das ZWEITE Bild ist eine STIL-REFERENZ aus dem echten Betrieb — übernimm die Lichtstimmung, Farbpalette und Authentizität dieses Bildes für das Hintergrundmotiv. Greife Atmosphäre und Bildsprache auf, übersetze sie aber in eine professionelle Recruiting-Ad-Komposition.`,
+    );
+  } else if (hasLogo) {
+    refHinweis.push(`MITGELIEFERTES BILD: Das ist das LOGO des Unternehmens — platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`);
+  } else if (hasReferenz) {
+    refHinweis.push(`MITGELIEFERTES BILD: Das ist eine STIL-REFERENZ aus dem echten Betrieb — übernimm Lichtstimmung, Farbpalette und Authentizität für das Hintergrundmotiv. Greife Atmosphäre und Bildsprache auf, übersetze sie in eine professionelle Recruiting-Ad-Komposition.`);
+  }
+
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im modernen Instagram/Facebook Stil.
 
-BILDMOTIV (Hintergrund):
+${refHinweis.length ? refHinweis.join('\n\n') + '\n\n' : ''}BILDMOTIV (Hintergrund):
 ${motiv}
 - Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
 - Branche: ${branche}
 - Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos
 
 TEXT-ELEMENTE (sauber lesbar, modernes Design):
-- Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift
+- Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
 - Mittig: Ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter), passend zur Stelle "${stelle}" — motivierend, auf Augenhöhe, kein "Wir suchen dich"-Klischee
 - Unten: 3-4 Benefit-Tags in kleinen, abgerundeten Boxen mit Icons nebeneinander: ${benefitListe}
 - Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", nicht ganze Sätze
@@ -134,29 +148,65 @@ export async function deleteFromStorage(publicUrl) {
   }
 }
 
-// Generiert ein einzelnes Bild in einem Format und uploaded es.
-// Returns { format, bildUrl, prompt }.  Wirft bei OpenAI-Fehler.
-export async function generateOneCreative({ job, kunde, motiv, format }) {
+// Lädt URLs nacheinander als Buffer + Mime und liefert sie als Liste {buffer, contentType, name}.
+async function loadReferenceImages(refs) {
+  const out = [];
+  for (const ref of refs) {
+    if (!ref?.url) continue;
+    try {
+      const { buffer, contentType } = await fetchAsBuffer(ref.url);
+      out.push({ buffer, contentType, name: ref.name || 'ref.png' });
+    } catch (err) {
+      console.warn(`[ref-fetch] ${ref.url}: ${err.message}`);
+    }
+  }
+  return out;
+}
+
+// Wandelt einen Buffer in einen Web-File für FormData (gpt-image-2 /edits).
+function bufferToFile(buf, name, type) {
+  return new File([buf], name, { type });
+}
+
+// Generiert ein Bild in einem Format und uploaded nach Storage.
+// referenceImages: [{ url, name? }] — Logo IMMER zuerst (wird in der Ecke platziert),
+// Stil-Referenz danach. Bei mind. einer Referenz nutzt OpenAI /v1/images/edits.
+export async function generateOneCreative({ job, kunde, motiv, format, referenceImages = [] }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
 
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format });
+  const refs = await loadReferenceImages(referenceImages);
+  const hasLogo = !!referenceImages[0]?.isLogo;
+  const hasReferenz = referenceImages.some(r => !r.isLogo);
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, hasLogo, hasReferenz });
 
-  const response = await fetch(OPENAI_IMAGES_API, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'gpt-image-2',
-      prompt,
-      size,
-      quality: 'high',
-      n: 1,
-    }),
-  });
+  let response;
+  if (refs.length > 0) {
+    const form = new FormData();
+    form.append('model', 'gpt-image-2');
+    form.append('prompt', prompt);
+    form.append('size', size);
+    form.append('quality', 'high');
+    form.append('n', '1');
+    refs.forEach((r, i) => {
+      form.append('image[]', bufferToFile(r.buffer, `ref-${i}.${r.contentType.includes('png') ? 'png' : 'jpg'}`, r.contentType));
+    });
+    response = await fetch(OPENAI_EDITS_API, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: form,
+    });
+  } else {
+    response = await fetch(OPENAI_IMAGES_API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: 'gpt-image-2', prompt, size, quality: 'high', n: 1 }),
+    });
+  }
 
   if (!response.ok) {
     const body = await response.text();
@@ -173,11 +223,10 @@ export async function generateOneCreative({ job, kunde, motiv, format }) {
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-// Liefert zwei Ergebnisse zurück; einzelne Fehler werden propagiert in `errors`.
-export async function generateVariant({ job, kunde, motiv }) {
+export async function generateVariant({ job, kunde, motiv, referenceImages = [] }) {
   const formats = ['quadrat', 'story'];
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, referenceImages })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
