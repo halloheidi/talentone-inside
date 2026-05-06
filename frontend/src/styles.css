@@ -564,8 +564,9 @@ button { font-family: inherit; }
   margin-bottom: 24px;
 }
 .kunde-head-logo {
-  width: 64px;
-  height: 64px;
+  position: relative;
+  width: 72px;
+  height: 72px;
   border-radius: 14px;
   background: var(--ink);
   color: #fff;
@@ -575,8 +576,38 @@ button { font-family: inherit; }
   font-size: 22px;
   flex-shrink: 0;
   overflow: hidden;
+  border: none;
+  padding: 0;
+  font-family: inherit;
 }
-.kunde-head-logo img { width: 100%; height: 100%; object-fit: cover; }
+.kunde-head-logo.has-image {
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.kunde-head-logo img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  padding: 6px;
+}
+.kunde-head-logo.is-clickable { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+.kunde-head-logo.is-clickable:hover { box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+.kunde-head-logo.is-clickable:hover.has-image { border-color: var(--ink-4); }
+.kunde-head-logo-edit {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 4px 0;
+  background: rgba(10,10,10,0.78);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+  backdrop-filter: blur(2px);
+}
+.kunde-head-logo.is-clickable:hover .kunde-head-logo-edit { opacity: 1; }
 .kunde-head-body { min-width: 0; flex: 1; }
 .kunde-head-body .page-title { margin-bottom: 8px; }
 .kunde-head-meta {
@@ -851,10 +882,14 @@ button { font-family: inherit; }
   flex-shrink: 0;
   overflow: hidden;
 }
+.logo-upload-preview:has(img) {
+  background: #fff;
+  border: 1px solid var(--line);
+}
 .logo-upload-preview img {
   width: 100%; height: 100%;
   object-fit: contain;
-  background: #fff;
+  padding: 4px;
 }
 .logo-upload-text {
   flex: 1;
@@ -1134,10 +1169,14 @@ button { font-family: inherit; }
   flex-shrink: 0;
   overflow: hidden;
 }
+.logo-banner.has-logo .logo-banner-preview {
+  background: #fff;
+  border: 1px solid var(--line);
+}
 .logo-banner-preview img {
   width: 100%; height: 100%;
   object-fit: contain;
-  background: #fff;
+  padding: 4px;
 }
 .logo-banner-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .logo-banner-text strong { font-size: 14px; color: var(--ink); }
@@ -1421,7 +1460,12 @@ button { font-family: inherit; }
 .ref-del:hover { background: var(--danger); }
 
 /* ───────── Kunde-Header Aktion + Referenz-Strip ───────── */
-.kunde-head-actions { margin-top: 14px; }
+.kunde-head-actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .ref-strip {
   background: var(--surface);

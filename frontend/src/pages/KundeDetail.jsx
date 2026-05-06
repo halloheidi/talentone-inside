@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { fileToBase64 } from '../lib/files.js';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 
@@ -31,6 +32,37 @@ export default function KundeDetail() {
   const [farbenDirty, setFarbenDirty] = useState(false);
   const [farbenBusy, setFarbenBusy] = useState(false);
   const [farbenMsg, setFarbenMsg] = useState('');
+
+  // Logo-Upload
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef(null);
+
+  async function onLogoChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const fileData = await fileToBase64(file);
+      const res = await api(`/kunden/${kundeId}/logo`, {
+        method: 'POST',
+        body: { fileData, fileName: file.name, contentType: file.type || 'image/png' },
+      });
+      setKunde(res.kunde);
+      if (res.kunde.farben) {
+        setFarben({
+          primaer:   res.kunde.farben.primaer   || '',
+          sekundaer: res.kunde.farben.sekundaer || '',
+          akzent:    res.kunde.farben.akzent    || '',
+        });
+        setFarbenDirty(false);
+      }
+    } catch (err) {
+      alert(`Logo-Upload fehlgeschlagen: ${err.message}`);
+    } finally {
+      setLogoUploading(false);
+    }
+  }
 
   function load() {
     setLoading(true);
@@ -154,11 +186,25 @@ export default function KundeDetail() {
       </div>
 
       <div className="kunde-head">
-        <div className="kunde-head-logo">
+        <button
+          type="button"
+          className={`kunde-head-logo ${kunde.logo_url ? 'has-image' : ''} is-clickable`}
+          onClick={() => !logoUploading && logoInputRef.current?.click()}
+          title={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
+          aria-label={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
+        >
           {kunde.logo_url
             ? <img src={kunde.logo_url} alt="" />
             : <span>{(kunde.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
-        </div>
+          <span className="kunde-head-logo-edit">{logoUploading ? '…' : 'Ändern'}</span>
+        </button>
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/svg+xml,image/webp"
+          style={{ display: 'none' }}
+          onChange={onLogoChange}
+        />
         <div className="kunde-head-body">
           <h1 className="page-title">{kunde.firmenname || '—'}</h1>
           <div className="kunde-head-meta">
@@ -169,6 +215,15 @@ export default function KundeDetail() {
           </div>
           {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
           <div className="kunde-head-actions">
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => !logoUploading && logoInputRef.current?.click()}
+              disabled={logoUploading}
+            >
+              {logoUploading
+                ? 'Lade Logo hoch…'
+                : (kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen')}
+            </button>
             <button
               className="btn-ghost btn-sm"
               onClick={() => setShowAnfrage(true)}
