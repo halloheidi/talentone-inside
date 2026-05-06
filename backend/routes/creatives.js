@@ -39,9 +39,11 @@ router.post('/motiv-vorschlaege', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, referenzbild_id } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id } = req.body || {};
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
-  if (!motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht.' });
+  if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
+  if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
+  if (mode === 'foto' && !foto_id) return res.status(400).json({ error: 'foto_id ist Pflicht in Modus "foto".' });
   const n = Math.min(Math.max(parseInt(varianten, 10) || 1, 1), 3);
 
   // Job + Kunde vorab laden, damit Validation-Fehler sofort kommen.
@@ -49,13 +51,24 @@ router.post('/generate', async (req, res) => {
   if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
   const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
 
-  // Reference-Images zusammenstellen: Logo zuerst, dann optional das gewählte Referenzbild.
+  // Reference-Images zusammenstellen.
+  // mode='ki':   Logo (falls vorhanden) zuerst, dann optional Personen-Foto.
+  // mode='foto': Logo (falls vorhanden) zuerst, dann VERPFLICHTEND das Hintergrund-Foto.
   const referenceImages = [];
   if (kunde?.logo_url) referenceImages.push({ url: kunde.logo_url, name: 'logo', isLogo: true });
-  if (referenzbild_id) {
+
+  const refRowId = mode === 'foto' ? foto_id : personenfoto_id;
+  if (refRowId) {
     const { data: ref } = await supabase
-      .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
-    if (ref?.bild_url) referenceImages.push({ url: ref.bild_url, name: 'stil-referenz', isLogo: false });
+      .from('talentone_referenzbilder').select('bild_url, beschreibung').eq('id', refRowId).maybeSingle();
+    if (ref?.bild_url) referenceImages.push({
+      url: ref.bild_url, name: mode === 'foto' ? 'hintergrund' : 'person',
+      isLogo: false, beschreibung: ref.beschreibung || null,
+    });
+  }
+
+  if (mode === 'foto' && !referenceImages.some(r => !r.isLogo)) {
+    return res.status(404).json({ error: 'Hintergrund-Foto nicht gefunden.' });
   }
 
   const expected = n * 2; // jede Variante × 2 Formate
@@ -63,10 +76,10 @@ router.post('/generate', async (req, res) => {
 
   // Hintergrund-Job
   (async () => {
-    console.log(`[generate-bg] job ${job_id}, ${n} Varianten (=${expected} Bilder), refs=${referenceImages.length}`);
+    console.log(`[generate-bg] job ${job_id}, mode=${mode}, ${n} Varianten (=${expected} Bilder), refs=${referenceImages.length}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, referenceImages })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
@@ -88,30 +101,41 @@ router.post('/generate', async (req, res) => {
   })().catch(err => console.error('[generate-bg] uncaught:', err));
 });
 
-/* POST /api/creatives/:id/regenerate  body: { motiv, referenzbild_id? } — altes Creative löschen + neu im selben Format. */
+/* POST /api/creatives/:id/regenerate
+   body: { motiv?, mode='ki'|'foto', personenfoto_id?, foto_id? }
+   Altes Creative löschen + neu im selben Format. */
 router.post('/:id/regenerate', async (req, res) => {
-  const { motiv, referenzbild_id } = req.body || {};
-  if (!motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht.' });
+  const { motiv, mode = 'ki', personenfoto_id, foto_id } = req.body || {};
+  if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
+  if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
+  if (mode === 'foto' && !foto_id) return res.status(400).json({ error: 'foto_id ist Pflicht in Modus "foto".' });
+
   try {
     const { data: existing, error: e1 } = await supabase
-      .from('talentone_creatives')
-      .select('*')
-      .eq('id', req.params.id)
-      .single();
+      .from('talentone_creatives').select('*').eq('id', req.params.id).single();
     if (e1 || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
     const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
     const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
 
     const referenceImages = [];
     if (kunde?.logo_url) referenceImages.push({ url: kunde.logo_url, name: 'logo', isLogo: true });
-    if (referenzbild_id) {
+    const refRowId = mode === 'foto' ? foto_id : personenfoto_id;
+    if (refRowId) {
       const { data: ref } = await supabase
-        .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
-      if (ref?.bild_url) referenceImages.push({ url: ref.bild_url, name: 'stil-referenz', isLogo: false });
+        .from('talentone_referenzbilder').select('bild_url, beschreibung').eq('id', refRowId).maybeSingle();
+      if (ref?.bild_url) referenceImages.push({
+        url: ref.bild_url, name: mode === 'foto' ? 'hintergrund' : 'person',
+        isLogo: false, beschreibung: ref.beschreibung || null,
+      });
+    }
+    if (mode === 'foto' && !referenceImages.some(r => !r.isLogo)) {
+      return res.status(404).json({ error: 'Hintergrund-Foto nicht gefunden.' });
     }
 
     const { generateOneCreative } = await import('../imagegen.js');
-    const result = await generateOneCreative({ job, kunde, motiv, format: existing.format, referenceImages });
+    const result = await generateOneCreative({
+      job, kunde, motiv, mode, format: existing.format, referenceImages,
+    });
 
     // Erst neues Creative anlegen, dann altes löschen (Storage + DB)
     const { data: created, error: insErr } = await supabase

@@ -1,26 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
-import { uploadFile } from '../../lib/files.js';
+import { fileToBase64 } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob } = useJob();
 
-  // Motive
+  // Modus
+  const [mode, setMode] = useState('ki'); // 'ki' | 'foto'
+
+  // Motive (Modus KI)
   const [vorschlaege, setVorschlaege] = useState([]);
   const [loadingVorschlaege, setLoadingVorschlaege] = useState(false);
   const [auswahl, setAuswahl] = useState('');
   const [eigenes, setEigenes] = useState('');
 
-  // Logo + Referenzbilder
-  const [referenzbilder, setReferenzbilder] = useState([]);
-  const [referenzId, setReferenzId] = useState(null);  // ausgewähltes Referenzbild
+  // Personen-Referenzen (gemeinsame Liste für beide Modi)
+  const [personen, setPersonen] = useState([]);
+  const [personId, setPersonId] = useState(null);     // ausgewählte Person (Modus KI)
+  const [fotoId, setFotoId] = useState(null);         // ausgewähltes Hintergrund-Foto (Modus Foto)
+
+  // Upload
   const [logoUploading, setLogoUploading] = useState(false);
-  const [refUploading, setRefUploading] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);   // Datei + Beschreibungs-Modal
+  const [pendingDesc, setPendingDesc] = useState('');
+  const [pendingBusy, setPendingBusy] = useState(false);
   const logoInputRef = useRef(null);
-  const refInputRef = useRef(null);
+  const personInputRef = useRef(null);
 
   // Generation
   const [varianten, setVarianten] = useState(1);
@@ -49,14 +56,14 @@ export default function JobCreatives() {
   }
   useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id]);
 
-  /* ───── Referenzbilder ───── */
-  function loadReferenzbilder() {
+  /* ───── Personen / Referenzbilder ───── */
+  function loadPersonen() {
     if (!kunde?.id) return;
     api(`/kunden/${kunde.id}/referenzbilder`)
-      .then(res => setReferenzbilder((res.referenzbilder || []).filter(r => r.typ === 'foto')))
+      .then(res => setPersonen((res.referenzbilder || []).filter(r => r.typ === 'foto')))
       .catch(() => {});
   }
-  useEffect(() => { loadReferenzbilder(); /* eslint-disable-next-line */ }, [kunde?.id]);
+  useEffect(() => { loadPersonen(); /* eslint-disable-next-line */ }, [kunde?.id]);
 
   /* ───── Motiv-Vorschläge ───── */
   useEffect(() => {
@@ -92,7 +99,11 @@ export default function JobCreatives() {
     if (!file) return;
     setLogoUploading(true);
     try {
-      await uploadFile(file, body => api(`/kunden/${kunde.id}/logo`, { method: 'POST', body }));
+      const fileData = await fileToBase64(file);
+      await api(`/kunden/${kunde.id}/logo`, {
+        method: 'POST',
+        body: { fileData, fileName: file.name, contentType: file.type || 'image/png' },
+      });
       await reloadJob();
     } catch (err) {
       alert(`Logo-Upload fehlgeschlagen: ${err.message}`);
@@ -101,32 +112,48 @@ export default function JobCreatives() {
     }
   }
 
-  /* ───── Referenzbild-Upload ───── */
-  async function onRefChange(e) {
+  /* ───── Personen-Foto-Upload (mit Beschreibung) ───── */
+  function onPersonChange(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    setRefUploading(true);
+    setPendingFile(file);
+    setPendingDesc('');
+  }
+
+  async function submitPersonUpload() {
+    if (!pendingFile) return;
+    setPendingBusy(true);
     try {
-      const res = await uploadFile(file, body => api(`/kunden/${kunde.id}/referenzbilder`, { method: 'POST', body }));
-      setReferenzbilder(prev => [res.referenzbild, ...prev]);
-      setReferenzId(res.referenzbild.id);
+      const fileData = await fileToBase64(pendingFile);
+      const res = await api(`/kunden/${kunde.id}/referenzbilder`, {
+        method: 'POST',
+        body: {
+          fileData, fileName: pendingFile.name,
+          contentType: pendingFile.type || 'image/jpeg',
+          beschreibung: pendingDesc.trim() || null,
+        },
+      });
+      setPersonen(prev => [res.referenzbild, ...prev]);
+      const id = res.referenzbild.id;
+      if (mode === 'ki') setPersonId(id); else setFotoId(id);
+      setPendingFile(null);
+      setPendingDesc('');
     } catch (err) {
       alert(`Upload fehlgeschlagen: ${err.message}`);
     } finally {
-      setRefUploading(false);
+      setPendingBusy(false);
     }
   }
 
-  async function deleteReferenz(id) {
-    if (!confirm('Referenzbild löschen?')) return;
+  async function deletePerson(id) {
+    if (!confirm('Foto löschen?')) return;
     try {
       await api(`/kunden/referenzbilder/${id}`, { method: 'DELETE' });
-      setReferenzbilder(prev => prev.filter(r => r.id !== id));
-      if (referenzId === id) setReferenzId(null);
-    } catch (err) {
-      alert(err.message);
-    }
+      setPersonen(prev => prev.filter(r => r.id !== id));
+      if (personId === id) setPersonId(null);
+      if (fotoId === id) setFotoId(null);
+    } catch (err) { alert(err.message); }
   }
 
   /* ───── Polling ───── */
@@ -156,15 +183,22 @@ export default function JobCreatives() {
 
   /* ───── Generate ───── */
   async function onGenerate() {
-    if (!motiv) { setGenerateError('Bitte ein Motiv wählen oder eigenes eintippen.'); return; }
-    setGenerating(true);
     setGenerateError('');
+    if (mode === 'ki' && !motiv) {
+      setGenerateError('Bitte ein Motiv wählen oder eigenes eintippen.');
+      return;
+    }
+    if (mode === 'foto' && !fotoId) {
+      setGenerateError('Bitte ein Foto auswählen oder neu hochladen.');
+      return;
+    }
+    setGenerating(true);
     const baseline = creatives.length;
     try {
-      const res = await api('/creatives/generate', {
-        method: 'POST',
-        body: { job_id: job.id, motiv, varianten, referenzbild_id: referenzId || undefined },
-      });
+      const body = mode === 'ki'
+        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined }
+        : { job_id: job.id, mode, varianten, foto_id: fotoId };
+      const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
       setExpected(exp);
       startPolling(baseline, exp);
@@ -179,9 +213,7 @@ export default function JobCreatives() {
     try {
       await api(`/creatives/${id}`, { method: 'DELETE' });
       setCreatives(prev => prev.filter(c => c.id !== id));
-    } catch (err) {
-      alert(`Löschen fehlgeschlagen: ${err.message}`);
-    }
+    } catch (err) { alert(`Löschen fehlgeschlagen: ${err.message}`); }
   }
 
   function openRework(creative) { setReworkTarget(creative); setReworkMotiv(motiv || ''); }
@@ -191,7 +223,7 @@ export default function JobCreatives() {
     try {
       const res = await api(`/creatives/${reworkTarget.id}/regenerate`, {
         method: 'POST',
-        body: { motiv: reworkMotiv.trim(), referenzbild_id: referenzId || undefined },
+        body: { mode: 'ki', motiv: reworkMotiv.trim(), personenfoto_id: personId || undefined },
       });
       setCreatives(prev => [res.creative, ...prev.filter(c => c.id !== reworkTarget.id)]);
       setReworkTarget(null);
@@ -199,6 +231,8 @@ export default function JobCreatives() {
     } catch (err) { alert(err.message); }
     finally { setReworkBusy(false); }
   }
+
+  const aktiveAuswahlId = mode === 'ki' ? personId : fotoId;
 
   return (
     <div className="creatives-page">
@@ -236,95 +270,137 @@ export default function JobCreatives() {
         </div>
       </div>
 
-      {/* ───────── Motiv-Sektion ───────── */}
-      <section className="card-form motiv-section">
-        <div className="motiv-head">
-          <div>
-            <div className="form-section-title" style={{ marginBottom: 4 }}>Motiv-Vorschläge</div>
-            <div className="motiv-sub">
-              Basierend auf <strong>{job.stelle || 'der Stelle'}</strong>{job.region ? ` (${job.region})` : ''}.
+      {/* ───────── Modus-Toggle ───────── */}
+      <div className="mode-cards">
+        <button
+          type="button"
+          className={`mode-card ${mode === 'ki' ? 'is-active' : ''}`}
+          onClick={() => setMode('ki')}
+        >
+          <div className="mode-card-title">KI-Bild generieren</div>
+          <div className="mode-card-desc">
+            Komplett neue Szene mit gpt-image-2. Optional Personenfoto als Vorlage — die Person erscheint dann in der KI-Szene.
+          </div>
+        </button>
+        <button
+          type="button"
+          className={`mode-card ${mode === 'foto' ? 'is-active' : ''}`}
+          onClick={() => setMode('foto')}
+        >
+          <div className="mode-card-title">Eigenes Foto verwenden</div>
+          <div className="mode-card-desc">
+            Echtes Foto bleibt unverändert als Hintergrund. Logo, Spruch und Benefits werden professionell als Overlay hinzugefügt.
+          </div>
+        </button>
+      </div>
+
+      {/* ───────── Motiv-Sektion (nur Modus KI) ───────── */}
+      {mode === 'ki' && (
+        <section className="card-form motiv-section">
+          <div className="motiv-head">
+            <div>
+              <div className="form-section-title" style={{ marginBottom: 4 }}>Motiv-Vorschläge</div>
+              <div className="motiv-sub">
+                Basierend auf <strong>{job.stelle || 'der Stelle'}</strong>{job.region ? ` (${job.region})` : ''}.
+              </div>
             </div>
+            <button className="btn-ghost" onClick={reloadVorschlaege} disabled={loadingVorschlaege}>
+              {loadingVorschlaege ? 'Lade…' : 'Neu vorschlagen'}
+            </button>
           </div>
-          <button className="btn-ghost" onClick={reloadVorschlaege} disabled={loadingVorschlaege}>
-            {loadingVorschlaege ? 'Lade…' : 'Neu vorschlagen'}
-          </button>
+
+          {loadingVorschlaege && vorschlaege.length === 0 && (
+            <div className="motiv-skeleton"><div /><div /><div /></div>
+          )}
+
+          {vorschlaege.length > 0 && (
+            <div className="motiv-grid">
+              {vorschlaege.map((m, i) => (
+                <button
+                  key={i} type="button"
+                  className={`motiv-card ${auswahl === m ? 'is-active' : ''}`}
+                  onClick={() => { setAuswahl(m); setEigenes(''); }}
+                >
+                  <span className="motiv-num">Vorschlag {i + 1}</span>
+                  <span className="motiv-text">{m}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <label className="field field-full" style={{ marginTop: 16 }}>
+            <span>Eigenes Motiv (überschreibt Auswahl)</span>
+            <textarea
+              rows={2}
+              placeholder="z.B. Servicetechniker installiert moderne Wärmepumpe in einer aufgeräumten Werkstatt, gedämpftes Morgenlicht…"
+              value={eigenes}
+              onChange={e => { setEigenes(e.target.value); if (e.target.value) setAuswahl(''); }}
+            />
+          </label>
+        </section>
+      )}
+
+      {/* ───────── Personen-Sektion ───────── */}
+      <section className="card-form" style={{ marginTop: mode === 'ki' ? 18 : 0 }}>
+        <div className="form-section-title" style={{ marginBottom: 4 }}>
+          {mode === 'ki' ? 'Personen-Referenz (optional)' : 'Hintergrund-Foto auswählen'}
         </div>
+        <p className="pane-hint" style={{ margin: '0 0 12px' }}>
+          {mode === 'ki'
+            ? 'Foto eines echten Mitarbeiters / der Geschäftsführung. Die KI baut diese Person in die generierte Szene ein.'
+            : 'Foto auswählen, das als unveränderter Hintergrund verwendet wird.'}
+        </p>
 
-        {loadingVorschlaege && vorschlaege.length === 0 && (
-          <div className="motiv-skeleton"><div /><div /><div /></div>
-        )}
-
-        {vorschlaege.length > 0 && (
-          <div className="motiv-grid">
-            {vorschlaege.map((m, i) => (
-              <button
-                key={i} type="button"
-                className={`motiv-card ${auswahl === m ? 'is-active' : ''}`}
-                onClick={() => { setAuswahl(m); setEigenes(''); }}
-              >
-                <span className="motiv-num">Vorschlag {i + 1}</span>
-                <span className="motiv-text">{m}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <label className="field field-full" style={{ marginTop: 16 }}>
-          <span>Eigenes Motiv (überschreibt Auswahl)</span>
-          <textarea
-            rows={2}
-            placeholder="z.B. Servicetechniker installiert moderne Wärmepumpe in einer aufgeräumten Werkstatt, gedämpftes Morgenlicht…"
-            value={eigenes}
-            onChange={e => { setEigenes(e.target.value); if (e.target.value) setAuswahl(''); }}
-          />
-        </label>
-
-        {/* Referenzbild-Sektion */}
-        <div className="form-section" style={{ marginTop: 18 }}>
-          <div className="form-section-title">Stil-Referenzbild (optional)</div>
-          <p className="pane-hint" style={{ margin: '0 0 10px' }}>
-            Echtes Foto vom Arbeitsplatz / Team — dient als Stil-Vorlage. Lichtstimmung und Atmosphäre werden ins Creative übernommen.
-          </p>
-          <div className="ref-grid">
+        <div className="ref-grid">
+          {mode === 'ki' && (
             <button
               type="button"
-              className={`ref-card ref-card-none ${referenzId === null ? 'is-active' : ''}`}
-              onClick={() => setReferenzId(null)}
+              className={`ref-card ref-card-none ${personId === null ? 'is-active' : ''}`}
+              onClick={() => setPersonId(null)}
             >
-              <span>Ohne Referenz</span>
+              <span>Ohne Person<br/><small>(KI generiert)</small></span>
             </button>
-            {referenzbilder.map(r => (
+          )}
+          {personen.map(r => {
+            const selected = aktiveAuswahlId === r.id;
+            return (
               <button
                 key={r.id}
                 type="button"
-                className={`ref-card ${referenzId === r.id ? 'is-active' : ''}`}
-                onClick={() => setReferenzId(r.id)}
-                title={r.label || ''}
+                className={`ref-card has-img ${selected ? 'is-active' : ''}`}
+                onClick={() => mode === 'ki' ? setPersonId(r.id) : setFotoId(r.id)}
+                title={r.beschreibung || 'Person'}
               >
                 <img src={r.bild_url} alt="" />
                 {r.uploaded_via === 'kunde' && <span className="ref-badge">Kunde</span>}
                 <button
                   type="button"
                   className="ref-del"
-                  title="Referenzbild löschen"
-                  onClick={e => { e.stopPropagation(); deleteReferenz(r.id); }}
+                  title="Löschen"
+                  onClick={e => { e.stopPropagation(); deletePerson(r.id); }}
                 >×</button>
+                <div className="ref-caption">
+                  {r.beschreibung || <em style={{ color: 'var(--ink-4)' }}>ohne Beschreibung</em>}
+                </div>
               </button>
-            ))}
-            <label className="ref-card ref-card-upload">
-              <input
-                ref={refInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                style={{ display: 'none' }}
-                onChange={onRefChange}
-              />
-              <span>{refUploading ? 'Lade…' : '+ Hochladen'}</span>
-            </label>
-          </div>
+            );
+          })}
+          <label className="ref-card ref-card-upload">
+            <input
+              ref={personInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              style={{ display: 'none' }}
+              onChange={onPersonChange}
+            />
+            <span>+ Person hochladen</span>
+          </label>
         </div>
+      </section>
 
-        <div className="generate-row">
+      {/* ───────── Generate-Bar ───────── */}
+      <section className="card-form" style={{ marginTop: 18 }}>
+        <div className="generate-row" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
           <label className="field" style={{ flex: '0 0 140px' }}>
             <span>Varianten</span>
             <select value={varianten} onChange={e => setVarianten(Number(e.target.value))}>
@@ -337,12 +413,15 @@ export default function JobCreatives() {
             <div className="generate-hint">
               Läuft im Hintergrund — Bilder erscheinen automatisch in der Galerie. Pro Bild ~30-90 Sekunden.
             </div>
-            <button className="btn-primary" onClick={onGenerate} disabled={generating || !motiv}>
+            <button
+              className="btn-primary"
+              onClick={onGenerate}
+              disabled={generating || (mode === 'ki' ? !motiv : !fotoId)}
+            >
               {generating ? `Generiere ${expected} Bilder…` : 'Creatives generieren'}
             </button>
           </div>
         </div>
-
         {generateError && <div className="alert alert-error" style={{ marginTop: 12 }}>{generateError}</div>}
       </section>
 
@@ -358,7 +437,7 @@ export default function JobCreatives() {
         {!loadingGalerie && creatives.length === 0 && (
           <div className="card empty">
             <h2>Noch keine Creatives</h2>
-            <p>Wähle oben ein Motiv und klick auf „Creatives generieren".</p>
+            <p>Wähle oben einen Modus und klick auf „Creatives generieren".</p>
           </div>
         )}
         {creatives.length > 0 && (
@@ -389,6 +468,39 @@ export default function JobCreatives() {
         )}
       </section>
 
+      {/* ───── Personen-Upload Modal: Beschreibung erfassen ───── */}
+      <Modal
+        open={!!pendingFile}
+        onClose={() => !pendingBusy && setPendingFile(null)}
+        title="Wer ist auf dem Foto?"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setPendingFile(null)} disabled={pendingBusy}>Abbrechen</button>
+            <button className="btn-primary" onClick={submitPersonUpload} disabled={pendingBusy}>
+              {pendingBusy ? 'Lade hoch…' : 'Hochladen'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Eine kurze Beschreibung hilft der KI später beim Einsetzen der Person in die Szene.
+        </p>
+        <label className="field field-full">
+          <span>Beschreibung (optional)</span>
+          <input
+            type="text"
+            placeholder="z.B. Max Müller, Geschäftsführer"
+            value={pendingDesc}
+            onChange={e => setPendingDesc(e.target.value)}
+          />
+        </label>
+        {pendingFile && (
+          <div className="form-msg" style={{ marginTop: 6 }}>
+            Datei: <strong>{pendingFile.name}</strong> · {(pendingFile.size / 1024).toFixed(0)} KB
+          </div>
+        )}
+      </Modal>
+
       {/* ───────── Rework-Modal ───────── */}
       <Modal
         open={!!reworkTarget}
@@ -404,7 +516,7 @@ export default function JobCreatives() {
         }
       >
         <p className="pane-hint">
-          Format bleibt <strong>{reworkTarget?.format === 'story' ? '9:16 (Story)' : '1:1 (Feed)'}</strong>. Das alte Creative wird ersetzt.
+          Format bleibt <strong>{reworkTarget?.format === 'story' ? '9:16 (Story)' : '1:1 (Feed)'}</strong>. Modus „KI-Bild" — das alte Creative wird ersetzt.
         </p>
         <label className="field field-full">
           <span>Neues Motiv</span>

@@ -200,9 +200,9 @@ router.get('/:id/referenzbilder', async (req, res) => {
   res.json({ referenzbilder: data });
 });
 
-// POST /api/kunden/:id/referenzbilder body: { fileData (base64), fileName, contentType, label? }
+// POST /api/kunden/:id/referenzbilder body: { fileData (base64), fileName, contentType, beschreibung? }
 router.post('/:id/referenzbilder', async (req, res) => {
-  const { fileData, fileName = 'foto.jpg', contentType = 'image/jpeg', label } = req.body || {};
+  const { fileData, fileName = 'foto.jpg', contentType = 'image/jpeg', beschreibung, label } = req.body || {};
   if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
 
   const { data: kunde } = await supabase
@@ -220,7 +220,9 @@ router.post('/:id/referenzbilder', async (req, res) => {
       .from('talentone_referenzbilder')
       .insert({
         kunde_id: req.params.id, bild_url: publicUrl,
-        typ: 'foto', label: label || null, uploaded_via: 'mitarbeiter',
+        typ: 'foto', label: label || null,
+        beschreibung: beschreibung || null,
+        uploaded_via: 'mitarbeiter',
       })
       .select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
@@ -230,6 +232,18 @@ router.post('/:id/referenzbilder', async (req, res) => {
     console.error('[ref-upload]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// PATCH /api/kunden/referenzbilder/:id  body: { beschreibung }
+router.patch('/referenzbilder/:id', async (req, res) => {
+  const { beschreibung } = req.body || {};
+  const { data, error } = await supabase
+    .from('talentone_referenzbilder')
+    .update({ beschreibung: beschreibung || null })
+    .eq('id', req.params.id)
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ referenzbild: data });
 });
 
 router.delete('/referenzbilder/:id', async (req, res) => {

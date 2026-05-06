@@ -22,6 +22,7 @@ export default function PublicUpload() {
   const [info, setInfo] = useState(null);
   const [error, setError] = useState('');
   const [uploads, setUploads] = useState([]);  // [{name, status, error?}]
+  const [pendingFotos, setPendingFotos] = useState([]); // [{file, beschreibung}]
   const logoInputRef = useRef(null);
   const fotosInputRef = useRef(null);
 
@@ -31,14 +32,19 @@ export default function PublicUpload() {
       .catch(err => setError(err.message));
   }, [token]);
 
-  async function uploadOne(file, typ) {
+  async function uploadOne(file, typ, beschreibung) {
     const id = `${Date.now()}-${Math.random()}`;
     setUploads(prev => [...prev, { id, name: file.name, typ, status: 'lade' }]);
     try {
       const fileData = await fileToBase64(file);
       await publicApi(`/upload/${token}`, {
         method: 'POST',
-        body: { typ, fileData, fileName: file.name, contentType: file.type || 'application/octet-stream' },
+        body: {
+          typ, fileData,
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream',
+          beschreibung: beschreibung || null,
+        },
       });
       setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'fertig' } : u));
     } catch (err) {
@@ -52,10 +58,27 @@ export default function PublicUpload() {
     if (file) await uploadOne(file, 'logo');
   }
 
-  async function onFotosChange(e) {
+  function onFotosChange(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
-    for (const f of files) await uploadOne(f, 'foto');
+    if (!files.length) return;
+    setPendingFotos(prev => [...prev, ...files.map(f => ({ file: f, beschreibung: '', id: `${Date.now()}-${Math.random()}` }))]);
+  }
+
+  function updatePendingDesc(id, value) {
+    setPendingFotos(prev => prev.map(p => p.id === id ? { ...p, beschreibung: value } : p));
+  }
+
+  function removePending(id) {
+    setPendingFotos(prev => prev.filter(p => p.id !== id));
+  }
+
+  async function submitFotos() {
+    const items = pendingFotos.slice();
+    setPendingFotos([]);
+    for (const item of items) {
+      await uploadOne(item.file, 'foto', item.beschreibung.trim());
+    }
   }
 
   if (error) {
@@ -93,10 +116,31 @@ export default function PublicUpload() {
 
         {/* Fotos */}
         <div className="upload-block">
-          <div className="upload-block-title">2) Fotos vom Arbeitsplatz, Team oder typischen Tätigkeiten</div>
+          <div className="upload-block-title">2) Fotos von Mitarbeiter:innen, Team oder Geschäftsführung</div>
           <input ref={fotosInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple style={{ display: 'none' }} onChange={onFotosChange} />
           <button className="btn-primary" onClick={() => fotosInputRef.current?.click()}>Fotos auswählen</button>
           <p className="upload-block-hint">Mehrere auf einmal möglich. Handy-Fotos sind völlig ok — bitte authentisch, kein Stockmaterial.</p>
+
+          {pendingFotos.length > 0 && (
+            <div className="pending-fotos">
+              <div className="pending-fotos-title">Wer ist auf den Fotos?</div>
+              {pendingFotos.map(p => (
+                <div key={p.id} className="pending-foto">
+                  <div className="pending-foto-name">{p.file.name}</div>
+                  <input
+                    type="text"
+                    placeholder="z.B. Max Müller, Geschäftsführer"
+                    value={p.beschreibung}
+                    onChange={e => updatePendingDesc(p.id, e.target.value)}
+                  />
+                  <button className="btn-ghost btn-sm" onClick={() => removePending(p.id)}>×</button>
+                </div>
+              ))}
+              <button className="btn-primary" onClick={submitFotos} style={{ marginTop: 12 }}>
+                {pendingFotos.length} Foto{pendingFotos.length === 1 ? '' : 's'} hochladen
+              </button>
+            </div>
+          )}
         </div>
 
         {uploads.length > 0 && (

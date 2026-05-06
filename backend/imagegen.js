@@ -65,7 +65,8 @@ function pickBenefits(job) {
   return benefits.slice(0, 4);
 }
 
-export function buildCreativePrompt({ job, kunde, motiv, format, hasLogo, hasReferenz }) {
+// Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
+function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
   const stelle = job.stelle || 'Mitarbeiter:in';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const firmenname = kunde?.firmenname || '';
@@ -74,24 +75,25 @@ export function buildCreativePrompt({ job, kunde, motiv, format, hasLogo, hasRef
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
 
   const refHinweis = [];
-  if (hasLogo && hasReferenz) {
+  if (hasLogo && person) {
     refHinweis.push(
-      `MITGELIEFERTE BILDER: Das ERSTE Referenzbild ist das LOGO des Unternehmens — platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`,
-      `Das ZWEITE Bild ist eine STIL-REFERENZ aus dem echten Betrieb — übernimm die Lichtstimmung, Farbpalette und Authentizität dieses Bildes für das Hintergrundmotiv. Greife Atmosphäre und Bildsprache auf, übersetze sie aber in eine professionelle Recruiting-Ad-Komposition.`,
+      `MITGELIEFERTE BILDER:`,
+      `1) ERSTES Referenzbild = LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`,
+      `2) ZWEITES Referenzbild = FOTO einer realen Person${person.beschreibung ? ` (${person.beschreibung})` : ''}. Stelle DIESE Person in der unten beschriebenen Szene dar — die Person soll erkennbar bleiben (Gesichtszüge, Frisur, Statur), aber natürlich in die neue Situation eingebettet sein. Kleidung darf der Tätigkeit angepasst werden.`,
     );
   } else if (hasLogo) {
-    refHinweis.push(`MITGELIEFERTES BILD: Das ist das LOGO des Unternehmens — platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`);
-  } else if (hasReferenz) {
-    refHinweis.push(`MITGELIEFERTES BILD: Das ist eine STIL-REFERENZ aus dem echten Betrieb — übernimm Lichtstimmung, Farbpalette und Authentizität für das Hintergrundmotiv. Greife Atmosphäre und Bildsprache auf, übersetze sie in eine professionelle Recruiting-Ad-Komposition.`);
+    refHinweis.push(`MITGELIEFERTES BILD: Das ist das LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).`);
+  } else if (person) {
+    refHinweis.push(`MITGELIEFERTES BILD: FOTO einer realen Person${person.beschreibung ? ` (${person.beschreibung})` : ''}. Stelle DIESE Person in der unten beschriebenen Szene dar — die Person soll erkennbar bleiben (Gesichtszüge, Frisur, Statur), aber natürlich in die neue Situation eingebettet sein. Kleidung darf der Tätigkeit angepasst werden.`);
   }
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im modernen Instagram/Facebook Stil.
 
-${refHinweis.length ? refHinweis.join('\n\n') + '\n\n' : ''}BILDMOTIV (Hintergrund):
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
 ${motiv}
 - Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
 - Branche: ${branche}
-- Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos
+- Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
 
 TEXT-ELEMENTE (sauber lesbar, modernes Design):
 - Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
@@ -107,6 +109,48 @@ DESIGN-REGELN:
 - Farben warm und einladend, passend zur Branche
 - Keine QR-Codes, keine Rahmen
 - Muss auf dem Handy sofort ins Auge springen und zum Stoppen beim Scrollen bewegen`;
+}
+
+// Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
+function buildPromptFoto({ job, kunde, format, hasLogo }) {
+  const stelle = job.stelle || 'Mitarbeiter:in';
+  const firmenname = kunde?.firmenname || '';
+  const benefits = pickBenefits(job);
+  const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
+  const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+
+  const refLines = hasLogo
+    ? `MITGELIEFERTE BILDER:
+1) ERSTES Bild = LOGO des Unternehmens. Platziere es dezent, klein und sauber oben rechts im Creative (max. 12% der Bildbreite, klare Kanten, ohne Filter, ohne Schatten).
+2) ZWEITES Bild = HINTERGRUNDFOTO. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
+    : `MITGELIEFERTES BILD = HINTERGRUNDFOTO. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
+
+  return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im modernen Instagram/Facebook Stil.
+
+${refLines}
+
+Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
+
+OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto):
+- Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
+- Mittig: Ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter), passend zur Stelle "${stelle}" — motivierend, auf Augenhöhe, kein "Wir suchen dich"-Klischee
+- Unten: 3-4 Benefit-Tags in kleinen, abgerundeten Boxen mit Icons nebeneinander: ${benefitListe}
+- Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub"
+- Ganz unten: Kleiner Call-to-Action "Jetzt bewerben"
+
+DESIGN-REGELN:
+- Dunkler, halbtransparenter Verlauf (Gradient) im unteren Drittel — sorgt für Textlesbarkeit ohne das Foto zu zerstören
+- Schrift weiß, modern, Bold für den Hauptspruch
+- Benefit-Tags klein und kompakt
+- Keine zusätzlichen Filter aufs Foto, keine Verfremdung, keine Stilisierung
+- Keine QR-Codes, keine Rahmen
+- Wirkung: das echte Foto bleibt der Held, Text und Logo unterstützen subtil`;
+}
+
+// Wrapper — wählt den passenden Prompt anhand des Modus.
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person }) {
+  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo });
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person });
 }
 
 /* ───────────────────────── Bild-Generierung ───────────────────────── */
@@ -169,17 +213,21 @@ function bufferToFile(buf, name, type) {
 }
 
 // Generiert ein Bild in einem Format und uploaded nach Storage.
-// referenceImages: [{ url, name? }] — Logo IMMER zuerst (wird in der Ecke platziert),
-// Stil-Referenz danach. Bei mind. einer Referenz nutzt OpenAI /v1/images/edits.
-export async function generateOneCreative({ job, kunde, motiv, format, referenceImages = [] }) {
+//   mode='ki'   → komplett neu generieren (optional mit Person als Vorlage)
+//   mode='foto' → Foto als Hintergrund übernehmen, nur Overlay (Foto MUSS in referenceImages enthalten sein)
+// referenceImages-Reihenfolge: Logo (isLogo:true) IMMER zuerst falls vorhanden, dann Person/Foto.
+export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [] }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
+  if (mode === 'foto' && !referenceImages.some(r => !r.isLogo)) {
+    throw new Error('Modus "foto" benötigt ein Hintergrund-Foto.');
+  }
 
   const refs = await loadReferenceImages(referenceImages);
   const hasLogo = !!referenceImages[0]?.isLogo;
-  const hasReferenz = referenceImages.some(r => !r.isLogo);
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, hasLogo, hasReferenz });
+  const person = referenceImages.find(r => !r.isLogo) || null;
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person });
 
   let response;
   if (refs.length > 0) {
@@ -223,10 +271,10 @@ export async function generateOneCreative({ job, kunde, motiv, format, reference
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, referenceImages = [] }) {
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [] }) {
   const formats = ['quadrat', 'story'];
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format, referenceImages })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
