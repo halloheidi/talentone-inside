@@ -1,38 +1,84 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Outlet, useMatch, useParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 
-const NAV = [
-  { to: '/kunden', label: 'Kunden', icon: 'users' },
-  { to: '/creatives', label: 'Creatives', icon: 'image' },
-  { to: '/adcopies', label: 'Ad Copies', icon: 'text' },
-  { to: '/funnel', label: 'Funnel', icon: 'funnel' },
-  { to: '/export', label: 'Export', icon: 'download' },
-];
+function GlobalNav() {
+  return (
+    <nav className="nav">
+      <NavLink to="/kunden" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>Kunden</span>
+      </NavLink>
+    </nav>
+  );
+}
+
+function KundeNav({ kundeId }) {
+  const [kunde, setKunde] = useState(null);
+  const [jobs, setJobs] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api(`/kunden/${kundeId}`).catch(() => ({ kunde: null })),
+      api(`/jobs?kunde_id=${kundeId}`).catch(() => ({ jobs: [] })),
+    ]).then(([k, j]) => {
+      if (cancelled) return;
+      setKunde(k.kunde);
+      setJobs(j.jobs || []);
+    });
+    return () => { cancelled = true; };
+  }, [kundeId]);
+
+  return (
+    <div className="ctx-nav">
+      <Link to="/kunden" className="ctx-back">
+        <span aria-hidden>←</span> Alle Kunden
+      </Link>
+      <NavLink
+        to={`/kunden/${kundeId}`}
+        end
+        className={({ isActive }) => `ctx-kunde ${isActive ? 'is-active' : ''}`}
+      >
+        <Icon name="users" size={16} />
+        <span className="ctx-kunde-name">{kunde?.firmenname || 'Kunde'}</span>
+      </NavLink>
+      <div className="ctx-section">Projekte</div>
+      <div className="ctx-list">
+        {jobs.length === 0 && <div className="ctx-empty">Noch keine Projekte.</div>}
+        {jobs.map(j => (
+          <NavLink
+            key={j.id}
+            to={`/kunden/${kundeId}/jobs/${j.id}`}
+            className={({ isActive }) => `ctx-job ${isActive ? 'is-active' : ''}`}
+            title={j.stelle || 'Unbenanntes Projekt'}
+          >
+            <span className="ctx-job-dot" />
+            <span className="ctx-job-name">{j.stelle || 'Unbenannt'}</span>
+          </NavLink>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardLayout() {
   const { user, signOut } = useAuth();
+  const kundeMatch = useMatch('/kunden/:kundeId/*');
+  const kundeId = kundeMatch?.params?.kundeId;
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
+        <Link to="/kunden" className="brand">
           <span>Talent</span>
           <span className="brand-accent">One</span>
           <span className="brand-sub">Inside</span>
-        </div>
-        <nav className="nav">
-          {NAV.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}
-            >
-              <Icon name={item.icon} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="sidebar-foot">v0.1 · intern</div>
+        </Link>
+        {kundeId ? <KundeNav kundeId={kundeId} /> : <GlobalNav />}
+        <div className="sidebar-foot">v0.2 · intern</div>
       </aside>
       <main className="main">
         <header className="topbar">

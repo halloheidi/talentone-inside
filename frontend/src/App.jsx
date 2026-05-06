@@ -2,11 +2,14 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import Login from './pages/Login.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
-import Kunden from './pages/Kunden.jsx';
-import Creatives from './pages/Creatives.jsx';
-import AdCopies from './pages/AdCopies.jsx';
-import Funnel from './pages/Funnel.jsx';
-import Export from './pages/Export.jsx';
+import KundenList from './pages/KundenList.jsx';
+import KundeDetail from './pages/KundeDetail.jsx';
+import JobView from './pages/JobView.jsx';
+import JobStelleninfos from './pages/job/JobStelleninfos.jsx';
+import JobCreatives from './pages/job/JobCreatives.jsx';
+import JobAdCopies from './pages/job/JobAdCopies.jsx';
+import JobFunnel from './pages/job/JobFunnel.jsx';
+import JobExport from './pages/job/JobExport.jsx';
 
 function Protected({ children }) {
   const { session, loading } = useAuth();
@@ -28,11 +31,16 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="/kunden" replace />} />
-        <Route path="kunden" element={<Kunden />} />
-        <Route path="creatives" element={<Creatives />} />
-        <Route path="adcopies" element={<AdCopies />} />
-        <Route path="funnel" element={<Funnel />} />
-        <Route path="export" element={<Export />} />
+        <Route path="kunden" element={<KundenList />} />
+        <Route path="kunden/:kundeId" element={<KundeDetail />} />
+        <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
+          <Route index element={<Navigate to="stelle" replace />} />
+          <Route path="stelle" element={<JobStelleninfos />} />
+          <Route path="creatives" element={<JobCreatives />} />
+          <Route path="adcopies" element={<JobAdCopies />} />
+          <Route path="funnel" element={<JobFunnel />} />
+          <Route path="export" element={<JobExport />} />
+        </Route>
       </Route>
     </Routes>
   );
