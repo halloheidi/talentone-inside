@@ -48,43 +48,87 @@ function buildBriefing(job, kunde) {
 }
 
 const STYLE_SPEC = {
-  emotional: `STIL: EMOTIONAL / STORY
-- Länge: 150-200 Wörter
-- Erzählerisch, spricht Gefühle an, persönlich, macht neugierig
-- Gerne mit "Stell dir vor…", einer Mini-Szene, einem inneren Bild starten
-- KEIN Recruiting-Floskelsprech ("dynamisches Team", "spannende Aufgaben", "wir suchen Sie")
-- Hauptfigur: die Bewerber:in, nicht das Unternehmen
-- Endet mit klarem CTA (z.B. "Schreib uns eine Nachricht — wir freuen uns auf dich.")`,
-  benefit: `STIL: BENEFIT-FOKUSSIERT
-- Länge: 120-150 Wörter
-- Direkt, klar strukturiert, faktenbasiert
-- Listet die stärksten konkreten Vorteile auf — gerne als kurze Aufzählung mit Bullet-Strichen "•"
-- Tonalität: "Das bekommst du bei uns:"
-- Keine Floskeln, jeder Satz muss ein konkretes Versprechen liefern
-- Endet mit klarem, niedrigschwelligem CTA`,
-  kompakt: `STIL: DIREKT / KNAPP
-- Länge: 50-80 Wörter, MAX 4 Sätze
-- Social-Media-Hook, scrolltauglich
-- Provokant oder überraschend (eine ungewöhnliche Frage, Zahl, Beobachtung)
-- Sehr kurz, kein Fluff, kein "wir bieten…"
-- Eine starke Aussage + 1-2 Stichpunkte + CTA`,
+  emotional: `STIL: EMOTIONAL / STORY — 130-180 Wörter
+
+ZWINGENDER AUFBAU (jede Sektion mit Leerzeile getrennt):
+Zeile 1: 🔥 (oder anderes branchenpassendes Emoji) + ein STARKER Hook-Satz, der zum Stoppen zwingt
+[Leerzeile]
+2-3 Sätze emotionale Mini-Story — Du-Ansprache, "Stell dir vor…" / "Kennst du das…" / provokante Frage / persönliches Bild
+[Leerzeile]
+3-5 Benefit-Zeilen, jede beginnt mit ✅ und nennt konkret einen Vorteil (kurz, nicht ganze Sätze)
+✅ ...und vieles mehr!
+[Leerzeile]
+👉 Klare Aufforderung (z.B. "Jetzt bewerben — dauert keine Minute" oder "Schreib uns eine Nachricht")
+📍 ${'${region}'} (Standort)`,
+
+  benefit: `STIL: BENEFIT-FOKUSSIERT — 120-160 Wörter
+
+ZWINGENDER AUFBAU:
+Zeile 1: 🚀 (oder branchenpassendes Emoji) + "[Stellenbezeichnung] gesucht bei [Firma]!" oder eine andere prägnante Headline
+[Leerzeile]
+"Das erwartet dich:"
+[Leerzeile]
+5-7 Benefit-Zeilen, jede mit individuell passendem Emoji am Anfang + konkreter Benefit (kein Standardsatz):
+💰 [Vorteil zu Geld]
+🚗 [Vorteil zu Mobilität / Auto]
+🏖️ [Vorteil zu Urlaub]
+📚 [Vorteil zu Weiterbildung]
+⏰ [Vorteil zu Arbeitszeit]
+[oder andere passende Emojis: 🛠️ 🤝 🏆 🌱 💪 🎯 etc.]
+➕ u.v.m.
+[Leerzeile]
+2 Kontrast-Zeilen (nur wenn Briefing Anlass gibt — sonst weglassen):
+❌ Kein [branchentypisches Problem]
+❌ Kein [weiteres Problem]
+[Leerzeile]
+✅ Stattdessen: [klares positives Gegenteil]
+[Leerzeile]
+📩 Niedrigschwelliger CTA ("Bewirb dich jetzt in unter 1 Minute!")
+📍 ${'${region}'}`,
+
+  kompakt: `STIL: KNACKIG / PROVOKANT — 50-90 Wörter
+
+ZWINGENDER AUFBAU:
+Zeile 1: Provokante Frage oder ungewöhnliches Statement + Emoji am Ende (🤔 / 😳 / 💡 / 🤯 — passend wählen)
+[Leerzeile]
+"3 Gründe warum [Stelle] bei [Firma] anders ist:"
+[Leerzeile]
+1️⃣ [Benefit, MAX 6 Wörter]
+2️⃣ [Benefit, MAX 6 Wörter]
+3️⃣ [Benefit, MAX 6 Wörter]
+[Leerzeile]
+👉 [3-Wort-CTA — z.B. "Link klicken. Bewerben. Fertig."]`,
 };
 
 function buildPrompt(job, kunde, style) {
+  const region = job.region || 'Region';
+  const stelle = job.stelle || 'Stelle';
+  const firma = kunde?.firmenname || 'das Unternehmen';
+
+  // Template-Platzhalter im STYLE_SPEC durch reale Werte ersetzen
+  const spec = STYLE_SPEC[style]
+    .replaceAll('${region}', region)
+    .replaceAll('${stelle}', stelle)
+    .replaceAll('${firma}', firma);
+
   return `${buildBriefing(job, kunde)}
 
-AUFGABE: Schreibe genau EINEN deutschen Recruiting-Werbetext für die obige Stelle.
+AUFGABE
+Schreibe EINE deutsche Social-Media-Recruiting-Ad für Facebook und Instagram. Diese Ad muss beim Scrollen sofort catchen — sie ist standalone (auch ohne Bild verständlich) und visuell strukturiert mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
 
-${STYLE_SPEC[style]}
+${spec}
 
-Wichtig:
-- Sprich die Bewerber:innen mit "du" an (informell)
-- Konkret, spezifisch, kein Stock-Sprech
-- Wenn relevant Benefits / Besonderheiten / "warum gern hier" einarbeiten — aber natürlich verwoben, nicht abgehakt
-- KEIN Hashtag, KEIN Emoji
-- Antworte NUR mit JSON, keine Markdown-Backticks:
+GLOBALE REGELN
+- Du-Ansprache, locker, auf Augenhöhe — KEIN "Wir suchen dich"-Klischee, KEIN "Bewerben Sie sich" / "Sehr geehrte Damen und Herren", KEIN HR-Sprech ("spannende Aufgaben", "dynamisches Team")
+- Emojis MÜSSEN passen — zur Branche (${kunde?.branche || 'allgemein'}) und zum jeweiligen Benefit. Nicht random.
+- Benefits konkret benennen mit Zahlen wenn möglich (z.B. "30 Tage Urlaub" statt "viel Urlaub", "Bis 4.500 €" statt "gutes Gehalt")
+- Echte Zeilenumbrüche zwischen den Sektionen (im JSON als \\n) — KEINE Bullet-Strings in einer Zeile
+- Referenz-Vorbilder im Stil: Performance Recruiting, Terbeek, Schilling — kurze visuelle Häppchen, jede Zeile ein Wert
+- Keine Hashtags, keine URLs (wir setzen den Link separat ein)
 
-{ "text": "<dein fertiger Werbetext>" }`;
+FORMAT
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>" }`;
 }
 
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
@@ -92,7 +136,7 @@ export async function generateAdCopy({ job, kunde, style }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
-    max_tokens: 1200,
+    max_tokens: 1500, // mehr Puffer wegen Emojis (mehrere Tokens pro Symbol)
     messages: [{ role: 'user', content: buildPrompt(job, kunde, style) }],
   });
   const parsed = parseJsonContent(data);
