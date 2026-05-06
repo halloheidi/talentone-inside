@@ -740,3 +740,92 @@ button { font-family: inherit; }
   border-top: 1px solid var(--line);
   background: #fafaf8;
 }
+
+/* Modal-Tabs (URL / PDF / Manuell) */
+.modal-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 18px;
+}
+.modal-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.modal-tab:hover:not(:disabled) { color: var(--ink); }
+.modal-tab.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.modal-tab:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.modal-pane { min-height: 180px; }
+.pane-hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+}
+
+.form-section + .form-section { margin-top: 18px; }
+.form-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  margin-bottom: 10px;
+}
+
+/* Drop-Zone für PDF/DOCX */
+.drop-zone {
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: #fafaf8;
+}
+.drop-zone:hover { border-color: var(--ink-4); }
+.drop-zone.is-over {
+  border-color: var(--ink);
+  background: rgba(212, 255, 0, 0.06);
+}
+.drop-zone.has-file {
+  border-style: solid;
+  border-color: var(--ink-4);
+  background: var(--surface);
+}
+.drop-empty strong, .drop-file strong {
+  display: block;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.drop-empty span, .drop-file span {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.extract-hint {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: #fafaf8;
+  border-left: 3px solid var(--accent);
+  font-size: 12px;
+  color: var(--ink-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}

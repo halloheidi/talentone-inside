@@ -2,17 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
-import Modal from '../components/Modal.jsx';
-
-const EMPTY_FORM = { firmenname: '', ansprechpartner: '', email: '', telefon: '', branche: '', notizen: '' };
+import QuickCreateModal from '../components/QuickCreateModal.jsx';
 
 export default function KundenList() {
   const [kunden, setKunden] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [creating, setCreating] = useState(false);
 
   function load() {
     setLoading(true);
@@ -23,22 +19,6 @@ export default function KundenList() {
   }
 
   useEffect(() => { load(); }, []);
-
-  async function onCreate(e) {
-    e.preventDefault();
-    if (!form.firmenname.trim()) return;
-    setCreating(true);
-    try {
-      await api('/kunden', { method: 'POST', body: form });
-      setShowCreate(false);
-      setForm(EMPTY_FORM);
-      load();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setCreating(false);
-    }
-  }
 
   return (
     <div>
@@ -84,48 +64,7 @@ export default function KundenList() {
         </div>
       )}
 
-      <Modal
-        open={showCreate}
-        onClose={() => !creating && setShowCreate(false)}
-        title="Neuer Kunde"
-        footer={
-          <>
-            <button className="btn-ghost" onClick={() => setShowCreate(false)} disabled={creating}>
-              Abbrechen
-            </button>
-            <button className="btn-primary" onClick={onCreate} disabled={creating || !form.firmenname.trim()}>
-              {creating ? 'Speichere…' : 'Anlegen'}
-            </button>
-          </>
-        }
-      >
-        <form onSubmit={onCreate} className="form-grid">
-          <label className="field">
-            <span>Firmenname *</span>
-            <input value={form.firmenname} onChange={e => setForm({ ...form, firmenname: e.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Ansprechpartner</span>
-            <input value={form.ansprechpartner} onChange={e => setForm({ ...form, ansprechpartner: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>E-Mail</span>
-            <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Telefon</span>
-            <input value={form.telefon} onChange={e => setForm({ ...form, telefon: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Branche</span>
-            <input value={form.branche} onChange={e => setForm({ ...form, branche: e.target.value })} />
-          </label>
-          <label className="field field-full">
-            <span>Notizen</span>
-            <textarea rows={3} value={form.notizen} onChange={e => setForm({ ...form, notizen: e.target.value })} />
-          </label>
-        </form>
-      </Modal>
+      <QuickCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   );
 }

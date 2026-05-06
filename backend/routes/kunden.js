@@ -1,7 +1,80 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 
 const router = Router();
+
+// Quick-Create: legt in einem Schritt Kunde + ersten Job an.
+// Modi:
+//   manual  → req.body.kunde + req.body.job  (User-Eingaben)
+//   url     → req.body.url                   (Puppeteer + Claude)
+//   file    → req.body.fileData (base64) + req.body.fileType  (pdf-parse/mammoth + Claude)
+router.post('/quick-create', async (req, res) => {
+  const { mode } = req.body || {};
+  let kundeData = {};
+  let jobData = {};
+
+  try {
+    if (mode === 'manual') {
+      const { kunde = {}, job = {} } = req.body;
+      if (!kunde.firmenname?.trim()) return res.status(400).json({ error: 'Firmenname ist Pflicht.' });
+      if (!job.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
+      kundeData = {
+        firmenname: kunde.firmenname.trim(),
+        ansprechpartner: kunde.ansprechpartner || null,
+        email: kunde.email || null,
+        telefon: kunde.telefon || null,
+        branche: kunde.branche || null,
+        notizen: kunde.notizen || null,
+      };
+      jobData = {
+        stelle: job.stelle.trim(),
+        region: job.region || null,
+        gehalt: job.gehalt || null,
+        eingabe_methode: 'neu',
+      };
+    } else if (mode === 'url') {
+      const { url } = req.body;
+      const extracted = await extractFromUrl(url);
+      kundeData = toKunde(extracted);
+      jobData = toJob(extracted, 'url', url);
+      if (!kundeData.firmenname) return res.status(422).json({ error: 'Firmenname konnte nicht ermittelt werden.', extracted });
+      if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
+    } else if (mode === 'file') {
+      const { fileData, fileType } = req.body;
+      const extracted = await extractFromFile(fileData, fileType);
+      kundeData = toKunde(extracted);
+      jobData = toJob(extracted, 'pdf');
+      if (!kundeData.firmenname) return res.status(422).json({ error: 'Firmenname konnte nicht ermittelt werden.', extracted });
+      if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
+    } else {
+      return res.status(400).json({ error: 'Unbekannter Modus.' });
+    }
+
+    const { data: kunde, error: kErr } = await supabase
+      .from('talentone_kunden')
+      .insert(kundeData)
+      .select()
+      .single();
+    if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });
+
+    const { data: job, error: jErr } = await supabase
+      .from('talentone_jobs')
+      .insert({ ...jobData, kunde_id: kunde.id })
+      .select()
+      .single();
+    if (jErr) {
+      // Kunde wieder löschen, damit kein Halb-Zustand bleibt
+      await supabase.from('talentone_kunden').delete().eq('id', kunde.id);
+      return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
+    }
+
+    res.status(201).json({ kunde, job });
+  } catch (err) {
+    console.error('[quick-create]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase

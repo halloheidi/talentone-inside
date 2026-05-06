@@ -11,6 +11,9 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "mammoth": "^1.7.0",
+    "pdf-parse": "^1.1.1",
+    "puppeteer": "^24.40.0"
   }
 }
