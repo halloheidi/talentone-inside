@@ -35,10 +35,19 @@ router.post('/', async (req, res) => {
   res.status(201).json({ job: data });
 });
 
+const ALLOWED_JOB_FIELDS = [
+  'stelle', 'region', 'gehalt', 'benefits', 'besonderheiten',
+  'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
+  'formdata_komplett', 'analyse_ergebnis',
+];
+
 router.patch('/:id', async (req, res) => {
+  const patch = Object.fromEntries(
+    Object.entries(req.body || {}).filter(([k]) => ALLOWED_JOB_FIELDS.includes(k))
+  );
   const { data, error } = await supabase
     .from('talentone_jobs')
-    .update(req.body)
+    .update(patch)
     .eq('id', req.params.id)
     .select()
     .single();

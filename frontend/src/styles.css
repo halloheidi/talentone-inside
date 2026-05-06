@@ -1835,3 +1835,249 @@ button { font-family: inherit; }
   .form-quick-tabs { flex-direction: column; }
   .formular-section { padding: 16px; }
 }
+
+/* ───────── Stelle-Tab: Logo-Header ───────── */
+.stelle-form { display: flex; flex-direction: column; gap: 18px; }
+.stelle-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.stelle-header.no-logo {
+  background: linear-gradient(180deg, #fffce4, #fafaf8);
+  border-color: #ece9c8;
+}
+.stelle-logo {
+  position: relative;
+  width: 120px; height: 120px;
+  border-radius: 18px;
+  background: var(--ink);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 40px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.stelle-logo.has-image {
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.stelle-logo:hover { box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+.stelle-logo:hover.has-image { border-color: var(--ink-4); }
+.stelle-logo img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  padding: 10px;
+}
+.stelle-logo-edit {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 6px 0;
+  background: rgba(10,10,10,0.78);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+  backdrop-filter: blur(2px);
+}
+.stelle-logo:hover .stelle-logo-edit { opacity: 1; }
+
+.stelle-header-text { flex: 1; min-width: 0; }
+.stelle-header-firma {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stelle-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.branche-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--ink);
+  color: #fff;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ───────── Chips (Benefits, Soft Skills) ───────── */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 36px;
+}
+.chips-empty {
+  font-size: 12px;
+  color: var(--ink-4);
+  font-style: italic;
+  padding: 8px 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px 5px 12px;
+  background: var(--ink);
+  color: #fff;
+  border-radius: 100px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.chip-x {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 50%;
+  transition: color 0.12s, background 0.12s;
+}
+.chip-x:hover { color: #fff; background: rgba(255,255,255,0.15); }
+
+.chip-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.chip-add input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  background: #fff;
+  outline: none;
+}
+.chip-add input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+
+.check-suggest {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  background: #fafaf8;
+  border: 1px dashed var(--line);
+  border-radius: 100px;
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.check-suggest:hover {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--ink-4);
+}
+
+.stelle-actions {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+  padding: 14px 0 4px;
+  margin-top: 8px;
+  border-top: none;
+  z-index: 5;
+}
+
+/* ───────── KI-Analyse ───────── */
+.analyse-section { background: #fafaf8; }
+.legend-toggle {
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-chev { color: var(--ink-3); font-size: 11px; }
+
+.analyse-body {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.analyse-score {
+  background: var(--ink);
+  color: #fff;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  text-align: center;
+  flex: 0 0 auto;
+}
+.analyse-score-num {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.analyse-score-num span { font-size: 14px; color: rgba(255,255,255,0.55); margin-left: 2px; }
+.analyse-score-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-top: 4px;
+}
+.analyse-empfehlungen { flex: 1; min-width: 220px; }
+.analyse-empfehlungen-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.analyse-empfehlungen ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.analyse-raw {
+  width: 100%;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid var(--line);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  color: var(--ink-2);
+}
