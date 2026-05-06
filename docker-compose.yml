@@ -1,8 +1,8 @@
-# TalentOne Inside — Docker-Compose Snippet
+# TalentOne Inside — Docker-Compose für VPS 69.62.116.44
 #
-# Auf dem VPS mit dem bestehenden Traefik-Compose mergen ODER als eigenständiges
-# Compose-File verwenden. Wichtig: Beide Services hängen am externen Traefik-Netz.
-# Name des externen Netzwerks ggf. anpassen (häufig "traefik" oder "proxy").
+# Hängt am bestehenden Traefik im Netzwerk "root_default".
+# Traefik leitet :80 zentral auf :443 — daher kein separater HTTP-Router nötig.
+# Certresolver ist "mytlschallenge" (HTTP-01 via Let's Encrypt).
 
 services:
   inside-backend:
@@ -12,15 +12,14 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env.local
     networks:
-      - traefik
+      - root_default
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
-      # API-Router: alle /api-Requests an den Backend-Container
+      - "traefik.docker.network=root_default"
       - "traefik.http.routers.inside-api.rule=Host(`inside.talent-one.de`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.inside-api.entrypoints=websecure"
+      - "traefik.http.routers.inside-api.entrypoints=web,websecure"
       - "traefik.http.routers.inside-api.tls=true"
-      - "traefik.http.routers.inside-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.inside-api.tls.certresolver=mytlschallenge"
       - "traefik.http.services.inside-api.loadbalancer.server.port=3001"
 
   inside-frontend:
@@ -34,24 +33,17 @@ services:
     container_name: talentone-inside-frontend
     restart: unless-stopped
     networks:
-      - traefik
+      - root_default
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traefik"
-      # SPA-Router: alles ausser /api an den Frontend-Container
+      - "traefik.docker.network=root_default"
       - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`)"
-      - "traefik.http.routers.inside-web.entrypoints=websecure"
+      - "traefik.http.routers.inside-web.entrypoints=web,websecure"
       - "traefik.http.routers.inside-web.tls=true"
-      - "traefik.http.routers.inside-web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.inside-web.tls.certresolver=mytlschallenge"
       - "traefik.http.routers.inside-web.priority=1"
       - "traefik.http.services.inside-web.loadbalancer.server.port=80"
-      # HTTP → HTTPS Redirect
-      - "traefik.http.routers.inside-web-http.rule=Host(`inside.talent-one.de`)"
-      - "traefik.http.routers.inside-web-http.entrypoints=web"
-      - "traefik.http.routers.inside-web-http.middlewares=https-redirect"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
 
 networks:
-  traefik:
+  root_default:
     external: true
