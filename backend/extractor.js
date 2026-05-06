@@ -1,6 +1,8 @@
 // Liest eine Stellenanzeige (URL oder PDF/DOCX) und extrahiert strukturierte Daten via Claude.
 // Gibt ein einheitliches Objekt zurück, das wir in Kunde + Job mappen.
 
+import { callClaudeWithRetry, parseJsonContent } from './claude.js';
+
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 const EXTRACT_PROMPT = (text) => `Du liest eine Stellenanzeige und extrahierst die wichtigsten Informationen.
@@ -32,56 +34,14 @@ Extrahiere die Informationen und antworte NUR mit einem JSON-Objekt, ohne Markdo
   "quereinsteiger": false
 }`;
 
-// Retry-Policy: 429 (Rate Limit), 529 (Overloaded), 5xx → bis zu 4 Versuche mit exp. Backoff + Jitter
-async function fetchClaudeWithRetry(payload, maxAttempts = 4) {
-  let lastErr;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) return response;
-
-    const body = await response.text();
-    const retryable = response.status === 429 || response.status === 529 || response.status >= 500;
-    lastErr = new Error(`Claude API ${response.status}: ${body.slice(0, 200)}`);
-
-    if (!retryable || attempt === maxAttempts) throw lastErr;
-
-    const base = 1500 * Math.pow(2, attempt - 1); // 1.5s, 3s, 6s
-    const jitter = Math.floor(Math.random() * 500);
-    const wait = base + jitter;
-    console.warn(`[Claude] ${response.status} — retry ${attempt}/${maxAttempts - 1} in ${wait}ms`);
-    await new Promise(r => setTimeout(r, wait));
-  }
-  throw lastErr;
-}
-
 async function callClaude(text) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY nicht gesetzt.');
-  }
   const truncated = text.slice(0, 5000);
-  const response = await fetchClaudeWithRetry({
+  const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
     max_tokens: 1000,
     messages: [{ role: 'user', content: EXTRACT_PROMPT(truncated) }],
   });
-
-  const data = await response.json();
-  const raw = data.content?.[0]?.text || '{}';
-  const cleaned = raw.replace(/```json|```/g, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Claude-Antwort war kein gültiges JSON.');
-  }
+  return parseJsonContent(data);
 }
 
 export async function extractFromUrl(url) {

@@ -3,8 +3,9 @@
 // - generateCreative:        OpenAI gpt-image-2 erzeugt ein Recruiting-Ad in einem Format,
 //                            Upload nach Supabase Storage (Bucket: talentone-creatives).
 
+import { callClaudeWithRetry, parseJsonContent } from './claude.js';
+
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 export const STORAGE_BUCKET = 'talentone-creatives';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
@@ -27,10 +28,6 @@ const BRANCHE_LABEL = {
 /* ───────────────────────── Motiv-Vorschläge ───────────────────────── */
 
 export async function generateMotivVorschlaege(job, kunde) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY nicht gesetzt.');
-  }
-
   const stelle = job.stelle || 'Mitarbeiter:in';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const region = job.region || '';
@@ -47,28 +44,12 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 
 { "motive": ["Motiv 1", "Motiv 2", "Motiv 3"] }`;
 
-  const response = await fetch(ANTHROPIC_API, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 600,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+  const data = await callClaudeWithRetry({
+    model: CLAUDE_MODEL,
+    max_tokens: 600,
+    messages: [{ role: 'user', content: prompt }],
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Claude ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  const raw = data.content?.[0]?.text || '{}';
-  const cleaned = raw.replace(/```json|```/g, '').trim();
-  const parsed = JSON.parse(cleaned);
+  const parsed = parseJsonContent(data);
   return Array.isArray(parsed.motive) ? parsed.motive.slice(0, 3) : [];
 }
 
