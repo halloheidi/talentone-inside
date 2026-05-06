@@ -26,15 +26,81 @@ export default function KundeDetail() {
 
   const [referenzbilder, setReferenzbilder] = useState([]);
 
+  // Farben (lokaler Edit-State, mit Speichern-Button)
+  const [farben, setFarben] = useState({ primaer: '', sekundaer: '', akzent: '' });
+  const [farbenDirty, setFarbenDirty] = useState(false);
+  const [farbenBusy, setFarbenBusy] = useState(false);
+  const [farbenMsg, setFarbenMsg] = useState('');
+
   function load() {
     setLoading(true);
     Promise.all([api(`/kunden/${kundeId}`), api(`/jobs?kunde_id=${kundeId}`)])
       .then(([k, j]) => {
         setKunde(k.kunde);
         setJobs(j.jobs || []);
+        setFarben({
+          primaer:   k.kunde?.farben?.primaer   || '',
+          sekundaer: k.kunde?.farben?.sekundaer || '',
+          akzent:    k.kunde?.farben?.akzent    || '',
+        });
+        setFarbenDirty(false);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+  }
+
+  // Farben separat polling — bei Quick-Create aus URL kommen die Farben asynchron rein.
+  useEffect(() => {
+    if (!kunde) return;
+    if (kunde.farben?.primaer) return;
+    const start = Date.now();
+    const t = setInterval(async () => {
+      if (Date.now() - start > 60_000) { clearInterval(t); return; }
+      try {
+        const k = await api(`/kunden/${kundeId}`);
+        if (k.kunde?.farben?.primaer) {
+          clearInterval(t);
+          setKunde(k.kunde);
+          setFarben({
+            primaer:   k.kunde.farben.primaer   || '',
+            sekundaer: k.kunde.farben.sekundaer || '',
+            akzent:    k.kunde.farben.akzent    || '',
+          });
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kunde?.id]);
+
+  function updateFarbe(key, value) {
+    setFarben(prev => ({ ...prev, [key]: value }));
+    setFarbenDirty(true);
+  }
+
+  async function saveFarben() {
+    setFarbenBusy(true);
+    setFarbenMsg('');
+    try {
+      const payload = {
+        primaer:   farben.primaer.trim()   || null,
+        sekundaer: farben.sekundaer.trim() || null,
+        akzent:    farben.akzent.trim()    || null,
+      };
+      const allEmpty = !payload.primaer && !payload.sekundaer && !payload.akzent;
+      const res = await api(`/kunden/${kundeId}`, {
+        method: 'PATCH',
+        body: { farben: allEmpty ? null : payload },
+      });
+      setKunde(res.kunde);
+      setFarbenDirty(false);
+      setFarbenMsg('Gespeichert.');
+      setTimeout(() => setFarbenMsg(''), 2000);
+    } catch (err) {
+      setFarbenMsg(err.message);
+    } finally {
+      setFarbenBusy(false);
+    }
   }
 
   useEffect(() => { load(); }, [kundeId]);
@@ -113,6 +179,52 @@ export default function KundeDetail() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="farben-card">
+        <div className="farben-head">
+          <div>
+            <div className="form-section-title" style={{ marginBottom: 4 }}>Markenfarben</div>
+            <div className="motiv-sub">Werden im Creative-Prompt für Text, Tags und Akzente verwendet.</div>
+          </div>
+          {farbenDirty && (
+            <button className="btn-primary btn-sm" onClick={saveFarben} disabled={farbenBusy}>
+              {farbenBusy ? 'Speichere…' : 'Speichern'}
+            </button>
+          )}
+          {farbenMsg && <span className="form-msg">{farbenMsg}</span>}
+        </div>
+        <div className="farben-grid">
+          {[
+            { key: 'primaer',   label: 'Primär' },
+            { key: 'sekundaer', label: 'Sekundär' },
+            { key: 'akzent',    label: 'Akzent' },
+          ].map(({ key, label }) => (
+            <div className="farbe-pick" key={key}>
+              <span className="farbe-label">{label}</span>
+              <div className="farbe-row">
+                <input
+                  type="color"
+                  value={/^#[0-9a-f]{6}$/i.test(farben[key]) ? farben[key] : '#cccccc'}
+                  onChange={e => updateFarbe(key, e.target.value)}
+                  aria-label={`${label} Farbe`}
+                />
+                <input
+                  type="text"
+                  className="farbe-hex"
+                  placeholder="#rrggbb"
+                  value={farben[key]}
+                  onChange={e => updateFarbe(key, e.target.value)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        {!kunde.farben?.primaer && (
+          <div className="farben-hint">
+            Noch keine Farben hinterlegt — werden beim Hochladen eines Logos oder beim Anlegen via URL automatisch ermittelt.
+          </div>
+        )}
       </div>
 
       {referenzbilder.length > 0 && (

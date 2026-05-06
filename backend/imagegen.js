@@ -65,6 +65,17 @@ function pickBenefits(job) {
   return benefits.slice(0, 4);
 }
 
+// Baut eine kompakte Farb-Anweisung aus kunde.farben — leer wenn keine Farben hinterlegt.
+function buildFarbenHinweis(kunde) {
+  const f = kunde?.farben;
+  if (!f || (!f.primaer && !f.sekundaer && !f.akzent)) return '';
+  const parts = [];
+  if (f.primaer)   parts.push(`Primär ${f.primaer}`);
+  if (f.sekundaer) parts.push(`Sekundär ${f.sekundaer}`);
+  if (f.akzent)    parts.push(`Akzent ${f.akzent}`);
+  return `MARKENFARBEN: ${parts.join(', ')}. Verwende diese Farben für Text-Overlay, Benefit-Tags, Akzent-Linien und den dunklen Verlauf — das Design soll zur Corporate Identity des Unternehmens passen. Die Hauttöne und natürlichen Bildelemente bleiben davon unberührt.`;
+}
+
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
 function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
   const stelle = job.stelle || 'Mitarbeiter:in';
@@ -73,6 +84,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
   const benefits = pickBenefits(job);
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const farben = buildFarbenHinweis(kunde);
 
   const refHinweis = [];
   if (hasLogo && person) {
@@ -89,7 +101,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im modernen Instagram/Facebook Stil.
 
-${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
 ${motiv}
 - Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
 - Branche: ${branche}
@@ -104,9 +116,9 @@ TEXT-ELEMENTE (sauber lesbar, modernes Design):
 
 DESIGN-REGELN:
 - Dunkler, halbtransparenter Verlauf im unteren Drittel für Textlesbarkeit
-- Schrift weiß, modern, Bold für den Hauptspruch
+- Schrift gut lesbar, modern, Bold für den Hauptspruch
 - Benefit-Tags klein gehalten damit alle nebeneinander reinpassen
-- Farben warm und einladend, passend zur Branche
+- ${farben ? 'Verwende die oben genannten Markenfarben konsequent für Text-Overlay, Benefit-Tags und Akzent-Linien.' : 'Farben warm und einladend, passend zur Branche.'}
 - Keine QR-Codes, keine Rahmen
 - Muss auf dem Handy sofort ins Auge springen und zum Stoppen beim Scrollen bewegen`;
 }
@@ -118,6 +130,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo }) {
   const benefits = pickBenefits(job);
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const farben = buildFarbenHinweis(kunde);
 
   const refLines = hasLogo
     ? `MITGELIEFERTE BILDER (in dieser Reihenfolge):
@@ -129,7 +142,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo }) {
 
 ${refLines}
 
-Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
+${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
 OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto):
 - Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
@@ -140,8 +153,9 @@ OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto):
 
 DESIGN-REGELN:
 - Dunkler, halbtransparenter Verlauf (Gradient) im unteren Drittel — sorgt für Textlesbarkeit ohne das Foto zu zerstören
-- Schrift weiß, modern, Bold für den Hauptspruch
+- Schrift gut lesbar, modern, Bold für den Hauptspruch
 - Benefit-Tags klein und kompakt
+- ${farben ? 'Verwende die oben genannten Markenfarben konsequent für Text-Overlay, Benefit-Tags und Akzent-Linien.' : 'Farben warm und einladend.'}
 - Keine zusätzlichen Filter aufs Foto, keine Verfremdung, keine Stilisierung
 - Keine QR-Codes, keine Rahmen
 - Wirkung: das echte Foto bleibt der Held, Text und Logo unterstützen subtil`;

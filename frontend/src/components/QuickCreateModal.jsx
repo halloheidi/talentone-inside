@@ -48,6 +48,11 @@ export default function QuickCreateModal({ open, onClose }) {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // Logo (optional, für alle drei Modi)
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const logoInputRef = useRef(null);
+
   function reset() {
     setTab('url');
     setError('');
@@ -55,6 +60,16 @@ export default function QuickCreateModal({ open, onClose }) {
     setUrl('');
     setFile(null);
     setManual(EMPTY_MANUAL);
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    setLogoFile(null);
+    setLogoPreview(null);
+  }
+
+  function onLogoSelected(f) {
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    if (!f) { setLogoFile(null); setLogoPreview(null); return; }
+    setLogoFile(f);
+    setLogoPreview(URL.createObjectURL(f));
   }
 
   function close() {
@@ -91,6 +106,16 @@ export default function QuickCreateModal({ open, onClose }) {
             notizen: manual.notizen,
           },
           job: { stelle: manual.stelle, region: manual.region, gehalt: manual.gehalt },
+        };
+      }
+
+      // Optionales Logo — gilt für alle drei Modi
+      if (logoFile) {
+        const logoData = await fileToBase64(logoFile);
+        body.logo = {
+          fileData: logoData,
+          fileName: logoFile.name,
+          contentType: logoFile.type || 'image/png',
         };
       }
 
@@ -239,6 +264,37 @@ export default function QuickCreateModal({ open, onClose }) {
           </div>
         </div>
       )}
+
+      {/* Logo-Upload (für alle Modi gemeinsam) */}
+      <div className="logo-upload-row">
+        <div className="logo-upload-preview">
+          {logoPreview
+            ? <img src={logoPreview} alt="Logo-Vorschau" />
+            : <span>Logo</span>}
+        </div>
+        <div className="logo-upload-text">
+          <strong>Logo (optional)</strong>
+          <span>Wir extrahieren daraus auch die Markenfarben für die Creatives.</span>
+        </div>
+        <div className="logo-upload-actions">
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml,image/webp"
+            style={{ display: 'none' }}
+            onChange={e => onLogoSelected(e.target.files?.[0] || null)}
+            disabled={busy}
+          />
+          {logoFile
+            ? (
+              <>
+                <button className="btn-ghost btn-sm" onClick={() => logoInputRef.current?.click()} disabled={busy}>Tauschen</button>
+                <button className="btn-ghost btn-sm" onClick={() => onLogoSelected(null)} disabled={busy}>Entfernen</button>
+              </>
+            )
+            : <button className="btn-ghost btn-sm" onClick={() => logoInputRef.current?.click()} disabled={busy}>Datei wählen</button>}
+        </div>
+      </div>
 
       {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
       {busy && (tab === 'url' || tab === 'file') && (

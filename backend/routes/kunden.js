@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { sendUploadAnfrage } from '../mail.js';
+import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 
 const router = Router();
 
@@ -14,14 +15,18 @@ function decodeBase64File(fileData) {
 }
 
 // Quick-Create: legt in einem Schritt Kunde + ersten Job an.
+// Optional kann ein Logo (base64) mitgegeben werden — wird nach dem Insert hochgeladen
+// und zugleich als Farb-Quelle für talentone_kunden.farben analysiert.
 // Modi:
-//   manual  → req.body.kunde + req.body.job  (User-Eingaben)
-//   url     → req.body.url                   (Puppeteer + Claude)
-//   file    → req.body.fileData (base64) + req.body.fileType  (pdf-parse/mammoth + Claude)
+//   manual  → req.body.kunde + req.body.job
+//   url     → req.body.url                  (Puppeteer + Claude + Farb-Scrape)
+//   file    → req.body.fileData (base64) + req.body.fileType
+//   logo (alle): req.body.logo = { fileData, fileName?, contentType? }
 router.post('/quick-create', async (req, res) => {
-  const { mode } = req.body || {};
+  const { mode, logo } = req.body || {};
   let kundeData = {};
   let jobData = {};
+  let urlForColors = null;
 
   try {
     if (mode === 'manual') {
@@ -44,6 +49,7 @@ router.post('/quick-create', async (req, res) => {
       };
     } else if (mode === 'url') {
       const { url } = req.body;
+      urlForColors = url;
       const extracted = await extractFromUrl(url);
       kundeData = toKunde(extracted);
       jobData = toJob(extracted, 'url', url);
@@ -78,7 +84,48 @@ router.post('/quick-create', async (req, res) => {
       return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
     }
 
+    // Antwort sofort raus — Logo + Farb-Extraktion sind best-effort und blockieren nicht.
     res.status(201).json({ kunde, job });
+
+    // Hintergrund: Logo hochladen + Farben extrahieren (Logo-Farben haben Priorität, sonst URL)
+    (async () => {
+      let logoUrl = null;
+      let logoBuffer = null;
+
+      if (logo?.fileData) {
+        try {
+          logoBuffer = Buffer.from(logo.fileData, 'base64');
+          const ext = extFromMime(logo.contentType || 'image/png', 'png');
+          const stem = safeFilenameStem(logo.fileName || 'logo');
+          const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
+          logoUrl = await uploadBuffer({
+            bucket: 'talentone-logos', path, buffer: logoBuffer,
+            contentType: logo.contentType || 'image/png',
+          });
+          await supabase.from('talentone_kunden').update({ logo_url: logoUrl }).eq('id', kunde.id);
+          console.log(`[quick-create-bg] Logo gesetzt für ${kunde.id.slice(0, 8)}`);
+        } catch (err) {
+          console.warn('[quick-create-bg] Logo-Upload fehlgeschlagen:', err.message);
+        }
+      }
+
+      // Farben — Logo bevorzugt, sonst URL
+      let farben = null;
+      if (logoBuffer) {
+        try { farben = await extractColorsFromImageBuffer(logoBuffer); }
+        catch (err) { console.warn('[quick-create-bg] Logo-Farben:', err.message); }
+      }
+      if (!farben && urlForColors) {
+        try { farben = await extractColorsFromUrl(urlForColors); }
+        catch (err) { console.warn('[quick-create-bg] URL-Farben:', err.message); }
+      }
+      if (farben) {
+        await supabase.from('talentone_kunden').update({ farben }).eq('id', kunde.id);
+        console.log(`[quick-create-bg] Farben für ${kunde.id.slice(0, 8)}:`, farben);
+      }
+    })().catch(err => console.error('[quick-create-bg] uncaught:', err));
+
+    return;
   } catch (err) {
     console.error('[quick-create]', err.message);
     if (/Claude API 529/.test(err.message)) {
@@ -124,7 +171,7 @@ router.post('/', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-  const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen'];
+  const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
   const { data, error } = await supabase
     .from('talentone_kunden')
@@ -144,14 +191,16 @@ router.delete('/:id', async (req, res) => {
 
 /* ─────────────────── Logo ─────────────────── */
 
-// POST /api/kunden/:id/logo  body: { fileData: base64, fileName, contentType? }
+// POST /api/kunden/:id/logo  body: { fileData: base64, fileName, contentType?, autoFarben? }
+// Standardmässig werden Farben aus dem Logo extrahiert und nur gesetzt, wenn der
+// Kunde noch keine eigenen Farben hat. autoFarben=force überschreibt vorhandene.
 router.post('/:id/logo', async (req, res) => {
-  const { fileData, fileName = 'logo.png', contentType = 'image/png' } = req.body || {};
+  const { fileData, fileName = 'logo.png', contentType = 'image/png', autoFarben = 'auto' } = req.body || {};
   if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
 
   const { data: existing } = await supabase
     .from('talentone_kunden')
-    .select('id, logo_url')
+    .select('id, logo_url, farben')
     .eq('id', req.params.id)
     .maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
@@ -165,9 +214,22 @@ router.post('/:id/logo', async (req, res) => {
 
     if (existing.logo_url) await deleteFromBucket('talentone-logos', existing.logo_url);
 
+    // Farben aus Logo extrahieren — nur setzen wenn leer (oder force)
+    let farbenUpdate = null;
+    if (autoFarben !== 'off' && (autoFarben === 'force' || !existing.farben)) {
+      try {
+        farbenUpdate = await extractColorsFromImageBuffer(buffer);
+      } catch (err) {
+        console.warn('[logo-upload] Farb-Extraktion:', err.message);
+      }
+    }
+
+    const update = { logo_url: publicUrl };
+    if (farbenUpdate) update.farben = farbenUpdate;
+
     const { data: updated, error: uErr } = await supabase
       .from('talentone_kunden')
-      .update({ logo_url: publicUrl })
+      .update(update)
       .eq('id', req.params.id)
       .select()
       .single();

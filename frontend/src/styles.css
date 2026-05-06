@@ -830,6 +830,106 @@ button { font-family: inherit; }
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* Logo-Upload Reihe im Quick-Create-Modal */
+.logo-upload-row {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.logo-upload-preview {
+  width: 48px; height: 48px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.logo-upload-preview img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+.logo-upload-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.logo-upload-text strong { font-size: 13px; color: var(--ink); }
+.logo-upload-text span { font-size: 11px; color: var(--ink-3); }
+.logo-upload-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Farben-Editor in KundeDetail */
+.farben-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+.farben-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.farben-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.farbe-pick { display: flex; flex-direction: column; gap: 6px; }
+.farbe-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.farbe-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.farbe-row input[type="color"] {
+  width: 44px; height: 36px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  cursor: pointer;
+}
+.farbe-hex {
+  flex: 1;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font: inherit;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  text-transform: lowercase;
+}
+.farbe-hex:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+.farben-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
 /* ───────── Creatives — Motiv-Sektion ───────── */
 .motiv-section { padding: 22px; }
 .motiv-head {
