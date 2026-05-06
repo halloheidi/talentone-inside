@@ -1665,3 +1665,173 @@ button { font-family: inherit; }
   font-size: 13px;
   color: var(--ink-3);
 }
+
+/* ───────── Status-Badge in Kundenliste ───────── */
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 100px;
+  vertical-align: middle;
+}
+.status-wartend {
+  background: #ececea;
+  color: var(--ink-3);
+}
+.kunde-card.is-wartend {
+  background: #fafaf8;
+  border-style: dashed;
+}
+
+/* ───────── Invite-Tab Erfolg ───────── */
+.invite-success {
+  text-align: center;
+  padding: 12px 0;
+}
+.invite-success strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 8px;
+  color: var(--ink);
+}
+.invite-success p {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+.invite-link {
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+  background: #fafaf8;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+.invite-link a { color: var(--ink-2); }
+
+/* ───────── Public Formular: Modus-Sektion oben ───────── */
+.public-card-form {
+  max-width: 720px;
+}
+.form-quick {
+  margin: 0 0 24px;
+  padding: 14px;
+  background: #fafaf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.form-quick-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+.form-quick-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.form-quick-tab.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.form-quick-pane p {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.form-quick-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.form-quick-row input[type="url"] {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  background: #fff;
+}
+.form-quick-row input[type="url"]:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(10,10,10,0.06);
+}
+
+/* ───────── Public Formular: Sektionen ───────── */
+.formular { display: flex; flex-direction: column; gap: 22px; }
+.formular-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  background: var(--surface);
+}
+.formular-section legend {
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #fafaf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.check-item:hover { background: #f3f3ef; }
+.check-item input[type="checkbox"] { accent-color: var(--ink); }
+
+.formular-submit {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+.formular-submit .btn-primary { min-width: 200px; height: 48px; font-size: 15px; }
+
+@media (max-width: 600px) {
+  .public-card-form { padding: 24px; }
+  .form-quick-tabs { flex-direction: column; }
+  .formular-section { padding: 16px; }
+}

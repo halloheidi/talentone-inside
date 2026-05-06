@@ -7,6 +7,7 @@ const TABS = [
   { id: 'url', label: 'URL' },
   { id: 'file', label: 'PDF / DOCX' },
   { id: 'manual', label: 'Manuell' },
+  { id: 'invite', label: 'Kunde füllt aus' },
 ];
 
 const EMPTY_MANUAL = {
@@ -53,6 +54,10 @@ export default function QuickCreateModal({ open, onClose }) {
   const [logoPreview, setLogoPreview] = useState(null);
   const logoInputRef = useRef(null);
 
+  // Invite-Tab: Kunde füllt selbst aus
+  const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
+  const [inviteSuccess, setInviteSuccess] = useState(null); // { firmenname, formularUrl } | null
+
   function reset() {
     setTab('url');
     setError('');
@@ -63,6 +68,8 @@ export default function QuickCreateModal({ open, onClose }) {
     if (logoPreview) URL.revokeObjectURL(logoPreview);
     setLogoFile(null);
     setLogoPreview(null);
+    setInvite({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
+    setInviteSuccess(null);
   }
 
   function onLogoSelected(f) {
@@ -82,6 +89,25 @@ export default function QuickCreateModal({ open, onClose }) {
     setError('');
     setBusy(true);
     try {
+      // Modus "Kunde füllt aus" — anderer Endpoint, kein Job-Anlegen
+      if (tab === 'invite') {
+        if (!invite.email.trim()) throw new Error('E-Mail des Kunden ist Pflicht.');
+        const res = await api('/kunden/formular-anlegen', {
+          method: 'POST',
+          body: {
+            email: invite.email.trim(),
+            firmenname: invite.firmenname.trim() || undefined,
+            ansprechpartner: invite.ansprechpartner.trim() || undefined,
+            customText: invite.customText.trim() || undefined,
+          },
+        });
+        setInviteSuccess({
+          firmenname: res.kunde.firmenname || invite.email.trim(),
+          formularUrl: res.formularUrl,
+        });
+        return;
+      }
+
       let body;
       if (tab === 'url') {
         if (!url.trim()) throw new Error('Bitte URL eingeben.');
@@ -142,16 +168,18 @@ export default function QuickCreateModal({ open, onClose }) {
       open={open}
       onClose={close}
       title="Neuer Kunde / neues Projekt"
-      footer={
+      footer={inviteSuccess ? null : (
         <>
           <button className="btn-ghost" onClick={close} disabled={busy}>Abbrechen</button>
           <button className="btn-primary" onClick={submit} disabled={busy}>
             {busy
-              ? (tab === 'manual' ? 'Speichere…' : 'Analysiere…')
-              : (tab === 'manual' ? 'Anlegen' : 'Analysieren & Anlegen')}
+              ? (tab === 'invite' || tab === 'manual' ? 'Sende…' : 'Analysiere…')
+              : (tab === 'invite' ? 'Formular senden'
+                : tab === 'manual' ? 'Anlegen'
+                : 'Analysieren & Anlegen')}
           </button>
         </>
-      }
+      )}
     >
       <div className="modal-tabs">
         {TABS.map(t => (
@@ -217,6 +245,52 @@ export default function QuickCreateModal({ open, onClose }) {
         </div>
       )}
 
+      {tab === 'invite' && (
+        <div className="modal-pane">
+          {inviteSuccess ? (
+            <div className="invite-success">
+              <strong>Mail verschickt.</strong>
+              <p>Wir haben das Briefing-Formular an <strong>{invite.email}</strong> geschickt. Sobald der Kunde es ausfüllt, erscheint er automatisch in der Liste.</p>
+              <p className="invite-link">Persönlicher Link: <a href={inviteSuccess.formularUrl} target="_blank" rel="noreferrer">{inviteSuccess.formularUrl}</a></p>
+              <button className="btn-primary" onClick={() => { reset(); onClose(); }}>Schließen</button>
+            </div>
+          ) : (
+            <>
+              <p className="pane-hint">Wir verschicken eine Mail mit einem persönlichen Briefing-Formular. Der Kunde trägt dort alles ein (Firma, Stelle, Benefits, Logo, Fotos…), Status wechselt automatisch von „wartend" auf „aktiv", sobald er fertig ist.</p>
+              <div className="form-grid">
+                <label className="field field-full">
+                  <span>E-Mail des Kunden *</span>
+                  <input
+                    type="email"
+                    placeholder="ansprechpartner@firma.de"
+                    value={invite.email}
+                    onChange={e => setInvite({ ...invite, email: e.target.value })}
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Firmenname (optional)</span>
+                  <input value={invite.firmenname} onChange={e => setInvite({ ...invite, firmenname: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Ansprechpartner (optional)</span>
+                  <input value={invite.ansprechpartner} onChange={e => setInvite({ ...invite, ansprechpartner: e.target.value })} />
+                </label>
+                <label className="field field-full">
+                  <span>Persönlicher Mail-Text (optional)</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Wenn leer, nehmen wir den Standard-Text."
+                    value={invite.customText}
+                    onChange={e => setInvite({ ...invite, customText: e.target.value })}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {tab === 'manual' && (
         <div className="modal-pane">
           <p className="pane-hint">Trage Kunde und erste Stelle direkt ein.</p>
@@ -265,8 +339,8 @@ export default function QuickCreateModal({ open, onClose }) {
         </div>
       )}
 
-      {/* Logo-Upload (für alle Modi gemeinsam) */}
-      <div className="logo-upload-row">
+      {/* Logo-Upload (für alle Modi gemeinsam — außer "Kunde füllt aus") */}
+      {tab !== 'invite' && <div className="logo-upload-row">
         <div className="logo-upload-preview">
           {logoPreview
             ? <img src={logoPreview} alt="Logo-Vorschau" />
@@ -294,7 +368,7 @@ export default function QuickCreateModal({ open, onClose }) {
             )
             : <button className="btn-ghost btn-sm" onClick={() => logoInputRef.current?.click()} disabled={busy}>Datei wählen</button>}
         </div>
-      </div>
+      </div>}
 
       {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
       {busy && (tab === 'url' || tab === 'file') && (

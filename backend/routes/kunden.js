@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
-import { sendUploadAnfrage } from '../mail.js';
+import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 
 const router = Router();
@@ -354,6 +354,42 @@ router.delete('/referenzbilder/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_referenzbilder').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* ─────────────────── Formular-Anlegen (Kunde füllt selbst aus) ─────────────────── */
+
+// POST /api/kunden/formular-anlegen  body: { email, firmenname?, ansprechpartner?, customText? }
+router.post('/formular-anlegen', async (req, res) => {
+  const { email, firmenname, ansprechpartner, customText } = req.body || {};
+  if (!email?.trim()) return res.status(400).json({ error: 'E-Mail ist Pflicht.' });
+
+  const token = randomUUID();
+  const { data: kunde, error: kErr } = await supabase
+    .from('talentone_kunden')
+    .insert({
+      email: email.trim(),
+      firmenname: firmenname?.trim() || null,
+      ansprechpartner: ansprechpartner?.trim() || null,
+      status: 'wartend',
+      formular_token: token,
+    })
+    .select().single();
+  if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });
+
+  const formularUrl = `${PUBLIC_BASE}/formular/${token}`;
+  try {
+    await sendFormularEinladung({
+      to: kunde.email, ansprechpartner: kunde.ansprechpartner,
+      formularUrl, customText,
+    });
+  } catch (err) {
+    console.error('[formular-anlegen] Mail:', err.message);
+    // Kunde wieder löschen, weil Formular ohne Mail wertlos ist
+    await supabase.from('talentone_kunden').delete().eq('id', kunde.id);
+    return res.status(503).json({ error: `Mail-Versand fehlgeschlagen: ${err.message}` });
+  }
+
+  res.status(201).json({ kunde, formularUrl });
 });
 
 /* ─────────────────── Upload-Anfrage per Mail ─────────────────── */

@@ -46,17 +46,21 @@ export default function KundenList() {
       {!loading && kunden.length > 0 && (
         <div className="grid-cards">
           {kunden.map(k => (
-            <Link key={k.id} to={`/kunden/${k.id}`} className="kunde-card">
-              <div className="kunde-card-logo">
+            <Link key={k.id} to={`/kunden/${k.id}`} className={`kunde-card ${k.status === 'wartend' ? 'is-wartend' : ''}`}>
+              <div className={`kunde-card-logo ${k.logo_url ? 'has-image' : ''}`}>
                 {k.logo_url
                   ? <img src={k.logo_url} alt="" />
                   : <span>{(k.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
               </div>
               <div className="kunde-card-body">
-                <div className="kunde-card-name">{k.firmenname || '—'}</div>
+                <div className="kunde-card-name">
+                  {k.firmenname || k.email || '—'}
+                  {k.status === 'wartend' && <span className="status-badge status-wartend">Wartet auf Formular</span>}
+                </div>
                 <div className="kunde-card-meta">
                   {k.branche && <span>{k.branche}</span>}
                   {k.ansprechpartner && <span>{k.ansprechpartner}</span>}
+                  {k.status === 'wartend' && !k.firmenname && k.email && <span>{k.email}</span>}
                 </div>
               </div>
             </Link>
