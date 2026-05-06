@@ -829,3 +829,153 @@ button { font-family: inherit; }
   color: var(--ink-2);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
+
+/* ───────── Creatives — Motiv-Sektion ───────── */
+.motiv-section { padding: 22px; }
+.motiv-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.motiv-sub { font-size: 12px; color: var(--ink-3); }
+.motiv-skeleton {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.motiv-skeleton > div {
+  height: 90px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, #ececea, #f5f4f1, #ececea);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.motiv-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.motiv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  text-align: left;
+  background: #fafaf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.motiv-card:hover { border-color: var(--ink-4); background: #fff; }
+.motiv-card.is-active {
+  border-color: var(--ink);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(10,10,10,0.05);
+}
+.motiv-num {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+.motiv-text { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+
+.generate-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+}
+.generate-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex: 1;
+  justify-content: flex-end;
+}
+.generate-hint { font-size: 11px; color: var(--ink-4); text-align: right; max-width: 320px; }
+.field select {
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font: inherit;
+  color: var(--ink);
+}
+
+/* ───────── Creatives — Galerie ───────── */
+.creative-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.creative-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.creative-thumb {
+  position: relative;
+  background: #f0efed;
+}
+.creative-thumb img { width: 100%; height: auto; display: block; }
+.creative-thumb-empty {
+  display: grid; place-items: center;
+  height: 200px; color: var(--ink-4); font-size: 12px;
+}
+.format-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 9px;
+  background: rgba(10,10,10,0.78);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 100px;
+  backdrop-filter: blur(4px);
+}
+.creative-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-2);
+  flex-wrap: wrap;
+}
+.creative-date {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.creative-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.btn-sm {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.btn-danger { color: var(--danger); border-color: #f4cfcf; }
+.btn-danger:hover { background: var(--danger-bg); border-color: #f4cfcf; color: var(--danger); }
