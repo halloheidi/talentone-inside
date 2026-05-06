@@ -1,0 +1,57 @@
+# TalentOne Inside — Docker-Compose Snippet
+#
+# Auf dem VPS mit dem bestehenden Traefik-Compose mergen ODER als eigenständiges
+# Compose-File verwenden. Wichtig: Beide Services hängen am externen Traefik-Netz.
+# Name des externen Netzwerks ggf. anpassen (häufig "traefik" oder "proxy").
+
+services:
+  inside-backend:
+    build: ./backend
+    image: talentone-inside-backend:latest
+    container_name: talentone-inside-backend
+    restart: unless-stopped
+    env_file: ./backend/.env.local
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      # API-Router: alle /api-Requests an den Backend-Container
+      - "traefik.http.routers.inside-api.rule=Host(`inside.talent-one.de`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.inside-api.entrypoints=websecure"
+      - "traefik.http.routers.inside-api.tls=true"
+      - "traefik.http.routers.inside-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.inside-api.loadbalancer.server.port=3001"
+
+  inside-frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_BASE: https://inside.talent-one.de/api
+    image: talentone-inside-frontend:latest
+    container_name: talentone-inside-frontend
+    restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      # SPA-Router: alles ausser /api an den Frontend-Container
+      - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`)"
+      - "traefik.http.routers.inside-web.entrypoints=websecure"
+      - "traefik.http.routers.inside-web.tls=true"
+      - "traefik.http.routers.inside-web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.inside-web.priority=1"
+      - "traefik.http.services.inside-web.loadbalancer.server.port=80"
+      # HTTP → HTTPS Redirect
+      - "traefik.http.routers.inside-web-http.rule=Host(`inside.talent-one.de`)"
+      - "traefik.http.routers.inside-web-http.entrypoints=web"
+      - "traefik.http.routers.inside-web-http.middlewares=https-redirect"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.permanent=true"
+
+networks:
+  traefik:
+    external: true
