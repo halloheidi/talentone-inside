@@ -965,6 +965,76 @@ button { font-family: inherit; }
   font-style: italic;
 }
 
+/* Quellen-Sektion */
+.farb-quellen {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #fafaf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+.farb-quelle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.farb-quelle-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  flex: 0 0 200px;
+}
+.farb-quelle-row {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Vorschau-Karte */
+.farb-preview {
+  margin-top: 12px;
+  padding: 14px;
+  background: rgba(212, 255, 0, 0.08);
+  border: 1px solid #ece9c8;
+  border-radius: var(--radius-sm);
+}
+.farb-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.farb-preview-actions { display: flex; gap: 6px; }
+.farb-preview-swatches {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.farb-preview-swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.swatch-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.swatch-hex {
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
 /* ───────── Creatives — Motiv-Sektion ───────── */
 .motiv-section { padding: 22px; }
 .motiv-head {

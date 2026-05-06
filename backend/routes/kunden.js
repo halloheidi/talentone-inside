@@ -171,7 +171,7 @@ router.post('/', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-  const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben'];
+  const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben', 'website_url'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
   const { data, error } = await supabase
     .from('talentone_kunden')
@@ -187,6 +187,45 @@ router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_kunden').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* ─────────────────── Farb-Vorschau (Preview, speichert NICHT) ─────────────────── */
+
+// POST /api/kunden/:id/farben/from-url  body: { url? }
+// Wenn url leer → nutzt kunde.website_url. Liefert nur Vorschau, kein DB-Update.
+router.post('/:id/farben/from-url', async (req, res) => {
+  const { url: bodyUrl } = req.body || {};
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('website_url').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  const url = (bodyUrl || kunde.website_url || '').trim();
+  if (!url) return res.status(400).json({ error: 'Keine URL angegeben (Body oder website_url).' });
+
+  try {
+    const farben = await extractColorsFromUrl(url);
+    res.json({ farben, url });
+  } catch (err) {
+    console.error('[farben/from-url]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/kunden/:id/farben/from-logo  → extrahiert aus aktuell gespeichertem Logo
+router.post('/:id/farben/from-logo', async (req, res) => {
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('logo_url').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  if (!kunde.logo_url) return res.status(400).json({ error: 'Kein Logo hinterlegt.' });
+
+  try {
+    const { fetchAsBuffer } = await import('../storage.js');
+    const { buffer } = await fetchAsBuffer(kunde.logo_url);
+    const farben = await extractColorsFromImageBuffer(buffer);
+    res.json({ farben });
+  } catch (err) {
+    console.error('[farben/from-logo]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ─────────────────── Logo ─────────────────── */

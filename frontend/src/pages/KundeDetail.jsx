@@ -37,6 +37,14 @@ export default function KundeDetail() {
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef(null);
 
+  // Website-URL + Farb-Extraktion (Preview)
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [websiteUrlDirty, setWebsiteUrlDirty] = useState(false);
+  const [websiteUrlBusy, setWebsiteUrlBusy] = useState(false);
+  const [extractBusy, setExtractBusy] = useState(null); // 'logo' | 'url' | null
+  const [farbenPreview, setFarbenPreview] = useState(null); // { source, farben } | null
+  const [extractError, setExtractError] = useState('');
+
   async function onLogoChange(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -76,9 +84,77 @@ export default function KundeDetail() {
           akzent:    k.kunde?.farben?.akzent    || '',
         });
         setFarbenDirty(false);
+        setWebsiteUrl(k.kunde?.website_url || '');
+        setWebsiteUrlDirty(false);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+  }
+
+  async function saveWebsiteUrl() {
+    setWebsiteUrlBusy(true);
+    try {
+      const res = await api(`/kunden/${kundeId}`, {
+        method: 'PATCH',
+        body: { website_url: websiteUrl.trim() || null },
+      });
+      setKunde(res.kunde);
+      setWebsiteUrlDirty(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setWebsiteUrlBusy(false);
+    }
+  }
+
+  async function extractFromLogo() {
+    setExtractBusy('logo');
+    setExtractError('');
+    setFarbenPreview(null);
+    try {
+      const res = await api(`/kunden/${kundeId}/farben/from-logo`, { method: 'POST' });
+      if (!res.farben) throw new Error('Aus dem Logo konnten keine Farben ermittelt werden.');
+      setFarbenPreview({ source: 'logo', farben: res.farben });
+    } catch (err) {
+      setExtractError(err.message);
+    } finally {
+      setExtractBusy(null);
+    }
+  }
+
+  async function extractFromUrl() {
+    if (!websiteUrl.trim()) {
+      setExtractError('Bitte zuerst eine Website-URL eintragen.');
+      return;
+    }
+    setExtractBusy('url');
+    setExtractError('');
+    setFarbenPreview(null);
+    try {
+      // Speichere zuerst die URL, falls geändert
+      if (websiteUrlDirty) await saveWebsiteUrl();
+      const res = await api(`/kunden/${kundeId}/farben/from-url`, {
+        method: 'POST', body: { url: websiteUrl.trim() },
+      });
+      if (!res.farben) throw new Error('Aus der Website konnten keine Farben ermittelt werden.');
+      setFarbenPreview({ source: 'url', farben: res.farben });
+    } catch (err) {
+      setExtractError(err.message);
+    } finally {
+      setExtractBusy(null);
+    }
+  }
+
+  function applyPreview() {
+    if (!farbenPreview?.farben) return;
+    const f = farbenPreview.farben;
+    setFarben({
+      primaer:   f.primaer   || '',
+      sekundaer: f.sekundaer || '',
+      akzent:    f.akzent    || '',
+    });
+    setFarbenDirty(true);
+    setFarbenPreview(null);
   }
 
   // Farben separat polling — bei Quick-Create aus URL kommen die Farben asynchron rein.
@@ -249,7 +325,66 @@ export default function KundeDetail() {
           )}
           {farbenMsg && <span className="form-msg">{farbenMsg}</span>}
         </div>
-        <div className="farben-grid">
+
+        {/* Quellen-Sektion */}
+        <div className="farb-quellen">
+          <div className="farb-quelle">
+            <div className="farb-quelle-label">Aus Logo</div>
+            <button
+              className="btn-ghost btn-sm"
+              onClick={extractFromLogo}
+              disabled={!kunde.logo_url || extractBusy === 'logo'}
+              title={kunde.logo_url ? '' : 'Kein Logo hinterlegt'}
+            >
+              {extractBusy === 'logo' ? 'Ermittle…' : 'Logo-Farben ermitteln'}
+            </button>
+          </div>
+          <div className="farb-quelle">
+            <div className="farb-quelle-label">Aus Karriereseite / Homepage</div>
+            <div className="farb-quelle-row">
+              <input
+                type="url"
+                className="farbe-hex"
+                placeholder="https://…"
+                value={websiteUrl}
+                onChange={e => { setWebsiteUrl(e.target.value); setWebsiteUrlDirty(true); }}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="btn-ghost btn-sm"
+                onClick={extractFromUrl}
+                disabled={!websiteUrl.trim() || extractBusy === 'url'}
+              >
+                {extractBusy === 'url' ? 'Scrape…' : 'Aus URL ermitteln'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {extractError && <div className="alert alert-error" style={{ marginTop: 12 }}>{extractError}</div>}
+
+        {/* Vorschau aus Quelle */}
+        {farbenPreview && (
+          <div className="farb-preview">
+            <div className="farb-preview-head">
+              <strong>Vorschlag aus {farbenPreview.source === 'logo' ? 'Logo' : 'Website'}:</strong>
+              <div className="farb-preview-actions">
+                <button className="btn-ghost btn-sm" onClick={() => setFarbenPreview(null)}>Verwerfen</button>
+                <button className="btn-primary btn-sm" onClick={applyPreview}>Übernehmen</button>
+              </div>
+            </div>
+            <div className="farb-preview-swatches">
+              {['primaer', 'sekundaer', 'akzent'].map(k => (
+                <div key={k} className="farb-preview-swatch">
+                  <span className="swatch-box" style={{ background: farbenPreview.farben[k] || 'transparent' }} />
+                  <span className="swatch-hex">{farbenPreview.farben[k] || '–'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="farben-grid" style={{ marginTop: 14 }}>
           {[
             { key: 'primaer',   label: 'Primär' },
             { key: 'sekundaer', label: 'Sekundär' },
@@ -275,9 +410,9 @@ export default function KundeDetail() {
             </div>
           ))}
         </div>
-        {!kunde.farben?.primaer && (
+        {!kunde.farben?.primaer && !farbenDirty && (
           <div className="farben-hint">
-            Noch keine Farben hinterlegt — werden beim Hochladen eines Logos oder beim Anlegen via URL automatisch ermittelt.
+            Noch keine Farben hinterlegt — entweder oben aus Logo oder Website ermitteln, oder manuell unten eintragen.
           </div>
         )}
       </div>
