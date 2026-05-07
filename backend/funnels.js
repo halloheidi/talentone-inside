@@ -126,18 +126,26 @@ Wichtig:
 
 /* ───────────────────── Stimmungsbild generieren ───────────────────── */
 
-export async function generateFunnelImage({ job, kunde, customPrompt, format = 'square' }) {
+// Landscape ist Default — Funnel-Screens brauchen 16:9-Bilder. gpt-image-1 unterstützt
+// 1536x1024 (3:2), das spätere Crop-Tool schneidet daraus exakt 16:9 zu.
+const SIZE_MAP = {
+  square: '1024x1024',
+  portrait: '1024x1536',
+  landscape: '1536x1024',
+};
+
+export async function generateFunnelImage({ job, kunde, customPrompt, format = 'landscape' }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
 
-  const basePrompt = customPrompt?.trim() || `Fotorealistisches, cinematic Stimmungsbild einer Person bei der Tätigkeit "${job.stelle || 'der Stelle'}" in der Branche "${branche}". Authentische Arbeitssituation, warme natürliche Beleuchtung, leichter Bokeh-Effekt, hohe Bildqualität. ${job.region ? `Setting passt zur Region ${job.region}. ` : ''}Die Person wirkt selbstbewusst und zufrieden.
+  const basePrompt = customPrompt?.trim() || `Fotorealistisches, cinematic Stimmungsbild im Querformat einer Person bei der Tätigkeit "${job.stelle || 'der Stelle'}" in der Branche "${branche}". Authentische Arbeitssituation, warme natürliche Beleuchtung, leichter Bokeh-Effekt, hohe Bildqualität. Komposition geeignet für ein 16:9-Layout (Hauptmotiv mittig, Raum links und rechts). ${job.region ? `Setting passt zur Region ${job.region}. ` : ''}Die Person wirkt selbstbewusst und zufrieden.
 
 ABSOLUT WICHTIG:
 - KEIN Text im Bild, KEINE Schrift, KEINE Logos, KEINE Benefit-Tags
 - KEIN Overlay, kein Werbe-Layout — das Bild ist ein reines Stimmungsbild
 - Keine Stock-Foto-Posen, authentisch wie ein Reportage-Foto`;
 
-  const size = format === 'portrait' ? '1024x1536' : '1024x1024';
+  const size = SIZE_MAP[format] || SIZE_MAP.landscape;
 
   const response = await fetch(OPENAI_IMAGES_API, {
     method: 'POST',

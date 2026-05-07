@@ -350,11 +350,8 @@ export default function JobFunnel() {
         footer={
           <>
             <button className="btn-ghost" onClick={() => setPickerOpen(null)}>Abbrechen</button>
-            <button className="btn-ghost btn-sm" onClick={() => generateImage('square')} disabled={genBusy}>
-              {genBusy ? 'Generiere…' : '+ KI 1:1'}
-            </button>
-            <button className="btn-ghost btn-sm" onClick={() => generateImage('portrait')} disabled={genBusy}>
-              {genBusy ? 'Generiere…' : '+ KI Hochkant'}
+            <button className="btn-primary btn-sm" onClick={() => generateImage('landscape')} disabled={genBusy}>
+              {genBusy ? 'Generiere…' : '+ KI-Bild generieren (16:9-tauglich)'}
             </button>
           </>
         }
