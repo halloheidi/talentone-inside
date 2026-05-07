@@ -91,11 +91,11 @@ OUTPUT: 3 Screen-Inhalte als JSON (KEINE Markdown-Backticks):
 
 {
   "intro": {
-    "headline": "Werde Teil von [Firma]! oder ähnlich, max 7 Wörter",
+    "headline": "",
     "body": "2-3 Sätze über das Unternehmen (warum besonders, was Mitarbeiter schätzen) — locker, kein Werbesprech",
-    "teaser": "Eine neugierig-machende Frage zu den Vorteilen, mit Stelle erwähnt, max 12 Wörter",
+    "teaser": "EXAKT die Formulierung 'Neugierig welche Vorteile dich als <Stellenname aus dem Briefing> bei uns erwarten?' verwenden — keine andere Formulierung, nur den Stellennamen einsetzen",
     "yes_button": "Ja klar! 🚀",
-    "info_button": "Erst mehr Infos bitte ℹ️"
+    "info_button": "Mehr Infos bitte ℹ️"
   },
   "benefits": {
     "headline": "Das erwartet dich bei uns",

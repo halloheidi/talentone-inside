@@ -2721,9 +2721,16 @@ button { font-family: inherit; }
   font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
-  line-height: 1.2;
+  line-height: 1.25;
   color: #0a0a0a;
 }
+/* Intro: Headline zentriert, etwas größer */
+.funnel-intro .funnel-h1 {
+  text-align: center;
+  font-size: 26px;
+  padding: 4px 4px 6px;
+}
+.funnel-intro .funnel-dual { margin-top: 4px; }
 .funnel-text { font-size: 14px; line-height: 1.55; color: #2a2a2a; margin: 0; }
 .funnel-teaser {
   font-size: 15px; font-weight: 600; line-height: 1.45;
