@@ -2745,22 +2745,37 @@ button { font-family: inherit; }
   cursor: pointer;
 }
 
-.funnel-benefit-cards {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
-  margin-top: 4px;
+/* Vertikale Benefits-Liste mit rundem Emoji-Badge */
+.funnel-benefit-list {
+  list-style: none; padding: 0; margin: 4px 0 0;
+  display: flex; flex-direction: column; gap: 8px;
 }
-.funnel-benefit-card {
+.funnel-benefit-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
   background: #fafaf8;
   border: 1px solid #ececea;
-  border-radius: 12px;
-  font-size: 13px;
+  border-radius: 14px;
 }
-.funnel-benefit-emoji { font-size: 22px; }
-.funnel-benefit-text { font-weight: 500; color: #0a0a0a; line-height: 1.3; }
+.funnel-benefit-row-more { background: #fff; border-style: dashed; }
+.funnel-benefit-badge {
+  width: 38px; height: 38px;
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  background: #fff;
+  border: 1px solid #ececea;
+  border-radius: 50%;
+  font-size: 20px;
+}
+.funnel-benefit-row-more .funnel-benefit-badge {
+  background: #fafaf8; border-style: dashed;
+}
+.funnel-benefit-text {
+  font-size: 14px; font-weight: 500;
+  color: #0a0a0a; line-height: 1.3;
+}
 .funnel-quote {
   margin: 8px 0 0;
   padding: 12px 14px;
@@ -2787,3 +2802,64 @@ button { font-family: inherit; }
 .funnel-tasks li::before { content: '→ '; color: var(--fn-primaer); font-weight: 700; margin-right: 4px; }
 
 .funnel-empty { padding: 40px 20px; text-align: center; color: var(--ink-3); }
+
+/* Unternehmensvorstellung im intro */
+.funnel-company {
+  margin-top: 16px;
+  padding: 14px;
+  background: #fafaf8;
+  border-radius: 12px;
+  border: 1px solid #ececea;
+}
+.funnel-company-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5a5955;
+  margin: 0 0 8px;
+}
+
+/* Funnel-Footer (Made with ❤️ by TalentOne) */
+.funnel-foot {
+  padding: 18px 16px 22px;
+  text-align: center;
+  font-size: 11px;
+  color: #9a9994;
+  border-top: 1px solid #ececea;
+  margin-top: 16px;
+}
+.funnel-foot a {
+  color: #5a5955;
+  text-decoration: none;
+  border-bottom: 1px dotted #c0bfba;
+}
+.funnel-foot a:hover { color: #0a0a0a; }
+
+/* Crop-Stage */
+.crop-stage {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  background: #0a0a0a;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.crop-zoom label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  flex: 0 0 60px;
+}
+.crop-zoom input[type="range"] {
+  flex: 1;
+  accent-color: var(--ink);
+}

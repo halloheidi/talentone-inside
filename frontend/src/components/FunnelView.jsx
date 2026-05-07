@@ -131,38 +131,48 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
       )}
 
       <div className="funnel-body">
-        {/* INTRO */}
+        {/* INTRO — neue Reihenfolge: Headline → 2 Buttons → Body → Großer CTA */}
         {screen.type === 'intro' && (
           <>
-            <h1 className="funnel-h1">{screen.headline || `Werde Teil von ${kunde?.firmenname || 'uns'}!`}</h1>
-            {screen.body && <p className="funnel-text">{screen.body}</p>}
-            {screen.teaser && <p className="funnel-teaser">{screen.teaser}</p>}
+            <h1 className="funnel-h1">
+              {screen.teaser || screen.headline || `Neugierig welche Vorteile dich als ${job?.stelle || 'Mitarbeiter:in'} bei uns erwarten?`}
+            </h1>
             <div className="funnel-dual">
               <button className="funnel-cta" onClick={next}>{screen.yes_button || 'Ja klar! 🚀'}</button>
-              <button className="funnel-cta funnel-cta-soft" onClick={next}>{screen.info_button || 'Erst mehr Infos bitte ℹ️'}</button>
+              <button className="funnel-cta funnel-cta-soft" onClick={next}>{screen.info_button || 'Mehr Infos bitte ℹ️'}</button>
             </div>
-            <button className="funnel-link" onClick={next}>Zu den Vorteilen →</button>
+            {screen.body && (
+              <div className="funnel-company">
+                <h2 className="funnel-company-h">Über uns</h2>
+                <p className="funnel-text">{screen.body}</p>
+              </div>
+            )}
+            <button className="funnel-cta" onClick={next}>Zu den Vorteilen →</button>
           </>
         )}
 
-        {/* BENEFITS */}
+        {/* BENEFITS — vertikale Liste mit Emoji-Badges */}
         {screen.type === 'benefits' && (
           <>
             <h1 className="funnel-h1">{screen.headline || 'Das erwartet dich bei uns'}</h1>
             {screen.body && <p className="funnel-text">{screen.body}</p>}
-            <div className="funnel-benefit-cards">
+            <ul className="funnel-benefit-list">
               {(Array.isArray(screen.benefits) && screen.benefits.length > 0
                 ? screen.benefits
                 : (Array.isArray(job?.benefits) ? job.benefits : [])
               ).map((b, i) => (
-                <div key={i} className="funnel-benefit-card">
-                  <span className="funnel-benefit-emoji">{benefitEmoji(b)}</span>
+                <li key={i} className="funnel-benefit-row">
+                  <span className="funnel-benefit-badge">{benefitEmoji(b)}</span>
                   <span className="funnel-benefit-text">{b}</span>
-                </div>
+                </li>
               ))}
-            </div>
+              <li className="funnel-benefit-row funnel-benefit-row-more">
+                <span className="funnel-benefit-badge">➕</span>
+                <span className="funnel-benefit-text">u.v.m.</span>
+              </li>
+            </ul>
             {screen.quote && <blockquote className="funnel-quote">{screen.quote}</blockquote>}
-            <button className="funnel-cta" onClick={next}>{screen.next_button || 'Weiter →'}</button>
+            <button className="funnel-cta" onClick={next}>{screen.next_button || 'Und was sind deine Aufgaben? →'}</button>
             <button className="funnel-back" onClick={back}>← zurück</button>
           </>
         )}
@@ -225,6 +235,11 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
           </>
         )}
       </div>
+
+      {/* TalentOne-Footer — auf jedem Screen ganz unten */}
+      <footer className="funnel-foot">
+        Made with ❤️ by <a href="https://talent-one.de" target="_blank" rel="noreferrer">TalentOne</a>
+      </footer>
     </div>
   );
 }

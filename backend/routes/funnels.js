@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
-import { generateFragenVorschlaege, generateFunnelImage, generateInitialScreenTexts } from '../funnels.js';
+import { generateFragenVorschlaege, generateFunnelImage, generateInitialScreenTexts, cropFunnelImage } from '../funnels.js';
 import { fetchAsBuffer } from '../storage.js';
 
 const router = Router();
@@ -160,6 +160,23 @@ router.post('/:id/bild-generieren', async (req, res) => {
   } catch (err) {
     console.error('[funnel/bild-generieren]', err.message);
     res.status(503).json({ error: err.message });
+  }
+});
+
+// POST /api/funnels/:id/crop-image  body: { source_url, crop:{x,y,width,height} }
+// Schneidet auf den 16:9-Bereich zu (sharp), uploaded als neue Datei.
+router.post('/:id/crop-image', async (req, res) => {
+  const { source_url, crop } = req.body || {};
+  if (!source_url || !crop) return res.status(400).json({ error: 'source_url + crop benötigt.' });
+  try {
+    const { data: funnel } = await supabase
+      .from('talentone_funnels').select('job_id').eq('id', req.params.id).maybeSingle();
+    if (!funnel) return res.status(404).json({ error: 'Funnel nicht gefunden.' });
+    const result = await cropFunnelImage(source_url, crop, funnel.job_id);
+    res.status(201).json(result);
+  } catch (err) {
+    console.error('[funnel/crop]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

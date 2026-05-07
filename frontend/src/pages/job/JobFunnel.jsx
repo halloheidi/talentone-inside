@@ -3,6 +3,7 @@ import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
+import CropModal from '../../components/CropModal.jsx';
 
 const PUBLIC_BASE = (import.meta.env.VITE_PUBLIC_BASE || window.location.origin);
 
@@ -42,6 +43,7 @@ export default function JobFunnel() {
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
   const [pickerOpen, setPickerOpen] = useState(null); // screenId
+  const [cropping, setCropping] = useState(null); // { sourceUrl, screenId }
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
 
   // Editor-State
@@ -134,19 +136,34 @@ export default function JobFunnel() {
       });
       const newImg = { url: res.url, format, ts: Date.now() };
       setGeneratedImages(prev => [newImg, ...prev]);
-      // Bei offenem Picker für aktives Screen direkt zuweisen
+      // Bei offenem Picker direkt ins Crop-Tool springen
       if (pickerOpen) {
-        setScreens(prev => prev.map(s => s.id === pickerOpen ? { ...s, image_url: res.url } : s));
+        const screenId = pickerOpen;
         setPickerOpen(null);
+        setCropping({ sourceUrl: res.url, screenId });
       }
     } catch (err) { setError(err.message); }
     finally { setGenBusy(false); }
   }
+
+  // Bild aus Picker → öffnet Crop-Modal (auf 16:9)
   function pickImage(url) {
     if (!pickerOpen) return;
-    setScreens(prev => prev.map(s => s.id === pickerOpen ? { ...s, image_url: url } : s));
+    const screenId = pickerOpen;
     setPickerOpen(null);
+    setCropping({ sourceUrl: url, screenId });
   }
+
+  async function confirmCrop(croppedAreaPixels) {
+    if (!cropping) return;
+    const res = await api(`/funnels/${funnel.id}/crop-image`, {
+      method: 'POST',
+      body: { source_url: cropping.sourceUrl, crop: croppedAreaPixels },
+    });
+    setScreens(prev => prev.map(s => s.id === cropping.screenId ? { ...s, image_url: res.url } : s));
+    setCropping(null);
+  }
+
   function clearImage(screenId) {
     setScreens(prev => prev.map(s => s.id === screenId ? { ...s, image_url: null } : s));
   }
@@ -265,26 +282,6 @@ export default function JobFunnel() {
             onClearImage={() => clearImage(activeScreen.id)}
           />}
 
-          {/* Pixel */}
-          <fieldset className="formular-section">
-            <legend>Tracking</legend>
-            <div className="form-grid">
-              <label className="field">
-                <span>Meta Pixel ID</span>
-                <input type="text" value={pixelId} onChange={e => setPixelId(e.target.value)} placeholder="123456789012345" />
-              </label>
-              <label className="field">
-                <span>Conversion-Event</span>
-                <select value={conversionZiel} onChange={e => setConversionZiel(e.target.value)}>
-                  <option value="Bewerbung einreichen">Bewerbung einreichen</option>
-                  <option value="Lead">Lead</option>
-                  <option value="CompleteRegistration">CompleteRegistration</option>
-                  <option value="SubmitApplication">SubmitApplication</option>
-                </select>
-              </label>
-            </div>
-          </fieldset>
-
           {/* Bewerbungen */}
           <fieldset className="formular-section">
             <legend>Eingegangene Bewerbungen ({bewerbungen.length})</legend>
@@ -301,6 +298,30 @@ export default function JobFunnel() {
                   ))}
                 </div>
               )}
+          </fieldset>
+
+          {/* Tracking — am Ende des Editors */}
+          <fieldset className="formular-section">
+            <legend>Tracking-Pixel</legend>
+            <p className="pane-hint" style={{ marginBottom: 12 }}>
+              Der Pixel wird auf <strong>allen Funnel-Seiten</strong> geladen und feuert automatisch ein <code>PageView</code>.
+              Das ausgewählte Conversion-Event wird ausgelöst, sobald der Bewerber auf der letzten Seite seine Kontaktdaten abschickt.
+            </p>
+            <div className="form-grid">
+              <label className="field">
+                <span>Meta Pixel ID</span>
+                <input type="text" value={pixelId} onChange={e => setPixelId(e.target.value)} placeholder="123456789012345" />
+              </label>
+              <label className="field">
+                <span>Conversion-Event</span>
+                <select value={conversionZiel} onChange={e => setConversionZiel(e.target.value)}>
+                  <option value="Bewerbung einreichen">Bewerbung einreichen</option>
+                  <option value="Lead">Lead (Standard-Event)</option>
+                  <option value="CompleteRegistration">CompleteRegistration (Standard-Event)</option>
+                  <option value="SubmitApplication">SubmitApplication (Standard-Event)</option>
+                </select>
+              </label>
+            </div>
           </fieldset>
         </div>
 
@@ -351,6 +372,14 @@ export default function JobFunnel() {
           ))}
         </div>
       </Modal>
+
+      {/* Crop-Modal */}
+      <CropModal
+        open={!!cropping}
+        imageUrl={cropping?.sourceUrl}
+        onCancel={() => setCropping(null)}
+        onConfirm={confirmCrop}
+      />
 
       {/* Vorschau-Modal */}
       {previewModalOpen && (

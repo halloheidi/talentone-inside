@@ -1,7 +1,8 @@
 // Funnel-Helpers: Fragen-Vorschläge via Claude + Stimmungsbild via gpt-image-1.
 
+import sharp from 'sharp';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
-import { uploadBuffer } from './storage.js';
+import { uploadBuffer, fetchAsBuffer } from './storage.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
@@ -166,4 +167,35 @@ ABSOLUT WICHTIG:
     bucket: FUNNEL_BUCKET, path, buffer, contentType: 'image/png',
   });
   return { url, prompt: basePrompt };
+}
+
+/* ───────────────────── Crop (16:9) ───────────────────── */
+
+// Lädt sourceUrl, schneidet auf den übergebenen Pixel-Bereich (vom Frontend),
+// uploaded das Ergebnis als neue Datei in den Funnel-Bucket. Original bleibt erhalten.
+export async function cropFunnelImage(sourceUrl, { x, y, width, height }, jobId) {
+  if (!sourceUrl) throw new Error('source_url fehlt.');
+  const left = Math.max(0, Math.round(x));
+  const top = Math.max(0, Math.round(y));
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round(height));
+
+  const { buffer } = await fetchAsBuffer(sourceUrl);
+  // Bei extract die echte Bildgröße respektieren — sharp wirft sonst auf out-of-bounds
+  const meta = await sharp(buffer).metadata();
+  const safeLeft = Math.min(left, Math.max(0, meta.width - 1));
+  const safeTop = Math.min(top, Math.max(0, meta.height - 1));
+  const safeW = Math.min(w, meta.width - safeLeft);
+  const safeH = Math.min(h, meta.height - safeTop);
+
+  const cropped = await sharp(buffer)
+    .extract({ left: safeLeft, top: safeTop, width: safeW, height: safeH })
+    .png({ quality: 92 })
+    .toBuffer();
+
+  const path = `${jobId}/cropped-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`;
+  const url = await uploadBuffer({
+    bucket: FUNNEL_BUCKET, path, buffer: cropped, contentType: 'image/png',
+  });
+  return { url };
 }
