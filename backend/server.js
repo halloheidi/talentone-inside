@@ -5,6 +5,7 @@ import kundenRouter from './routes/kunden.js';
 import jobsRouter from './routes/jobs.js';
 import creativesRouter from './routes/creatives.js';
 import adcopiesRouter from './routes/adcopies.js';
+import funnelsRouter from './routes/funnels.js';
 import publicRouter from './routes/public.js';
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/kunden', requireAuth, kundenRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/creatives', requireAuth, creativesRouter);
 app.use('/api/adcopies', requireAuth, adcopiesRouter);
+app.use('/api/funnels', requireAuth, funnelsRouter);
 
 app.use((err, req, res, _next) => {
   console.error('[Inside] Fehler:', err.message);

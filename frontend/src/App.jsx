@@ -3,6 +3,7 @@ import { useAuth } from './lib/auth.jsx';
 import Login from './pages/Login.jsx';
 import PublicUpload from './pages/PublicUpload.jsx';
 import PublicFormular from './pages/PublicFormular.jsx';
+import PublicFunnel from './pages/PublicFunnel.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
 import KundenList from './pages/KundenList.jsx';
 import KundeDetail from './pages/KundeDetail.jsx';
@@ -26,6 +27,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/upload/:token" element={<PublicUpload />} />
       <Route path="/formular/:token" element={<PublicFormular />} />
+      <Route path="/f/:funnelId" element={<PublicFunnel />} />
       <Route
         path="/"
         element={

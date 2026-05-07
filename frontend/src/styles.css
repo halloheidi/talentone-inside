@@ -2200,3 +2200,382 @@ button { font-family: inherit; }
   animation: shimmer 1.4s ease-in-out infinite;
 }
 .adcopy-skeleton > div.short { width: 60%; }
+
+/* ───────── Funnel-Editor Layout ───────── */
+.funnel-editor-cols {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 1100px) { .funnel-editor-cols { grid-template-columns: 1fr; } }
+
+.funnel-editor-left { display: flex; flex-direction: column; gap: 18px; }
+
+.funnel-editor-right {
+  position: sticky;
+  top: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.funnel-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.funnel-preview-stage {
+  background: linear-gradient(180deg, #f3f3ef, #ececea);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  min-height: 600px;
+}
+
+/* ───────── Publish-Card ───────── */
+.funnel-publish-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.funnel-publish-status { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
+.funnel-status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+.funnel-status-dot.is-live {
+  background: #16a34a;
+  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.18);
+}
+.funnel-url-link {
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+.funnel-url-disabled { color: var(--ink-4); }
+.funnel-publish-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ───────── Bilder-Bereich ───────── */
+.funnel-img-actions { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.funnel-img-empty {
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: #fafaf8;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: center;
+}
+.funnel-img-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.funnel-img-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.funnel-img-card img {
+  width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+}
+.funnel-img-source {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 6px 8px 0;
+}
+.funnel-img-pick {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 8px;
+}
+.funnel-img-pick .btn-ghost { flex: 1; }
+.btn-ghost.is-selected { background: var(--ink); color: #fff; border-color: var(--ink); }
+.funnel-img-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-wrap: wrap;
+}
+
+/* ───────── Fragen-Liste ───────── */
+.funnel-fragen-actions { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.frage-list { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.frage-card {
+  background: #fafaf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.frage-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.frage-num {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.frage-card-actions { display: flex; gap: 4px; }
+.frage-text-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+}
+.frage-text-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+.frage-options { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.frage-option-row { display: flex; align-items: center; gap: 6px; }
+.frage-option-row input {
+  flex: 1;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font: inherit;
+  outline: none;
+}
+.frage-option-row input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(10,10,10,0.06); }
+
+/* ───────── Bewerbungen ───────── */
+.bewerbungen-list { display: flex; flex-direction: column; gap: 6px; }
+.bewerbung-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fafaf8;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  align-items: center;
+}
+.bewerbung-date { color: var(--ink-4); font-size: 11px; }
+
+/* ───────── Phone-Frame (Editor-Vorschau) ───────── */
+.phone-frame {
+  width: 320px;
+  height: 640px;
+  background: #0a0a0a;
+  border-radius: 36px;
+  padding: 8px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  border-radius: 28px;
+  overflow: hidden;
+  overflow-y: auto;
+  position: relative;
+}
+.funnel-screen {
+  width: 100%;
+  min-height: 100vh;
+  background: #fff;
+}
+.public-funnel-wrap { background: #f6f6f3; min-height: 100vh; }
+.public-funnel-wrap .funnel-screen {
+  max-width: 540px;
+  margin: 0 auto;
+  background: #fff;
+  min-height: 100vh;
+  box-shadow: 0 0 60px rgba(0,0,0,0.04);
+}
+
+/* ───────── FunnelView Styling (innen) ───────── */
+.funnel-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+.funnel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #ececea;
+  background: #fff;
+}
+.funnel-header-mini { padding: 10px 14px; }
+.funnel-logo {
+  width: 36px; height: 36px; object-fit: contain;
+  border-radius: 6px; background: #fff; padding: 2px; border: 1px solid #ececea;
+}
+.funnel-logo-mini { width: 24px; height: 24px; object-fit: contain; border-radius: 4px; }
+.funnel-logo-fallback {
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  background: var(--fn-primaer);
+  color: #fff; border-radius: 6px; font-weight: 700;
+}
+.funnel-firma { font-size: 14px; font-weight: 600; color: #0a0a0a; }
+.funnel-firma-mini { font-size: 12px; font-weight: 500; color: #5a5955; }
+
+.funnel-hero { width: 100%; aspect-ratio: 1; overflow: hidden; background: #f0efed; }
+.funnel-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.funnel-image-mini {
+  width: 100%; aspect-ratio: 16/9; overflow: hidden; background: #f0efed;
+}
+.funnel-image-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.funnel-body {
+  flex: 1;
+  padding: 18px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.funnel-stelle {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: #0a0a0a;
+  line-height: 1.2;
+}
+.funnel-region {
+  font-size: 13px;
+  color: #5a5955;
+}
+.funnel-benefits {
+  list-style: none; padding: 0; margin: 4px 0 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.funnel-benefits li {
+  font-size: 14px;
+  color: #2a2a2a;
+}
+.funnel-cta {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 100px;
+  background: var(--fn-primaer);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: auto;
+  transition: filter 0.15s;
+}
+.funnel-cta:hover { filter: brightness(1.08); }
+.funnel-cta:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.funnel-progress {
+  height: 4px;
+  background: #ececea;
+}
+.funnel-progress-bar {
+  height: 100%;
+  background: var(--fn-primaer);
+  transition: width 0.3s;
+}
+.funnel-progress-label {
+  padding: 6px 16px 0;
+  font-size: 11px;
+  color: #9a9994;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.funnel-q {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  line-height: 1.3;
+}
+.funnel-q-sub { font-size: 13px; color: #5a5955; margin: 0; }
+.funnel-q-hint { font-size: 11px; color: #9a9994; margin: 4px 0 0; }
+.funnel-options { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.funnel-option {
+  width: 100%;
+  padding: 14px 16px;
+  background: #fafaf8;
+  border: 2px solid #ececea;
+  border-radius: 12px;
+  text-align: left;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0a0a0a;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.05s;
+}
+.funnel-option:hover { border-color: var(--fn-primaer); background: #fff; }
+.funnel-option:active { transform: scale(0.98); }
+.funnel-back {
+  background: transparent;
+  border: none;
+  color: #9a9994;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 8px 0 0;
+  align-self: flex-start;
+}
+
+.funnel-contact-form { display: flex; flex-direction: column; gap: 10px; }
+.funnel-contact-form label { display: flex; flex-direction: column; gap: 4px; }
+.funnel-contact-form label span { font-size: 11px; color: #5a5955; font-weight: 600; letter-spacing: 0.02em; }
+.funnel-contact-form input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #ececea;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.funnel-contact-form input:focus { border-color: var(--fn-primaer); box-shadow: 0 0 0 3px rgba(0,0,0,0.04); }
+.funnel-error { color: #dc2626; font-size: 13px; }
+
+.funnel-thanks {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 24px;
+  gap: 8px;
+}
+.funnel-emoji { font-size: 56px; }
+.funnel-thanks h1 { font-size: 24px; margin: 8px 0 0; }
+.funnel-thanks p { color: #5a5955; margin: 0 0 16px; }
+
+/* Modal: größer für Funnel-Vorschau */
+.funnel-preview-modal { max-width: 420px; }

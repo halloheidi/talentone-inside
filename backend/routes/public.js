@@ -265,4 +265,44 @@ router.post('/formular/:token/submit', async (req, res) => {
   }
 });
 
+/* ───────────────── Funnel (öffentliche Bewerbungsseite) ───────────────── */
+
+// GET /api/public/funnel/:id — komplette Funnel-Daten + Job + Kunde-Stub
+router.get('/funnel/:id', async (req, res) => {
+  const { data: funnel } = await supabase
+    .from('talentone_funnels').select('*').eq('id', req.params.id).maybeSingle();
+  if (!funnel) return res.status(404).json({ error: 'Funnel nicht gefunden.' });
+  if (!funnel.veroeffentlicht) return res.status(403).json({ error: 'Funnel ist noch nicht veröffentlicht.' });
+  const { data: job } = await supabase
+    .from('talentone_jobs').select('id, stelle, region, gehalt, benefits, kunde_id').eq('id', funnel.job_id).maybeSingle();
+  const { data: kunde } = job ? await supabase
+    .from('talentone_kunden').select('id, firmenname, branche, logo_url, farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+  res.json({ funnel, job, kunde });
+});
+
+// POST /api/public/funnel/:id/bewerbung  body: { name, email, telefon, antworten }
+router.post('/funnel/:id/bewerbung', async (req, res) => {
+  const { name, email, telefon, antworten } = req.body || {};
+  if (!email?.trim() && !telefon?.trim()) {
+    return res.status(400).json({ error: 'E-Mail oder Telefonnummer ist Pflicht.' });
+  }
+  const { data: funnel } = await supabase
+    .from('talentone_funnels').select('id, job_id, veroeffentlicht').eq('id', req.params.id).maybeSingle();
+  if (!funnel) return res.status(404).json({ error: 'Funnel nicht gefunden.' });
+  if (!funnel.veroeffentlicht) return res.status(403).json({ error: 'Funnel nicht veröffentlicht.' });
+
+  const { data, error } = await supabase
+    .from('talentone_bewerbungen')
+    .insert({
+      funnel_id: funnel.id, job_id: funnel.job_id,
+      name: name?.trim() || null,
+      email: email?.trim() || null,
+      telefon: telefon?.trim() || null,
+      antworten: antworten || null,
+    })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ ok: true, bewerbung_id: data.id });
+});
+
 export default router;
