@@ -247,19 +247,34 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
   );
 }
 
-// Splittet die Intro-Headline am Stellennamen in drei Teile, damit nur der Job groß ist.
+// Trennt den Geschlechtskürzel-Suffix vom Kern: "Bauhelfer (m/w/d)" → { core: "Bauhelfer", modifier: "(m/w/d)" }
+function stripModifier(stelle) {
+  if (!stelle) return { core: '', modifier: null };
+  const m = stelle.match(/^(.+?)\s*(\([mwfdivx\/\s\-]+\))\s*$/i);
+  if (m) return { core: m[1].trim(), modifier: m[2].trim() };
+  return { core: stelle, modifier: null };
+}
+
+// Headline für den Intro-Screen: Pre (klein) → Stellenname (groß) → optional Geschlechtskürzel (klein) → Post (klein).
 function IntroHeadline({ teaser, stelle }) {
   if (!teaser) return null;
-  if (!stelle) return <span className="funnel-h1-line">{teaser}</span>;
-  const idx = teaser.toLowerCase().indexOf(stelle.toLowerCase());
+  const { core, modifier } = stripModifier(stelle || '');
+  if (!core) return <span className="funnel-h1-line">{teaser}</span>;
+  const idx = teaser.toLowerCase().indexOf(core.toLowerCase());
   if (idx < 0) return <span className="funnel-h1-line">{teaser}</span>;
-  const pre = teaser.slice(0, idx).trim();
-  const job = teaser.slice(idx, idx + stelle.length);
-  const post = teaser.slice(idx + stelle.length).trim();
+  let pre = teaser.slice(0, idx).trim();
+  let post = teaser.slice(idx + core.length).trim();
+  // Wenn der teaser zufällig schon den Modifier enthält, aus post entfernen
+  if (modifier) {
+    const mLower = modifier.toLowerCase();
+    const postLower = post.toLowerCase();
+    if (postLower.startsWith(mLower)) post = post.slice(modifier.length).trim();
+  }
   return (
     <>
       {pre && <span className="funnel-h1-small">{pre}</span>}
-      <span className="funnel-h1-job">{job}</span>
+      <span className="funnel-h1-job">{core}</span>
+      {modifier && <span className="funnel-h1-mod">{modifier}</span>}
       {post && <span className="funnel-h1-small">{post}</span>}
     </>
   );
