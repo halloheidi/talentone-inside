@@ -135,7 +135,10 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
         {screen.type === 'intro' && (
           <>
             <h1 className="funnel-h1">
-              {screen.teaser || screen.headline || `Neugierig welche Vorteile dich als ${job?.stelle || 'Mitarbeiter:in'} bei uns erwarten?`}
+              <IntroHeadline
+                teaser={screen.teaser || screen.headline || `Neugierig welche Vorteile dich als ${job?.stelle || 'Mitarbeiter:in'} bei uns erwarten?`}
+                stelle={job?.stelle}
+              />
             </h1>
             <div className="funnel-dual">
               <button className="funnel-cta" onClick={next}>{screen.yes_button || 'Ja klar! 🚀'}</button>
@@ -241,6 +244,24 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
         Made with ❤️ by <a href="https://talent-one.de" target="_blank" rel="noreferrer">TalentOne</a>
       </footer>
     </div>
+  );
+}
+
+// Splittet die Intro-Headline am Stellennamen in drei Teile, damit nur der Job groß ist.
+function IntroHeadline({ teaser, stelle }) {
+  if (!teaser) return null;
+  if (!stelle) return <span className="funnel-h1-line">{teaser}</span>;
+  const idx = teaser.toLowerCase().indexOf(stelle.toLowerCase());
+  if (idx < 0) return <span className="funnel-h1-line">{teaser}</span>;
+  const pre = teaser.slice(0, idx).trim();
+  const job = teaser.slice(idx, idx + stelle.length);
+  const post = teaser.slice(idx + stelle.length).trim();
+  return (
+    <>
+      {pre && <span className="funnel-h1-small">{pre}</span>}
+      <span className="funnel-h1-job">{job}</span>
+      {post && <span className="funnel-h1-small">{post}</span>}
+    </>
   );
 }
 

@@ -2724,11 +2724,35 @@ button { font-family: inherit; }
   line-height: 1.25;
   color: #0a0a0a;
 }
-/* Intro: Headline zentriert, etwas größer */
+/* Intro: Headline mittig — Job groß, Rest dezent */
 .funnel-intro .funnel-h1 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  font-size: 26px;
-  padding: 4px 4px 6px;
+  gap: 4px;
+  padding: 6px 4px 10px;
+  font-size: inherit; /* einzelne Spans regeln Größen */
+}
+.funnel-h1-small {
+  font-size: 16px;
+  font-weight: 500;
+  color: #5a5955;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.funnel-h1-job {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0a0a0a;
+  line-height: 1.1;
+}
+.funnel-h1-line {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 .funnel-intro .funnel-dual { margin-top: 4px; }
 .funnel-text { font-size: 14px; line-height: 1.55; color: #2a2a2a; margin: 0; }
