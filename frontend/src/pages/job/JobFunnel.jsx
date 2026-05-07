@@ -2,10 +2,32 @@ import { useEffect, useRef, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import FunnelView from '../../components/FunnelView.jsx';
+import Modal from '../../components/Modal.jsx';
 
 const PUBLIC_BASE = (import.meta.env.VITE_PUBLIC_BASE || window.location.origin);
 
+const TYPE_META = {
+  intro:    { label: 'Startseite',  icon: '👋', removable: false },
+  benefits: { label: 'Vorteile',    icon: '🎁', removable: true },
+  tasks:    { label: 'Aufgaben',    icon: '🛠️', removable: true },
+  question: { label: 'Frage',       icon: '❓', removable: true },
+  contact:  { label: 'Kontakt',     icon: '📩', removable: false },
+};
+
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+
+function newScreen(type) {
+  switch (type) {
+    case 'question':
+      return { id: uid(), type, text: 'Neue Frage', options: ['Option 1', 'Option 2'], image_url: null };
+    case 'benefits':
+      return { id: uid(), type, headline: 'Das erwartet dich bei uns', body: '', quote: '', benefits: [], next_button: 'Weiter →', image_url: null };
+    case 'tasks':
+      return { id: uid(), type, headline: 'Deine Aufgaben', intro: '', aufgaben: [], next_button: 'Jetzt bewerben →', image_url: null };
+    default:
+      return { id: uid(), type, headline: '', body: '', image_url: null };
+  }
+}
 
 export default function JobFunnel() {
   const { job, kunde } = useJob();
@@ -14,17 +36,17 @@ export default function JobFunnel() {
   const [error, setError] = useState('');
   const [bewerbungen, setBewerbungen] = useState([]);
   const [referenzen, setReferenzen] = useState([]);
-  const [generatedImages, setGeneratedImages] = useState([]); // session-only
+  const [generatedImages, setGeneratedImages] = useState([]);
   const [genBusy, setGenBusy] = useState(false);
-  const [fragenBusy, setFragenBusy] = useState(false);
+  const [initBusy, setInitBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const previewKey = useRef(0); // bumpen, um Vorschau zurückzusetzen
+  const [pickerOpen, setPickerOpen] = useState(null); // screenId
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
 
-  // Editor-State (lokal, mergt mit funnel beim Save)
-  const [fragen, setFragen] = useState([]);
-  const [bilder, setBilder] = useState({}); // {start, frage}
+  // Editor-State
+  const [screens, setScreens] = useState([]);
+  const [activeScreenId, setActiveScreenId] = useState(null);
   const [pixelId, setPixelId] = useState('');
   const [conversionZiel, setConversionZiel] = useState('');
   const [veroeffentlicht, setVeroeffentlicht] = useState(false);
@@ -35,17 +57,32 @@ export default function JobFunnel() {
       api(`/funnels?job_id=${job.id}`),
       api(`/kunden/${kunde.id}/referenzbilder`).catch(() => ({ referenzbilder: [] })),
     ])
-      .then(([f, r]) => {
-        setFunnel(f.funnel);
-        setFragen(Array.isArray(f.funnel.fragen) ? f.funnel.fragen : []);
-        setBilder(f.funnel.bilder || {});
-        setPixelId(f.funnel.pixel_id || '');
-        setConversionZiel(f.funnel.conversion_ziel || 'Bewerbung einreichen');
-        setVeroeffentlicht(!!f.funnel.veroeffentlicht);
+      .then(async ([f, r]) => {
+        let funnelData = f.funnel;
+        // Auto-generate Initial-Screens beim ersten Öffnen
+        if (!Array.isArray(funnelData.screens) || funnelData.screens.length === 0) {
+          setInitBusy(true);
+          try {
+            const init = await api(`/funnels/${funnelData.id}/initial-screens`, { method: 'POST' });
+            funnelData = { ...funnelData, screens: init.screens };
+          } catch (err) {
+            setError(`Initial-Generierung: ${err.message}`);
+          } finally {
+            setInitBusy(false);
+          }
+        }
+        setFunnel(funnelData);
+        setScreens(Array.isArray(funnelData.screens) ? funnelData.screens : []);
+        setPixelId(funnelData.pixel_id || '');
+        setConversionZiel(funnelData.conversion_ziel || 'Bewerbung einreichen');
+        setVeroeffentlicht(!!funnelData.veroeffentlicht);
         setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
-        // Bewerbungen laden
-        if (f.funnel.id) {
-          api(`/funnels/${f.funnel.id}/bewerbungen`).then(b => setBewerbungen(b.bewerbungen || [])).catch(() => {});
+        if (funnelData.id) {
+          api(`/funnels/${funnelData.id}/bewerbungen`).then(b => setBewerbungen(b.bewerbungen || [])).catch(() => {});
+        }
+        // Default: Startseite ausgewählt
+        if (Array.isArray(funnelData.screens) && funnelData.screens[0]) {
+          setActiveScreenId(funnelData.screens[0].id);
         }
       })
       .catch(err => setError(err.message))
@@ -53,47 +90,38 @@ export default function JobFunnel() {
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
 
-  /* ───── Fragen ───── */
-  async function vorschlagen() {
-    if (fragen.length > 0 && !confirm('Bestehende Fragen überschreiben?')) return;
-    setFragenBusy(true);
-    setError('');
-    try {
-      const res = await api(`/funnels/${funnel.id}/fragen-vorschlaege`, { method: 'POST' });
-      setFragen(res.fragen || []);
-    } catch (err) { setError(err.message); }
-    finally { setFragenBusy(false); }
+  const activeIndex = screens.findIndex(s => s.id === activeScreenId);
+  const activeScreen = activeIndex >= 0 ? screens[activeIndex] : null;
+
+  function patchActive(patch) {
+    setScreens(prev => prev.map(s => s.id === activeScreenId ? { ...s, ...patch } : s));
   }
-  function addFrage() {
-    setFragen([...fragen, { id: uid(), text: 'Neue Frage', options: ['Option 1', 'Option 2'] }]);
-  }
-  function removeFrage(id) {
-    if (!confirm('Frage löschen?')) return;
-    setFragen(fragen.filter(f => f.id !== id));
-  }
-  function moveFrage(id, dir) {
-    const idx = fragen.findIndex(f => f.id === id);
+
+  /* ───── Screen-Operationen ───── */
+  function moveScreen(id, dir) {
+    const idx = screens.findIndex(s => s.id === id);
     const next = idx + dir;
-    if (next < 0 || next >= fragen.length) return;
-    const arr = [...fragen];
+    if (next < 0 || next >= screens.length) return;
+    const arr = [...screens];
     [arr[idx], arr[next]] = [arr[next], arr[idx]];
-    setFragen(arr);
+    setScreens(arr);
   }
-  function patchFrage(id, patch) {
-    setFragen(fragen.map(f => f.id === id ? { ...f, ...patch } : f));
+  function removeScreen(id) {
+    const s = screens.find(x => x.id === id);
+    if (!s || !TYPE_META[s.type]?.removable) return;
+    if (!confirm('Screen löschen?')) return;
+    setScreens(prev => prev.filter(x => x.id !== id));
+    if (activeScreenId === id) setActiveScreenId(screens[0]?.id || null);
   }
-  function addOption(id) {
-    const f = fragen.find(x => x.id === id);
-    patchFrage(id, { options: [...(f.options || []), 'Neue Option'] });
-  }
-  function patchOption(id, i, value) {
-    const f = fragen.find(x => x.id === id);
-    const opts = [...(f.options || [])]; opts[i] = value;
-    patchFrage(id, { options: opts });
-  }
-  function removeOption(id, i) {
-    const f = fragen.find(x => x.id === id);
-    patchFrage(id, { options: f.options.filter((_, idx) => idx !== i) });
+  function addScreen(type) {
+    const screen = newScreen(type);
+    // Question und Info-Screens vor dem contact einfügen, sonst am Ende
+    const contactIdx = screens.findIndex(s => s.type === 'contact');
+    const insertAt = contactIdx >= 0 ? contactIdx : screens.length;
+    const arr = [...screens];
+    arr.splice(insertAt, 0, screen);
+    setScreens(arr);
+    setActiveScreenId(screen.id);
   }
 
   /* ───── Bilder ───── */
@@ -104,21 +132,31 @@ export default function JobFunnel() {
       const res = await api(`/funnels/${funnel.id}/bild-generieren`, {
         method: 'POST', body: { format },
       });
-      setGeneratedImages(prev => [{ url: res.url, format, ts: Date.now() }, ...prev]);
+      const newImg = { url: res.url, format, ts: Date.now() };
+      setGeneratedImages(prev => [newImg, ...prev]);
+      // Bei offenem Picker für aktives Screen direkt zuweisen
+      if (pickerOpen) {
+        setScreens(prev => prev.map(s => s.id === pickerOpen ? { ...s, image_url: res.url } : s));
+        setPickerOpen(null);
+      }
     } catch (err) { setError(err.message); }
     finally { setGenBusy(false); }
   }
-  function pickStart(url) { setBilder(b => ({ ...b, start: url })); previewKey.current++; }
-  function pickFrage(url) { setBilder(b => ({ ...b, frage: url })); previewKey.current++; }
-  function clearBild(slot) { setBilder(b => ({ ...b, [slot]: null })); previewKey.current++; }
+  function pickImage(url) {
+    if (!pickerOpen) return;
+    setScreens(prev => prev.map(s => s.id === pickerOpen ? { ...s, image_url: url } : s));
+    setPickerOpen(null);
+  }
+  function clearImage(screenId) {
+    setScreens(prev => prev.map(s => s.id === screenId ? { ...s, image_url: null } : s));
+  }
 
-  /* ───── Speichern + Veröffentlichen ───── */
+  /* ───── Save + Publish ───── */
   async function save(extra = {}) {
-    setSaveBusy(true);
-    setSaveMsg('');
+    setSaveBusy(true); setSaveMsg('');
     try {
       const body = {
-        fragen, bilder,
+        screens,
         pixel_id: pixelId.trim() || null,
         conversion_ziel: conversionZiel.trim() || null,
         ...extra,
@@ -131,21 +169,21 @@ export default function JobFunnel() {
     } catch (err) { setSaveMsg(err.message); }
     finally { setSaveBusy(false); }
   }
-
   async function togglePublish() {
-    if (!veroeffentlicht && fragen.length === 0) {
-      if (!confirm('Funnel hat noch keine Fragen. Trotzdem veröffentlichen?')) return;
+    if (!veroeffentlicht && screens.filter(s => s.type === 'question').length === 0) {
+      if (!confirm('Funnel hat keine Qualifizierungsfragen. Trotzdem veröffentlichen?')) return;
     }
     await save({ veroeffentlicht: !veroeffentlicht });
   }
 
-  if (loading) return <div className="card empty">Lade Funnel…</div>;
+  if (loading || initBusy) {
+    return <div className="card empty">{initBusy ? 'KI generiert die Funnel-Texte… (~10–20 Sekunden)' : 'Lade Funnel…'}</div>;
+  }
   if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
 
   const funnelUrl = `${PUBLIC_BASE}/f/${funnel.id}`;
-  const previewFunnel = { ...funnel, fragen, bilder, conversion_ziel: conversionZiel };
+  const previewFunnel = { ...funnel, screens, conversion_ziel: conversionZiel };
 
-  // Verfügbare Bilder = Referenzbilder + frisch generierte
   const allImages = [
     ...generatedImages.map(g => ({ id: `g-${g.ts}`, bild_url: g.url, source: 'KI' })),
     ...referenzen.map(r => ({ id: r.id, bild_url: r.bild_url, source: r.uploaded_via === 'kunde' ? 'Kunde' : 'Mitarbeiter' })),
@@ -153,136 +191,86 @@ export default function JobFunnel() {
 
   return (
     <div className="funnel-editor">
+      {/* Publish-Card */}
+      <div className="funnel-publish-card">
+        <div className="funnel-publish-status">
+          <span className={`funnel-status-dot ${veroeffentlicht ? 'is-live' : ''}`} />
+          <strong>{veroeffentlicht ? 'Live' : 'Entwurf'}</strong>
+          {veroeffentlicht
+            ? <a href={funnelUrl} target="_blank" rel="noreferrer" className="funnel-url-link">{funnelUrl}</a>
+            : <span className="funnel-url-link funnel-url-disabled">{funnelUrl}</span>}
+        </div>
+        <div className="funnel-publish-actions">
+          <button className="btn-ghost btn-sm" onClick={() => save()} disabled={saveBusy}>
+            {saveBusy ? 'Speichere…' : 'Speichern'}
+          </button>
+          <button className={veroeffentlicht ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'} onClick={togglePublish}>
+            {veroeffentlicht ? 'Offline nehmen' : 'Veröffentlichen'}
+          </button>
+          {saveMsg && <span className="form-msg">{saveMsg}</span>}
+        </div>
+      </div>
+
+      {error && <div className="alert alert-error">{error}</div>}
+
       <div className="funnel-editor-cols">
-        {/* ───────── Editor links ───────── */}
+        {/* ───────── Linke Spalte: Screen-Liste + Detail-Editor ───────── */}
         <div className="funnel-editor-left">
-          {/* URL + Veröffentlichen */}
-          <div className="funnel-publish-card">
-            <div className="funnel-publish-status">
-              <span className={`funnel-status-dot ${veroeffentlicht ? 'is-live' : ''}`} />
-              <strong>{veroeffentlicht ? 'Live' : 'Entwurf'}</strong>
-              {veroeffentlicht
-                ? <a href={funnelUrl} target="_blank" rel="noreferrer" className="funnel-url-link">{funnelUrl}</a>
-                : <span className="funnel-url-link funnel-url-disabled">{funnelUrl}</span>}
-            </div>
-            <div className="funnel-publish-actions">
-              <button className="btn-ghost btn-sm" onClick={() => save()} disabled={saveBusy}>
-                {saveBusy ? 'Speichere…' : 'Speichern'}
-              </button>
-              <button className={veroeffentlicht ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'} onClick={togglePublish}>
-                {veroeffentlicht ? 'Offline nehmen' : 'Veröffentlichen'}
-              </button>
-              {saveMsg && <span className="form-msg">{saveMsg}</span>}
-            </div>
-          </div>
 
-          {/* Bilder */}
           <fieldset className="formular-section">
-            <legend>Stimmungsbilder</legend>
-            <p className="motiv-sub" style={{ marginBottom: 12 }}>
-              Wähle ein Bild für die Startseite und eines für die Fragen-Screens. Personenfotos vom Kunden + KI-generierte Stimmungsbilder.
-            </p>
-            <div className="funnel-img-actions">
-              <button type="button" className="btn-ghost btn-sm" onClick={() => generateImage('square')} disabled={genBusy}>
-                {genBusy ? 'Generiere…' : '+ KI-Bild generieren (1:1)'}
-              </button>
-              <button type="button" className="btn-ghost btn-sm" onClick={() => generateImage('portrait')} disabled={genBusy}>
-                {genBusy ? 'Generiere…' : '+ KI-Bild generieren (Hochkant)'}
-              </button>
-            </div>
-            {allImages.length === 0 ? (
-              <div className="funnel-img-empty">Noch keine Bilder verfügbar — generiere eins oder lade Referenzbilder beim Kunden hoch.</div>
-            ) : (
-              <div className="funnel-img-grid">
-                {allImages.map(img => (
-                  <div key={img.id} className="funnel-img-card">
-                    <img src={img.bild_url} alt="" />
-                    <div className="funnel-img-source">{img.source}</div>
-                    <div className="funnel-img-pick">
-                      <button
-                        type="button"
-                        className={`btn-ghost btn-sm ${bilder.start === img.bild_url ? 'is-selected' : ''}`}
-                        onClick={() => pickStart(img.bild_url)}
-                      >
-                        {bilder.start === img.bild_url ? '✓ Start' : 'Start'}
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn-ghost btn-sm ${bilder.frage === img.bild_url ? 'is-selected' : ''}`}
-                        onClick={() => pickFrage(img.bild_url)}
-                      >
-                        {bilder.frage === img.bild_url ? '✓ Fragen' : 'Fragen'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {(bilder.start || bilder.frage) && (
-              <div className="funnel-img-summary">
-                Aktuelle Auswahl:
-                {bilder.start && <button className="btn-ghost btn-sm" onClick={() => clearBild('start')}>Start ✕</button>}
-                {bilder.frage && <button className="btn-ghost btn-sm" onClick={() => clearBild('frage')}>Fragen ✕</button>}
-              </div>
-            )}
-          </fieldset>
-
-          {/* Fragen */}
-          <fieldset className="formular-section">
-            <legend>Fragen</legend>
-            <div className="funnel-fragen-actions">
-              <button type="button" className="btn-primary btn-sm" onClick={vorschlagen} disabled={fragenBusy}>
-                {fragenBusy ? 'Lade…' : (fragen.length ? 'Neu vorschlagen' : 'Fragen vorschlagen lassen')}
-              </button>
-              <button type="button" className="btn-ghost btn-sm" onClick={addFrage}>+ Frage manuell</button>
-            </div>
-            {fragen.length === 0 && (
-              <div className="motiv-sub" style={{ marginTop: 12 }}>Noch keine Fragen. Lass dir welche vorschlagen oder leg manuell an.</div>
-            )}
-            <div className="frage-list">
-              {fragen.map((f, i) => (
-                <div key={f.id} className="frage-card">
-                  <div className="frage-card-head">
-                    <span className="frage-num">Frage {i + 1}</span>
-                    <div className="frage-card-actions">
-                      <button type="button" className="btn-ghost btn-sm" onClick={() => moveFrage(f.id, -1)} disabled={i === 0}>↑</button>
-                      <button type="button" className="btn-ghost btn-sm" onClick={() => moveFrage(f.id, 1)} disabled={i === fragen.length - 1}>↓</button>
-                      <button type="button" className="btn-ghost btn-sm btn-danger" onClick={() => removeFrage(f.id)}>Löschen</button>
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    className="frage-text-input"
-                    value={f.text}
-                    onChange={e => patchFrage(f.id, { text: e.target.value })}
-                    placeholder="Fragetext"
-                  />
-                  <div className="frage-options">
-                    {(f.options || []).map((opt, oi) => (
-                      <div key={oi} className="frage-option-row">
-                        <input
-                          type="text"
-                          value={opt}
-                          onChange={e => patchOption(f.id, oi, e.target.value)}
-                        />
-                        <button type="button" className="chip-x" onClick={() => removeOption(f.id, oi)}>×</button>
+            <legend>Screens ({screens.length})</legend>
+            <div className="screen-list">
+              {screens.map((s, i) => {
+                const meta = TYPE_META[s.type] || { label: s.type, icon: '·', removable: true };
+                const title = s.headline || s.text || meta.label;
+                const isActive = s.id === activeScreenId;
+                return (
+                  <div key={s.id} className={`screen-row ${isActive ? 'is-active' : ''}`}>
+                    <button type="button" className="screen-row-main" onClick={() => setActiveScreenId(s.id)}>
+                      <span className="screen-row-num">{i + 1}</span>
+                      <div className="screen-row-thumb">
+                        {s.image_url
+                          ? <img src={s.image_url} alt="" />
+                          : <span>{meta.icon}</span>}
                       </div>
-                    ))}
-                    {(f.options || []).length < 4 && (
-                      <button type="button" className="btn-ghost btn-sm" onClick={() => addOption(f.id)}>+ Option</button>
-                    )}
+                      <div className="screen-row-text">
+                        <span className="screen-row-type">{meta.icon} {meta.label}</span>
+                        <span className="screen-row-title">{title || <em>—</em>}</span>
+                      </div>
+                    </button>
+                    <div className="screen-row-actions">
+                      <button type="button" className="btn-ghost btn-sm" onClick={() => moveScreen(s.id, -1)} disabled={i === 0}>↑</button>
+                      <button type="button" className="btn-ghost btn-sm" onClick={() => moveScreen(s.id, 1)} disabled={i === screens.length - 1}>↓</button>
+                      {meta.removable && (
+                        <button type="button" className="btn-ghost btn-sm btn-danger" onClick={() => removeScreen(s.id)}>×</button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+            <div className="screen-add">
+              <span>+ Screen hinzufügen:</span>
+              <button type="button" className="btn-ghost btn-sm" onClick={() => addScreen('question')}>Frage</button>
+              <button type="button" className="btn-ghost btn-sm" onClick={() => addScreen('benefits')}>Vorteile</button>
+              <button type="button" className="btn-ghost btn-sm" onClick={() => addScreen('tasks')}>Aufgaben</button>
             </div>
           </fieldset>
+
+          {/* Detail-Editor des aktiven Screens */}
+          {activeScreen && <ScreenEditor
+            screen={activeScreen}
+            patch={patchActive}
+            onPickImage={() => setPickerOpen(activeScreen.id)}
+            onClearImage={() => clearImage(activeScreen.id)}
+          />}
 
           {/* Pixel */}
           <fieldset className="formular-section">
             <legend>Tracking</legend>
             <div className="form-grid">
               <label className="field">
-                <span>Meta Pixel ID (optional)</span>
+                <span>Meta Pixel ID</span>
                 <input type="text" value={pixelId} onChange={e => setPixelId(e.target.value)} placeholder="123456789012345" />
               </label>
               <label className="field">
@@ -297,58 +285,271 @@ export default function JobFunnel() {
             </div>
           </fieldset>
 
-          {error && <div className="alert alert-error">{error}</div>}
-
           {/* Bewerbungen */}
           <fieldset className="formular-section">
             <legend>Eingegangene Bewerbungen ({bewerbungen.length})</legend>
-            {bewerbungen.length === 0 ? (
-              <div className="motiv-sub">Noch keine Bewerbungen.</div>
-            ) : (
-              <div className="bewerbungen-list">
-                {bewerbungen.map(b => (
-                  <div key={b.id} className="bewerbung-row">
-                    <strong>{b.name || '(ohne Namen)'}</strong>
-                    <span>{b.email || b.telefon || '—'}</span>
-                    <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {bewerbungen.length === 0
+              ? <div className="motiv-sub">Noch keine Bewerbungen.</div>
+              : (
+                <div className="bewerbungen-list">
+                  {bewerbungen.map(b => (
+                    <div key={b.id} className="bewerbung-row">
+                      <strong>{b.name || '(ohne Namen)'}</strong>
+                      <span>{b.email || b.telefon || '—'}</span>
+                      <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
           </fieldset>
         </div>
 
-        {/* ───────── Vorschau rechts ───────── */}
+        {/* ───────── Rechte Spalte: Live-Vorschau ───────── */}
         <aside className="funnel-editor-right">
           <div className="funnel-preview-head">
-            <strong>Vorschau</strong>
-            <button type="button" className="btn-ghost btn-sm" onClick={() => setShowPreviewModal(true)}>Groß öffnen</button>
+            <strong>Vorschau · Screen {activeIndex + 1}/{screens.length}</strong>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => setPreviewModalOpen(true)}>Groß öffnen</button>
           </div>
           <div className="funnel-preview-stage">
             <FunnelView
-              key={previewKey.current}
-              funnel={previewFunnel}
-              job={job}
-              kunde={kunde}
-              frame="phone"
-              readonly
+              key={activeScreenId + '-' + (activeScreen?.image_url || '')}
+              funnel={previewFunnel} job={job} kunde={kunde}
+              frame="phone" readonly
+              jumpToIndex={activeIndex}
             />
           </div>
         </aside>
       </div>
 
+      {/* Bild-Picker-Modal */}
+      <Modal
+        open={!!pickerOpen}
+        onClose={() => setPickerOpen(null)}
+        title="Bild für Screen wählen"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setPickerOpen(null)}>Abbrechen</button>
+            <button className="btn-ghost btn-sm" onClick={() => generateImage('square')} disabled={genBusy}>
+              {genBusy ? 'Generiere…' : '+ KI 1:1'}
+            </button>
+            <button className="btn-ghost btn-sm" onClick={() => generateImage('portrait')} disabled={genBusy}>
+              {genBusy ? 'Generiere…' : '+ KI Hochkant'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">KI-generiertes Stimmungsbild zur Stelle (kein Text-Overlay) oder vorhandenes Personenfoto verwenden.</p>
+        {allImages.length === 0 && (
+          <div className="funnel-img-empty">Noch keine Bilder verfügbar — generiere eins über die Buttons unten.</div>
+        )}
+        <div className="funnel-img-grid">
+          {allImages.map(img => (
+            <button key={img.id} type="button" className="funnel-img-card" onClick={() => pickImage(img.bild_url)}>
+              <img src={img.bild_url} alt="" />
+              <div className="funnel-img-source">{img.source}</div>
+            </button>
+          ))}
+        </div>
+      </Modal>
+
       {/* Vorschau-Modal */}
-      {showPreviewModal && (
-        <div className="modal-overlay" onClick={() => setShowPreviewModal(false)}>
+      {previewModalOpen && (
+        <div className="modal-overlay" onClick={() => setPreviewModalOpen(false)}>
           <div className="modal funnel-preview-modal" onClick={e => e.stopPropagation()}>
             <header className="modal-head">
               <h2>Vorschau</h2>
-              <button className="modal-close" onClick={() => setShowPreviewModal(false)}>×</button>
+              <button className="modal-close" onClick={() => setPreviewModalOpen(false)}>×</button>
             </header>
             <div className="modal-body" style={{ display: 'grid', placeItems: 'center', padding: 24 }}>
-              <FunnelView funnel={previewFunnel} job={job} kunde={kunde} frame="phone" readonly />
+              <FunnelView funnel={previewFunnel} job={job} kunde={kunde} frame="phone" />
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═════════════════════ ScreenEditor (per Type) ═════════════════════ */
+
+function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
+  const meta = TYPE_META[screen.type] || { label: screen.type };
+  return (
+    <fieldset className="formular-section">
+      <legend>{meta.icon} {meta.label} bearbeiten</legend>
+
+      <div className="screen-image-row">
+        <div className="screen-image-thumb">
+          {screen.image_url
+            ? <img src={screen.image_url} alt="" />
+            : <span>kein Bild</span>}
+        </div>
+        <div className="screen-image-actions">
+          <button type="button" className="btn-ghost btn-sm" onClick={onPickImage}>
+            {screen.image_url ? 'Bild ändern' : 'Bild zuweisen'}
+          </button>
+          {screen.image_url && (
+            <button type="button" className="btn-ghost btn-sm" onClick={onClearImage}>Bild entfernen</button>
+          )}
+        </div>
+      </div>
+
+      {screen.type === 'intro' && (
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>Headline</span>
+            <input value={screen.headline || ''} onChange={e => patch({ headline: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Text über das Unternehmen</span>
+            <textarea rows={3} value={screen.body || ''} onChange={e => patch({ body: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Neugier-Frage</span>
+            <input value={screen.teaser || ''} onChange={e => patch({ teaser: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Button 1 (Ja)</span>
+            <input value={screen.yes_button || ''} onChange={e => patch({ yes_button: e.target.value })} />
+          </label>
+          <label className="field">
+            <span>Button 2 (mehr Infos)</span>
+            <input value={screen.info_button || ''} onChange={e => patch({ info_button: e.target.value })} />
+          </label>
+        </div>
+      )}
+
+      {screen.type === 'benefits' && (
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>Headline</span>
+            <input value={screen.headline || ''} onChange={e => patch({ headline: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Einleitung (optional)</span>
+            <textarea rows={2} value={screen.body || ''} onChange={e => patch({ body: e.target.value })} />
+          </label>
+          <div className="field field-full">
+            <span className="field-label">Benefits</span>
+            <ChipsEditor
+              items={Array.isArray(screen.benefits) ? screen.benefits : []}
+              onChange={items => patch({ benefits: items })}
+              placeholder="Benefit hinzufügen"
+            />
+          </div>
+          <label className="field field-full">
+            <span>Highlight / Zitat (optional)</span>
+            <textarea rows={2} value={screen.quote || ''} onChange={e => patch({ quote: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Weiter-Button</span>
+            <input value={screen.next_button || ''} onChange={e => patch({ next_button: e.target.value })} />
+          </label>
+        </div>
+      )}
+
+      {screen.type === 'tasks' && (
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>Headline</span>
+            <input value={screen.headline || ''} onChange={e => patch({ headline: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Einleitung (optional)</span>
+            <textarea rows={2} value={screen.intro || ''} onChange={e => patch({ intro: e.target.value })} />
+          </label>
+          <div className="field field-full">
+            <span className="field-label">Aufgaben</span>
+            <ChipsEditor
+              items={Array.isArray(screen.aufgaben) ? screen.aufgaben : []}
+              onChange={items => patch({ aufgaben: items })}
+              placeholder="Aufgabe hinzufügen"
+              vertical
+            />
+          </div>
+          <label className="field field-full">
+            <span>Weiter-Button</span>
+            <input value={screen.next_button || ''} onChange={e => patch({ next_button: e.target.value })} />
+          </label>
+        </div>
+      )}
+
+      {screen.type === 'question' && (
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>Fragetext</span>
+            <input value={screen.text || ''} onChange={e => patch({ text: e.target.value })} />
+          </label>
+          <div className="field field-full">
+            <span className="field-label">Antwort-Optionen</span>
+            <ChipsEditor
+              items={Array.isArray(screen.options) ? screen.options : []}
+              onChange={items => patch({ options: items.slice(0, 4) })}
+              placeholder="Option hinzufügen"
+              max={4}
+              vertical
+            />
+          </div>
+        </div>
+      )}
+
+      {screen.type === 'contact' && (
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>Headline</span>
+            <input value={screen.headline || ''} onChange={e => patch({ headline: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Untertitel</span>
+            <input value={screen.body || ''} onChange={e => patch({ body: e.target.value })} />
+          </label>
+          <label className="field field-full">
+            <span>Submit-Button</span>
+            <input value={screen.submit_button || ''} onChange={e => patch({ submit_button: e.target.value })} />
+          </label>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+/* ═════════════════════ ChipsEditor (für benefits, aufgaben, options) ═════════════════════ */
+
+function ChipsEditor({ items = [], onChange, placeholder, max, vertical }) {
+  const [draft, setDraft] = useState('');
+  function add() {
+    const v = draft.trim();
+    if (!v) return;
+    if (max && items.length >= max) return;
+    if (items.includes(v)) { setDraft(''); return; }
+    onChange([...items, v]);
+    setDraft('');
+  }
+  function update(i, value) {
+    const arr = [...items]; arr[i] = value;
+    onChange(arr);
+  }
+  function remove(i) {
+    onChange(items.filter((_, idx) => idx !== i));
+  }
+  return (
+    <div className={`chips-editor ${vertical ? 'is-vertical' : ''}`}>
+      {items.map((it, i) => (
+        <div key={i} className="chip-edit-row">
+          <input value={it} onChange={e => update(i, e.target.value)} />
+          <button type="button" className="chip-x" onClick={() => remove(i)}>×</button>
+        </div>
+      ))}
+      {(!max || items.length < max) && (
+        <div className="chip-add">
+          <input
+            type="text"
+            placeholder={placeholder || 'Hinzufügen'}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          />
+          <button type="button" className="btn-ghost btn-sm" onClick={add}>Hinzufügen</button>
         </div>
       )}
     </div>

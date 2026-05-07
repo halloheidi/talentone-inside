@@ -60,6 +60,69 @@ Antworte NUR mit JSON, keine Markdown-Backticks, keine ID-Felder (die generieren
   })).filter(f => f.text && f.options.length >= 2);
 }
 
+/* ───────────────────── Initial-Screens (Texte) generieren ───────────────────── */
+
+export async function generateInitialScreenTexts(job, kunde) {
+  const fd = job.formdata_komplett || {};
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [];
+  const fdBenefits = (fd.benefits_zusatz || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+  const allBenefits = [...new Set([...benefits, ...fdBenefits])];
+
+  const briefing = `Stelle: ${job.stelle || '-'}
+Firma: ${kunde?.firmenname || '-'}
+Branche: ${branche}
+Region: ${job.region || '-'}
+Gehalt: ${job.gehalt || '-'}
+Was unterscheidet das Unternehmen: ${fd.unterschied || '-'}
+Warum arbeiten Mitarbeiter gerne hier: ${fd.mitarbeiter_gerne || '-'}
+Unternehmenskultur: ${fd.unternehmenskultur || '-'}
+Mitarbeiterzahl: ${fd.mitarbeiter_anzahl || '-'}
+Benefits: ${allBenefits.join(', ') || '-'}
+Besonderheiten der Stelle: ${job.besonderheiten || '-'}`;
+
+  const prompt = `Du bist Recruiting-Funnel-Designer. Generiere die Texte für eine 3-Screen Funnel-Einleitung (Mobile-First Bewerbungsseite). Sprache: Deutsch, Du-Ansprache, locker, auf Augenhöhe — KEIN HR-Sprech.
+
+BRIEFING:
+${briefing}
+
+OUTPUT: 3 Screen-Inhalte als JSON (KEINE Markdown-Backticks):
+
+{
+  "intro": {
+    "headline": "Werde Teil von [Firma]! oder ähnlich, max 7 Wörter",
+    "body": "2-3 Sätze über das Unternehmen (warum besonders, was Mitarbeiter schätzen) — locker, kein Werbesprech",
+    "teaser": "Eine neugierig-machende Frage zu den Vorteilen, mit Stelle erwähnt, max 12 Wörter",
+    "yes_button": "Ja klar! 🚀",
+    "info_button": "Erst mehr Infos bitte ℹ️"
+  },
+  "benefits": {
+    "headline": "Das erwartet dich bei uns",
+    "body": "1-2 einleitende Sätze, kein Aufzählen — die Liste kommt darunter",
+    "quote": "Optional: ein konkretes Highlight oder Mitarbeiter-Zitat-Stil (1 Satz, gerne mit Anführungszeichen). Wenn kein guter Inhalt, leer.",
+    "next_button": "Und was sind meine Aufgaben? →"
+  },
+  "tasks": {
+    "headline": "Deine Aufgaben als [Stelle]",
+    "intro": "1 einleitender Satz vor der Aufgaben-Liste",
+    "aufgaben": ["Konkrete Aufgabe 1, kurz", "Aufgabe 2", "Aufgabe 3", "Aufgabe 4", "Aufgabe 5"],
+    "next_button": "Klingt gut — jetzt bewerben! →"
+  }
+}
+
+Wichtig:
+- Aufgaben-Liste 4-6 Punkte, jeweils 3-8 Wörter, konkret zur Stelle. Aus den Briefing-Infos ableiten.
+- Texte konkret und auf Augenhöhe, keine Floskeln`;
+
+  const data = await callClaudeWithRetry({
+    model: CLAUDE_MODEL,
+    max_tokens: 2000,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const parsed = parseJsonContent(data);
+  return parsed; // { intro, benefits, tasks }
+}
+
 /* ───────────────────── Stimmungsbild generieren ───────────────────── */
 
 export async function generateFunnelImage({ job, kunde, customPrompt, format = 'square' }) {
