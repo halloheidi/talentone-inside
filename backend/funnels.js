@@ -169,10 +169,13 @@ ABSOLUT WICHTIG:
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
 
-  const buffer = Buffer.from(b64, 'base64');
-  const path = `${job.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const pngBuffer = Buffer.from(b64, 'base64');
+  // PNG → JPEG re-encode (lossless PNG ist für fotografische Stimmungsbilder oft >10 MB,
+  // damit überschreitet es das Bucket-Limit. JPEG q=88 ist visuell identisch, ~4× kleiner)
+  const jpgBuffer = await sharp(pngBuffer).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+  const path = `${job.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
   const url = await uploadBuffer({
-    bucket: FUNNEL_BUCKET, path, buffer, contentType: 'image/png',
+    bucket: FUNNEL_BUCKET, path, buffer: jpgBuffer, contentType: 'image/jpeg',
   });
   return { url, prompt: basePrompt };
 }
@@ -198,12 +201,12 @@ export async function cropFunnelImage(sourceUrl, { x, y, width, height }, jobId)
 
   const cropped = await sharp(buffer)
     .extract({ left: safeLeft, top: safeTop, width: safeW, height: safeH })
-    .png({ quality: 92 })
+    .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
 
-  const path = `${jobId}/cropped-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`;
+  const path = `${jobId}/cropped-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jpg`;
   const url = await uploadBuffer({
-    bucket: FUNNEL_BUCKET, path, buffer: cropped, contentType: 'image/png',
+    bucket: FUNNEL_BUCKET, path, buffer: cropped, contentType: 'image/jpeg',
   });
   return { url };
 }
