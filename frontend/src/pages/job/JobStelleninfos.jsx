@@ -89,6 +89,54 @@ export default function JobStelleninfos() {
   const [newSoftSkill, setNewSoftSkill] = useState('');
   const logoInputRef = useRef(null);
 
+  // KI-Auto-Befüllung
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiFields, setAiFields] = useState(new Set()); // Keys mit "KI-Vorschlag"-Badge
+
+  const SUGGESTIBLE_KEYS = ['unterschied', 'mitarbeiter_gerne', 'unternehmenskultur', 'ausbildung', 'kandidat_eigenschaften'];
+  const emptySuggestible = SUGGESTIBLE_KEYS.filter(k => !(form[k] || '').trim());
+  const allSuggestibleFull = emptySuggestible.length === 0;
+
+  async function requestAiSuggestions() {
+    if (allSuggestibleFull || aiBusy) return;
+    setAiBusy(true);
+    setAiError('');
+    try {
+      const res = await api(`/jobs/${job.id}/felder-vorschlaege`, {
+        method: 'POST',
+        body: { felder: emptySuggestible },
+      });
+      const vorschlaege = res.vorschlaege || {};
+      setForm(prev => {
+        const next = { ...prev };
+        for (const k of emptySuggestible) {
+          if (typeof vorschlaege[k] === 'string' && vorschlaege[k].trim()) {
+            next[k] = vorschlaege[k];
+          }
+        }
+        return next;
+      });
+      setAiFields(new Set(Object.keys(vorschlaege).filter(k => vorschlaege[k]?.trim())));
+    } catch (err) {
+      setAiError(err.message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  // Wenn der User ein AI-vorgeschlagenes Feld manuell ändert, Badge entfernen
+  function setFWithAiClear(k, v) {
+    setF(k, v);
+    if (aiFields.has(k)) {
+      setAiFields(prev => {
+        const n = new Set(prev);
+        n.delete(k);
+        return n;
+      });
+    }
+  }
+
   // Original-State für "dirty"-Vergleich + Reset bei externer Job/Kunde-Änderung
   useEffect(() => {
     setForm({
@@ -207,6 +255,7 @@ export default function JobStelleninfos() {
       }
       await Promise.all(tasks);
       await reload();
+      setAiFields(new Set()); // KI-Badges entfernen, Werte sind jetzt persistent
       setMsg('Gespeichert.');
       setTimeout(() => setMsg(''), 2000);
     } catch (err) {
@@ -306,18 +355,42 @@ export default function JobStelleninfos() {
       {/* ───────── Über das Unternehmen ───────── */}
       <fieldset className="formular-section">
         <legend>Über das Unternehmen</legend>
+        <div className="ai-suggest-bar">
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={requestAiSuggestions}
+            disabled={allSuggestibleFull || aiBusy}
+            title={allSuggestibleFull ? 'Alle Felder sind bereits ausgefüllt' : ''}
+          >
+            {aiBusy ? 'KI denkt nach…' : '✨ Felder per KI vorschlagen lassen'}
+          </button>
+          {!allSuggestibleFull && !aiBusy && (
+            <span className="ai-suggest-hint">{emptySuggestible.length} leere{emptySuggestible.length === 1 ? 's' : ''} Feld{emptySuggestible.length === 1 ? '' : 'er'} • Vorschlag basiert auf Stelle, Branche, Benefits und Website</span>
+          )}
+          {aiError && <span className="form-msg" style={{ color: 'var(--danger)' }}>{aiError}</span>}
+        </div>
         <div className="form-grid">
           <label className="field field-full">
-            <span>Was unterscheidet euch von anderen Arbeitgebern?</span>
-            <textarea rows={3} value={form.unterschied} onChange={e => setF('unterschied', e.target.value)} />
+            <span>
+              Was unterscheidet euch von anderen Arbeitgebern?
+              {aiFields.has('unterschied') && <span className="ai-badge">✨ KI-Vorschlag</span>}
+            </span>
+            <textarea rows={3} value={form.unterschied} onChange={e => setFWithAiClear('unterschied', e.target.value)} />
           </label>
           <label className="field field-full">
-            <span>Warum arbeiten Mitarbeiter gerne hier?</span>
-            <textarea rows={3} value={form.mitarbeiter_gerne} onChange={e => setF('mitarbeiter_gerne', e.target.value)} />
+            <span>
+              Warum arbeiten Mitarbeiter gerne hier?
+              {aiFields.has('mitarbeiter_gerne') && <span className="ai-badge">✨ KI-Vorschlag</span>}
+            </span>
+            <textarea rows={3} value={form.mitarbeiter_gerne} onChange={e => setFWithAiClear('mitarbeiter_gerne', e.target.value)} />
           </label>
           <label className="field field-full">
-            <span>Unternehmenskultur</span>
-            <textarea rows={2} value={form.unternehmenskultur} onChange={e => setF('unternehmenskultur', e.target.value)} />
+            <span>
+              Unternehmenskultur
+              {aiFields.has('unternehmenskultur') && <span className="ai-badge">✨ KI-Vorschlag</span>}
+            </span>
+            <textarea rows={2} value={form.unternehmenskultur} onChange={e => setFWithAiClear('unternehmenskultur', e.target.value)} />
           </label>
           <label className="field">
             <span>Mitarbeiterzahl</span>
@@ -361,8 +434,11 @@ export default function JobStelleninfos() {
         <legend>Idealer Kandidat</legend>
         <div className="form-grid">
           <label className="field field-full">
-            <span>Ausbildung / Qualifikation</span>
-            <input value={form.ausbildung} onChange={e => setF('ausbildung', e.target.value)} />
+            <span>
+              Ausbildung / Qualifikation
+              {aiFields.has('ausbildung') && <span className="ai-badge">✨ KI-Vorschlag</span>}
+            </span>
+            <input value={form.ausbildung} onChange={e => setFWithAiClear('ausbildung', e.target.value)} />
           </label>
           <label className="field">
             <span>Berufserfahrung</span>
@@ -400,8 +476,11 @@ export default function JobStelleninfos() {
             </div>
           </div>
           <label className="field field-full">
-            <span>Welche Eigenschaften soll der ideale Kandidat mitbringen?</span>
-            <textarea rows={2} value={form.kandidat_eigenschaften} onChange={e => setF('kandidat_eigenschaften', e.target.value)} />
+            <span>
+              Welche Eigenschaften soll der ideale Kandidat mitbringen?
+              {aiFields.has('kandidat_eigenschaften') && <span className="ai-badge">✨ KI-Vorschlag</span>}
+            </span>
+            <textarea rows={2} value={form.kandidat_eigenschaften} onChange={e => setFWithAiClear('kandidat_eigenschaften', e.target.value)} />
           </label>
         </div>
       </fieldset>

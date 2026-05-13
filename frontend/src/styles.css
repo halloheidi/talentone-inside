@@ -2082,6 +2082,38 @@ button { font-family: inherit; }
   color: var(--ink-2);
 }
 
+/* KI-Suggest-Bar im Stelle-Tab */
+.ai-suggest-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(212, 255, 0, 0.08);
+  border: 1px solid #ece9c8;
+  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+}
+.ai-suggest-hint {
+  font-size: 11px;
+  color: var(--ink-3);
+  flex: 1;
+  min-width: 0;
+}
+.ai-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 100px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 /* ───────── Ad Copies Tab ───────── */
 .adcopy-head {
   display: flex;
@@ -2724,6 +2756,20 @@ button { font-family: inherit; }
   margin: 0;
   line-height: 1.25;
   color: #0a0a0a;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+.funnel-q,
+.funnel-q-sub,
+.funnel-text,
+.funnel-teaser,
+.funnel-company-h {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
 }
 /* Intro: Headline mittig — Job groß, Rest dezent */
 .funnel-intro .funnel-h1 {
@@ -2754,8 +2800,11 @@ button { font-family: inherit; }
   line-height: 1.05;
   margin: 4px 0 2px;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  /* Wörter NICHT zerschneiden — nur an Wortgrenzen umbrechen, hyphens-Fallback nur wenn unvermeidbar */
+  word-break: keep-all;
+  overflow-wrap: break-word;
   hyphens: auto;
+  -webkit-hyphens: auto;
   text-wrap: balance;
 }
 .funnel-h1-mod {
@@ -2773,7 +2822,10 @@ button { font-family: inherit; }
   letter-spacing: -0.02em;
   line-height: 1.25;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
   text-wrap: balance;
 }
 .funnel-intro .funnel-dual { margin-top: 4px; }

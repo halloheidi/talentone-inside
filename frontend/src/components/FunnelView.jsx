@@ -104,7 +104,7 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
   const headerCompact = screen.type !== 'intro';
 
   return wrap(
-    <div className={`funnel-page funnel-${screen.type}`} style={themeStyle}>
+    <div className={`funnel-page funnel-${screen.type}`} style={themeStyle} lang="de">
       <header className={`funnel-header ${headerCompact ? 'funnel-header-mini' : ''}`}>
         {kunde?.logo_url
           ? <img className={headerCompact ? 'funnel-logo-mini' : 'funnel-logo'} src={kunde.logo_url} alt="" />
