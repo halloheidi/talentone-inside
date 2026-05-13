@@ -76,9 +76,16 @@ function buildFarbenHinweis(kunde) {
   return `MARKENFARBEN: ${parts.join(', ')}. Verwende diese Farben für Text-Overlay, Benefit-Tags, Akzent-Linien und den dunklen Verlauf — das Design soll zur Corporate Identity des Unternehmens passen. Die Hauttöne und natürlichen Bildelemente bleiben davon unberührt.`;
 }
 
+// Sorgt für korrekte Stellendarstellung mit Geschlechtskürzel: "Bauhelfer" → "Bauhelfer (m/w/d)"
+function stelleDisplay(stelle) {
+  if (!stelle) return 'Mitarbeiter:in (m/w/d)';
+  if (/\([mwfd][\/\\mwfd\s\-]+\)/i.test(stelle)) return stelle.trim();
+  return `${stelle.trim()} (m/w/d)`;
+}
+
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
 function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
-  const stelle = job.stelle || 'Mitarbeiter:in';
+  const stelle = stelleDisplay(job.stelle);
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const firmenname = kunde?.firmenname || '';
   const benefits = pickBenefits(job);
@@ -107,25 +114,27 @@ ${motiv}
 - Branche: ${branche}
 - Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
 
-TEXT-ELEMENTE (sauber lesbar, modernes Design):
-- Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
-- Mittig: Ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter), passend zur Stelle "${stelle}" — motivierend, auf Augenhöhe, kein "Wir suchen dich"-Klischee
-- Unten: 3-4 Benefit-Tags in kleinen, abgerundeten Boxen mit Icons nebeneinander: ${benefitListe}
-- Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", nicht ganze Sätze
-- Ganz unten: Kleiner Call-to-Action "Jetzt bewerben"
+TEXT-ELEMENTE (in dieser Reihenfolge von oben nach unten, sauber lesbar):
+1. LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten${hasLogo ? '' : ' — entfällt, kein Logo vorhanden'}
+2. FIRMENNAME klein und unauffällig: "${firmenname}" — entweder direkt links vom Logo oder als kleiner Untertitel darunter (max. 14-16% Bildhöhe insgesamt für den Header-Bereich)
+3. HAUPTSPRUCH zentral: ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+4. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80% der Größe), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche klar hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. DAS IST DAS ZWEITWICHTIGSTE ELEMENT NACH DEM SPRUCH.
+5. BENEFIT-TAGS unten: 3-4 kompakte, abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
+   Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", keine Sätze
+6. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent, gerne mit Pfeil
 
 DESIGN-REGELN:
-- Dunkler, halbtransparenter Verlauf im unteren Drittel für Textlesbarkeit
-- Schrift gut lesbar, modern, Bold für den Hauptspruch
-- Benefit-Tags klein gehalten damit alle nebeneinander reinpassen
-- ${farben ? 'Verwende die oben genannten Markenfarben konsequent für Text-Overlay, Benefit-Tags und Akzent-Linien.' : 'Farben warm und einladend, passend zur Branche.'}
-- Keine QR-Codes, keine Rahmen
-- Muss auf dem Handy sofort ins Auge springen und zum Stoppen beim Scrollen bewegen`;
+- HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast-Hintergrund/Linie) > Benefits (klein) > Firmenname & CTA (sehr klein)
+- Dunkler, halbtransparenter Verlauf hinter den Texten für Lesbarkeit, ohne das Hintergrundbild zu zerstören
+- Schrift modern, sehr lesbar; Hauptspruch UND Stellenbezeichnung beide Bold
+- ${farben ? 'Markenfarben konsequent für Text + Akzent-Linien + Box hinter der Stellenbezeichnung (so wird die CI getragen).' : 'Verwende eine kräftige Akzentfarbe (z.B. lime, orange, türkis) für die Stellenbezeichnungs-Box, damit sie aus dem Bild heraussticht.'}
+- Keine QR-Codes, keine Rahmen ums ganze Bild
+- Muss auf dem Handy sofort ins Auge springen und Scroll-Stop erzeugen`;
 }
 
 // Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
 function buildPromptFoto({ job, kunde, format, hasLogo }) {
-  const stelle = job.stelle || 'Mitarbeiter:in';
+  const stelle = stelleDisplay(job.stelle);
   const firmenname = kunde?.firmenname || '';
   const benefits = pickBenefits(job);
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
@@ -144,21 +153,22 @@ ${refLines}
 
 ${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
-OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto):
-- Oben: Firmenname "${firmenname}" in kleiner, eleganter Schrift${hasLogo ? ' (links neben dem Logo, oder als Untertitel darunter)' : ''}
-- Mittig: Ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter), passend zur Stelle "${stelle}" — motivierend, auf Augenhöhe, kein "Wir suchen dich"-Klischee
-- Unten: 3-4 Benefit-Tags in kleinen, abgerundeten Boxen mit Icons nebeneinander: ${benefitListe}
-- Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub"
-- Ganz unten: Kleiner Call-to-Action "Jetzt bewerben"
+OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto, in dieser Reihenfolge von oben nach unten):
+1. LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten${hasLogo ? '' : ' — entfällt, kein Logo vorhanden'}
+2. FIRMENNAME klein: "${firmenname}" — links neben dem Logo oder als Untertitel
+3. HAUPTSPRUCH zentral oder im oberen Drittel: kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+4. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80%), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird.
+5. BENEFIT-TAGS unten: 3-4 kompakte abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
+6. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent
 
 DESIGN-REGELN:
-- Dunkler, halbtransparenter Verlauf (Gradient) im unteren Drittel — sorgt für Textlesbarkeit ohne das Foto zu zerstören
-- Schrift gut lesbar, modern, Bold für den Hauptspruch
-- Benefit-Tags klein und kompakt
-- ${farben ? 'Verwende die oben genannten Markenfarben konsequent für Text-Overlay, Benefit-Tags und Akzent-Linien.' : 'Farben warm und einladend.'}
+- HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast) > Benefits (klein) > Firmenname & CTA (sehr klein)
+- Dunkler, halbtransparenter Verlauf (Gradient) hinter den Texten — sorgt für Lesbarkeit ohne das Foto zu zerstören
+- Schrift modern, sehr lesbar; Hauptspruch UND Stellenbezeichnung beide Bold
+- ${farben ? 'Markenfarben konsequent für Text + Akzent-Linien + Stellen-Box.' : 'Kräftige Akzentfarbe (lime, orange, türkis o.ä.) für die Stellen-Box, damit sie aus dem Foto heraussticht.'}
 - Keine zusätzlichen Filter aufs Foto, keine Verfremdung, keine Stilisierung
-- Keine QR-Codes, keine Rahmen
-- Wirkung: das echte Foto bleibt der Held, Text und Logo unterstützen subtil`;
+- Keine QR-Codes, keine Rahmen ums ganze Bild
+- Wirkung: das echte Foto bleibt der Held, Text-Overlay (besonders Spruch + Stellenbezeichnung) erzeugt Scroll-Stop`;
 }
 
 // Wrapper — wählt den passenden Prompt anhand des Modus.
