@@ -1192,6 +1192,115 @@ button { font-family: inherit; }
   background: rgba(10,10,10,0.85);
 }
 .format-badge.format-story + .creative-play-icon { display: grid; }
+
+/* ───────── Export-Tab ───────── */
+.export-tab { display: flex; flex-direction: column; gap: 18px; }
+
+.export-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.export-select-all input { accent-color: var(--ink); }
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.export-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.export-card.is-checked {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px rgba(10,10,10,0.06);
+}
+.export-card input[type="checkbox"] {
+  position: absolute;
+  top: 8px; left: 8px;
+  width: 18px; height: 18px;
+  accent-color: var(--ink);
+  z-index: 2;
+  cursor: pointer;
+}
+.export-thumb {
+  position: relative;
+  background: #f0efed;
+}
+.export-thumb img,
+.export-thumb video {
+  width: 100%; aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+.export-date {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--ink-3);
+  border-top: 1px solid var(--line-2);
+  background: #fafaf8;
+}
+
+.export-adcopies { display: flex; flex-direction: column; gap: 12px; }
+.export-adcopy {
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  transition: border-color 0.12s;
+}
+.export-adcopy.is-checked { border-color: var(--ink); }
+.export-adcopy-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.export-adcopy-head input { accent-color: var(--ink); }
+.export-adcopy-head .btn-ghost { margin-left: auto; }
+.export-adcopy-text {
+  margin: 0;
+  padding: 12px;
+  background: #fafaf8;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--ink-2);
+}
+
+.export-funnel { display: flex; flex-direction: column; gap: 8px; }
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-top: 8px;
+}
+.export-actions .btn-primary { margin-left: auto; }
 /* REEL-Badge etwas farbiger */
 .creative-card video + .format-badge,
 .creative-thumb video ~ .format-badge {
