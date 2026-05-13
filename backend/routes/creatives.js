@@ -178,14 +178,49 @@ router.delete('/:id', async (req, res) => {
 });
 
 /* POST /api/creatives/:id/reel — Kling AI Video aus Story-Bild.
-   Stub: zeigt klare Meldung, falls KLING_API_KEY nicht konfiguriert. */
+   Antwortet sofort 202, generiert im Hintergrund (1-3 Min). Fertiges Video erscheint
+   als neuer Creative-Eintrag mit typ=video, parent_id=<originalBildId>. */
 router.post('/:id/reel', async (req, res) => {
-  if (!process.env.KLING_API_KEY) {
-    return res.status(501).json({
-      error: 'Reel-Generierung noch nicht aktiviert — KLING_API_KEY fehlt im Backend.',
-    });
+  if (!process.env.KLING_ACCESS_KEY || !process.env.KLING_SECRET_KEY) {
+    return res.status(501).json({ error: 'Kling-Keys nicht konfiguriert.' });
   }
-  return res.status(501).json({ error: 'Reel-Integration kommt im nächsten Schritt.' });
+
+  const { data: existing, error } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (error || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.format !== 'story') return res.status(400).json({ error: 'Reel nur für 9:16-Creatives möglich.' });
+  if (existing.typ === 'video') return res.status(400).json({ error: 'Quelle muss ein Bild sein, kein Video.' });
+  if (!existing.bild_url) return res.status(400).json({ error: 'Keine Bild-URL am Creative.' });
+
+  res.status(202).json({
+    accepted: true,
+    message: 'Reel-Generierung gestartet — kann 1-3 Minuten dauern. Das Video erscheint automatisch in der Galerie.',
+  });
+
+  (async () => {
+    try {
+      const { generateReelFromImage } = await import('../kling.js');
+      const { url } = await generateReelFromImage({
+        imageUrl: existing.bild_url,
+        prompt: 'Subtle cinematic motion, gentle camera movement, keep all text and overlay elements perfectly stable and sharp',
+        jobId: existing.job_id,
+      });
+
+      const { error: insErr } = await supabase.from('talentone_creatives').insert({
+        job_id: existing.job_id,
+        format: 'story',
+        typ: 'video',
+        bild_url: url,
+        prompt: `Kling Reel aus Creative ${existing.id}`,
+        status: 'fertig',
+        parent_id: existing.id,
+      });
+      if (insErr) console.error('[reel-bg] DB-Insert:', insErr.message);
+      else console.log(`[reel-bg] Reel fertig für creative ${existing.id.slice(0, 8)}`);
+    } catch (err) {
+      console.error('[reel-bg]', err.message);
+    }
+  })().catch(err => console.error('[reel-bg] uncaught:', err));
 });
 
 export default router;

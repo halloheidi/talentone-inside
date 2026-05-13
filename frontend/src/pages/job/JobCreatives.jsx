@@ -48,11 +48,60 @@ export default function JobCreatives() {
   // Lightbox
   const [lightboxIndex, setLightboxIndex] = useState(null);
 
+  // Reel-Generierung pro Parent-Creative-ID (zeigt Loading-State)
+  const [reelBusy, setReelBusy] = useState(() => new Set());
+  const reelPollRefs = useRef(new Map()); // parentId → intervalId
+
   function buildFilename(c) {
     const stelle = (job.stelle || 'creative').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
     const ts = new Date(c.created_at).toISOString().slice(0, 10);
-    return `${stelle}-${c.format}-${ts}-${c.id.slice(0, 6)}.png`;
+    const ext = c.typ === 'video' ? 'mp4' : 'png';
+    return `${stelle}-${c.format}-${ts}-${c.id.slice(0, 6)}.${ext}`;
   }
+
+  async function onReel(creative) {
+    if (reelBusy.has(creative.id)) return;
+    const cost = '~1 USD pro Reel';
+    if (!confirm(`Reel-Generierung dauert 1-3 Minuten und kostet ${cost}. Fortfahren?`)) return;
+    try {
+      await api(`/creatives/${creative.id}/reel`, { method: 'POST' });
+      setReelBusy(prev => { const n = new Set(prev); n.add(creative.id); return n; });
+      startReelPolling(creative.id);
+    } catch (err) {
+      alert(`Reel-Start fehlgeschlagen: ${err.message}`);
+    }
+  }
+
+  function startReelPolling(parentId) {
+    if (reelPollRefs.current.has(parentId)) return;
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 6 * 60 * 1000;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api(`/creatives?job_id=${job.id}`);
+        const list = res.creatives || [];
+        const reel = list.find(c => c.parent_id === parentId && c.typ === 'video');
+        if (reel) {
+          clearInterval(interval);
+          reelPollRefs.current.delete(parentId);
+          setCreatives(list);
+          setReelBusy(prev => { const n = new Set(prev); n.delete(parentId); return n; });
+          return;
+        }
+        if (Date.now() - startedAt > TIMEOUT_MS) {
+          clearInterval(interval);
+          reelPollRefs.current.delete(parentId);
+          setReelBusy(prev => { const n = new Set(prev); n.delete(parentId); return n; });
+          alert('Reel-Generierung dauert ungewöhnlich lang. Bitte später in der Galerie nachschauen oder Logs prüfen.');
+        }
+      } catch (err) { console.warn('[reel-poll]', err.message); }
+    }, 6000);
+    reelPollRefs.current.set(parentId, interval);
+  }
+  useEffect(() => () => {
+    reelPollRefs.current.forEach(id => clearInterval(id));
+    reelPollRefs.current.clear();
+  }, []);
 
   async function downloadCreative(c, e) {
     e?.stopPropagation();
@@ -471,18 +520,25 @@ export default function JobCreatives() {
                   title="Klicken für Vollansicht"
                   aria-label="Vollansicht öffnen"
                 >
-                  {c.bild_url
-                    ? <img src={c.bild_url} alt="" loading="lazy" />
-                    : <div className="creative-thumb-empty">kein Bild</div>}
+                  {!c.bild_url ? (
+                    <div className="creative-thumb-empty">kein Bild</div>
+                  ) : c.typ === 'video' ? (
+                    <>
+                      <video src={c.bild_url} preload="metadata" muted playsInline />
+                      <span className="creative-play-icon" aria-hidden>▶</span>
+                    </>
+                  ) : (
+                    <img src={c.bild_url} alt="" loading="lazy" />
+                  )}
                   <span className={`format-badge format-${c.format}`}>
-                    {c.format === 'story' ? '9:16' : '1:1'}
+                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
                   </span>
                   {c.bild_url && (
                     <button
                       type="button"
                       className="thumb-download"
                       title="Herunterladen"
-                      aria-label="Bild herunterladen"
+                      aria-label="Datei herunterladen"
                       onClick={(e) => downloadCreative(c, e)}
                     >
                       <Icon name="download" size={16} />
@@ -492,9 +548,17 @@ export default function JobCreatives() {
                 <div className="creative-foot">
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">
-                    <button className="btn-ghost btn-sm" onClick={() => openRework(c)}>Überarbeiten</button>
-                    {c.format === 'story' && (
-                      <button className="btn-ghost btn-sm" onClick={() => alert('Reel-Feature folgt.')}>Reel</button>
+                    {c.typ !== 'video' && (
+                      <button className="btn-ghost btn-sm" onClick={() => openRework(c)}>Überarbeiten</button>
+                    )}
+                    {c.format === 'story' && c.typ !== 'video' && (
+                      <button
+                        className="btn-ghost btn-sm"
+                        onClick={() => onReel(c)}
+                        disabled={reelBusy.has(c.id)}
+                      >
+                        {reelBusy.has(c.id) ? 'Reel läuft…' : 'Reel'}
+                      </button>
                     )}
                     <button className="btn-ghost btn-sm btn-danger" onClick={() => onDelete(c.id)}>Löschen</button>
                   </div>

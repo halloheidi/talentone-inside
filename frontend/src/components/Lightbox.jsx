@@ -70,13 +70,26 @@ export default function Lightbox({ items, index, onClose, onNavigate, filenameFo
       )}
 
       <div className="lb-stage" onClick={onClose}>
-        <img
-          key={item.id}
-          src={item.bild_url}
-          alt=""
-          className="lb-img"
-          onClick={e => e.stopPropagation()}
-        />
+        {item.typ === 'video' ? (
+          <video
+            key={item.id}
+            src={item.bild_url}
+            className="lb-img"
+            controls
+            autoPlay
+            loop
+            playsInline
+            onClick={e => e.stopPropagation()}
+          />
+        ) : (
+          <img
+            key={item.id}
+            src={item.bild_url}
+            alt=""
+            className="lb-img"
+            onClick={e => e.stopPropagation()}
+          />
+        )}
       </div>
 
       {items.length > 1 && (
