@@ -8,7 +8,7 @@ async function authHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+export async function api(path, { method = 'GET', body, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
@@ -16,6 +16,7 @@ export async function api(path, { method = 'GET', body } = {}) {
       ...(await authHeader()),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));

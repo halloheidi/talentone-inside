@@ -7,7 +7,7 @@ import Icon from '../../components/Icon.jsx';
 import Lightbox from '../../components/Lightbox.jsx';
 
 export default function JobCreatives() {
-  const { job, kunde, reload: reloadJob } = useJob();
+  const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
 
   // Modus
   const [mode, setMode] = useState('ki'); // 'ki' | 'foto'
@@ -44,6 +44,7 @@ export default function JobCreatives() {
   const [reworkTarget, setReworkTarget] = useState(null);
   const [reworkMotiv, setReworkMotiv] = useState('');
   const [reworkBusy, setReworkBusy] = useState(false);
+  const reworkAbortRef = useRef(null);
 
   // Lightbox
   const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -67,6 +68,8 @@ export default function JobCreatives() {
       await api(`/creatives/${creative.id}/reel`, { method: 'POST' });
       setReelBusy(prev => { const n = new Set(prev); n.add(creative.id); return n; });
       startReelPolling(creative.id);
+      // Persistenter Banner
+      startReel?.(creative.id);
     } catch (err) {
       alert(`Reel-Start fehlgeschlagen: ${err.message}`);
     }
@@ -271,6 +274,8 @@ export default function JobCreatives() {
       const exp = res.expected || varianten * 2;
       setExpected(exp);
       startPolling(baseline, exp);
+      // Persistenter Banner über JobView-Context (übersteht Tab-Wechsel)
+      startCreatives?.(exp);
     } catch (err) {
       setGenerateError(err.message);
       setGenerating(false);
@@ -286,19 +291,36 @@ export default function JobCreatives() {
   }
 
   function openRework(creative) { setReworkTarget(creative); setReworkMotiv(motiv || ''); }
+  function cancelRework() {
+    // Laufenden Request abbrechen + UI zurücksetzen
+    if (reworkAbortRef.current) {
+      reworkAbortRef.current.abort();
+      reworkAbortRef.current = null;
+    }
+    setReworkBusy(false);
+    setReworkTarget(null);
+    setReworkMotiv('');
+  }
   async function submitRework() {
     if (!reworkMotiv.trim()) return;
     setReworkBusy(true);
+    const controller = new AbortController();
+    reworkAbortRef.current = controller;
     try {
       const res = await api(`/creatives/${reworkTarget.id}/regenerate`, {
         method: 'POST',
         body: { mode: 'ki', motiv: reworkMotiv.trim(), personenfoto_id: personId || undefined },
+        signal: controller.signal,
       });
       setCreatives(prev => [res.creative, ...prev.filter(c => c.id !== reworkTarget.id)]);
       setReworkTarget(null);
       setReworkMotiv('');
-    } catch (err) { alert(err.message); }
-    finally { setReworkBusy(false); }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert(err.message);
+    } finally {
+      reworkAbortRef.current = null;
+      setReworkBusy(false);
+    }
   }
 
   const aktiveAuswahlId = mode === 'ki' ? personId : fotoId;
@@ -615,11 +637,13 @@ export default function JobCreatives() {
       {/* ───────── Rework-Modal ───────── */}
       <Modal
         open={!!reworkTarget}
-        onClose={() => !reworkBusy && setReworkTarget(null)}
+        onClose={cancelRework}
         title="Creative überarbeiten"
         footer={
           <>
-            <button className="btn-ghost" onClick={() => setReworkTarget(null)} disabled={reworkBusy}>Abbrechen</button>
+            <button className="btn-ghost" onClick={cancelRework}>
+              {reworkBusy ? 'Abbrechen' : 'Schließen'}
+            </button>
             <button className="btn-primary" onClick={submitRework} disabled={reworkBusy || !reworkMotiv.trim()}>
               {reworkBusy ? 'Generiere…' : 'Neu generieren'}
             </button>

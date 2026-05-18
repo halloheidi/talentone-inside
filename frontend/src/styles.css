@@ -2369,6 +2369,37 @@ button { font-family: inherit; }
 }
 .adcopy-skeleton > div.short { width: 60%; }
 
+/* Persistenter Banner für Hintergrund-Tasks im JobView */
+.bg-task-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 0 0 14px;
+  background: linear-gradient(90deg, rgba(212,255,0,0.18), rgba(212,255,0,0.06));
+  border: 1px solid #e3e8ad;
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--ink-2);
+  flex-wrap: wrap;
+}
+.bg-task-msgs { display: flex; gap: 16px; flex-wrap: wrap; font-weight: 500; color: var(--ink); }
+.bg-task-hint { color: var(--ink-3); font-size: 12px; margin-left: auto; }
+.bg-task-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid #c9d57a;
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Kunde Edit-Modus */
+.kunde-edit { width: 100%; }
+.kunde-edit .form-actions { padding-top: 12px; border-top: 1px solid var(--line-2); margin-top: 14px; }
+
 /* Warn-Banner (z.B. fehlender Funnel-Link) */
 .warn-banner {
   padding: 12px 16px;

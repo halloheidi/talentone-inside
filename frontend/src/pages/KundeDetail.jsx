@@ -37,6 +37,53 @@ export default function KundeDetail() {
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef(null);
 
+  // Kontakt-Edit
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    firmenname: '', ansprechpartner: '', email: '', telefon: '',
+    branche: '', agentur: 'talentone', notizen: '',
+  });
+  const [editBusy, setEditBusy] = useState(false);
+  const [editMsg, setEditMsg] = useState('');
+
+  function startEdit() {
+    setEditForm({
+      firmenname: kunde?.firmenname || '',
+      ansprechpartner: kunde?.ansprechpartner || '',
+      email: kunde?.email || '',
+      telefon: kunde?.telefon || '',
+      branche: kunde?.branche || '',
+      agentur: kunde?.agentur || 'talentone',
+      notizen: kunde?.notizen || '',
+    });
+    setEditMode(true);
+    setEditMsg('');
+  }
+  function cancelEdit() { setEditMode(false); setEditMsg(''); }
+  async function saveEdit() {
+    setEditBusy(true); setEditMsg('');
+    try {
+      const res = await api(`/kunden/${kundeId}`, {
+        method: 'PATCH',
+        body: {
+          firmenname: editForm.firmenname.trim(),
+          ansprechpartner: editForm.ansprechpartner.trim() || null,
+          email: editForm.email.trim() || null,
+          telefon: editForm.telefon.trim() || null,
+          branche: editForm.branche.trim() || null,
+          agentur: editForm.agentur || 'talentone',
+          notizen: editForm.notizen.trim() || null,
+        },
+      });
+      setKunde(res.kunde);
+      setEditMode(false);
+    } catch (err) {
+      setEditMsg(err.message);
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   // Website-URL + Farb-Extraktion (Preview)
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [websiteUrlDirty, setWebsiteUrlDirty] = useState(false);
@@ -282,33 +329,84 @@ export default function KundeDetail() {
           onChange={onLogoChange}
         />
         <div className="kunde-head-body">
-          <h1 className="page-title">{kunde.firmenname || '—'}</h1>
-          <div className="kunde-head-meta">
-            {kunde.branche && <span><strong>Branche:</strong> {kunde.branche}</span>}
-            {kunde.ansprechpartner && <span><strong>Ansprechpartner:</strong> {kunde.ansprechpartner}</span>}
-            {kunde.email && <span><strong>E-Mail:</strong> <a href={`mailto:${kunde.email}`}>{kunde.email}</a></span>}
-            {kunde.telefon && <span><strong>Telefon:</strong> {kunde.telefon}</span>}
-          </div>
-          {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
-          <div className="kunde-head-actions">
-            <button
-              className="btn-ghost btn-sm"
-              onClick={() => !logoUploading && logoInputRef.current?.click()}
-              disabled={logoUploading}
-            >
-              {logoUploading
-                ? 'Lade Logo hoch…'
-                : (kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen')}
-            </button>
-            <button
-              className="btn-ghost btn-sm"
-              onClick={() => setShowAnfrage(true)}
-              title={kunde.email ? '' : 'Kunden-E-Mail fehlt'}
-              disabled={!kunde.email}
-            >
-              Fotos & Logo beim Kunden anfragen
-            </button>
-          </div>
+          {!editMode ? (
+            <>
+              <h1 className="page-title">{kunde.firmenname || '—'}</h1>
+              <div className="kunde-head-meta">
+                {kunde.agentur && (
+                  <span><strong>Agentur:</strong> {kunde.agentur === 'nowagwirth' ? 'Nowag & Wirth' : 'TalentOne'}</span>
+                )}
+                {kunde.branche && <span><strong>Branche:</strong> {kunde.branche}</span>}
+                {kunde.ansprechpartner && <span><strong>Ansprechpartner:</strong> {kunde.ansprechpartner}</span>}
+                {kunde.email && <span><strong>E-Mail:</strong> <a href={`mailto:${kunde.email}`}>{kunde.email}</a></span>}
+                {kunde.telefon && <span><strong>Telefon:</strong> {kunde.telefon}</span>}
+              </div>
+              {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
+              <div className="kunde-head-actions">
+                <button className="btn-ghost btn-sm" onClick={startEdit}>Bearbeiten</button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => !logoUploading && logoInputRef.current?.click()}
+                  disabled={logoUploading}
+                >
+                  {logoUploading
+                    ? 'Lade Logo hoch…'
+                    : (kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen')}
+                </button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setShowAnfrage(true)}
+                  title={kunde.email ? '' : 'Kunden-E-Mail fehlt'}
+                  disabled={!kunde.email}
+                >
+                  Fotos & Logo beim Kunden anfragen
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="kunde-edit">
+              <div className="form-grid">
+                <label className="field field-full">
+                  <span>Firmenname</span>
+                  <input value={editForm.firmenname} onChange={e => setEditForm({ ...editForm, firmenname: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Ansprechpartner</span>
+                  <input value={editForm.ansprechpartner} onChange={e => setEditForm({ ...editForm, ansprechpartner: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Branche</span>
+                  <input value={editForm.branche} onChange={e => setEditForm({ ...editForm, branche: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>E-Mail</span>
+                  <input type="email" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Telefon</span>
+                  <input value={editForm.telefon} onChange={e => setEditForm({ ...editForm, telefon: e.target.value })} />
+                </label>
+                <label className="field field-full">
+                  <span>Agentur</span>
+                  <select value={editForm.agentur} onChange={e => setEditForm({ ...editForm, agentur: e.target.value })}>
+                    <option value="talentone">TalentOne</option>
+                    <option value="nowagwirth">Nowag & Wirth</option>
+                  </select>
+                </label>
+                <label className="field field-full">
+                  <span>Notizen</span>
+                  <textarea rows={2} value={editForm.notizen} onChange={e => setEditForm({ ...editForm, notizen: e.target.value })} />
+                </label>
+              </div>
+              <div className="form-actions">
+                {editMsg && <span className="form-msg" style={{ color: 'var(--danger)' }}>{editMsg}</span>}
+                <button className="btn-ghost" onClick={cancelEdit} disabled={editBusy}>Abbrechen</button>
+                <button className="btn-primary" onClick={saveEdit} disabled={editBusy || !editForm.firmenname.trim()}>
+                  {editBusy ? 'Speichere…' : 'Speichern'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
