@@ -355,7 +355,7 @@ ${sortedAdcopies.map(a => `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Bewerbungs-Funnel</h2>
 <table width="100%" cellpadding="0" cellspacing="0">
   <tr><td align="center" style="padding:8px 0;">
-    <a href="${escape(funnelUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:14px;padding:14px 28px;border-radius:100px;">→ Funnel-Vorschau ansehen</a>
+    <a href="${escape(funnelUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:14px 28px;border-radius:100px;">→ Funnel-Vorschau ansehen</a>
     <div style="font-size:11px;color:#9a9994;margin-top:8px;">${escape(funnelUrl)}</div>
   </td></tr>
 </table>` : '';
@@ -371,7 +371,7 @@ ${sortedAdcopies.map(a => `
 <div style="margin:32px 0 8px;padding:24px;background:${brand.accent}1a;border:1px solid #ececea;border-radius:14px;text-align:center;">
   <h2 style="font-size:17px;font-weight:700;color:${brand.primary};margin:0 0 6px;">Bereit für Feedback?</h2>
   <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">Du kannst die Entwürfe direkt online kommentieren oder freigeben — alles in einer Übersicht.</p>
-  <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">Entwürfe kommentieren &amp; freigeben →</a>
+  <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">Entwürfe kommentieren &amp; freigeben →</a>
 </div>` : '';
 
   const html = `<!doctype html>

@@ -53,7 +53,7 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
       </ul>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
-      <a href="${escape(uploadUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Dateien hochladen</a>
+      <a href="${escape(uploadUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Dateien hochladen</a>
       <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link ist persönlich und nur für ${escape(kundenname)} gültig.</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
@@ -106,7 +106,7 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
       </p>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
-      <a href="${escape(formularUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Formular ausfüllen</a>
+      <a href="${escape(formularUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Formular ausfüllen</a>
       <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link ist persönlich für euch.</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
