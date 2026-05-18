@@ -35,10 +35,10 @@ const BRANDING = {
     key: 'nowagwirth',
     name: 'Nowag & Wirth',
     domain: NOWAGWIRTH_DOMAIN,
-    websiteUrl: 'https://nowagwirth.de',
-    // Mail
-    from: 'Nowag & Wirth <noreply@nowagwirth.de>',
-    replyTo: 'info@nowagwirth.de',
+    websiteUrl: 'https://nowagwirth.com',
+    // Mail (Domain in Resend verifiziert: nowagwirth.com)
+    from: 'Nowag & Wirth <noreply@nowagwirth.com>',
+    replyTo: 'info@nowagwirth.com',
     mailVerified: NOWAGWIRTH_MAIL_VERIFIED,
     // Farben
     primary: '#1a3a6c',
