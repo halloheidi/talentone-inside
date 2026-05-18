@@ -3013,6 +3013,78 @@ button { font-family: inherit; }
   line-height: 1.5;
 }
 
+/* Webhook-Setup-Guide (collapsible) */
+.webhook-guide {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.webhook-guide-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+  padding: 4px 0;
+  list-style: none;
+  user-select: none;
+}
+.webhook-guide-summary::-webkit-details-marker { display: none; }
+.webhook-guide-summary::after {
+  content: '▸';
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform 0.15s ease;
+}
+.webhook-guide[open] .webhook-guide-summary::after {
+  transform: rotate(90deg);
+}
+.webhook-guide-icon {
+  font-size: 15px;
+}
+.webhook-guide-steps {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.webhook-guide-steps li {
+  margin-bottom: 10px;
+}
+.webhook-guide-steps li:last-child {
+  margin-bottom: 0;
+}
+.webhook-guide-url-row {
+  margin-top: 6px;
+}
+.webhook-guide-note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #fff8e1;
+  border: 1px solid #f0d878;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: #6b5410;
+  line-height: 1.5;
+}
+.webhook-guide-note-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.webhook-guide-footer {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.5;
+  font-style: italic;
+}
+
 /* ───────── Phone-Frame (Editor-Vorschau) ───────── */
 .phone-frame {
   width: 320px;

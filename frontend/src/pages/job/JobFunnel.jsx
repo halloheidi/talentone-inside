@@ -640,6 +640,41 @@ function WebhookInfo({ jobId }) {
         Diese URL in Perspective unter <strong>Integrationen → Webhook</strong> eintragen. Bei jeder neuen Bewerbung
         werden die Daten automatisch übermittelt und der Kunde benachrichtigt (Branding nach Agentur-Einstellung).
       </p>
+
+      <details className="webhook-guide">
+        <summary className="webhook-guide-summary">
+          <span className="webhook-guide-icon">📖</span>
+          <span>So richtest du den Webhook in Perspective ein</span>
+        </summary>
+        <ol className="webhook-guide-steps">
+          <li>Öffne deinen Funnel in Perspective</li>
+          <li>Gehe zu <strong>Integrationen → Webhooks</strong></li>
+          <li>
+            Unter <strong>„Funnel komplettiert"</strong> die folgende URL einfügen:
+            <div className="webhook-info-row webhook-guide-url-row">
+              <code className="webhook-url">{webhookUrl}</code>
+              <button type="button" className="btn-ghost btn-sm" onClick={copyToClipboard}>
+                {copied ? '✓ Kopiert' : 'Kopieren'}
+              </button>
+            </div>
+          </li>
+          <li>Auf <strong>„Hinzufügen"</strong> klicken</li>
+          <li>Teste mit einer Test-Bewerbung — sie sollte innerhalb von Sekunden hier in der Bewerbungsliste erscheinen</li>
+        </ol>
+
+        <div className="webhook-guide-note">
+          <span className="webhook-guide-note-icon">💡</span>
+          <span>
+            Trage die URL unter <strong>„Funnel komplettiert"</strong> ein (nicht unter <strong>„Neuer Lead"</strong>),
+            damit nur vollständige Bewerbungen übermittelt werden.
+          </span>
+        </div>
+
+        <p className="webhook-guide-footer">
+          Nach der Einrichtung werden alle Bewerbungen aus diesem Perspective-Funnel automatisch hier angezeigt
+          und der Kunde wird per Mail benachrichtigt.
+        </p>
+      </details>
     </div>
   );
 }
