@@ -24,6 +24,24 @@ function joinList(...vals) {
   return vals.flat().filter(v => v && String(v).trim()).join(', ');
 }
 
+// Stellenbezeichnung mit (m/w/d) — hängt es an wenn noch nicht vorhanden
+function stelleDisplay(stelle) {
+  if (!stelle) return 'Mitarbeiter:in (m/w/d)';
+  if (/\([mwfd][\/\\mwfd\s\-]+\)/i.test(stelle)) return stelle.trim();
+  return `${stelle.trim()} (m/w/d)`;
+}
+
+// Nur der Ort — entfernt typische Umkreis-Suffixe (+30km, (30km Umkreis), Umkreis 30km …)
+function cleanOrt(region) {
+  if (!region) return '';
+  return String(region)
+    .replace(/\s*[\(\[\+,]\s*\d+\s*km\s*(umkreis)?\s*[\)\]]?/gi, '')
+    .replace(/\s*umkreis\s+\d+\s*km/gi, '')
+    .replace(/\s*\(\s*umkreis\s*\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function buildBriefing(job, kunde) {
   const fd = job.formdata_komplett || {};
   const benefits = Array.isArray(job.benefits) ? job.benefits : [];
@@ -31,8 +49,8 @@ function buildBriefing(job, kunde) {
   return `BRIEFING:
 - Firma: ${kunde?.firmenname || '-'}
 - Branche: ${branche || '-'}
-- Stelle: ${job.stelle || '-'}
-- Region: ${job.region || '-'}
+- Stelle: ${stelleDisplay(job.stelle)}
+- Ort (NUR Ort, ohne Umkreis): ${cleanOrt(job.region) || '-'}
 - Gehalt: ${job.gehalt || '-'}
 - Benefits: ${joinList(benefits, fd.benefits_zusatz) || '-'}
 - Besonderheiten der Stelle: ${job.besonderheiten || '-'}
@@ -103,13 +121,14 @@ Zeile 1: Provokante Frage oder ungewöhnliches Statement + Emoji am Ende (🤔 /
 export const LINK_PLACEHOLDER = '[Funnel-Link wird ergänzt]';
 
 function buildPrompt(job, kunde, style, funnelUrl) {
-  const region = job.region || 'Region';
-  const stelle = job.stelle || 'Stelle';
+  const ort = cleanOrt(job.region) || 'Region';
+  const stelle = stelleDisplay(job.stelle);
   const firma = kunde?.firmenname || 'das Unternehmen';
 
   // Template-Platzhalter im STYLE_SPEC durch reale Werte ersetzen
   const spec = STYLE_SPEC[style]
-    .replaceAll('${region}', region)
+    .replaceAll('${region}', ort)   // alte Variable mappt auf cleaned ort
+    .replaceAll('${ort}', ort)
     .replaceAll('${stelle}', stelle)
     .replaceAll('${firma}', firma);
 
@@ -136,7 +155,8 @@ GLOBALE REGELN
 - Benefits konkret benennen mit Zahlen wenn möglich (z.B. "30 Tage Urlaub" statt "viel Urlaub", "Bis 4.500 €" statt "gutes Gehalt")
 - Echte Zeilenumbrüche zwischen den Sektionen (im JSON als \\n) — KEINE Bullet-Strings in einer Zeile
 - Referenz-Vorbilder im Stil: Performance Recruiting, Terbeek, Schilling — kurze visuelle Häppchen, jede Zeile ein Wert
-- Keine Hashtags, keine URLs (wir setzen den Link separat ein)
+- Stellenbezeichnung IMMER mit "(m/w/d)" am Ende — z.B. "Fahrzeugaufbereiter (m/w/d)", "Pflegefachkraft (m/w/d)". Niemals ohne.
+- Standort: NUR den Ort nennen (z.B. "📍 Essen"), KEINEN Umkreis / Radius / "+30km" / "(Umkreis 50km)".
 
 FORMAT
 Antworte NUR mit JSON, keine Markdown-Backticks:
