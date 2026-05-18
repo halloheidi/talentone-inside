@@ -5,44 +5,98 @@ import { supabase } from '../supabase.js';
 
 const router = Router();
 
-const KNOWN_CONTACT_KEYS = new Set([
+// Meta-Felder von Perspective, die wir komplett ignorieren
+const META_KEYS = new Set([
+  'id', 'funnelid', 'funnelname', 'meta', 'values', 'titles',
+  'trackingversion', 'profile', 'createdat', 'updatedat',
+]);
+
+// Flache Kontakt-Keys (für Fallback bei nicht-Perspective-Webhooks)
+const FLAT_CONTACT_KEYS = new Set([
   'name', 'full_name', 'fullname', 'vorname', 'nachname',
   'first_name', 'firstname', 'last_name', 'lastname',
   'email', 'e-mail', 'mail',
   'telefon', 'phone', 'tel', 'telephone', 'mobile', 'handynummer',
 ]);
 
-function extractContact(body) {
-  if (!body || typeof body !== 'object') return { name: null, email: null, telefon: null, rest: {} };
-
-  // Normalisiere Keys auf lowercase für Lookup
-  const lookup = {};
-  for (const [k, v] of Object.entries(body)) lookup[k.toLowerCase()] = v;
-
-  const vorname = lookup.vorname || lookup.first_name || lookup.firstname || '';
-  const nachname = lookup.nachname || lookup.last_name || lookup.lastname || '';
-  const combined = (vorname + ' ' + nachname).trim();
-  const name = (lookup.full_name || lookup.fullname || lookup.name || combined || null) || null;
-  const email = lookup.email || lookup['e-mail'] || lookup.mail || null;
-  const telefon = lookup.telefon || lookup.phone || lookup.tel || lookup.telephone || lookup.mobile || lookup.handynummer || null;
-
-  const rest = {};
-  for (const [k, v] of Object.entries(body)) {
-    if (!KNOWN_CONTACT_KEYS.has(k.toLowerCase())) rest[k] = v;
+function pickValue(node) {
+  if (node == null) return null;
+  if (typeof node === 'object') {
+    if ('value' in node && typeof node.value !== 'object') return node.value;
+    return null;
   }
-  return {
-    name: name?.toString().trim() || null,
-    email: email?.toString().trim() || null,
-    telefon: telefon?.toString().trim() || null,
-    rest,
-  };
+  return node;
 }
 
-function restToAntworten(rest) {
-  return Object.entries(rest).map(([k, v]) => ({
-    frage_text: k,
-    antwort: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? ''),
-  }));
+function extractContact(body) {
+  if (!body || typeof body !== 'object') {
+    return { name: null, email: null, telefon: null, antworten: [] };
+  }
+
+  const profile = (body.profile && typeof body.profile === 'object') ? body.profile : {};
+  const values  = (body.values  && typeof body.values  === 'object') ? body.values  : {};
+
+  const flat = {};
+  for (const [k, v] of Object.entries(body)) flat[k.toLowerCase()] = v;
+
+  const nameParts = [pickValue(profile.first_name), pickValue(profile.last_name)].filter(Boolean).join(' ').trim();
+  const valuesNameParts = [values.first_name, values.last_name].filter(Boolean).join(' ').trim();
+  const name =
+    pickValue(profile.name) ||
+    pickValue(profile.fullName) ||
+    pickValue(profile.full_name) ||
+    values.name || values.fullName || values.full_name ||
+    nameParts || valuesNameParts ||
+    flat.name || flat.full_name || flat.fullname ||
+    [flat.vorname || flat.first_name || flat.firstname, flat.nachname || flat.last_name || flat.lastname]
+      .filter(Boolean).join(' ').trim() ||
+    null;
+
+  const email =
+    pickValue(profile.email) ||
+    values.email ||
+    flat.email || flat['e-mail'] || flat.mail ||
+    null;
+
+  const telefon =
+    pickValue(profile.phone) ||
+    pickValue(profile.telefon) ||
+    values.phone || values.telefon ||
+    flat.telefon || flat.phone || flat.tel || flat.telephone || flat.mobile || flat.handynummer ||
+    null;
+
+  // Antworten aus profile.question_* — Jeder Key hat { title, value }
+  const antworten = [];
+  for (const [k, v] of Object.entries(profile)) {
+    if (!k.startsWith('question_')) continue;
+    if (!v || typeof v !== 'object') continue;
+    const frage = v.title || v.label || k;
+    const antwort = v.value;
+    if (antwort == null || antwort === '') continue;
+    antworten.push({
+      frage_text: String(frage).trim(),
+      antwort: typeof antwort === 'object' ? JSON.stringify(antwort) : String(antwort).trim(),
+    });
+  }
+
+  // Fallback: nicht-Perspective-Webhook (flaches JSON) — alte Logik
+  if (antworten.length === 0 && Object.keys(profile).length === 0) {
+    for (const [k, v] of Object.entries(body)) {
+      const lk = k.toLowerCase();
+      if (FLAT_CONTACT_KEYS.has(lk) || META_KEYS.has(lk)) continue;
+      antworten.push({
+        frage_text: k,
+        antwort: typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? ''),
+      });
+    }
+  }
+
+  return {
+    name: name ? String(name).trim() || null : null,
+    email: email ? String(email).trim() || null : null,
+    telefon: telefon ? String(telefon).trim() || null : null,
+    antworten,
+  };
 }
 
 /* POST /api/webhooks/perspective?job_id=<uuid>&secret=<optional>
@@ -67,7 +121,6 @@ router.post('/perspective', async (req, res) => {
       .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
 
     const contact = extractContact(req.body);
-    const antworten = restToAntworten(contact.rest);
 
     const { data: bew, error: insErr } = await supabase
       .from('talentone_bewerbungen')
@@ -77,7 +130,7 @@ router.post('/perspective', async (req, res) => {
         name: contact.name,
         email: contact.email,
         telefon: contact.telefon,
-        antworten,
+        antworten: contact.antworten,
         quelle: 'perspective',
         ko_kriterium: false,
       })

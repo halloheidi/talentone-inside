@@ -204,9 +204,13 @@ export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl }) {
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
     return null;
   }
-  const recipient = (job?.bewerbung_email?.trim() || kunde?.email?.trim() || '');
-  if (!recipient) {
-    console.warn('[bewerbungs-mail] Kein Empfänger (weder job.bewerbung_email noch kunde.email) — überspringe.');
+  const recipientRaw = (job?.bewerbung_email?.trim() || kunde?.email?.trim() || '');
+  const recipients = recipientRaw
+    .split(/[;,]/)
+    .map(s => s.trim())
+    .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+  if (recipients.length === 0) {
+    console.warn('[bewerbungs-mail] Kein gültiger Empfänger — überspringe.');
     return null;
   }
 
@@ -291,7 +295,7 @@ ${antworten.map(a => `
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
       from: brand.from,
-      to: recipient,
+      to: recipients,
       reply_to: bewerbung?.email || brand.replyTo,
       subject: subjekt,
       html,

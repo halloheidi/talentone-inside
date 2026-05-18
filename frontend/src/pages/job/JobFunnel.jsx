@@ -285,17 +285,18 @@ export default function JobFunnel() {
       <fieldset className="formular-section">
         <legend>Bewerbungen senden an</legend>
         <p className="pane-hint" style={{ marginBottom: 10 }}>
-          E-Mail-Adresse, an die neue Bewerbungen verschickt werden. Standard ist die Kunden-E-Mail
-          {kunde?.email ? <> (<code>{kunde.email}</code>)</> : null} — pro Stelle überschreibbar (z.B. direkt der Abteilungsleiter).
+          E-Mail-Adresse(n), an die neue Bewerbungen verschickt werden. Standard ist die Kunden-E-Mail
+          {kunde?.email ? <> (<code>{kunde.email}</code>)</> : null} — pro Stelle überschreibbar.
+          Mehrere Empfänger mit <code>;</code> oder <code>,</code> trennen.
         </p>
         <div className="form-grid">
           <label className="field field-full">
             <span>E-Mail-Empfänger</span>
             <input
-              type="email"
+              type="text"
               value={bewerbungEmail}
               onChange={e => setBewerbungEmail(e.target.value)}
-              placeholder={kunde?.email || 'name@firma.de'}
+              placeholder={kunde?.email ? `${kunde.email}; chef@firma.de` : 'name@firma.de; chef@firma.de'}
             />
           </label>
         </div>
@@ -384,17 +385,7 @@ export default function JobFunnel() {
               ? <div className="motiv-sub">Noch keine Bewerbungen.</div>
               : (
                 <div className="bewerbungen-list">
-                  {bewerbungen.map(b => (
-                    <div key={b.id} className={`bewerbung-row ${b.ko_kriterium ? 'is-ko' : ''}`}>
-                      <strong>{b.name || '(ohne Namen)'}</strong>
-                      <span>{b.email || b.telefon || '—'}</span>
-                      <span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>
-                        {b.quelle === 'perspective' ? 'Perspective' : 'TalentOne Funnel'}
-                      </span>
-                      {b.ko_kriterium && <span className="ko-badge">KO</span>}
-                      <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
-                    </div>
-                  ))}
+                  {bewerbungen.map(b => <BewerbungCard key={b.id} bewerbung={b} />)}
                 </div>
               )}
           </fieldset>
@@ -501,6 +492,52 @@ export default function JobFunnel() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ═════════════════════ Bewerbung-Karte (mit Antworten) ═════════════════════ */
+
+function BewerbungCard({ bewerbung: b }) {
+  const antworten = Array.isArray(b.antworten) ? b.antworten.filter(a => a && (a.antwort ?? '') !== '') : [];
+  const quelleLabel = b.quelle === 'perspective' ? 'Perspective' : 'TalentOne Funnel';
+  return (
+    <details className={`bewerbung-card ${b.ko_kriterium ? 'is-ko' : ''}`}>
+      <summary className="bewerbung-summary">
+        <strong>{b.name || '(ohne Namen)'}</strong>
+        <span className="bewerbung-contact">{b.email || b.telefon || '—'}</span>
+        <span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{quelleLabel}</span>
+        {b.ko_kriterium && <span className="ko-badge">KO</span>}
+        <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
+      </summary>
+      <div className="bewerbung-body">
+        <dl className="bewerbung-contact-grid">
+          {b.email && (
+            <>
+              <dt>E-Mail</dt>
+              <dd><a href={`mailto:${b.email}`}>{b.email}</a></dd>
+            </>
+          )}
+          {b.telefon && (
+            <>
+              <dt>Telefon</dt>
+              <dd><a href={`tel:${b.telefon}`}>{b.telefon}</a></dd>
+            </>
+          )}
+        </dl>
+        {antworten.length > 0 ? (
+          <ul className="bewerbung-antworten">
+            {antworten.map((a, i) => (
+              <li key={i}>
+                <div className="bewerbung-frage">{a.frage_text || '—'}</div>
+                <div className="bewerbung-antwort">→ {a.antwort}</div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="bewerbung-empty">Keine Antworten übermittelt.</p>
+        )}
+      </div>
+    </details>
   );
 }
 
