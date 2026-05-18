@@ -325,6 +325,21 @@ router.post('/funnel/:id/bewerbung', async (req, res) => {
     }).catch(err => console.warn('[CAPI] uncaught:', err.message));
   }
 
+  // Bewerbungs-Mail an Kunden (best-effort, blockt nicht)
+  (async () => {
+    try {
+      const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', funnel.job_id).maybeSingle();
+      const { data: kunde } = job ? await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle() : { data: null };
+      if (!kunde?.email) return;
+      const { sendBewerbungsMail } = await import('../exports.js');
+      await sendBewerbungsMail({
+        kunde, job,
+        bewerbung: { ...data, quelle: 'funnel' },
+        sheetUrl: funnel.extern_sheet_url || null,
+      });
+    } catch (err) { console.warn('[bewerbungs-mail]', err.message); }
+  })().catch(err => console.error('[bewerbungs-mail-uncaught]', err.message));
+
   res.status(201).json({ ok: true, bewerbung_id: data.id });
 });
 

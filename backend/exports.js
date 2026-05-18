@@ -197,6 +197,113 @@ NUR JSON zurück, keine Markdown-Backticks:
   return (parsed.text || '').trim();
 }
 
+/* ───────────────────── Bewerbungs-Mail an Kunden ───────────────────── */
+
+export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl }) {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
+    return null;
+  }
+  if (!kunde?.email?.trim()) {
+    console.warn('[bewerbungs-mail] Kunde ohne E-Mail — überspringe.');
+    return null;
+  }
+
+  const brand = getBranding(kunde?.agentur);
+  const isKo = !!bewerbung?.ko_kriterium;
+  const stelle = escape(job?.stelle || 'Stelle');
+  const region = escape(job?.region || '');
+  const name = escape(bewerbung?.name || 'Unbekannt');
+  const email = escape(bewerbung?.email || '');
+  const telefon = escape(bewerbung?.telefon || '');
+  const quelle = bewerbung?.quelle === 'perspective' ? 'Perspective.co' : 'Funnel';
+
+  const antworten = Array.isArray(bewerbung?.antworten) ? bewerbung.antworten : [];
+  const antwortenHtml = antworten.length === 0 ? '' : `
+<h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:24px 0 10px;">Antworten</h2>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+${antworten.map(a => `
+  <tr>
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:45%;vertical-align:top;">${escape(a.frage_text || a.frage_id || '—')}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;">${escape(typeof a.antwort === 'object' ? JSON.stringify(a.antwort) : (a.antwort || '—'))}</td>
+  </tr>`).join('')}
+</table>`;
+
+  const koWarning = isKo ? `
+<div style="margin:20px 0;padding:14px 16px;background:#fff3cd;border:1px solid #f2d76b;border-left:4px solid #d4a800;border-radius:8px;font-size:13px;color:#5a4a00;">
+  ⚠️ <strong>Achtung:</strong> Der Bewerber hat ein KO-Kriterium ausgelöst und erfüllt damit nicht alle Anforderungen dieser Stelle.
+</div>` : '';
+
+  const sheetHtml = sheetUrl ? `
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
+  <tr><td align="center" style="padding:6px 0;">
+    <a href="${escape(sheetUrl)}" style="display:inline-block;background:#fafaf8;color:#0a0a0a;text-decoration:none;font-weight:600;font-size:13px;padding:10px 22px;border-radius:100px;border:1px solid #ececea;">📊 Alle Bewerbungen im Google Sheet</a>
+  </td></tr>
+</table>` : '';
+
+  const html = `<!doctype html>
+<html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0a0a0a;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;max-width:560px;width:100%;">
+  <tr><td style="background:${brand.primary};padding:18px 28px;">
+    ${brand.logoHtml}
+  </td></tr>
+  <tr><td style="padding:24px 28px 8px;">
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Neue Bewerbung · ${quelle}</p>
+    <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 4px;color:#0a0a0a;">${name}</h1>
+    <p style="font-size:13px;color:#5a5955;margin:0 0 6px;">für <strong>${stelle}</strong>${region ? ` · ${region}` : ''}</p>
+    ${koWarning}
+  </td></tr>
+  <tr><td style="padding:6px 28px 8px;">
+    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:14px 0 10px;">Kontakt</h2>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      ${email ? `<tr><td style="padding:6px 0;font-size:12px;color:#5a5955;width:45%;">E-Mail</td><td style="padding:6px 0;font-size:13px;font-weight:500;"><a href="mailto:${email}" style="color:#0a0a0a;">${email}</a></td></tr>` : ''}
+      ${telefon ? `<tr><td style="padding:6px 0;font-size:12px;color:#5a5955;">Telefon</td><td style="padding:6px 0;font-size:13px;font-weight:500;"><a href="tel:${telefon}" style="color:#0a0a0a;">${telefon}</a></td></tr>` : ''}
+      ${(!email && !telefon) ? '<tr><td colspan="2" style="font-size:12px;color:#9a9994;font-style:italic;">Keine Kontaktdaten übermittelt.</td></tr>' : ''}
+    </table>
+    ${antwortenHtml}
+    ${sheetHtml}
+  </td></tr>
+  <tr><td style="padding:18px 28px;background:#fafaf8;border-top:1px solid #ececea;text-align:center;">
+    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.website}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.website.replace(/^https?:\/\//, ''))}</a></p>
+  </td></tr>
+</table></td></tr></table></body></html>`;
+
+  const textParts = [
+    `Neue Bewerbung für ${job?.stelle || 'die Stelle'}`,
+    isKo ? '\n⚠️ KO-Kriterium ausgelöst — Bewerber erfüllt nicht alle Anforderungen.' : '',
+    `\nName: ${bewerbung?.name || '—'}`,
+    `E-Mail: ${bewerbung?.email || '—'}`,
+    `Telefon: ${bewerbung?.telefon || '—'}`,
+  ];
+  if (antworten.length > 0) {
+    textParts.push('\nAntworten:');
+    for (const a of antworten) {
+      textParts.push(`  ${a.frage_text || '?'}: ${a.antwort || '—'}`);
+    }
+  }
+  if (sheetUrl) textParts.push(`\nGoogle Sheet: ${sheetUrl}`);
+
+  const subjekt = `Neue Bewerbung für ${job?.stelle || 'Stelle'}${bewerbung?.name ? ` — ${bewerbung.name}` : ''}`;
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: brand.from,
+      to: kunde.email,
+      reply_to: bewerbung?.email || brand.replyTo,
+      subject: subjekt,
+      html,
+      text: textParts.join('\n'),
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ───────────────────── Mail an Kunden senden ───────────────────── */
 
 function escape(s = '') {

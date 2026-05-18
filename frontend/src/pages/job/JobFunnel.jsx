@@ -266,6 +266,8 @@ export default function JobFunnel() {
               <input type="url" placeholder="https://docs.google.com/spreadsheets/…" value={externSheetUrl} onChange={e => setExternSheetUrl(e.target.value)} />
             </label>
           </div>
+
+          <WebhookInfo jobId={job.id} />
         </fieldset>
       )}
 
@@ -345,7 +347,7 @@ export default function JobFunnel() {
             onClearImage={() => clearImage(activeScreen.id)}
           />}
 
-          {/* Bewerbungen — bei externem Funnel ausgeblendet (Bewerbungen kommen extern) */}
+          {/* Bewerbungen */}
           <fieldset className="formular-section bewerbungen-section">
             <legend>Eingegangene Bewerbungen ({bewerbungen.length})</legend>
             {bewerbungen.length === 0
@@ -353,9 +355,13 @@ export default function JobFunnel() {
               : (
                 <div className="bewerbungen-list">
                   {bewerbungen.map(b => (
-                    <div key={b.id} className="bewerbung-row">
+                    <div key={b.id} className={`bewerbung-row ${b.ko_kriterium ? 'is-ko' : ''}`}>
                       <strong>{b.name || '(ohne Namen)'}</strong>
                       <span>{b.email || b.telefon || '—'}</span>
+                      <span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>
+                        {b.quelle === 'perspective' ? 'Perspective' : 'TalentOne Funnel'}
+                      </span>
+                      {b.ko_kriterium && <span className="ko-badge">KO</span>}
                       <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
                     </div>
                   ))}
@@ -606,6 +612,35 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
         </div>
       )}
     </fieldset>
+  );
+}
+
+/* ═════════════════════ Webhook-Info Box (Perspective) ═════════════════════ */
+
+function WebhookInfo({ jobId }) {
+  const webhookUrl = `${PUBLIC_BASE}/api/webhooks/perspective?job_id=${jobId}`;
+  const [copied, setCopied] = useState(false);
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  }
+  return (
+    <div className="webhook-info">
+      <div className="webhook-info-title">Webhook-URL für Perspective</div>
+      <div className="webhook-info-row">
+        <code className="webhook-url">{webhookUrl}</code>
+        <button type="button" className="btn-ghost btn-sm" onClick={copyToClipboard}>
+          {copied ? '✓ Kopiert' : 'Kopieren'}
+        </button>
+      </div>
+      <p className="webhook-info-hint">
+        Diese URL in Perspective unter <strong>Integrationen → Webhook</strong> eintragen. Bei jeder neuen Bewerbung
+        werden die Daten automatisch übermittelt und der Kunde benachrichtigt (Branding nach Agentur-Einstellung).
+      </p>
+    </div>
   );
 }
 

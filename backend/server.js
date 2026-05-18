@@ -8,6 +8,7 @@ import adcopiesRouter from './routes/adcopies.js';
 import funnelsRouter from './routes/funnels.js';
 import exportsRouter from './routes/exports.js';
 import publicRouter from './routes/public.js';
+import webhooksRouter from './routes/webhooks.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -33,6 +34,7 @@ app.get('/api/health', (req, res) => {
 
 // Public — KEIN Login (Kunde lädt Logo/Fotos via Token-Link hoch).
 app.use('/api/public', publicRouter);
+app.use('/api/webhooks', webhooksRouter);
 
 // Geschützt — nur eingeloggte Mitarbeiter.
 app.use('/api/kunden', requireAuth, kundenRouter);
