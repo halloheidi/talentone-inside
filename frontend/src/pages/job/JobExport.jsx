@@ -34,8 +34,10 @@ export default function JobExport() {
   const [mailMsg, setMailMsg] = useState('');
   const [anschreibensBusy, setAnschreibensBusy] = useState(false);
 
-  // Versand-Historie
+  // Versand-Historie + Review
   const [versand, setVersand] = useState([]);
+  const [review, setReview] = useState(null);
+  const [showKommentare, setShowKommentare] = useState(false);
 
   function load() {
     setLoading(true);
@@ -43,13 +45,15 @@ export default function JobExport() {
     Promise.all([
       api(`/jobs/${job.id}/export`),
       api(`/jobs/${job.id}/export/versand`).catch(() => ({ versand: [] })),
+      api(`/jobs/${job.id}/export/review`).catch(() => ({ review: null })),
     ])
-      .then(([d, v]) => {
+      .then(([d, v, r]) => {
         setData(d);
         // alle Creatives + alle AdCopies vorausgewählt
         setSelectedCreatives(new Set((d.creatives || []).map(c => c.id)));
         setSelectedAdcopies(new Set((d.adcopies || []).map(a => a.id)));
         setVersand(v.versand || []);
+        setReview(r.review);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -195,8 +199,9 @@ export default function JobExport() {
         },
       });
       setMailMsg('Mail verschickt!');
-      // Historie nachladen
+      // Historie + Review nachladen
       api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+      api(`/jobs/${job.id}/export/review`).then(r => setReview(r.review)).catch(() => {});
       setTimeout(() => setShowMail(false), 1200);
     } catch (err) {
       setMailMsg(err.message);
@@ -213,8 +218,60 @@ export default function JobExport() {
   const funnel = data?.funnel;
   const allCreativesSelected = creatives.length > 0 && selectedCreatives.size === creatives.length;
 
+  const letzterVersand = versand[0];
+  const kommentarEntries = review?.kommentare && typeof review.kommentare === 'object'
+    ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
+    : [];
+
   return (
     <div className="export-tab">
+      {/* ─────── Versand-Status oben ─────── */}
+      {letzterVersand && (
+        <div className="versand-status">
+          <span>✅ Entwürfe gesendet am <strong>{new Date(letzterVersand.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzterVersand.empfaenger}</strong></span>
+          <button className="btn-ghost btn-sm" onClick={openMailModal} disabled={!kunde?.email}>
+            Erneut senden
+          </button>
+        </div>
+      )}
+
+      {/* ─────── Review-Status ─────── */}
+      {review && (review.status === 'freigegeben' || review.status === 'aenderungen') && (
+        <div className={`review-status review-status-${review.status}`}>
+          {review.status === 'freigegeben' ? (
+            <strong>✅ Kunde hat freigegeben am {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+          ) : (
+            <>
+              <div className="review-status-head">
+                <strong>📝 Kunde hat Änderungswünsche</strong>
+                <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
+                  {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
+                </span>
+                {kommentarEntries.length > 0 && (
+                  <button className="btn-ghost btn-sm" onClick={() => setShowKommentare(v => !v)}>
+                    {showKommentare ? 'Kommentare ausblenden' : `${kommentarEntries.length} Kommentar${kommentarEntries.length === 1 ? '' : 'e'} ansehen`}
+                  </button>
+                )}
+              </div>
+              {showKommentare && kommentarEntries.length > 0 && (
+                <ul className="review-kommentar-list">
+                  {kommentarEntries.map(([key, text]) => {
+                    const [type, id] = key.split('_');
+                    const label = type === 'creative' ? 'Creative' : type === 'adcopy' ? 'Ad-Copy' : type === 'funnel' ? 'Funnel' : 'Allgemein';
+                    return (
+                      <li key={key}>
+                        <span className="review-k-label">{label}{id ? ` (${id.slice(0,6)})` : ''}:</span>
+                        <span className="review-k-text">{text}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* ─────── Creatives ─────── */}
       <fieldset className="formular-section">
         <legend>Creatives ({creatives.length})</legend>

@@ -8,7 +8,35 @@ import { fetchAsBuffer } from './storage.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const RESEND_API = 'https://api.resend.com/emails';
-const FROM = 'TalentOne <hallo@talent-one.de>';
+
+// Branding-Mapping pro Agentur
+const BRANDING = {
+  talentone: {
+    name: 'TalentOne',
+    from: 'TalentOne <hallo@talent-one.de>',
+    replyTo: 'hallo@talent-one.de',
+    primary: '#0a0a0a',
+    accent: '#d4ff00',
+    accentInk: '#0a0a0a',
+    footer: 'TalentOne — Recruiting neu gedacht',
+    website: 'https://talent-one.de',
+    logoHtml: '<span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Talent<span style="color:#d4ff00;">One</span></span>',
+  },
+  nowagwirth: {
+    name: 'Nowag & Wirth',
+    from: 'Nowag & Wirth <hallo@nowagwirth.de>',
+    replyTo: 'hallo@nowagwirth.de',
+    primary: '#1a3a6c',
+    accent: '#ffd966',
+    accentInk: '#1a3a6c',
+    footer: 'Nowag & Wirth — Digitales Marketing',
+    website: 'https://nowagwirth.de',
+    logoHtml: '<span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Nowag &amp; Wirth</span>',
+  },
+};
+export function getBranding(agentur) {
+  return BRANDING[agentur] || BRANDING.talentone;
+}
 
 const STYLE_LABEL = {
   emotional: 'Emotional / Story',
@@ -143,7 +171,8 @@ export async function streamAdCopiesPdf(res, { job, kunde, adcopies }) {
 /* ───────────────────── Anschreiben-Vorschlag (Claude) ───────────────────── */
 
 export async function generateAnschreibensVorschlag(job, kunde) {
-  const prompt = `Du schreibst eine kurze, professionelle Mail an einen Kunden, dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel). Sprache: Deutsch, Sie-Anrede, höflich aber locker (keine Floskeln wie "Sehr geehrte Damen und Herren").
+  const brand = getBranding(kunde?.agentur);
+  const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel, Review-Link zum Kommentieren). Sprache: Deutsch, Sie-Anrede, höflich aber locker (keine Floskeln wie "Sehr geehrte Damen und Herren").
 
 Kontext:
 - Kunde: ${kunde?.firmenname || '-'}
@@ -178,9 +207,10 @@ function escape(s = '') {
     .replace(/"/g, '&quot;');
 }
 
-export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl }) {
+export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
 
+  const brand = getBranding(kunde?.agentur);
   const safeAnschreiben = escape(anschreiben || '').replace(/\n/g, '<br>');
   const firma = escape(kunde?.firmenname || '');
   const stelle = escape(job?.stelle || '');
@@ -226,17 +256,31 @@ ${sortedAdcopies.map(a => `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Bewerbungs-Funnel</h2>
 <table width="100%" cellpadding="0" cellspacing="0">
   <tr><td align="center" style="padding:8px 0;">
-    <a href="${escape(funnelUrl)}" style="display:inline-block;background:#0a0a0a;color:#d4ff00;text-decoration:none;font-weight:700;font-size:14px;padding:14px 28px;border-radius:100px;">→ Funnel-Vorschau ansehen</a>
+    <a href="${escape(funnelUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:14px;padding:14px 28px;border-radius:100px;">→ Funnel-Vorschau ansehen</a>
     <div style="font-size:11px;color:#9a9994;margin-top:8px;">${escape(funnelUrl)}</div>
   </td></tr>
 </table>` : '';
+
+  const sheetHtml = sheetUrl ? `
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;">
+  <tr><td align="center" style="padding:8px 0;">
+    <a href="${escape(sheetUrl)}" style="display:inline-block;background:#fafaf8;color:#0a0a0a;text-decoration:none;font-weight:600;font-size:13px;padding:10px 22px;border-radius:100px;border:1px solid #ececea;">📊 Google Sheet öffnen</a>
+  </td></tr>
+</table>` : '';
+
+  const reviewHtml = reviewUrl ? `
+<div style="margin:32px 0 8px;padding:24px;background:${brand.accent}1a;border:1px solid #ececea;border-radius:14px;text-align:center;">
+  <h2 style="font-size:17px;font-weight:700;color:${brand.primary};margin:0 0 6px;">Bereit für Feedback?</h2>
+  <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">Du kannst die Entwürfe direkt online kommentieren oder freigeben — alles in einer Übersicht.</p>
+  <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.primary};color:${brand.accent};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">Entwürfe kommentieren &amp; freigeben →</a>
+</div>` : '';
 
   const html = `<!doctype html>
 <html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0a0a0a;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;max-width:600px;width:100%;">
-  <tr><td style="background:#0a0a0a;padding:22px 32px;">
-    <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Talent<span style="color:#d4ff00;">One</span></span>
+  <tr><td style="background:${brand.primary};padding:22px 32px;">
+    ${brand.logoHtml}
     ${kunde?.logo_url ? `<img src="${escape(kunde.logo_url)}" alt="${firma}" style="height:36px;float:right;background:#fff;border-radius:6px;padding:4px;">` : ''}
   </td></tr>
   <tr><td style="padding:28px 32px 8px;">
@@ -245,19 +289,22 @@ ${sortedAdcopies.map(a => `
     <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 8px;">${safeAnschreiben}</p>
   </td></tr>
   <tr><td style="padding:0 32px 24px;">
+    ${reviewHtml}
     ${creativesHtml}
     ${adcopiesHtml}
     ${funnelHtml}
+    ${sheetHtml}
   </td></tr>
   <tr><td style="padding:20px 32px;background:#fafaf8;border-top:1px solid #ececea;">
-    <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Änderungswünschen einfach auf diese Mail antworten — wir setzen sie sofort um.</p>
+    <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Änderungswünschen kannst du direkt im <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> kommentieren oder einfach auf diese Mail antworten.</p>
   </td></tr>
   <tr><td style="padding:14px 32px;background:#fafaf8;text-align:center;">
-    <p style="font-size:11px;color:#9a9994;margin:0;">Made with ❤️ by <a href="https://talent-one.de" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">TalentOne</a></p>
+    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.website}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.website.replace(/^https?:\/\//, ''))}</a></p>
   </td></tr>
 </table></td></tr></table></body></html>`;
 
   const textParts = [anschreiben || ''];
+  if (reviewUrl) textParts.push(`\n→ Entwürfe kommentieren & freigeben: ${reviewUrl}`);
   if (sortedCreatives.length) textParts.push(`\n${sortedCreatives.length} Creative(s) im Anhang/eingebettet.`);
   if (sortedAdcopies.length) {
     textParts.push('\nWerbetexte:');
@@ -266,14 +313,15 @@ ${sortedAdcopies.map(a => `
     }
   }
   if (funnelUrl) textParts.push(`\nFunnel-Vorschau: ${funnelUrl}`);
+  if (sheetUrl) textParts.push(`Google Sheet: ${sheetUrl}`);
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: FROM,
+      from: brand.from,
       to,
-      reply_to: 'hallo@talent-one.de',
+      reply_to: brand.replyTo,
       subject: betreff || `${kunde?.firmenname || 'Ihre Kampagne'} — Entwürfe zur Freigabe`,
       html,
       text: textParts.join('\n'),

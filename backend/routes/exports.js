@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import {
   streamCreativesZip, streamAdCopiesPdf,
@@ -8,6 +9,14 @@ import {
 const router = Router();
 
 const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
+
+// Stellt sicher dass der Job einen review_token hat. Gibt ihn zurück.
+async function ensureReviewToken(jobId, existing) {
+  if (existing) return existing;
+  const token = randomUUID();
+  await supabase.from('talentone_jobs').update({ review_token: token }).eq('id', jobId);
+  return token;
+}
 
 async function loadFullJob(jobId) {
   const { data: job, error: jE } = await supabase
@@ -95,10 +104,16 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     const funnelUrl = !include_funnel || !funnel?.id ? null
       : (funnel.extern && funnel.extern_url) ? funnel.extern_url
       : `${PUBLIC_BASE}/f/${funnel.id}`;
+    const sheetUrl = include_funnel && funnel?.extern_sheet_url ? funnel.extern_sheet_url : null;
+
+    // Review-Token sicherstellen + URL bauen
+    const reviewToken = await ensureReviewToken(job.id, job.review_token);
+    const reviewUrl = `${PUBLIC_BASE}/review/${reviewToken}`;
 
     await sendEntwurfsMail({
       to: to.trim(), betreff, anschreiben, job, kunde,
-      creatives: selCreatives, adcopies: selAdcopies, funnelUrl,
+      creatives: selCreatives, adcopies: selAdcopies,
+      funnelUrl, sheetUrl, reviewUrl,
     });
 
     // Historie speichern
@@ -131,6 +146,16 @@ router.get('/jobs/:id/export/versand', async (req, res) => {
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ versand: data });
+});
+
+/* GET /api/jobs/:id/export/review — neueste Review-Antwort + Status */
+router.get('/jobs/:id/export/review', async (req, res) => {
+  const { data, error } = await supabase
+    .from('talentone_reviews')
+    .select('*').eq('job_id', req.params.id)
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ review: data });
 });
 
 export default router;

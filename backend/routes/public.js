@@ -328,4 +328,78 @@ router.post('/funnel/:id/bewerbung', async (req, res) => {
   res.status(201).json({ ok: true, bewerbung_id: data.id });
 });
 
+/* ─────── Review-Seite (Token-basiert, ohne Login) ─────── */
+
+const REVIEW_PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
+
+// GET /api/public/review/:token — komplette Daten für die Review-Seite
+router.get('/review/:token', async (req, res) => {
+  const { data: job } = await supabase
+    .from('talentone_jobs').select('*').eq('review_token', req.params.token).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+
+  const { data: kunde } = await supabase
+    .from('talentone_kunden')
+    .select('id, firmenname, branche, logo_url, farben, agentur')
+    .eq('id', job.kunde_id).maybeSingle();
+  const { data: creatives = [] } = await supabase
+    .from('talentone_creatives').select('*').eq('job_id', job.id)
+    .order('created_at', { ascending: false });
+  const { data: adcopies = [] } = await supabase
+    .from('talentone_adcopies').select('*').eq('job_id', job.id);
+  const { data: funnel } = await supabase
+    .from('talentone_funnels').select('*').eq('job_id', job.id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  const funnelUrl = !funnel?.id ? null
+    : (funnel.extern && funnel.extern_url) ? funnel.extern_url
+    : funnel.veroeffentlicht ? `${REVIEW_PUBLIC_BASE}/f/${funnel.id}`
+    : null;
+  const sheetUrl = funnel?.extern_sheet_url || null;
+  const { data: review } = await supabase
+    .from('talentone_reviews').select('*').eq('job_id', job.id)
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+
+  res.json({
+    job: { id: job.id, stelle: job.stelle, region: job.region },
+    kunde,
+    creatives,
+    adcopies,
+    funnel_url: funnelUrl,
+    sheet_url: sheetUrl,
+    review,
+  });
+});
+
+// POST /api/public/review/:token  body: { status, kommentare }
+router.post('/review/:token', async (req, res) => {
+  const { status, kommentare } = req.body || {};
+  if (!['freigegeben', 'aenderungen'].includes(status)) {
+    return res.status(400).json({ error: 'status muss "freigegeben" oder "aenderungen" sein.' });
+  }
+  const { data: job } = await supabase
+    .from('talentone_jobs').select('id, review_token').eq('review_token', req.params.token).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  // Upsert: existiert schon ein Review für den Job → updaten, sonst insert
+  const { data: existing } = await supabase
+    .from('talentone_reviews').select('id').eq('job_id', job.id)
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('talentone_reviews')
+      .update({ status, kommentare: kommentare || null })
+      .eq('id', existing.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true, review: data });
+  }
+
+  const { data, error } = await supabase
+    .from('talentone_reviews')
+    .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ ok: true, review: data });
+});
+
 export default router;
