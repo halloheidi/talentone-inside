@@ -10,8 +10,9 @@ import { sendFormularEingang } from '../mail.js';
 
 const router = Router();
 
+import { getPublicBaseUrl } from '../branding.js';
+
 const MITARBEITER_MAIL = process.env.MITARBEITER_MAIL || 'info@nowagwirth.de';
-const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
 
 async function loadKundeByToken(token) {
   const { data } = await supabase
@@ -23,7 +24,7 @@ async function loadKundeByToken(token) {
 router.get('/upload/:token', async (req, res) => {
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, ansprechpartner, logo_url')
+    .select('id, firmenname, ansprechpartner, logo_url, agentur')
     .eq('upload_token', req.params.token)
     .maybeSingle();
   if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
@@ -31,6 +32,7 @@ router.get('/upload/:token', async (req, res) => {
     kunde: {
       firmenname: kunde.firmenname,
       ansprechpartner: kunde.ansprechpartner,
+      agentur: kunde.agentur || 'talentone',
       hat_logo: !!kunde.logo_url,
     },
   });
@@ -106,6 +108,7 @@ router.get('/formular/:token', async (req, res) => {
       firmenname: kunde.firmenname,
       ansprechpartner: kunde.ansprechpartner,
       email: kunde.email,
+      agentur: kunde.agentur || 'talentone',
     },
   });
 });
@@ -255,7 +258,7 @@ router.post('/formular/:token/submit', async (req, res) => {
         await sendFormularEingang({
           to: MITARBEITER_MAIL,
           kundenname: updated.firmenname,
-          kundeUrl: `${PUBLIC_BASE}/kunden/${kunde.id}`,
+          kundeUrl: `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}`,
         });
       } catch (err) { console.warn('[formular-bg] Mitarbeiter-Mail:', err.message); }
     })().catch(err => console.error('[formular-bg] uncaught:', err));
@@ -280,7 +283,7 @@ router.get('/funnel/:id', async (req, res) => {
   const { data: job } = await supabase
     .from('talentone_jobs').select('id, stelle, region, gehalt, benefits, kunde_id').eq('id', funnel.job_id).maybeSingle();
   const { data: kunde } = job ? await supabase
-    .from('talentone_kunden').select('id, firmenname, branche, logo_url, farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+    .from('talentone_kunden').select('id, firmenname, branche, logo_url, farben, agentur').eq('id', job.kunde_id).maybeSingle() : { data: null };
   res.json({ funnel, job, kunde });
 });
 
@@ -316,11 +319,17 @@ router.post('/funnel/:id/bewerbung', async (req, res) => {
     const { sendCapiEvent } = await import('../capi.js');
     const clientIp = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() || req.ip;
     const userAgent = req.headers['user-agent'];
+    // Brand-Domain für eventSourceUrl
+    const { data: jobForCapi } = await supabase
+      .from('talentone_jobs').select('kunde_id').eq('id', funnel.job_id).maybeSingle();
+    const { data: kundeForCapi } = jobForCapi
+      ? await supabase.from('talentone_kunden').select('agentur').eq('id', jobForCapi.kunde_id).maybeSingle()
+      : { data: null };
     sendCapiEvent({
       pixelId: funnel.pixel_id,
       accessToken: funnel.capi_access_token,
       eventName: funnel.conversion_ziel || 'Lead',
-      eventSourceUrl: `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/f/${funnel.id}`,
+      eventSourceUrl: `${getPublicBaseUrl(kundeForCapi?.agentur)}/f/${funnel.id}`,
       userData: { email, phone: telefon, clientIp, userAgent },
     }).catch(err => console.warn('[CAPI] uncaught:', err.message));
   }
@@ -345,8 +354,6 @@ router.post('/funnel/:id/bewerbung', async (req, res) => {
 
 /* ─────── Review-Seite (Token-basiert, ohne Login) ─────── */
 
-const REVIEW_PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
-
 // GET /api/public/review/:token — komplette Daten für die Review-Seite
 router.get('/review/:token', async (req, res) => {
   const { data: job } = await supabase
@@ -367,7 +374,7 @@ router.get('/review/:token', async (req, res) => {
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   const funnelUrl = !funnel?.id ? null
     : (funnel.extern && funnel.extern_url) ? funnel.extern_url
-    : funnel.veroeffentlicht ? `${REVIEW_PUBLIC_BASE}/f/${funnel.id}`
+    : funnel.veroeffentlicht ? `${getPublicBaseUrl(kunde?.agentur)}/f/${funnel.id}`
     : null;
   const sheetUrl = funnel?.extern_sheet_url || null;
   const { data: review } = await supabase

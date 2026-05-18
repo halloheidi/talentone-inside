@@ -8,7 +8,7 @@ import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js
 
 const router = Router();
 
-const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
+import { getPublicBaseUrl } from '../branding.js';
 
 function decodeBase64File(fileData) {
   return Buffer.from(fileData, 'base64');
@@ -23,8 +23,9 @@ function decodeBase64File(fileData) {
 //   file    → req.body.fileData (base64) + req.body.fileType
 //   logo (alle): req.body.logo = { fileData, fileName?, contentType? }
 router.post('/quick-create', async (req, res) => {
-  const { mode, logo } = req.body || {};
-  let kundeData = {};
+  const { mode, logo, agentur } = req.body || {};
+  const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
+  let kundeData = { agentur: finalAgentur };
   let jobData = {};
   let urlForColors = null;
 
@@ -34,6 +35,7 @@ router.post('/quick-create', async (req, res) => {
       if (!kunde.firmenname?.trim()) return res.status(400).json({ error: 'Firmenname ist Pflicht.' });
       if (!job.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
       kundeData = {
+        ...kundeData,
         firmenname: kunde.firmenname.trim(),
         ansprechpartner: kunde.ansprechpartner || null,
         email: kunde.email || null,
@@ -51,14 +53,14 @@ router.post('/quick-create', async (req, res) => {
       const { url } = req.body;
       urlForColors = url;
       const extracted = await extractFromUrl(url);
-      kundeData = toKunde(extracted);
+      kundeData = { ...toKunde(extracted), agentur: finalAgentur };
       jobData = toJob(extracted, 'url', url);
       if (!kundeData.firmenname) return res.status(422).json({ error: 'Firmenname konnte nicht ermittelt werden.', extracted });
       if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
     } else if (mode === 'file') {
       const { fileData, fileType } = req.body;
       const extracted = await extractFromFile(fileData, fileType);
-      kundeData = toKunde(extracted);
+      kundeData = { ...toKunde(extracted), agentur: finalAgentur };
       jobData = toJob(extracted, 'pdf');
       if (!kundeData.firmenname) return res.status(422).json({ error: 'Firmenname konnte nicht ermittelt werden.', extracted });
       if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
@@ -360,8 +362,9 @@ router.delete('/referenzbilder/:id', async (req, res) => {
 
 // POST /api/kunden/formular-anlegen  body: { email, firmenname?, ansprechpartner?, customText? }
 router.post('/formular-anlegen', async (req, res) => {
-  const { email, firmenname, ansprechpartner, customText } = req.body || {};
+  const { email, firmenname, ansprechpartner, customText, agentur } = req.body || {};
   if (!email?.trim()) return res.status(400).json({ error: 'E-Mail ist Pflicht.' });
+  const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
 
   const token = randomUUID();
   const { data: kunde, error: kErr } = await supabase
@@ -372,15 +375,16 @@ router.post('/formular-anlegen', async (req, res) => {
       ansprechpartner: ansprechpartner?.trim() || null,
       status: 'wartend',
       formular_token: token,
+      agentur: finalAgentur,
     })
     .select().single();
   if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });
 
-  const formularUrl = `${PUBLIC_BASE}/formular/${token}`;
+  const formularUrl = `${getPublicBaseUrl(kunde.agentur)}/formular/${token}`;
   try {
     await sendFormularEinladung({
       to: kunde.email, ansprechpartner: kunde.ansprechpartner,
-      formularUrl, customText,
+      formularUrl, customText, agentur: kunde.agentur,
     });
   } catch (err) {
     console.error('[formular-anlegen] Mail:', err.message);
@@ -411,7 +415,7 @@ router.post('/:id/anfrage', async (req, res) => {
     if (uErr) return res.status(500).json({ error: uErr.message });
   }
 
-  const uploadUrl = `${PUBLIC_BASE}/upload/${token}`;
+  const uploadUrl = `${getPublicBaseUrl(kunde.agentur)}/upload/${token}`;
 
   try {
     await sendUploadAnfrage({
@@ -420,6 +424,7 @@ router.post('/:id/anfrage', async (req, res) => {
       ansprechpartner: kunde.ansprechpartner,
       uploadUrl,
       customText,
+      agentur: kunde.agentur,
     });
     res.json({ ok: true, uploadUrl });
   } catch (err) {

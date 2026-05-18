@@ -3,6 +3,10 @@
 # Hängt am bestehenden Traefik im Netzwerk "root_default".
 # Traefik leitet :80 zentral auf :443 — daher kein separater HTTP-Router nötig.
 # Certresolver ist "mytlschallenge" (HTTP-01 via Let's Encrypt).
+#
+# Beide Hosts werden vom selben Frontend/Backend bedient:
+# - inside.talent-one.de       (TalentOne-Kunden)
+# - recruiting.nowagwirth.com  (Nowag & Wirth-Kunden)
 
 services:
   inside-backend:
@@ -16,7 +20,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
-      - "traefik.http.routers.inside-api.rule=Host(`inside.talent-one.de`) && PathPrefix(`/api`)"
+      # API für beide Domains
+      - "traefik.http.routers.inside-api.rule=(Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`)) && PathPrefix(`/api`)"
       - "traefik.http.routers.inside-api.entrypoints=web,websecure"
       - "traefik.http.routers.inside-api.tls=true"
       - "traefik.http.routers.inside-api.tls.certresolver=mytlschallenge"
@@ -28,7 +33,9 @@ services:
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
-        VITE_API_BASE: https://inside.talent-one.de/api
+        VITE_API_BASE: /api
+        VITE_TALENTONE_DOMAIN: inside.talent-one.de
+        VITE_NOWAGWIRTH_DOMAIN: recruiting.nowagwirth.com
     image: talentone-inside-frontend:latest
     container_name: talentone-inside-frontend
     restart: unless-stopped
@@ -37,10 +44,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
-      - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`)"
+      # Web-UI für beide Domains
+      - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`)"
       - "traefik.http.routers.inside-web.entrypoints=web,websecure"
       - "traefik.http.routers.inside-web.tls=true"
       - "traefik.http.routers.inside-web.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.inside-web.tls.domains[0].main=inside.talent-one.de"
+      - "traefik.http.routers.inside-web.tls.domains[1].main=recruiting.nowagwirth.com"
       - "traefik.http.routers.inside-web.priority=1"
       - "traefik.http.services.inside-web.loadbalancer.server.port=80"
 

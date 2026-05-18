@@ -67,7 +67,6 @@ export default function PublicFunnel() {
     return (
       <div className="public-page">
         <div className="public-card">
-          <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
           <h1 className="public-title">Hoppla.</h1>
           <p className="public-sub">{error}</p>
         </div>

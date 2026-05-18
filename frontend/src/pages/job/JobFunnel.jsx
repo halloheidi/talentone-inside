@@ -5,8 +5,7 @@ import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
 import CropModal from '../../components/CropModal.jsx';
 import BewerbungenTable from '../../components/BewerbungenTable.jsx';
-
-const PUBLIC_BASE = (import.meta.env.VITE_PUBLIC_BASE || window.location.origin);
+import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
 
 const TYPE_META = {
   intro:    { label: 'Startseite',  icon: '👋', removable: false },
@@ -228,7 +227,8 @@ export default function JobFunnel() {
   }
   if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
 
-  const internalUrl = `${PUBLIC_BASE}/f/${funnel.id}`;
+  const brandBase = getBrandBaseUrl(kunde?.agentur);
+  const internalUrl = `${brandBase}/f/${funnel.id}`;
   const funnelUrl = extern && externUrl.trim() ? externUrl.trim() : internalUrl;
   const previewFunnel = { ...funnel, screens, conversion_ziel: conversionZiel };
 
@@ -400,7 +400,7 @@ export default function JobFunnel() {
           {/* Bewerbungen */}
           <fieldset className="formular-section bewerbungen-section">
             <legend>Eingegangene Bewerbungen</legend>
-            <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} />
+            <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
             <BewerbungenTable
               job={job}
               internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
@@ -518,8 +518,8 @@ export default function JobFunnel() {
 
 /* ═════════════════════ Bewerbungen-Link für Kunden ═════════════════════ */
 
-function BewerbungenLink({ token }) {
-  const url = `${PUBLIC_BASE}/bewerbungen/${token}`;
+function BewerbungenLink({ token, agentur }) {
+  const url = `${getBrandBaseUrl(agentur)}/bewerbungen/${token}`;
   const [copied, setCopied] = useState(false);
   async function copy() {
     try {
@@ -688,7 +688,7 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
 /* ═════════════════════ Webhook-Info Box (Perspective) ═════════════════════ */
 
 function WebhookInfo({ jobId }) {
-  const webhookUrl = `${PUBLIC_BASE}/api/webhooks/perspective?job_id=${jobId}`;
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
   async function copyToClipboard() {
     try {

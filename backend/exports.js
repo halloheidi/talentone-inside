@@ -5,38 +5,12 @@ import archiver from 'archiver';
 import PDFDocument from 'pdfkit';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
+import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const RESEND_API = 'https://api.resend.com/emails';
 
-// Branding-Mapping pro Agentur
-const BRANDING = {
-  talentone: {
-    name: 'TalentOne',
-    from: 'TalentOne <hallo@talent-one.de>',
-    replyTo: 'hallo@talent-one.de',
-    primary: '#0a0a0a',
-    accent: '#d4ff00',
-    accentInk: '#0a0a0a',
-    footer: 'TalentOne — Recruiting neu gedacht',
-    website: 'https://talent-one.de',
-    logoHtml: '<span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Talent<span style="color:#d4ff00;">One</span></span>',
-  },
-  nowagwirth: {
-    name: 'Nowag & Wirth',
-    from: 'Nowag & Wirth <hallo@nowagwirth.de>',
-    replyTo: 'hallo@nowagwirth.de',
-    primary: '#1a3a6c',
-    accent: '#ffd966',
-    accentInk: '#1a3a6c',
-    footer: 'Nowag & Wirth — Digitales Marketing',
-    website: 'https://nowagwirth.de',
-    logoHtml: `<img src="${(process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de')}/nowagwirth-logo.png" alt="Nowag &amp; Wirth" height="36" style="display:inline-block;background:#fff;border-radius:6px;padding:4px 8px;">`,
-  },
-};
-export function getBranding(agentur) {
-  return BRANDING[agentur] || BRANDING.talentone;
-}
+export { getBranding };
 
 const STYLE_LABEL = {
   emotional: 'Emotional / Story',
@@ -240,7 +214,7 @@ ${antworten.map(a => `
 </div>` : '';
 
   const bewerbungenUrl = job?.bewerbungen_token
-    ? `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/bewerbungen/${job.bewerbungen_token}`
+    ? `${getPublicBaseUrl(kunde?.agentur)}/bewerbungen/${job.bewerbungen_token}`
     : null;
 
   const bewerbungenButtonHtml = bewerbungenUrl ? `
@@ -282,7 +256,7 @@ ${antworten.map(a => `
     ${sheetHtml}
   </td></tr>
   <tr><td style="padding:18px 28px;background:#fafaf8;border-top:1px solid #ececea;text-align:center;">
-    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.website}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.website.replace(/^https?:\/\//, ''))}</a></p>
+    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.websiteUrl}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.websiteUrl.replace(/^https?:\/\//, ''))}</a></p>
   </td></tr>
 </table></td></tr></table></body></html>`;
 
@@ -307,9 +281,9 @@ ${antworten.map(a => `
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: brand.from,
+      from: getMailFrom(brand),
       to: recipients,
-      reply_to: bewerbung?.email || brand.replyTo,
+      reply_to: bewerbung?.email || getMailReplyTo(brand),
       subject: subjekt,
       html,
       text: textParts.join('\n'),
@@ -424,7 +398,7 @@ ${sortedAdcopies.map(a => `
     <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Änderungswünschen kannst du direkt im <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> kommentieren oder einfach auf diese Mail antworten.</p>
   </td></tr>
   <tr><td style="padding:14px 32px;background:#fafaf8;text-align:center;">
-    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.website}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.website.replace(/^https?:\/\//, ''))}</a></p>
+    <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.websiteUrl}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.websiteUrl.replace(/^https?:\/\//, ''))}</a></p>
   </td></tr>
 </table></td></tr></table></body></html>`;
 
@@ -444,9 +418,9 @@ ${sortedAdcopies.map(a => `
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: brand.from,
+      from: getMailFrom(brand),
       to,
-      reply_to: brand.replyTo,
+      reply_to: getMailReplyTo(brand),
       subject: betreff || `${kunde?.firmenname || 'Ihre Kampagne'} — Entwürfe zur Freigabe`,
       html,
       text: textParts.join('\n'),

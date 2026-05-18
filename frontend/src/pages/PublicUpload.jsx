@@ -1,6 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
+import { getBrand } from '../lib/branding.js';
+
+function BrandHeader({ agentur }) {
+  const brand = getBrand(agentur);
+  if (brand.key === 'nowagwirth') {
+    return (
+      <div className="public-brand">
+        <img src={brand.logoUrl} alt={brand.name} style={{ height: 28 }} />
+      </div>
+    );
+  }
+  return <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>;
+}
+
+function BrandFooter({ agentur }) {
+  const brand = getBrand(agentur);
+  return (
+    <p className="public-footer-line" style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#9a9994' }}>
+      {brand.madeWith.split('by')[0]}by <a href={brand.websiteUrl} target="_blank" rel="noreferrer" style={{ color: '#5a5955', textDecoration: 'none', borderBottom: '1px dotted #c0bfba' }}>{brand.name}</a>
+    </p>
+  );
+}
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -85,7 +107,7 @@ export default function PublicUpload() {
     return (
       <div className="public-page">
         <div className="public-card">
-          <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
+          <BrandHeader agentur={info?.agentur} />
           <h1 className="public-title">Hoppla.</h1>
           <p className="public-sub">{error}</p>
         </div>
@@ -98,7 +120,7 @@ export default function PublicUpload() {
   return (
     <div className="public-page">
       <div className="public-card">
-        <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
+        <BrandHeader agentur={info?.agentur} />
         <h1 className="public-title">Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : info.firmenname}!</h1>
         <p className="public-sub">
           Schön, dass du hier bist. Lade einfach euer Logo und ein paar Fotos vom Team / Arbeitsplatz hoch — wir nutzen sie für eure Recruiting-Kampagne.
@@ -161,6 +183,7 @@ export default function PublicUpload() {
         <p className="public-foot">
           Sobald du fertig bist, kannst du den Tab einfach schließen — wir bekommen automatisch Bescheid. Vielen Dank!
         </p>
+        <BrandFooter agentur={info?.agentur} />
       </div>
     </div>
   );

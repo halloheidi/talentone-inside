@@ -1,21 +1,28 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { generateAdCopy, ensureLinkInText, isValidStyle, STYLES } from '../adcopies.js';
+import { getPublicBaseUrl } from '../branding.js';
 
 const router = Router();
-
-const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
 
 // Liefert die aktuell gültige Funnel-URL oder null (wenn kein Funnel oder intern aber nicht veröffentlicht)
 async function loadFunnelUrl(job_id) {
   const { data: funnel } = await supabase
     .from('talentone_funnels')
-    .select('id, veroeffentlicht, extern, extern_url')
+    .select('id, veroeffentlicht, extern, extern_url, job_id')
     .eq('job_id', job_id)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (!funnel) return null;
   if (funnel.extern && funnel.extern_url) return funnel.extern_url;
-  if (funnel.veroeffentlicht) return `${PUBLIC_BASE}/f/${funnel.id}`;
+  if (funnel.veroeffentlicht) {
+    // Brand-Domain anhand kunde.agentur
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('kunde_id').eq('id', funnel.job_id).maybeSingle();
+    const { data: kunde } = job ? await supabase
+      .from('talentone_kunden').select('agentur').eq('id', job.kunde_id).maybeSingle()
+      : { data: null };
+    return `${getPublicBaseUrl(kunde?.agentur)}/f/${funnel.id}`;
+  }
   return null;
 }
 

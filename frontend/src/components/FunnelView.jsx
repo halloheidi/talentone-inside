@@ -1,4 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import { getBrand } from '../lib/branding.js';
+
+function FunnelBrandFooter({ agentur }) {
+  const brand = getBrand(agentur);
+  return (
+    <footer className="funnel-foot">
+      {brand.madeWith.split('by')[0]}by <a href={brand.websiteUrl} target="_blank" rel="noreferrer">{brand.name}</a>
+    </footer>
+  );
+}
 
 /**
  * Wiederverwendbare Funnel-Anzeige — wird im Editor als Live-Vorschau
@@ -280,10 +290,8 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
         )}
       </div>
 
-      {/* TalentOne-Footer — auf jedem Screen ganz unten */}
-      <footer className="funnel-foot">
-        Made with ❤️ by <a href="https://talent-one.de" target="_blank" rel="noreferrer">TalentOne</a>
-      </footer>
+      {/* Brand-Footer — auf jedem Screen ganz unten */}
+      <FunnelBrandFooter agentur={kunde?.agentur} />
     </div>
   );
 }

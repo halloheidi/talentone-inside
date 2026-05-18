@@ -42,6 +42,7 @@ export default function QuickCreateModal({ open, onClose }) {
   const [tab, setTab] = useState('url');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [agentur, setAgentur] = useState('talentone');
 
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -62,6 +63,7 @@ export default function QuickCreateModal({ open, onClose }) {
     setTab('url');
     setError('');
     setBusy(false);
+    setAgentur('talentone');
     setUrl('');
     setFile(null);
     setManual(EMPTY_MANUAL);
@@ -99,6 +101,7 @@ export default function QuickCreateModal({ open, onClose }) {
             firmenname: invite.firmenname.trim() || undefined,
             ansprechpartner: invite.ansprechpartner.trim() || undefined,
             customText: invite.customText.trim() || undefined,
+            agentur,
           },
         });
         setInviteSuccess({
@@ -145,6 +148,7 @@ export default function QuickCreateModal({ open, onClose }) {
         };
       }
 
+      body.agentur = agentur;
       const res = await api('/kunden/quick-create', { method: 'POST', body });
       reset();
       onClose();
@@ -181,6 +185,23 @@ export default function QuickCreateModal({ open, onClose }) {
         </>
       )}
     >
+      {/* Agentur-Auswahl — ganz oben, bestimmt komplettes Branding für diesen Kunden */}
+      <div className="agentur-picker">
+        <label className="agentur-picker-label">Für welche Agentur ist dieser Kunde?</label>
+        <div className="agentur-options">
+          <label className={`agentur-option ${agentur === 'talentone' ? 'is-active' : ''}`}>
+            <input type="radio" name="agentur" value="talentone" checked={agentur === 'talentone'} onChange={() => setAgentur('talentone')} disabled={busy} />
+            <strong>TalentOne</strong>
+            <span>inside.talent-one.de</span>
+          </label>
+          <label className={`agentur-option ${agentur === 'nowagwirth' ? 'is-active' : ''}`}>
+            <input type="radio" name="agentur" value="nowagwirth" checked={agentur === 'nowagwirth'} onChange={() => setAgentur('nowagwirth')} disabled={busy} />
+            <strong>Nowag &amp; Wirth</strong>
+            <span>recruiting.nowagwirth.com</span>
+          </label>
+        </div>
+      </div>
+
       <div className="modal-tabs">
         {TABS.map(t => (
           <button

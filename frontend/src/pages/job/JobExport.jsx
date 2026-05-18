@@ -3,6 +3,7 @@ import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { downloadFromUrl } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
+import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
   emotional: 'Emotional / Story',
@@ -223,9 +224,8 @@ export default function JobExport() {
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
 
-  const PUB_BASE = import.meta.env.VITE_PUBLIC_BASE || window.location.origin;
   const bewerbungenUrl = job?.bewerbungen_token
-    ? `${PUB_BASE}/bewerbungen/${job.bewerbungen_token}`
+    ? `${getBrandBaseUrl(kunde?.agentur)}/bewerbungen/${job.bewerbungen_token}`
     : null;
 
   return (

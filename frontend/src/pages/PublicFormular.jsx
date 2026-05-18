@@ -1,6 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
+import { getBrand } from '../lib/branding.js';
+
+function BrandHeader({ agentur }) {
+  const brand = getBrand(agentur);
+  if (brand.key === 'nowagwirth') {
+    return (
+      <div className="public-brand">
+        <img src={brand.logoUrl} alt={brand.name} style={{ height: 28 }} />
+      </div>
+    );
+  }
+  return <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>;
+}
+
+function BrandFooter({ agentur }) {
+  const brand = getBrand(agentur);
+  return (
+    <p className="public-footer-line" style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#9a9994' }}>
+      {brand.madeWith.split('by')[0]}by <a href={brand.websiteUrl} target="_blank" rel="noreferrer" style={{ color: '#5a5955', textDecoration: 'none', borderBottom: '1px dotted #c0bfba' }}>{brand.name}</a>
+    </p>
+  );
+}
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -313,7 +335,7 @@ export default function PublicFormular() {
     return (
       <div className="public-page">
         <div className="public-card">
-          <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
+          <BrandHeader agentur={info?.agentur} />
           <h1 className="public-title">Hoppla.</h1>
           <p className="public-sub">{loadError}</p>
         </div>
@@ -325,7 +347,7 @@ export default function PublicFormular() {
     return (
       <div className="public-page">
         <div className="public-card">
-          <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
+          <BrandHeader agentur={info?.agentur} />
           <h1 className="public-title">Vielen Dank!</h1>
           <p className="public-sub">Eure Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei euch.</p>
         </div>
@@ -336,7 +358,7 @@ export default function PublicFormular() {
   return (
     <div className="public-page">
       <div className="public-card public-card-form">
-        <div className="public-brand"><span>Talent</span><span className="brand-accent">One</span></div>
+        <BrandHeader agentur={info?.agentur} />
         <h1 className="public-title">Briefing-Formular</h1>
         <p className="public-sub">
           Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : (info.firmenname || 'zusammen')}! Damit wir eine passgenaue Recruiting-Kampagne für euch bauen können, brauchen wir ein paar Infos. ~10 Minuten.
@@ -568,6 +590,7 @@ export default function PublicFormular() {
             </button>
           </div>
         </form>
+        <BrandFooter agentur={info?.agentur} />
       </div>
     </div>
   );

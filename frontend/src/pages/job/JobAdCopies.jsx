@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
+import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLES = [
   { id: 'emotional', label: 'Emotional',     subtitle: 'Story / Gefühl', words: '150–200 Wörter' },
@@ -9,7 +10,7 @@ const STYLES = [
 ];
 
 export default function JobAdCopies() {
-  const { job } = useJob();
+  const { job, kunde } = useJob();
   const [items, setItems] = useState([]);                  // alle adcopies aus DB
   const [drafts, setDrafts] = useState({});                // { stil: text } — User-Edit
   const [savingId, setSavingId] = useState(null);
@@ -34,7 +35,7 @@ export default function JobAdCopies() {
         // Funnel-URL ermitteln (gleiche Logik wie Backend)
         const fn = f.funnel;
         if (fn?.extern && fn.extern_url) setFunnelUrl(fn.extern_url);
-        else if (fn?.veroeffentlicht) setFunnelUrl(`${window.location.origin}/f/${fn.id}`);
+        else if (fn?.veroeffentlicht) setFunnelUrl(`${getBrandBaseUrl(kunde?.agentur)}/f/${fn.id}`);
         else setFunnelUrl(null);
       })
       .catch(err => setError(err.message))

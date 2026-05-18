@@ -14,7 +14,7 @@ import bewerbungenRouter from './routes/bewerbungen.js';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://inside.talent-one.de,http://localhost:5173')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://inside.talent-one.de,https://recruiting.nowagwirth.com,http://localhost:5173')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);

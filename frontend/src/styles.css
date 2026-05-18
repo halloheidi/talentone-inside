@@ -4165,3 +4165,25 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 @media (max-width: 500px) {
   .pub-mcard-customs { grid-template-columns: 1fr; }
 }
+
+/* ─── Agentur-Auswahl im "Neuer Kunde"-Modal ─── */
+.agentur-picker {
+  padding: 14px 18px; margin-bottom: 16px;
+  background: linear-gradient(180deg, #fafff0 0%, #fafaf8 100%);
+  border: 1px solid #e8f0b8; border-radius: var(--radius-sm);
+}
+.agentur-picker-label {
+  display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px;
+}
+.agentur-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.agentur-option {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px;
+  background: #fff; border: 2px solid var(--line); border-radius: var(--radius-sm);
+  cursor: pointer; transition: all 0.1s;
+}
+.agentur-option strong { font-size: 14px; color: var(--ink-1); }
+.agentur-option span { font-size: 11px; color: var(--ink-4); font-family: ui-monospace, monospace; }
+.agentur-option input { display: none; }
+.agentur-option.is-active { border-color: var(--ink-1); background: #fafaf8; }
+.agentur-option:hover { border-color: var(--ink-2); }

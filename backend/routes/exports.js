@@ -5,10 +5,9 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
+import { getPublicBaseUrl } from '../branding.js';
 
 const router = Router();
-
-const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
 
 // Stellt sicher dass der Job einen review_token hat. Gibt ihn zurück.
 async function ensureReviewToken(jobId, existing) {
@@ -43,10 +42,10 @@ function filterByIds(list, ids) {
 router.get('/jobs/:id/export', async (req, res) => {
   try {
     const data = await loadFullJob(req.params.id);
-    // Externer Funnel → externe URL, sonst interne PUBLIC_BASE/f/:id
+    const baseUrl = getPublicBaseUrl(data.kunde?.agentur);
     const funnelUrl = !data.funnel?.id ? null
       : (data.funnel.extern && data.funnel.extern_url) ? data.funnel.extern_url
-      : `${PUBLIC_BASE}/f/${data.funnel.id}`;
+      : `${baseUrl}/f/${data.funnel.id}`;
     res.json({ ...data, funnel_url: funnelUrl });
   } catch (err) {
     res.status(404).json({ error: err.message });
@@ -99,16 +98,17 @@ router.post('/jobs/:id/export/email', async (req, res) => {
 
   try {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
+    const baseUrl = getPublicBaseUrl(kunde?.agentur);
     const selCreatives = filterByIds(creatives, creative_ids);
     const selAdcopies = filterByIds(adcopies, adcopy_ids);
     const funnelUrl = !include_funnel || !funnel?.id ? null
       : (funnel.extern && funnel.extern_url) ? funnel.extern_url
-      : `${PUBLIC_BASE}/f/${funnel.id}`;
+      : `${baseUrl}/f/${funnel.id}`;
     const sheetUrl = include_funnel && funnel?.extern_sheet_url ? funnel.extern_sheet_url : null;
 
     // Review-Token sicherstellen + URL bauen
     const reviewToken = await ensureReviewToken(job.id, job.review_token);
-    const reviewUrl = `${PUBLIC_BASE}/review/${reviewToken}`;
+    const reviewUrl = `${baseUrl}/review/${reviewToken}`;
 
     await sendEntwurfsMail({
       to: to.trim(), betreff, anschreiben, job, kunde,
