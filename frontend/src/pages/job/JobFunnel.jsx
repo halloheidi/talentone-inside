@@ -238,6 +238,8 @@ export default function JobFunnel() {
           type="button"
           className={`funnel-mode-btn ${!extern ? 'is-active' : ''}`}
           onClick={() => setExtern(false)}
+          disabled={extern && externUrl.trim().length > 0}
+          title={extern && externUrl.trim() ? 'Externe URL erst entfernen, um zurück zum eigenen Funnel zu wechseln' : ''}
         >
           🛠 Eigenen Funnel verwenden
         </button>
@@ -291,11 +293,11 @@ export default function JobFunnel() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className={`funnel-editor-cols ${extern ? 'is-extern' : ''}`}>
+      <div className={`funnel-editor-cols ${extern && externUrl.trim() ? 'is-extern-active' : ''}`}>
         {/* ───────── Linke Spalte: Screen-Liste + Detail-Editor ───────── */}
         <div className="funnel-editor-left">
 
-          <fieldset className="formular-section">
+          <fieldset className="formular-section screens-section">
             <legend>Screens ({screens.length})</legend>
             <div className="screen-list">
               {screens.map((s, i) => {
@@ -335,16 +337,16 @@ export default function JobFunnel() {
             </div>
           </fieldset>
 
-          {/* Detail-Editor des aktiven Screens */}
-          {activeScreen && <ScreenEditor
+          {/* Detail-Editor des aktiven Screens — nur bei internem Funnel */}
+          {activeScreen && !(extern && externUrl.trim()) && <ScreenEditor
             screen={activeScreen}
             patch={patchActive}
             onPickImage={() => setPickerOpen(activeScreen.id)}
             onClearImage={() => clearImage(activeScreen.id)}
           />}
 
-          {/* Bewerbungen */}
-          <fieldset className="formular-section">
+          {/* Bewerbungen — bei externem Funnel ausgeblendet (Bewerbungen kommen extern) */}
+          <fieldset className="formular-section bewerbungen-section">
             <legend>Eingegangene Bewerbungen ({bewerbungen.length})</legend>
             {bewerbungen.length === 0
               ? <div className="motiv-sub">Noch keine Bewerbungen.</div>

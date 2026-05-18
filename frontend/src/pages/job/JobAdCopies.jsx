@@ -18,19 +18,42 @@ export default function JobAdCopies() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(null);
+  const [funnelUrl, setFunnelUrl] = useState(null);
+  const [updateLinksBusy, setUpdateLinksBusy] = useState(false);
 
   function load() {
     setLoading(true);
-    api(`/adcopies?job_id=${job.id}`)
-      .then(res => {
+    Promise.all([
+      api(`/adcopies?job_id=${job.id}`),
+      api(`/funnels?job_id=${job.id}`).catch(() => ({ funnel: null })),
+    ])
+      .then(([res, f]) => {
         const list = res.adcopies || [];
         setItems(list);
         setDrafts(Object.fromEntries(list.map(c => [c.stil, c.text])));
+        // Funnel-URL ermitteln (gleiche Logik wie Backend)
+        const fn = f.funnel;
+        if (fn?.extern && fn.extern_url) setFunnelUrl(fn.extern_url);
+        else if (fn?.veroeffentlicht) setFunnelUrl(`${window.location.origin}/f/${fn.id}`);
+        else setFunnelUrl(null);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
+
+  async function updateLinks() {
+    setUpdateLinksBusy(true);
+    try {
+      const res = await api('/adcopies/update-links', { method: 'POST', body: { job_id: job.id } });
+      load(); // reload mit aktualisierten Texten
+      alert(`${res.updated} Text(e) aktualisiert${res.skipped ? `, ${res.skipped} unverändert` : ''}.`);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUpdateLinksBusy(false);
+    }
+  }
 
   function findItem(stil) { return items.find(c => c.stil === stil); }
   function isDirty(stil) {
@@ -120,6 +143,17 @@ export default function JobAdCopies() {
     }
   }
 
+  const hasItems = items.length > 0;
+  const hasPlaceholder = hasItems && items.some(i => (drafts[i.stil] || i.text || '').includes('[Funnel-Link wird ergänzt]'));
+  const hasOldLink = hasItems && funnelUrl && items.some(i => {
+    const t = drafts[i.stil] || i.text || '';
+    return /https?:\/\/\S+/.test(t) && !t.includes(funnelUrl);
+  });
+  const canUpdateLinks = !!funnelUrl && hasItems && (hasPlaceholder || hasOldLink || items.some(i => {
+    const t = drafts[i.stil] || i.text || '';
+    return !t.includes(funnelUrl);
+  }));
+
   return (
     <div>
       <div className="adcopy-head">
@@ -127,10 +161,23 @@ export default function JobAdCopies() {
           <h2 className="section-title">Werbetexte</h2>
           <p className="section-sub">Drei Stile auf Basis aller Briefing-Infos. Editierbar, einzeln oder alle neu generierbar.</p>
         </div>
-        <button className="btn-primary" onClick={generateAll} disabled={genAllBusy || regenStil}>
-          {genAllBusy ? 'Generiere alle…' : (items.length ? 'Alle neu generieren' : 'Ad Copies generieren')}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {funnelUrl && canUpdateLinks && (
+            <button className="btn-ghost" onClick={updateLinks} disabled={updateLinksBusy}>
+              {updateLinksBusy ? 'Aktualisiere…' : '🔗 Links in Ad Copies aktualisieren'}
+            </button>
+          )}
+          <button className="btn-primary" onClick={generateAll} disabled={genAllBusy || regenStil}>
+            {genAllBusy ? 'Generiere alle…' : (items.length ? 'Alle neu generieren' : 'Ad Copies generieren')}
+          </button>
+        </div>
       </div>
+
+      {!funnelUrl && (
+        <div className="warn-banner">
+          ⚠️ Noch kein Bewerbungslink vorhanden — bitte zuerst im Tab „Funnel" einen Funnel anlegen und veröffentlichen oder einen externen Link eintragen. Solange erscheint im Text nur ein Platzhalter.
+        </div>
+      )}
 
       {error && <div className="alert alert-error" style={{ marginBottom: 14 }}>{error}</div>}
 

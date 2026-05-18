@@ -2369,6 +2369,19 @@ button { font-family: inherit; }
 }
 .adcopy-skeleton > div.short { width: 60%; }
 
+/* Warn-Banner (z.B. fehlender Funnel-Link) */
+.warn-banner {
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  background: #fffbe6;
+  border: 1px solid #f2d76b;
+  border-left: 4px solid #d4a800;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #5a4a00;
+}
+
 /* ───────── Funnel: Mode-Toggle (intern vs extern) ───────── */
 .funnel-mode-toggle {
   display: grid;
@@ -2398,15 +2411,18 @@ button { font-family: inherit; }
   box-shadow: var(--shadow-sm);
 }
 
-/* Bei extern: linke Spalte ausgegraut, rechts ausgeblendet */
-.funnel-editor-cols.is-extern .funnel-editor-left > fieldset:not(:first-of-type) {
-  opacity: 0.4;
-  pointer-events: none;
-}
-.funnel-editor-cols.is-extern .funnel-editor-right {
+/* Bei extern mit URL: interne Editor-Sektionen komplett ausblenden, rechte Spalte weg.
+   Sektionen die sichtbar bleiben: tracking (Pixel/CAPI). */
+.funnel-editor-cols.is-extern-active .screens-section,
+.funnel-editor-cols.is-extern-active .bewerbungen-section,
+.funnel-editor-cols.is-extern-active .funnel-editor-right {
   display: none;
 }
-.funnel-editor-cols.is-extern { grid-template-columns: 1fr; }
+.funnel-editor-cols.is-extern-active { grid-template-columns: 1fr; }
+
+/* Disabled-Toggle (wenn extern-URL eingetragen ist) */
+.funnel-mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.funnel-mode-btn:disabled:hover { color: var(--ink-3); }
 
 /* KO-Flag in Options-Editor */
 .option-row { display: flex; align-items: center; gap: 6px; }

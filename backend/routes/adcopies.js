@@ -1,8 +1,23 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { generateAdCopy, isValidStyle, STYLES } from '../adcopies.js';
+import { generateAdCopy, ensureLinkInText, isValidStyle, STYLES } from '../adcopies.js';
 
 const router = Router();
+
+const PUBLIC_BASE = process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de';
+
+// Liefert die aktuell gültige Funnel-URL oder null (wenn kein Funnel oder intern aber nicht veröffentlicht)
+async function loadFunnelUrl(job_id) {
+  const { data: funnel } = await supabase
+    .from('talentone_funnels')
+    .select('id, veroeffentlicht, extern, extern_url')
+    .eq('job_id', job_id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!funnel) return null;
+  if (funnel.extern && funnel.extern_url) return funnel.extern_url;
+  if (funnel.veroeffentlicht) return `${PUBLIC_BASE}/f/${funnel.id}`;
+  return null;
+}
 
 /* GET /api/adcopies?job_id=…  */
 router.get('/', async (req, res) => {
@@ -25,11 +40,11 @@ async function loadJobAndKunde(job_id) {
   return { job, kunde };
 }
 
-async function generateAndStore({ job, kunde, style }) {
+async function generateAndStore({ job, kunde, style, funnelUrl }) {
   // Bestehende für diesen Style+Job löschen (Replace-Semantik)
   await supabase.from('talentone_adcopies')
     .delete().eq('job_id', job.id).eq('stil', style);
-  const out = await generateAdCopy({ job, kunde, style });
+  const out = await generateAdCopy({ job, kunde, style, funnelUrl });
   const { data, error } = await supabase
     .from('talentone_adcopies')
     .insert({ job_id: job.id, stil: out.stil, text: out.text, bearbeitet: false })
@@ -52,6 +67,7 @@ router.post('/generate', async (req, res) => {
 
   try {
     const { job, kunde } = await loadJobAndKunde(job_id);
+    const funnelUrl = await loadFunnelUrl(job_id);
 
     // Bestehende laden (für Skip-Logik)
     const { data: existing = [] } = await supabase
@@ -68,7 +84,7 @@ router.post('/generate', async (req, res) => {
     });
 
     const results = await Promise.allSettled(
-      toGenerate.map(s => generateAndStore({ job, kunde, style: s }))
+      toGenerate.map(s => generateAndStore({ job, kunde, style: s, funnelUrl }))
     );
     const generated = results.filter(r => r.status === 'fulfilled').map(r => r.value);
     const errors = results
@@ -89,7 +105,8 @@ router.post('/:id/regenerate', async (req, res) => {
       .from('talentone_adcopies').select('*').eq('id', req.params.id).single();
     if (e1 || !existing) return res.status(404).json({ error: 'Ad-Copy nicht gefunden.' });
     const { job, kunde } = await loadJobAndKunde(existing.job_id);
-    const out = await generateAdCopy({ job, kunde, style: existing.stil });
+    const funnelUrl = await loadFunnelUrl(existing.job_id);
+    const out = await generateAdCopy({ job, kunde, style: existing.stil, funnelUrl });
     const { data, error } = await supabase
       .from('talentone_adcopies')
       .update({ text: out.text, bearbeitet: false })
@@ -120,6 +137,37 @@ router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_adcopies').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* POST /api/adcopies/update-links body: { job_id } — Funnel-URL in alle Texte injizieren/erneuern.
+   - Ersetzt [Funnel-Link wird ergänzt] durch die aktuelle URL
+   - Ersetzt vorhandene andere URL durch die neue
+   - Hängt CTA-Zeile an wenn weder Platzhalter noch URL vorhanden
+   Returns: { updated: <n>, skipped: <n>, funnel_url } */
+router.post('/update-links', async (req, res) => {
+  const { job_id } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+
+  try {
+    const funnelUrl = await loadFunnelUrl(job_id);
+    if (!funnelUrl) return res.status(400).json({ error: 'Kein Funnel-Link verfügbar — bitte erst Funnel anlegen oder externe URL eintragen.' });
+
+    const { data: list = [] } = await supabase
+      .from('talentone_adcopies').select('*').eq('job_id', job_id);
+
+    let updated = 0, skipped = 0;
+    for (const a of list) {
+      const nextText = ensureLinkInText(a.text || '', funnelUrl);
+      if (nextText === a.text) { skipped++; continue; }
+      const { error } = await supabase
+        .from('talentone_adcopies').update({ text: nextText }).eq('id', a.id);
+      if (!error) updated++;
+    }
+    res.json({ updated, skipped, funnel_url: funnelUrl });
+  } catch (err) {
+    console.error('[update-links]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

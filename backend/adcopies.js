@@ -100,7 +100,9 @@ Zeile 1: Provokante Frage oder ungewöhnliches Statement + Emoji am Ende (🤔 /
 👉 [3-Wort-CTA — z.B. "Link klicken. Bewerben. Fertig."]`,
 };
 
-function buildPrompt(job, kunde, style) {
+export const LINK_PLACEHOLDER = '[Funnel-Link wird ergänzt]';
+
+function buildPrompt(job, kunde, style, funnelUrl) {
   const region = job.region || 'Region';
   const stelle = job.stelle || 'Stelle';
   const firma = kunde?.firmenname || 'das Unternehmen';
@@ -111,7 +113,17 @@ function buildPrompt(job, kunde, style) {
     .replaceAll('${stelle}', stelle)
     .replaceAll('${firma}', firma);
 
+  const linkBlock = funnelUrl
+    ? `BEWERBUNGS-LINK: ${funnelUrl}
+Diesen Link MUSS in der CTA-Zeile am Ende exakt so vorkommen (z.B. "👉 Jetzt bewerben: ${funnelUrl}").`
+    : `BEWERBUNGS-LINK: noch kein Funnel-Link verfügbar.
+In der CTA-Zeile am Ende verwende DIESEN Platzhalter EXAKT (wird später automatisch ersetzt):
+${LINK_PLACEHOLDER}
+Beispiel: "👉 Jetzt bewerben: ${LINK_PLACEHOLDER}"`;
+
   return `${buildBriefing(job, kunde)}
+
+${linkBlock}
 
 AUFGABE
 Schreibe EINE deutsche Social-Media-Recruiting-Ad für Facebook und Instagram. Diese Ad muss beim Scrollen sofort catchen — sie ist standalone (auch ohne Bild verständlich) und visuell strukturiert mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
@@ -132,15 +144,36 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 }
 
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
-export async function generateAdCopy({ job, kunde, style }) {
+export async function generateAdCopy({ job, kunde, style, funnelUrl }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
     max_tokens: 1500, // mehr Puffer wegen Emojis (mehrere Tokens pro Symbol)
-    messages: [{ role: 'user', content: buildPrompt(job, kunde, style) }],
+    messages: [{ role: 'user', content: buildPrompt(job, kunde, style, funnelUrl) }],
   });
   const parsed = parseJsonContent(data);
-  const text = (parsed.text || '').trim();
+  let text = (parsed.text || '').trim();
   if (!text) throw new Error('Claude lieferte leeren Text.');
+  // Sicherheitsnetz: falls Claude den Platzhalter / Link doch nicht eingebaut hat
+  text = ensureLinkInText(text, funnelUrl);
   return { stil: style, text };
+}
+
+// Stellt sicher, dass der Funnel-Link (oder Platzhalter) im Text steht. Idempotent.
+export function ensureLinkInText(text, funnelUrl) {
+  if (!text) return text;
+  const target = funnelUrl || LINK_PLACEHOLDER;
+  // Bereits drin?
+  if (text.includes(target)) return text;
+  // Platzhalter vorhanden aber falsch → ersetzen
+  if (text.includes(LINK_PLACEHOLDER) && funnelUrl) {
+    return text.replace(LINK_PLACEHOLDER, funnelUrl);
+  }
+  // Alte URL im Text? → ersetzen (greift wenn vorher anderer Funnel-Link)
+  const urlMatch = text.match(/https?:\/\/\S+/);
+  if (urlMatch && funnelUrl) {
+    return text.replace(urlMatch[0], funnelUrl);
+  }
+  // Sonst: am Ende anhängen
+  return text.trimEnd() + `\n\n👉 Jetzt bewerben: ${target}`;
 }
