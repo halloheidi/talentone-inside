@@ -278,6 +278,28 @@ export default function JobFunnel() {
         </fieldset>
       )}
 
+      {/* Telefonische Vorqualifizierung */}
+      <fieldset className="formular-section">
+        <legend>Telefonische Vorqualifizierung</legend>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={!!job.vorqualifizierung}
+            onChange={async (e) => {
+              await api(`/jobs/${job.id}`, { method: 'PATCH', body: { vorqualifizierung: e.target.checked } });
+              reload?.();
+            }}
+          />
+          <span>
+            <strong>Telefonische Vorqualifizierung durch uns</strong>
+            <span className="pane-hint" style={{ display: 'block', marginTop: 2 }}>
+              Wenn aktiviert, erscheinen in der Bewerberliste prominent die Anrufversuche-Spalten —
+              für Mitarbeiter, die Bewerber anrufen und qualifizieren.
+            </span>
+          </span>
+        </label>
+      </fieldset>
+
       {/* Empfänger der Bewerbungs-Mails */}
       <fieldset className="formular-section">
         <legend>Bewerbungen senden an</legend>

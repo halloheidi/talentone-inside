@@ -223,8 +223,31 @@ export default function JobExport() {
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
 
+  const PUB_BASE = import.meta.env.VITE_PUBLIC_BASE || window.location.origin;
+  const bewerbungenUrl = job?.bewerbungen_token
+    ? `${PUB_BASE}/bewerbungen/${job.bewerbungen_token}`
+    : null;
+
   return (
     <div className="export-tab">
+      {/* ─────── Bewerberliste-Link für den Kunden ─────── */}
+      {bewerbungenUrl && (
+        <div className="bewerbungen-link-box">
+          <div className="bewerbungen-link-title">📋 Bewerberliste für den Kunden</div>
+          <div className="bewerbungen-link-row">
+            <code className="bewerbungen-link-url">{bewerbungenUrl}</code>
+            <button type="button" className="btn-ghost btn-sm" onClick={async () => {
+              try { await navigator.clipboard.writeText(bewerbungenUrl); } catch { /* noop */ }
+            }}>Kopieren</button>
+            <a className="btn-ghost btn-sm" href={bewerbungenUrl} target="_blank" rel="noreferrer">Öffnen</a>
+          </div>
+          <p className="bewerbungen-link-hint">
+            Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit
+            (Branding nach Agentur-Einstellung, Status/Termin/Notizen können vom Kunden eingetragen werden).
+          </p>
+        </div>
+      )}
+
       {/* ─────── Versand-Status oben ─────── */}
       {letzterVersand && (
         <div className="versand-status">

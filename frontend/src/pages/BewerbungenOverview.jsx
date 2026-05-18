@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 
 const STATUS_OPTIONS = [
   { value: 'neu', label: 'Neu' },
@@ -249,7 +250,12 @@ export default function BewerbungenOverview() {
           <label>Status</label>
           <div className="filter-chips">
             {STATUS_OPTIONS.map(o => (
-              <button key={o.value} type="button" className={`chip ${statusFilter.includes(o.value) ? 'is-on' : ''}`} onClick={() => toggleStatus(o.value)}>{o.label}</button>
+              <button
+                key={o.value}
+                type="button"
+                className={`chip chip-${o.value} ${statusFilter.includes(o.value) ? 'is-on' : ''}`}
+                onClick={() => toggleStatus(o.value)}
+              >{o.label}</button>
             ))}
           </div>
         </div>
@@ -274,11 +280,13 @@ export default function BewerbungenOverview() {
                 <th>Anrufe</th>
                 <th>Nächste Aktion</th>
                 <SortHeader k="bewertung" label="Bewertung" />
+                <th>Notizen</th>
                 <th>Kundenfeedback</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(b => {
+                const norm = normalizeBewerbung(b);
                 const n = data.notizen[b.id] || {};
                 const fb = data.feedback[b.id] || {};
                 const anrufe = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a.datum || a.ergebnis) : [];
@@ -290,9 +298,9 @@ export default function BewerbungenOverview() {
                     <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
                     <td className="td-name">
                       <button className="link-button" onClick={() => setSelectedBewerbung(b)}>
-                        <strong>{b.name || '—'}</strong>
+                        <strong>{norm.name || '—'}</strong>
                       </button>
-                      <div className="td-name-meta">{b.email || ''}{b.email && b.telefon ? ' · ' : ''}{b.telefon || ''}</div>
+                      <div className="td-name-meta">{norm.email || ''}{norm.email && norm.telefon ? ' · ' : ''}{norm.telefon || ''}</div>
                     </td>
                     <td>{kunde ? <Link to={`/kunden/${kunde.id}`}>{kunde.firmenname}</Link> : '—'}</td>
                     <td>{job && kunde ? <Link to={`/kunden/${kunde.id}/jobs/${job.id}/funnel`}>{job.stelle || '—'}</Link> : '—'}</td>
@@ -313,10 +321,13 @@ export default function BewerbungenOverview() {
                     <td>
                       <StarRating value={n.bewertung || 0} onChange={v => updateNotiz(b.id, { bewertung: v })} />
                     </td>
+                    <td className="td-notizen-preview" title={n.notizen || ''}>
+                      {n.notizen ? <span>{n.notizen.slice(0, 60)}{n.notizen.length > 60 ? '…' : ''}</span> : <span className="muted">—</span>}
+                    </td>
                     <td>
                       {fb.status ? (
                         <span className={`kundenfeedback-badge kundenfeedback-${fb.status}`}>
-                          {FEEDBACK_LABELS[fb.status]}
+                          Kunde: {FEEDBACK_LABELS[fb.status]}
                           {fb.vorstellungsgespraech_am && ` · ${new Date(fb.vorstellungsgespraech_am).toLocaleDateString('de-DE')}`}
                         </span>
                       ) : <span className="muted">—</span>}
@@ -339,7 +350,7 @@ export default function BewerbungenOverview() {
 function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) {
   const note = n || {};
   const feedback = fb || {};
-  const antworten = Array.isArray(b.antworten) ? b.antworten.filter(a => a && (a.antwort ?? '') !== '') : [];
+  const norm = normalizeBewerbung(b);
   const kunde = b.talentone_jobs?.talentone_kunden;
   const job = b.talentone_jobs;
 
@@ -348,40 +359,36 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
       <aside className="slideover" onClick={e => e.stopPropagation()}>
         <header className="slideover-head">
           <div>
-            <h2>{b.name || '(ohne Namen)'}</h2>
-            <p className="muted">{b.email || ''}{b.telefon ? ` · ${b.telefon}` : ''}</p>
+            <h2>{norm.name || '(ohne Namen)'}</h2>
+            <p className="muted">
+              {new Date(b.created_at).toLocaleString('de-DE')} ·
+              {' '}{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne Funnel'}
+              {b.ko_kriterium && <> · <span className="ko-badge">KO</span></>}
+            </p>
           </div>
           <button className="btn-ghost" onClick={onClose}>×</button>
         </header>
 
         <div className="slideover-body">
+          {/* 1. Kontaktdaten */}
           <section>
-            <h3>Bewerbung</h3>
+            <h3>Kontaktdaten</h3>
             <dl className="slideover-dl">
-              <dt>Datum</dt><dd>{new Date(b.created_at).toLocaleString('de-DE')}</dd>
-              <dt>Quelle</dt><dd>{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}</dd>
-              {b.ko_kriterium && <><dt>KO</dt><dd><span className="ko-badge">KO-Kriterium ausgelöst</span></dd></>}
-              {kunde && <><dt>Kunde</dt><dd><Link to={`/kunden/${kunde.id}`} onClick={onClose}>{kunde.firmenname}</Link></dd></>}
-              {job && kunde && <><dt>Stelle</dt><dd><Link to={`/kunden/${kunde.id}/jobs/${job.id}/funnel`} onClick={onClose}>{job.stelle}</Link></dd></>}
+              <dt>Name</dt><dd>{norm.name || <span className="muted">—</span>}</dd>
+              <dt>E-Mail</dt><dd>{norm.email ? <a href={`mailto:${norm.email}`}>{norm.email}</a> : <span className="muted">—</span>}</dd>
+              <dt>Telefon</dt><dd>{norm.telefon ? <a href={`tel:${norm.telefon}`}>{norm.telefon}</a> : <span className="muted">—</span>}</dd>
             </dl>
           </section>
 
-          {antworten.length > 0 && (
-            <section>
-              <h3>Antworten</h3>
-              <ul className="slideover-antworten">
-                {antworten.map((a, i) => (
-                  <li key={i}>
-                    <div className="muted">{a.frage_text}</div>
-                    <div>{a.antwort}</div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {/* 2. Anrufversuche (prominent — Telefonierer brauchen das zuerst) */}
+          <section className="slideover-anrufversuche">
+            <h3>Anrufversuche</h3>
+            <AnrufversucheBlock value={note.anrufversuche || []} onChange={v => onUpdate({ anrufversuche: v })} />
+          </section>
 
+          {/* 3. Status + Bewertung + Nächste Aktion */}
           <section>
-            <h3>Interne Notizen</h3>
+            <h3>Status & Bewertung</h3>
             <div className="slideover-form">
               <label><span>Status</span>
                 <select className="cell-input" value={note.status || 'neu'} onChange={e => onUpdate({ status: e.target.value })}>
@@ -391,33 +398,66 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
               <label><span>Bewertung</span>
                 <StarRating value={note.bewertung || 0} onChange={v => onUpdate({ bewertung: v })} />
               </label>
+              <label className="slideover-full"><span>Nächste Aktion</span>
+                <DebouncedInput value={note.naechste_aktion || ''} onSave={v => onUpdate({ naechste_aktion: v })} />
+              </label>
+            </div>
+          </section>
+
+          {/* 4. Gehaltswunsch + Verfügbarkeit */}
+          <section>
+            <h3>Konditionen</h3>
+            <div className="slideover-form">
               <label><span>Gehaltswunsch</span>
                 <DebouncedInput value={note.gehaltswunsch || ''} onSave={v => onUpdate({ gehaltswunsch: v })} />
               </label>
               <label><span>Verfügbarkeit</span>
                 <DebouncedInput value={note.verfuegbarkeit || ''} onSave={v => onUpdate({ verfuegbarkeit: v })} />
               </label>
-              <label><span>Nächste Aktion</span>
-                <DebouncedInput value={note.naechste_aktion || ''} onSave={v => onUpdate({ naechste_aktion: v })} />
-              </label>
-              <label><span>Notizen</span>
-                <DebouncedInput rows={4} value={note.notizen || ''} onSave={v => onUpdate({ notizen: v })} />
-              </label>
             </div>
           </section>
 
+          {/* 5. Notizen */}
           <section>
-            <h3>Anrufversuche</h3>
-            <AnrufversucheBlock value={note.anrufversuche || []} onChange={v => onUpdate({ anrufversuche: v })} />
+            <h3>Notizen</h3>
+            <DebouncedInput rows={5} value={note.notizen || ''} onSave={v => onUpdate({ notizen: v })} />
           </section>
 
+          {/* 6. Funnel-Antworten — aufklappbar */}
+          {norm.antworten.length > 0 && (
+            <section>
+              <details className="slideover-details">
+                <summary><h3>Funnel-Antworten ({norm.antworten.length})</h3></summary>
+                <ul className="slideover-antworten">
+                  {norm.antworten.map((a, i) => (
+                    <li key={i}>
+                      <div className="slideover-frage">Frage: {a.frage_text}</div>
+                      <div className="slideover-antwort">→ Antwort: {a.antwort}</div>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </section>
+          )}
+
+          {/* 7. Kundenfeedback */}
           {feedback.status && (
             <section>
-              <h3>Kundenfeedback</h3>
+              <h3>Kundenfeedback <span className="kundenfeedback-badge">{FEEDBACK_LABELS[feedback.status] || feedback.status}</span></h3>
               <dl className="slideover-dl">
-                <dt>Status</dt><dd>{FEEDBACK_LABELS[feedback.status] || feedback.status}</dd>
                 {feedback.vorstellungsgespraech_am && <><dt>Vorstellungsgespräch</dt><dd>{new Date(feedback.vorstellungsgespraech_am).toLocaleString('de-DE')}</dd></>}
                 {feedback.notizen && <><dt>Notizen</dt><dd>{feedback.notizen}</dd></>}
+              </dl>
+            </section>
+          )}
+
+          {/* 8. Link zum Projekt */}
+          {job && kunde && (
+            <section>
+              <h3>Projekt</h3>
+              <dl className="slideover-dl">
+                <dt>Kunde</dt><dd><Link to={`/kunden/${kunde.id}`} onClick={onClose}>{kunde.firmenname}</Link></dd>
+                <dt>Stelle</dt><dd><Link to={`/kunden/${kunde.id}/jobs/${job.id}/funnel`} onClick={onClose}>{job.stelle || '—'}</Link></dd>
               </dl>
             </section>
           )}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 
 /* Vordefinierte interne Spalten */
 const INTERNE_SPALTEN_DEFS = {
@@ -163,7 +164,12 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-export default function BewerbungenTable({ job, internalSpalten, onChangeInternalSpalten }) {
+export default function BewerbungenTable({ job, internalSpalten: internalSpaltenProp, onChangeInternalSpalten }) {
+  // Anruf-Spalte nur sichtbar wenn telefonische Vorqualifizierung aktiv
+  const internalSpalten = useMemo(() => {
+    if (job?.vorqualifizierung) return internalSpaltenProp;
+    return internalSpaltenProp.filter(k => k !== 'anrufversuche');
+  }, [internalSpaltenProp, job?.vorqualifizierung]);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ bewerbungen: [], notizen: {}, feedback: {}, werte: {} });
   const [spalten, setSpalten] = useState([]);
@@ -186,22 +192,29 @@ export default function BewerbungenTable({ job, internalSpalten, onChangeInterna
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
 
-  /* Dynamische Funnel-Fragen-Spalten — alle unique frage_text aus allen Bewerbungen */
+  /* Normalisierte Bewerbungen (Perspective-roh wird sauber gerendert) */
+  const normalized = useMemo(() => {
+    const map = new Map();
+    for (const b of data.bewerbungen) map.set(b.id, normalizeBewerbung(b));
+    return map;
+  }, [data.bewerbungen]);
+
+  /* Dynamische Funnel-Fragen-Spalten — alle unique frage_text aus normalisierten Antworten */
   const frageSpalten = useMemo(() => {
     const seen = new Map();
     for (const b of data.bewerbungen) {
-      const ant = Array.isArray(b.antworten) ? b.antworten : [];
-      for (const a of ant) {
+      const norm = normalized.get(b.id);
+      for (const a of norm?.antworten || []) {
         const key = (a?.frage_text || '').trim();
         if (key && !seen.has(key)) seen.set(key, key);
       }
     }
     return Array.from(seen.keys());
-  }, [data.bewerbungen]);
+  }, [data.bewerbungen, normalized]);
 
   function antwortFor(bewerbung, frage) {
-    const ant = Array.isArray(bewerbung.antworten) ? bewerbung.antworten : [];
-    return ant.find(a => (a?.frage_text || '').trim() === frage)?.antwort ?? '';
+    const norm = normalized.get(bewerbung.id);
+    return norm?.antworten.find(a => (a?.frage_text || '').trim() === frage)?.antwort ?? '';
   }
 
   /* Inline-Update der Notizen */
@@ -375,12 +388,13 @@ export default function BewerbungenTable({ job, internalSpalten, onChangeInterna
                 {bewerbungen.map(b => {
                   const n = data.notizen[b.id] || {};
                   const fb = data.feedback[b.id] || {};
+                  const norm = normalized.get(b.id) || { name: b.name, email: b.email, telefon: b.telefon };
                   return (
                     <tr key={b.id} className={b.ko_kriterium ? 'is-ko' : ''}>
                       <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                      <td className="td-name"><strong>{b.name || '—'}</strong></td>
-                      <td>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
-                      <td>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
+                      <td className="td-name"><strong>{norm.name || '—'}</strong></td>
+                      <td>{norm.email ? <a href={`mailto:${norm.email}`}>{norm.email}</a> : '—'}</td>
+                      <td>{norm.telefon ? <a href={`tel:${norm.telefon}`}>{norm.telefon}</a> : '—'}</td>
                       <td><span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}</span></td>
                       <td>{b.ko_kriterium ? <span className="ko-badge">KO</span> : ''}</td>
 
