@@ -40,10 +40,10 @@ const BRANDING = {
     from: 'Nowag & Wirth <noreply@nowagwirth.com>',
     replyTo: 'info@nowagwirth.com',
     mailVerified: NOWAGWIRTH_MAIL_VERIFIED,
-    // Farben
-    primary: '#1a3a6c',
-    accent: '#ffd966',
-    accentInk: '#1a3a6c',
+    // Farben (Weiß / Rot / Schwarz)
+    primary: '#0a0a0a',
+    accent: '#980000',
+    accentInk: '#ffffff',
     // Texte
     footer: 'Nowag & Wirth — Digitales Marketing',
     madeWith: 'Made with ♥ by Nowag & Wirth',
