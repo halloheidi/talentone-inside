@@ -37,7 +37,7 @@ function normalizeOptions(options) {
 }
 
 export default function JobFunnel() {
-  const { job, kunde } = useJob();
+  const { job, kunde, reload } = useJob();
   const [funnel, setFunnel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -62,6 +62,7 @@ export default function JobFunnel() {
   const [extern, setExtern] = useState(false);
   const [externUrl, setExternUrl] = useState('');
   const [externSheetUrl, setExternSheetUrl] = useState('');
+  const [bewerbungEmail, setBewerbungEmail] = useState('');
 
   function loadAll() {
     setLoading(true);
@@ -97,6 +98,7 @@ export default function JobFunnel() {
         setExtern(!!funnelData.extern);
         setExternUrl(funnelData.extern_url || '');
         setExternSheetUrl(funnelData.extern_sheet_url || '');
+        setBewerbungEmail(job?.bewerbung_email || '');
         setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
         if (funnelData.id) {
           api(`/funnels/${funnelData.id}/bewerbungen`).then(b => setBewerbungen(b.bewerbungen || [])).catch(() => {});
@@ -204,6 +206,14 @@ export default function JobFunnel() {
       const res = await api(`/funnels/${funnel.id}`, { method: 'PATCH', body });
       setFunnel(res.funnel);
       setVeroeffentlicht(!!res.funnel.veroeffentlicht);
+
+      // Job-Empfänger separat speichern (nur wenn geändert)
+      const desiredEmail = bewerbungEmail.trim() || null;
+      if (desiredEmail !== (job?.bewerbung_email || null)) {
+        await api(`/jobs/${job.id}`, { method: 'PATCH', body: { bewerbung_email: desiredEmail } });
+        reload?.();
+      }
+
       setSaveMsg('Gespeichert.');
       setTimeout(() => setSaveMsg(''), 1800);
     } catch (err) { setSaveMsg(err.message); }
@@ -270,6 +280,26 @@ export default function JobFunnel() {
           <WebhookInfo jobId={job.id} />
         </fieldset>
       )}
+
+      {/* Empfänger der Bewerbungs-Mails */}
+      <fieldset className="formular-section">
+        <legend>Bewerbungen senden an</legend>
+        <p className="pane-hint" style={{ marginBottom: 10 }}>
+          E-Mail-Adresse, an die neue Bewerbungen verschickt werden. Standard ist die Kunden-E-Mail
+          {kunde?.email ? <> (<code>{kunde.email}</code>)</> : null} — pro Stelle überschreibbar (z.B. direkt der Abteilungsleiter).
+        </p>
+        <div className="form-grid">
+          <label className="field field-full">
+            <span>E-Mail-Empfänger</span>
+            <input
+              type="email"
+              value={bewerbungEmail}
+              onChange={e => setBewerbungEmail(e.target.value)}
+              placeholder={kunde?.email || 'name@firma.de'}
+            />
+          </label>
+        </div>
+      </fieldset>
 
       {/* Publish-Card */}
       <div className="funnel-publish-card">
@@ -369,7 +399,8 @@ export default function JobFunnel() {
               )}
           </fieldset>
 
-          {/* Tracking — am Ende des Editors */}
+          {/* Tracking — nur bei internem Funnel (extern → Tracking läuft direkt in Perspective o.ä.) */}
+          {!extern && (
           <fieldset className="formular-section">
             <legend>Tracking-Pixel</legend>
             <p className="pane-hint" style={{ marginBottom: 12 }}>
@@ -399,6 +430,7 @@ export default function JobFunnel() {
               💡 Für zuverlässigeres Tracking empfehlen wir die <strong>Conversion API</strong> zusätzlich zum Pixel — sie umgeht Ad-Blocker und iOS-14-Tracking-Schutz. Token aus dem Meta Events Manager → Pixel → Einstellungen → „Token für die Conversions API erstellen".
             </p>
           </fieldset>
+          )}
         </div>
 
         {/* ───────── Rechte Spalte: Live-Vorschau ───────── */}

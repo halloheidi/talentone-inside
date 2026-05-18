@@ -39,7 +39,7 @@ router.post('/', async (req, res) => {
 const ALLOWED_JOB_FIELDS = [
   'stelle', 'region', 'gehalt', 'benefits', 'besonderheiten',
   'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
-  'formdata_komplett', 'analyse_ergebnis',
+  'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
 ];
 
 router.patch('/:id', async (req, res) => {
