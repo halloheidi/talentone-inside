@@ -417,4 +417,81 @@ router.post('/review/:token', async (req, res) => {
   res.status(201).json({ ok: true, review: data });
 });
 
+/* ════════════════════ Public Bewerberliste (Token) ════════════════════ */
+
+const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'abgesagt'];
+
+// GET /api/public/bewerbungen/:token — Liste für den Kunden
+router.get('/bewerbungen/:token', async (req, res) => {
+  const { data: job } = await supabase
+    .from('talentone_jobs')
+    .select('id, stelle, region, kunde_id, bewerbungen_token')
+    .eq('bewerbungen_token', req.params.token)
+    .maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+
+  const { data: kunde } = await supabase
+    .from('talentone_kunden')
+    .select('id, firmenname, agentur, logo_url')
+    .eq('id', job.kunde_id)
+    .maybeSingle();
+
+  const { data: bewerbungen, error } = await supabase
+    .from('talentone_bewerbungen')
+    .select('id, name, email, telefon, antworten, quelle, ko_kriterium, created_at')
+    .eq('job_id', job.id)
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const ids = (bewerbungen || []).map(b => b.id);
+  let feedback = {};
+  if (ids.length > 0) {
+    const { data: fb } = await supabase
+      .from('talentone_bewerber_kundenfeedback')
+      .select('*').in('bewerbung_id', ids);
+    for (const f of fb || []) feedback[f.bewerbung_id] = f;
+  }
+
+  res.json({
+    job: { id: job.id, stelle: job.stelle, region: job.region },
+    kunde: kunde ? { firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url } : null,
+    bewerbungen: bewerbungen || [],
+    feedback,
+  });
+});
+
+// PATCH /api/public/bewerbungen/:token/:bewId  body: { status?, vorstellungsgespraech_am?, notizen? }
+router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
+  const { data: job } = await supabase
+    .from('talentone_jobs')
+    .select('id, bewerbungen_token')
+    .eq('bewerbungen_token', req.params.token)
+    .maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  // Bewerbung muss zu diesem Job gehören
+  const { data: bew } = await supabase
+    .from('talentone_bewerbungen').select('id, job_id').eq('id', req.params.bewId).maybeSingle();
+  if (!bew || bew.job_id !== job.id) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Link.' });
+
+  const patch = { bewerbung_id: bew.id, updated_at: new Date().toISOString() };
+  const body = req.body || {};
+  if (body.status !== undefined) {
+    patch.status = FEEDBACK_STATI.includes(body.status) ? body.status : 'neu';
+  }
+  if (body.vorstellungsgespraech_am !== undefined) {
+    patch.vorstellungsgespraech_am = body.vorstellungsgespraech_am || null;
+  }
+  if (body.notizen !== undefined) {
+    patch.notizen = body.notizen?.toString().trim() || null;
+  }
+
+  const { data, error } = await supabase
+    .from('talentone_bewerber_kundenfeedback')
+    .upsert(patch, { onConflict: 'bewerbung_id' })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ feedback: data });
+});
+
 export default router;

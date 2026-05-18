@@ -40,6 +40,7 @@ const ALLOWED_JOB_FIELDS = [
   'stelle', 'region', 'gehalt', 'benefits', 'besonderheiten',
   'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
   'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
+  'interne_spalten',
 ];
 
 router.patch('/:id', async (req, res) => {

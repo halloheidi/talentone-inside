@@ -239,10 +239,21 @@ ${antworten.map(a => `
   ⚠️ <strong>Achtung:</strong> Der Bewerber hat ein KO-Kriterium ausgelöst und erfüllt damit nicht alle Anforderungen dieser Stelle.
 </div>` : '';
 
-  const sheetHtml = sheetUrl ? `
+  const bewerbungenUrl = job?.bewerbungen_token
+    ? `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/bewerbungen/${job.bewerbungen_token}`
+    : null;
+
+  const bewerbungenButtonHtml = bewerbungenUrl ? `
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
   <tr><td align="center" style="padding:6px 0;">
-    <a href="${escape(sheetUrl)}" style="display:inline-block;background:#fafaf8;color:#0a0a0a;text-decoration:none;font-weight:600;font-size:13px;padding:10px 22px;border-radius:100px;border:1px solid #ececea;">📊 Alle Bewerbungen im Google Sheet</a>
+    <a href="${escape(bewerbungenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:600;font-size:13px;padding:10px 22px;border-radius:100px;">📋 Alle Bewerbungen ansehen</a>
+  </td></tr>
+</table>` : '';
+
+  const sheetHtml = sheetUrl ? `
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;">
+  <tr><td align="center" style="padding:6px 0;">
+    <a href="${escape(sheetUrl)}" style="display:inline-block;background:#fafaf8;color:#0a0a0a;text-decoration:none;font-weight:600;font-size:13px;padding:10px 22px;border-radius:100px;border:1px solid #ececea;">📊 Google Sheet</a>
   </td></tr>
 </table>` : '';
 
@@ -267,6 +278,7 @@ ${antworten.map(a => `
       ${(!email && !telefon) ? '<tr><td colspan="2" style="font-size:12px;color:#9a9994;font-style:italic;">Keine Kontaktdaten übermittelt.</td></tr>' : ''}
     </table>
     ${antwortenHtml}
+    ${bewerbungenButtonHtml}
     ${sheetHtml}
   </td></tr>
   <tr><td style="padding:18px 28px;background:#fafaf8;border-top:1px solid #ececea;text-align:center;">
@@ -287,6 +299,7 @@ ${antworten.map(a => `
       textParts.push(`  ${a.frage_text || '?'}: ${a.antwort || '—'}`);
     }
   }
+  if (bewerbungenUrl) textParts.push(`\nAlle Bewerbungen: ${bewerbungenUrl}`);
   if (sheetUrl) textParts.push(`\nGoogle Sheet: ${sheetUrl}`);
 
   const subjekt = `Neue Bewerbung für ${job?.stelle || 'Stelle'}${bewerbung?.name ? ` — ${bewerbung.name}` : ''}`;

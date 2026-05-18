@@ -4,6 +4,7 @@ import { api } from '../../lib/api.js';
 import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
 import CropModal from '../../components/CropModal.jsx';
+import BewerbungenTable from '../../components/BewerbungenTable.jsx';
 
 const PUBLIC_BASE = (import.meta.env.VITE_PUBLIC_BASE || window.location.origin);
 
@@ -41,7 +42,6 @@ export default function JobFunnel() {
   const [funnel, setFunnel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [bewerbungen, setBewerbungen] = useState([]);
   const [referenzen, setReferenzen] = useState([]);
   const [generatedImages, setGeneratedImages] = useState([]);
   const [genBusy, setGenBusy] = useState(false);
@@ -100,9 +100,6 @@ export default function JobFunnel() {
         setExternSheetUrl(funnelData.extern_sheet_url || '');
         setBewerbungEmail(job?.bewerbung_email || '');
         setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
-        if (funnelData.id) {
-          api(`/funnels/${funnelData.id}/bewerbungen`).then(b => setBewerbungen(b.bewerbungen || [])).catch(() => {});
-        }
         // Default: Startseite ausgewählt
         if (Array.isArray(funnelData.screens) && funnelData.screens[0]) {
           setActiveScreenId(funnelData.screens[0].id);
@@ -380,14 +377,16 @@ export default function JobFunnel() {
 
           {/* Bewerbungen */}
           <fieldset className="formular-section bewerbungen-section">
-            <legend>Eingegangene Bewerbungen ({bewerbungen.length})</legend>
-            {bewerbungen.length === 0
-              ? <div className="motiv-sub">Noch keine Bewerbungen.</div>
-              : (
-                <div className="bewerbungen-list">
-                  {bewerbungen.map(b => <BewerbungCard key={b.id} bewerbung={b} />)}
-                </div>
-              )}
+            <legend>Eingegangene Bewerbungen</legend>
+            <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} />
+            <BewerbungenTable
+              job={job}
+              internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
+              onChangeInternalSpalten={async (next) => {
+                await api(`/jobs/${job.id}`, { method: 'PATCH', body: { interne_spalten: next } });
+                reload?.();
+              }}
+            />
           </fieldset>
 
           {/* Tracking — nur bei internem Funnel (extern → Tracking läuft direkt in Perspective o.ä.) */}
@@ -495,49 +494,29 @@ export default function JobFunnel() {
   );
 }
 
-/* ═════════════════════ Bewerbung-Karte (mit Antworten) ═════════════════════ */
+/* ═════════════════════ Bewerbungen-Link für Kunden ═════════════════════ */
 
-function BewerbungCard({ bewerbung: b }) {
-  const antworten = Array.isArray(b.antworten) ? b.antworten.filter(a => a && (a.antwort ?? '') !== '') : [];
-  const quelleLabel = b.quelle === 'perspective' ? 'Perspective' : 'TalentOne Funnel';
+function BewerbungenLink({ token }) {
+  const url = `${PUBLIC_BASE}/bewerbungen/${token}`;
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* noop */ }
+  }
+  if (!token) return null;
   return (
-    <details className={`bewerbung-card ${b.ko_kriterium ? 'is-ko' : ''}`}>
-      <summary className="bewerbung-summary">
-        <strong>{b.name || '(ohne Namen)'}</strong>
-        <span className="bewerbung-contact">{b.email || b.telefon || '—'}</span>
-        <span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{quelleLabel}</span>
-        {b.ko_kriterium && <span className="ko-badge">KO</span>}
-        <span className="bewerbung-date">{new Date(b.created_at).toLocaleString('de-DE')}</span>
-      </summary>
-      <div className="bewerbung-body">
-        <dl className="bewerbung-contact-grid">
-          {b.email && (
-            <>
-              <dt>E-Mail</dt>
-              <dd><a href={`mailto:${b.email}`}>{b.email}</a></dd>
-            </>
-          )}
-          {b.telefon && (
-            <>
-              <dt>Telefon</dt>
-              <dd><a href={`tel:${b.telefon}`}>{b.telefon}</a></dd>
-            </>
-          )}
-        </dl>
-        {antworten.length > 0 ? (
-          <ul className="bewerbung-antworten">
-            {antworten.map((a, i) => (
-              <li key={i}>
-                <div className="bewerbung-frage">{a.frage_text || '—'}</div>
-                <div className="bewerbung-antwort">→ {a.antwort}</div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="bewerbung-empty">Keine Antworten übermittelt.</p>
-        )}
+    <div className="bewerbungen-link-box">
+      <div className="bewerbungen-link-title">Bewerberliste für den Kunden</div>
+      <div className="bewerbungen-link-row">
+        <code className="bewerbungen-link-url">{url}</code>
+        <button type="button" className="btn-ghost btn-sm" onClick={copy}>{copied ? '✓ Kopiert' : 'Kopieren'}</button>
+        <a className="btn-ghost btn-sm" href={url} target="_blank" rel="noreferrer">Öffnen</a>
       </div>
-    </details>
+      <p className="bewerbungen-link-hint">Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit. Status, Vorstellungsgespräch-Termin und Notizen kann der Kunde direkt eintragen.</p>
+    </div>
   );
 }
 

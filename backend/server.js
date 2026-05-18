@@ -9,6 +9,7 @@ import funnelsRouter from './routes/funnels.js';
 import exportsRouter from './routes/exports.js';
 import publicRouter from './routes/public.js';
 import webhooksRouter from './routes/webhooks.js';
+import bewerbungenRouter from './routes/bewerbungen.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,6 +43,7 @@ app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/creatives', requireAuth, creativesRouter);
 app.use('/api/adcopies', requireAuth, adcopiesRouter);
 app.use('/api/funnels', requireAuth, funnelsRouter);
+app.use('/api/bewerbungen', requireAuth, bewerbungenRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 app.use((err, req, res, _next) => {

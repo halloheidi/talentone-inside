@@ -5,9 +5,11 @@ import PublicUpload from './pages/PublicUpload.jsx';
 import PublicFormular from './pages/PublicFormular.jsx';
 import PublicFunnel from './pages/PublicFunnel.jsx';
 import PublicReview from './pages/PublicReview.jsx';
+import PublicBewerbungen from './pages/PublicBewerbungen.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
 import KundenList from './pages/KundenList.jsx';
 import KundeDetail from './pages/KundeDetail.jsx';
+import BewerbungenOverview from './pages/BewerbungenOverview.jsx';
 import JobView from './pages/JobView.jsx';
 import JobStelleninfos from './pages/job/JobStelleninfos.jsx';
 import JobCreatives from './pages/job/JobCreatives.jsx';
@@ -30,6 +32,7 @@ export default function App() {
       <Route path="/formular/:token" element={<PublicFormular />} />
       <Route path="/f/:funnelId" element={<PublicFunnel />} />
       <Route path="/review/:token" element={<PublicReview />} />
+      <Route path="/bewerbungen/:token" element={<PublicBewerbungen />} />
       <Route
         path="/"
         element={
@@ -40,6 +43,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/kunden" replace />} />
         <Route path="kunden" element={<KundenList />} />
+        <Route path="bewerbungen" element={<BewerbungenOverview />} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />
