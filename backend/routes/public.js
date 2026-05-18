@@ -421,13 +421,18 @@ router.post('/review/:token', async (req, res) => {
 
 const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'abgesagt'];
 
-// GET /api/public/bewerbungen/:token — Liste für den Kunden
-router.get('/bewerbungen/:token', async (req, res) => {
-  const { data: job } = await supabase
+async function loadJobByToken(token) {
+  const { data } = await supabase
     .from('talentone_jobs')
     .select('id, stelle, region, kunde_id, bewerbungen_token')
-    .eq('bewerbungen_token', req.params.token)
+    .eq('bewerbungen_token', token)
     .maybeSingle();
+  return data;
+}
+
+// GET /api/public/bewerbungen/:token — Liste für den Kunden
+router.get('/bewerbungen/:token', async (req, res) => {
+  const job = await loadJobByToken(req.params.token);
   if (!job) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
 
   const { data: kunde } = await supabase
@@ -445,19 +450,110 @@ router.get('/bewerbungen/:token', async (req, res) => {
 
   const ids = (bewerbungen || []).map(b => b.id);
   let feedback = {};
+  let werte = {};
   if (ids.length > 0) {
-    const { data: fb } = await supabase
-      .from('talentone_bewerber_kundenfeedback')
-      .select('*').in('bewerbung_id', ids);
-    for (const f of fb || []) feedback[f.bewerbung_id] = f;
+    const [fb, w] = await Promise.all([
+      supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
+      supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
+    ]);
+    for (const f of fb.data || []) feedback[f.bewerbung_id] = f;
+    for (const x of w.data || []) {
+      if (!werte[x.bewerbung_id]) werte[x.bewerbung_id] = {};
+      werte[x.bewerbung_id][x.spalte_id] = x.wert;
+    }
   }
+
+  // Nur Kunden-sichtbare Spalten
+  const { data: spalten } = await supabase
+    .from('talentone_bewerber_spalten')
+    .select('*')
+    .eq('job_id', job.id)
+    .eq('sichtbar_fuer', 'kunde')
+    .order('reihenfolge', { ascending: true });
 
   res.json({
     job: { id: job.id, stelle: job.stelle, region: job.region },
     kunde: kunde ? { firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url } : null,
     bewerbungen: bewerbungen || [],
     feedback,
+    spalten: spalten || [],
+    werte,
   });
+});
+
+// POST /api/public/bewerbungen/:token/spalten  body: { name }
+router.post('/bewerbungen/:token/spalten', async (req, res) => {
+  const job = await loadJobByToken(req.params.token);
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+  const name = req.body?.name?.toString().trim();
+  if (!name) return res.status(400).json({ error: 'name fehlt.' });
+
+  const { data: last } = await supabase
+    .from('talentone_bewerber_spalten')
+    .select('reihenfolge')
+    .eq('job_id', job.id)
+    .order('reihenfolge', { ascending: false })
+    .limit(1).maybeSingle();
+
+  const { data, error } = await supabase
+    .from('talentone_bewerber_spalten')
+    .insert({
+      job_id: job.id,
+      name: name.slice(0, 80),
+      typ: 'text',
+      sichtbar_fuer: 'kunde',
+      reihenfolge: (last?.reihenfolge ?? -1) + 1,
+    })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ spalte: data });
+});
+
+// DELETE /api/public/bewerbungen/:token/spalten/:id
+router.delete('/bewerbungen/:token/spalten/:id', async (req, res) => {
+  const job = await loadJobByToken(req.params.token);
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  const { data: spalte } = await supabase
+    .from('talentone_bewerber_spalten').select('id, job_id, sichtbar_fuer')
+    .eq('id', req.params.id).maybeSingle();
+  if (!spalte || spalte.job_id !== job.id || spalte.sichtbar_fuer !== 'kunde') {
+    return res.status(403).json({ error: 'Spalte gehört nicht zu diesem Link.' });
+  }
+
+  const { error } = await supabase
+    .from('talentone_bewerber_spalten').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// PUT /api/public/bewerbungen/:token/:bewId/spalten/:spalteId  body: { wert }
+router.put('/bewerbungen/:token/:bewId/spalten/:spalteId', async (req, res) => {
+  const job = await loadJobByToken(req.params.token);
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  const { data: bew } = await supabase
+    .from('talentone_bewerbungen').select('id, job_id').eq('id', req.params.bewId).maybeSingle();
+  if (!bew || bew.job_id !== job.id) return res.status(403).json({ error: 'Bewerbung gehört nicht.' });
+
+  const { data: spalte } = await supabase
+    .from('talentone_bewerber_spalten').select('id, job_id, sichtbar_fuer').eq('id', req.params.spalteId).maybeSingle();
+  if (!spalte || spalte.job_id !== job.id || spalte.sichtbar_fuer !== 'kunde') {
+    return res.status(403).json({ error: 'Spalte gehört nicht zu diesem Link.' });
+  }
+
+  const wert = req.body?.wert == null ? null : String(req.body.wert);
+  const { data, error } = await supabase
+    .from('talentone_bewerber_spalten_werte')
+    .upsert({
+      bewerbung_id: bew.id,
+      spalte_id: spalte.id,
+      wert,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'bewerbung_id,spalte_id' })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ wert: data });
 });
 
 // PATCH /api/public/bewerbungen/:token/:bewId  body: { status?, vorstellungsgespraech_am?, notizen? }

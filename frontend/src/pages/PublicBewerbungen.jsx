@@ -45,6 +45,38 @@ function DebouncedInput({ value, onSave, type = 'text', rows, placeholder }) {
   return <input type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
 }
 
+function AddSpalteForm({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  function submit() {
+    if (!name.trim()) return;
+    onAdd(name.trim());
+    setName('');
+    setOpen(false);
+  }
+  if (!open) {
+    return (
+      <button type="button" className="pub-add-col-btn" onClick={() => setOpen(true)}>
+        + Eigene Spalte
+      </button>
+    );
+  }
+  return (
+    <div className="pub-add-col-form">
+      <input
+        autoFocus
+        type="text"
+        placeholder="z.B. Gehaltswunsch, Wechselmotivation"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setName(''); setOpen(false); } }}
+      />
+      <button type="button" onClick={submit}>Hinzufügen</button>
+      <button type="button" className="pub-cancel" onClick={() => { setName(''); setOpen(false); }}>×</button>
+    </div>
+  );
+}
+
 function EditableFeedbackBlock({ fb, onPatch }) {
   return (
     <div className="pub-feedback-grid">
@@ -114,6 +146,45 @@ export default function PublicBewerbungen() {
         const j = await res.json();
         updateFeedback(bewId, j.feedback);
       }
+    } catch (err) { console.error(err); }
+  }
+
+  /* ─── Custom Spalten (vom Kunden verwaltet) ─── */
+  async function addSpalte(name) {
+    if (!name?.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/public/bewerbungen/${token}/spalten`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error('Spalte konnte nicht angelegt werden.');
+      const j = await res.json();
+      setData(prev => ({ ...prev, spalten: [...(prev.spalten || []), j.spalte] }));
+    } catch (err) { alert(err.message); }
+  }
+  async function removeSpalte(spalteId) {
+    if (!confirm('Spalte wirklich entfernen? Alle Werte gehen verloren.')) return;
+    try {
+      await fetch(`${API_BASE}/public/bewerbungen/${token}/spalten/${spalteId}`, { method: 'DELETE' });
+      setData(prev => ({
+        ...prev,
+        spalten: (prev.spalten || []).filter(s => s.id !== spalteId),
+      }));
+    } catch (err) { console.error(err); }
+  }
+  async function setSpalteWert(bewId, spalteId, wert) {
+    setData(prev => {
+      const next = { ...(prev.werte || {}) };
+      next[bewId] = { ...(next[bewId] || {}), [spalteId]: wert };
+      return { ...prev, werte: next };
+    });
+    try {
+      await fetch(`${API_BASE}/public/bewerbungen/${token}/${bewId}/spalten/${spalteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wert }),
+      });
     } catch (err) { console.error(err); }
   }
 
@@ -190,8 +261,22 @@ export default function PublicBewerbungen() {
             <button className={`pub-filter ${filter === 'alle' ? 'is-active' : ''}`} onClick={() => setFilter('alle')}>Alle</button>
             <button className={`pub-filter ${filter === 'qualifiziert' ? 'is-active' : ''}`} onClick={() => setFilter('qualifiziert')}>Nur qualifizierte</button>
           </div>
-          <button className="pub-sort" onClick={() => setSortAsc(v => !v)}>Datum {sortAsc ? '↑' : '↓'}</button>
+          <div className="pub-toolbar-right">
+            <AddSpalteForm onAdd={addSpalte} />
+            <button className="pub-sort" onClick={() => setSortAsc(v => !v)}>Datum {sortAsc ? '↑' : '↓'}</button>
+          </div>
         </div>
+        {(data.spalten || []).length > 0 && (
+          <div className="pub-spalten-bar">
+            <span className="pub-spalten-label">Ihre eigenen Spalten:</span>
+            {(data.spalten || []).map(s => (
+              <span key={s.id} className="pub-spalten-chip">
+                {s.name}
+                <button type="button" onClick={() => removeSpalte(s.id)} title="Entfernen">×</button>
+              </span>
+            ))}
+          </div>
+        )}
 
         {bewerbungen.length === 0 ? (
           <div className="pub-empty">Noch keine Bewerbungen.</div>
@@ -209,6 +294,9 @@ export default function PublicBewerbungen() {
                     <th>Telefon</th>
                     <th>KO</th>
                     {frageSpalten.map(f => <th key={f}>{f}</th>)}
+                    {(data.spalten || []).map(s => (
+                      <th key={s.id} className="pub-th-custom">{s.name}</th>
+                    ))}
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -227,6 +315,14 @@ export default function PublicBewerbungen() {
                           <td>{norm.telefon ? <a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a> : '—'}</td>
                           <td>{b.ko_kriterium ? <span className="pub-ko-badge">KO</span> : ''}</td>
                           {frageSpalten.map(f => <td key={f} className="pub-td-antwort">{antwortFor(b.id, f) || <span className="pub-muted">—</span>}</td>)}
+                          {(data.spalten || []).map(s => (
+                            <td key={s.id} className="pub-td-custom" onClick={e => e.stopPropagation()}>
+                              <DebouncedInput
+                                value={data.werte?.[b.id]?.[s.id] || ''}
+                                onSave={v => setSpalteWert(b.id, s.id, v)}
+                              />
+                            </td>
+                          ))}
                           <td>
                             {fb.status && fb.status !== 'neu' && (
                               <span className={`pub-status-badge pub-status-${fb.status}`}>{STATUS_OPTIONS.find(o => o.value === fb.status)?.label}</span>
@@ -235,7 +331,7 @@ export default function PublicBewerbungen() {
                         </tr>
                         {expanded && (
                           <tr className="pub-tr-expand">
-                            <td colSpan={7 + frageSpalten.length} onClick={e => e.stopPropagation()}>
+                            <td colSpan={7 + frageSpalten.length + (data.spalten?.length || 0)} onClick={e => e.stopPropagation()}>
                               <div className="pub-expand-inner">
                                 <h4>Ihre Einschätzung</h4>
                                 <EditableFeedbackBlock fb={fb} onPatch={body => patchFeedback(b.id, body)} />
@@ -283,6 +379,19 @@ export default function PublicBewerbungen() {
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {(data.spalten || []).length > 0 && (
+                      <div className="pub-mcard-customs">
+                        {(data.spalten || []).map(s => (
+                          <label key={s.id} className="pub-mcard-custom">
+                            <span>{s.name}</span>
+                            <DebouncedInput
+                              value={data.werte?.[b.id]?.[s.id] || ''}
+                              onSave={v => setSpalteWert(b.id, s.id, v)}
+                            />
+                          </label>
+                        ))}
+                      </div>
                     )}
                     <button className="pub-mcard-toggle" onClick={() => toggleExpand(b.id)}>
                       {expanded ? '✕ Schließen' : 'Status & Notizen bearbeiten ▸'}

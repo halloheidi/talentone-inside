@@ -54,12 +54,13 @@ router.patch('/:id/notiz', async (req, res) => {
 
 /* ════════════════════ Eigene Spalten pro Job ════════════════════ */
 
-// GET /api/bewerbungen/job/:jobId/spalten
+// GET /api/bewerbungen/job/:jobId/spalten — nur intern-sichtbare
 router.get('/job/:jobId/spalten', async (req, res) => {
   const { data, error } = await supabase
     .from('talentone_bewerber_spalten')
     .select('*')
     .eq('job_id', req.params.jobId)
+    .eq('sichtbar_fuer', 'intern')
     .order('reihenfolge', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ spalten: data || [] });
@@ -87,6 +88,7 @@ router.post('/job/:jobId/spalten', async (req, res) => {
       typ,
       optionen: Array.isArray(optionen) ? optionen.map(o => String(o).slice(0, 80)).slice(0, 30) : null,
       reihenfolge: (last?.reihenfolge ?? -1) + 1,
+      sichtbar_fuer: 'intern',
     })
     .select()
     .single();

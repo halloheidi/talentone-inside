@@ -3889,7 +3889,7 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .pub-error { color: #a02828; }
 
 .pub-header { color: #fff; padding: 32px 0; }
-.pub-header-inner { max-width: 920px; margin: 0 auto; padding: 0 24px;
+.pub-header-inner { max-width: 1600px; margin: 0 auto; padding: 0 32px;
   display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .pub-brand { font-size: 13px; font-weight: 600; opacity: 0.7; }
 .pub-h1 { font-size: 28px; margin: 6px 0 0; font-weight: 700; letter-spacing: -0.02em; color: #fff; }
@@ -3898,7 +3898,7 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .pub-count strong { font-size: 36px; font-weight: 700; display: block; line-height: 1; }
 .pub-count span { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; }
 
-.pub-main { max-width: 920px; margin: 0 auto; padding: 24px; width: 100%; box-sizing: border-box; flex: 1; }
+.pub-main { max-width: 1600px; margin: 0 auto; padding: 24px 32px; width: 100%; box-sizing: border-box; flex: 1; }
 .pub-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
 .pub-filter-group { display: flex; gap: 0; background: #fff; border-radius: 100px; padding: 4px; border: 1px solid #e8e7e3; }
 .pub-filter {
@@ -3976,7 +3976,7 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 }
 
 .pub-footer {
-  max-width: 920px; margin: 0 auto; padding: 24px;
+  max-width: 1600px; margin: 0 auto; padding: 24px 32px;
   text-align: center; font-size: 12px; color: #9a9994; width: 100%; box-sizing: border-box;
 }
 .pub-footer a { color: #5a5955; text-decoration: none; border-bottom: 1px dotted #c0bfba; }
@@ -4091,3 +4091,77 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   color: #fff; border: none; border-radius: 100px; font-size: 12px; cursor: pointer; font-weight: 600;
 }
 .pub-mcard-feedback { margin-top: 6px; padding-top: 12px; border-top: 1px solid #f4f3f0; }
+
+/* ─── Public: Kunden-eigene Spalten ─── */
+.pub-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.pub-add-col-btn {
+  padding: 8px 14px; background: var(--pub-primary, #0a0a0a); color: #fff;
+  border: none; border-radius: 100px; cursor: pointer; font-size: 12.5px;
+  font-weight: 600; transition: opacity 0.1s;
+}
+.pub-add-col-btn:hover { opacity: 0.85; }
+.pub-add-col-form {
+  display: flex; gap: 4px; align-items: center;
+  background: #fff; border: 1px solid #e8e7e3; border-radius: 100px;
+  padding: 3px 4px 3px 12px;
+}
+.pub-add-col-form input {
+  border: none; outline: none; padding: 6px 4px; font-size: 13px;
+  min-width: 200px; background: transparent;
+}
+.pub-add-col-form button {
+  padding: 6px 14px; background: var(--pub-primary, #0a0a0a); color: #fff;
+  border: none; border-radius: 100px; font-size: 12px; cursor: pointer; font-weight: 600;
+}
+.pub-add-col-form .pub-cancel {
+  background: transparent; color: #9a9994; padding: 4px 8px;
+  font-size: 16px; line-height: 1;
+}
+
+.pub-spalten-bar {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px;
+  background: #fff; border: 1px solid #ececea; border-radius: 8px;
+  font-size: 12.5px;
+}
+.pub-spalten-label { color: #5a5955; font-weight: 600; margin-right: 4px; }
+.pub-spalten-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px 4px 12px; background: #f4f3f0; border-radius: 100px;
+  color: #0a0a0a;
+}
+.pub-spalten-chip button {
+  background: transparent; border: none; color: #9a9994; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 4px;
+}
+.pub-spalten-chip button:hover { color: #80201f; }
+
+.pub-th-custom { background: #fafff0 !important; min-width: 160px; }
+.pub-td-custom { background: #fafff0; min-width: 160px; padding: 4px !important; }
+.pub-td-custom input, .pub-td-custom textarea {
+  width: 100%; padding: 6px 8px; border: 1px solid transparent;
+  border-radius: 4px; font-size: 13px; background: transparent;
+  font-family: inherit; color: #0a0a0a;
+}
+.pub-td-custom input:hover, .pub-td-custom textarea:hover { background: #fff; }
+.pub-td-custom input:focus, .pub-td-custom textarea:focus {
+  outline: none; border-color: var(--pub-primary, #0a0a0a); background: #fff;
+}
+
+/* Mobile: Custom-Felder im Karten-Layout */
+.pub-mcard-customs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+  padding: 10px 12px; background: #fafff0; border-radius: 8px;
+  border: 1px solid #e8f0b8;
+}
+.pub-mcard-custom { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.pub-mcard-custom span { font-size: 11px; color: #5a5955; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.pub-mcard-custom input, .pub-mcard-custom textarea {
+  padding: 6px 10px; border: 1px solid #d8e5b0; border-radius: 4px;
+  font-size: 13px; background: #fff; font-family: inherit;
+}
+@media (max-width: 500px) {
+  .pub-mcard-customs { grid-template-columns: 1fr; }
+}
