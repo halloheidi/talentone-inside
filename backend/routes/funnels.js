@@ -6,7 +6,10 @@ import { fetchAsBuffer } from '../storage.js';
 
 const router = Router();
 
-const ALLOWED = ['fragen', 'pixel_id', 'conversion_ziel', 'bilder', 'veroeffentlicht', 'screens'];
+const ALLOWED = [
+  'fragen', 'pixel_id', 'conversion_ziel', 'bilder', 'veroeffentlicht', 'screens',
+  'capi_access_token', 'extern', 'extern_url', 'extern_sheet_url',
+];
 
 async function loadJobAndKunde(job_id) {
   const { data: job, error: jE } = await supabase

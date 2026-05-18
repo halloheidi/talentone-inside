@@ -20,7 +20,7 @@ function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toS
 function newScreen(type) {
   switch (type) {
     case 'question':
-      return { id: uid(), type, text: 'Neue Frage', options: ['Option 1', 'Option 2'], image_url: null };
+      return { id: uid(), type, text: 'Neue Frage', options: [{ text: 'Option 1' }, { text: 'Option 2' }], image_url: null };
     case 'benefits':
       return { id: uid(), type, headline: 'Das erwartet dich bei uns', body: '', quote: '', benefits: [], next_button: 'Weiter →', image_url: null };
     case 'tasks':
@@ -28,6 +28,12 @@ function newScreen(type) {
     default:
       return { id: uid(), type, headline: '', body: '', image_url: null };
   }
+}
+
+// Normalisiert Optionen — String oder Object → immer Object
+function normalizeOptions(options) {
+  if (!Array.isArray(options)) return [];
+  return options.map(o => typeof o === 'string' ? { text: o } : (o || { text: '' }));
 }
 
 export default function JobFunnel() {
@@ -50,8 +56,12 @@ export default function JobFunnel() {
   const [screens, setScreens] = useState([]);
   const [activeScreenId, setActiveScreenId] = useState(null);
   const [pixelId, setPixelId] = useState('');
+  const [capiAccessToken, setCapiAccessToken] = useState('');
   const [conversionZiel, setConversionZiel] = useState('');
   const [veroeffentlicht, setVeroeffentlicht] = useState(false);
+  const [extern, setExtern] = useState(false);
+  const [externUrl, setExternUrl] = useState('');
+  const [externSheetUrl, setExternSheetUrl] = useState('');
 
   function loadAll() {
     setLoading(true);
@@ -74,10 +84,19 @@ export default function JobFunnel() {
           }
         }
         setFunnel(funnelData);
-        setScreens(Array.isArray(funnelData.screens) ? funnelData.screens : []);
+        // Screens laden + Optionen normalisieren (String → Object)
+        const rawScreens = Array.isArray(funnelData.screens) ? funnelData.screens : [];
+        const normalizedScreens = rawScreens.map(s => s.type === 'question'
+          ? { ...s, options: normalizeOptions(s.options) }
+          : s);
+        setScreens(normalizedScreens);
         setPixelId(funnelData.pixel_id || '');
+        setCapiAccessToken(funnelData.capi_access_token || '');
         setConversionZiel(funnelData.conversion_ziel || 'Bewerbung einreichen');
         setVeroeffentlicht(!!funnelData.veroeffentlicht);
+        setExtern(!!funnelData.extern);
+        setExternUrl(funnelData.extern_url || '');
+        setExternSheetUrl(funnelData.extern_sheet_url || '');
         setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
         if (funnelData.id) {
           api(`/funnels/${funnelData.id}/bewerbungen`).then(b => setBewerbungen(b.bewerbungen || [])).catch(() => {});
@@ -175,7 +194,11 @@ export default function JobFunnel() {
       const body = {
         screens,
         pixel_id: pixelId.trim() || null,
+        capi_access_token: capiAccessToken.trim() || null,
         conversion_ziel: conversionZiel.trim() || null,
+        extern,
+        extern_url: externUrl.trim() || null,
+        extern_sheet_url: externSheetUrl.trim() || null,
         ...extra,
       };
       const res = await api(`/funnels/${funnel.id}`, { method: 'PATCH', body });
@@ -198,7 +221,8 @@ export default function JobFunnel() {
   }
   if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
 
-  const funnelUrl = `${PUBLIC_BASE}/f/${funnel.id}`;
+  const internalUrl = `${PUBLIC_BASE}/f/${funnel.id}`;
+  const funnelUrl = extern && externUrl.trim() ? externUrl.trim() : internalUrl;
   const previewFunnel = { ...funnel, screens, conversion_ziel: conversionZiel };
 
   const allImages = [
@@ -208,12 +232,47 @@ export default function JobFunnel() {
 
   return (
     <div className="funnel-editor">
+      {/* Toggle: Eigener vs. externer Funnel */}
+      <div className="funnel-mode-toggle">
+        <button
+          type="button"
+          className={`funnel-mode-btn ${!extern ? 'is-active' : ''}`}
+          onClick={() => setExtern(false)}
+        >
+          🛠 Eigenen Funnel verwenden
+        </button>
+        <button
+          type="button"
+          className={`funnel-mode-btn ${extern ? 'is-active' : ''}`}
+          onClick={() => setExtern(true)}
+        >
+          🔗 Externen Funnel verwenden
+        </button>
+      </div>
+
+      {extern && (
+        <fieldset className="formular-section">
+          <legend>Externer Funnel</legend>
+          <p className="pane-hint">Wenn ihr einen externen Funnel-Builder nutzt (Perspective, Heyflow o.ä.), trag die URLs hier ein. Der interne Editor unten ist dann deaktiviert.</p>
+          <div className="form-grid">
+            <label className="field field-full">
+              <span>Externe Funnel-URL *</span>
+              <input type="url" placeholder="https://app.perspective.co/…" value={externUrl} onChange={e => setExternUrl(e.target.value)} />
+            </label>
+            <label className="field field-full">
+              <span>Google Sheet URL der Bewerber (optional)</span>
+              <input type="url" placeholder="https://docs.google.com/spreadsheets/…" value={externSheetUrl} onChange={e => setExternSheetUrl(e.target.value)} />
+            </label>
+          </div>
+        </fieldset>
+      )}
+
       {/* Publish-Card */}
       <div className="funnel-publish-card">
         <div className="funnel-publish-status">
-          <span className={`funnel-status-dot ${veroeffentlicht ? 'is-live' : ''}`} />
-          <strong>{veroeffentlicht ? 'Live' : 'Entwurf'}</strong>
-          {veroeffentlicht
+          <span className={`funnel-status-dot ${(veroeffentlicht || extern) ? 'is-live' : ''}`} />
+          <strong>{extern ? 'Extern' : (veroeffentlicht ? 'Live' : 'Entwurf')}</strong>
+          {((veroeffentlicht && !extern) || (extern && externUrl.trim()))
             ? <a href={funnelUrl} target="_blank" rel="noreferrer" className="funnel-url-link">{funnelUrl}</a>
             : <span className="funnel-url-link funnel-url-disabled">{funnelUrl}</span>}
         </div>
@@ -221,16 +280,18 @@ export default function JobFunnel() {
           <button className="btn-ghost btn-sm" onClick={() => save()} disabled={saveBusy}>
             {saveBusy ? 'Speichere…' : 'Speichern'}
           </button>
-          <button className={veroeffentlicht ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'} onClick={togglePublish}>
-            {veroeffentlicht ? 'Offline nehmen' : 'Veröffentlichen'}
-          </button>
+          {!extern && (
+            <button className={veroeffentlicht ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'} onClick={togglePublish}>
+              {veroeffentlicht ? 'Offline nehmen' : 'Veröffentlichen'}
+            </button>
+          )}
           {saveMsg && <span className="form-msg">{saveMsg}</span>}
         </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className="funnel-editor-cols">
+      <div className={`funnel-editor-cols ${extern ? 'is-extern' : ''}`}>
         {/* ───────── Linke Spalte: Screen-Liste + Detail-Editor ───────── */}
         <div className="funnel-editor-left">
 
@@ -321,7 +382,14 @@ export default function JobFunnel() {
                   <option value="SubmitApplication">SubmitApplication (Standard-Event)</option>
                 </select>
               </label>
+              <label className="field field-full">
+                <span>Conversion API Access Token (optional)</span>
+                <input type="text" value={capiAccessToken} onChange={e => setCapiAccessToken(e.target.value)} placeholder="EAAxxxxxxxxxxxxxxxxxxx" />
+              </label>
             </div>
+            <p className="pane-hint" style={{ marginTop: 8 }}>
+              💡 Für zuverlässigeres Tracking empfehlen wir die <strong>Conversion API</strong> zusätzlich zum Pixel — sie umgeht Ad-Blocker und iOS-14-Tracking-Schutz. Token aus dem Meta Events Manager → Pixel → Einstellungen → „Token für die Conversions API erstellen".
+            </p>
           </fieldset>
         </div>
 
@@ -508,12 +576,12 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
           </label>
           <div className="field field-full">
             <span className="field-label">Antwort-Optionen</span>
-            <ChipsEditor
-              items={Array.isArray(screen.options) ? screen.options : []}
+            <p className="pane-hint" style={{ margin: '0 0 8px' }}>
+              Klick auf 🚩 markiert eine Antwort als <strong>KO-Kriterium</strong> — wer das wählt sieht statt des Kontaktformulars eine Absage.
+            </p>
+            <OptionsEditor
+              options={normalizeOptions(screen.options)}
               onChange={items => patch({ options: items.slice(0, 4) })}
-              placeholder="Option hinzufügen"
-              max={4}
-              vertical
             />
           </div>
         </div>
@@ -536,6 +604,60 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
         </div>
       )}
     </fieldset>
+  );
+}
+
+/* ═════════════════════ OptionsEditor (Antworten mit KO-Flag) ═════════════════════ */
+
+function OptionsEditor({ options = [], onChange }) {
+  const [draft, setDraft] = useState('');
+  function add() {
+    const v = draft.trim();
+    if (!v) return;
+    if (options.length >= 4) return;
+    if (options.some(o => o.text === v)) { setDraft(''); return; }
+    onChange([...options, { text: v }]);
+    setDraft('');
+  }
+  function update(i, value) {
+    const arr = [...options]; arr[i] = { ...arr[i], text: value };
+    onChange(arr);
+  }
+  function toggleKo(i) {
+    const arr = [...options]; arr[i] = { ...arr[i], ko: !arr[i].ko };
+    onChange(arr);
+  }
+  function remove(i) {
+    onChange(options.filter((_, idx) => idx !== i));
+  }
+  return (
+    <div className="chips-editor is-vertical">
+      {options.map((o, i) => (
+        <div key={i} className={`chip-edit-row option-row ${o.ko ? 'is-ko' : ''}`}>
+          <button
+            type="button"
+            className={`option-ko-flag ${o.ko ? 'is-ko' : ''}`}
+            onClick={() => toggleKo(i)}
+            title={o.ko ? 'KO-Kriterium aktiv — Klick entfernt' : 'Als KO-Kriterium markieren'}
+            aria-label="KO-Kriterium umschalten"
+          >🚩</button>
+          <input value={o.text} onChange={e => update(i, e.target.value)} />
+          <button type="button" className="chip-x" onClick={() => remove(i)}>×</button>
+        </div>
+      ))}
+      {options.length < 4 && (
+        <div className="chip-add">
+          <input
+            type="text"
+            placeholder="Option hinzufügen"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          />
+          <button type="button" className="btn-ghost btn-sm" onClick={add}>Hinzufügen</button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -268,10 +268,14 @@ router.post('/formular/:token/submit', async (req, res) => {
 /* ───────────────── Funnel (öffentliche Bewerbungsseite) ───────────────── */
 
 // GET /api/public/funnel/:id — komplette Funnel-Daten + Job + Kunde-Stub
+// Bei externem Funnel: returnt redirect_to-URL statt Daten.
 router.get('/funnel/:id', async (req, res) => {
   const { data: funnel } = await supabase
     .from('talentone_funnels').select('*').eq('id', req.params.id).maybeSingle();
   if (!funnel) return res.status(404).json({ error: 'Funnel nicht gefunden.' });
+  if (funnel.extern && funnel.extern_url) {
+    return res.json({ redirect_to: funnel.extern_url });
+  }
   if (!funnel.veroeffentlicht) return res.status(403).json({ error: 'Funnel ist noch nicht veröffentlicht.' });
   const { data: job } = await supabase
     .from('talentone_jobs').select('id, stelle, region, gehalt, benefits, kunde_id').eq('id', funnel.job_id).maybeSingle();
@@ -280,14 +284,17 @@ router.get('/funnel/:id', async (req, res) => {
   res.json({ funnel, job, kunde });
 });
 
-// POST /api/public/funnel/:id/bewerbung  body: { name, email, telefon, antworten }
+// POST /api/public/funnel/:id/bewerbung  body: { name, email, telefon, antworten, ko_kriterium }
 router.post('/funnel/:id/bewerbung', async (req, res) => {
-  const { name, email, telefon, antworten } = req.body || {};
-  if (!email?.trim() && !telefon?.trim()) {
+  const { name, email, telefon, antworten, ko_kriterium } = req.body || {};
+  const isKo = !!ko_kriterium;
+
+  // Bei KO: name/email/telefon optional. Sonst: mind. eines pflicht.
+  if (!isKo && !email?.trim() && !telefon?.trim()) {
     return res.status(400).json({ error: 'E-Mail oder Telefonnummer ist Pflicht.' });
   }
   const { data: funnel } = await supabase
-    .from('talentone_funnels').select('id, job_id, veroeffentlicht').eq('id', req.params.id).maybeSingle();
+    .from('talentone_funnels').select('*').eq('id', req.params.id).maybeSingle();
   if (!funnel) return res.status(404).json({ error: 'Funnel nicht gefunden.' });
   if (!funnel.veroeffentlicht) return res.status(403).json({ error: 'Funnel nicht veröffentlicht.' });
 
@@ -299,9 +306,25 @@ router.post('/funnel/:id/bewerbung', async (req, res) => {
       email: email?.trim() || null,
       telefon: telefon?.trim() || null,
       antworten: antworten || null,
+      ko_kriterium: isKo,
     })
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
+
+  // CAPI: nur bei NICHT-KO und wenn pixel_id + capi_access_token gesetzt
+  if (!isKo && funnel.pixel_id && funnel.capi_access_token) {
+    const { sendCapiEvent } = await import('../capi.js');
+    const clientIp = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() || req.ip;
+    const userAgent = req.headers['user-agent'];
+    sendCapiEvent({
+      pixelId: funnel.pixel_id,
+      accessToken: funnel.capi_access_token,
+      eventName: funnel.conversion_ziel || 'Lead',
+      eventSourceUrl: `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/f/${funnel.id}`,
+      userData: { email, phone: telefon, clientIp, userAgent },
+    }).catch(err => console.warn('[CAPI] uncaught:', err.message));
+  }
+
   res.status(201).json({ ok: true, bewerbung_id: data.id });
 });
 

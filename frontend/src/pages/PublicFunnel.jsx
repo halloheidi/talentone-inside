@@ -41,6 +41,11 @@ export default function PublicFunnel() {
   useEffect(() => {
     publicApi(`/funnel/${funnelId}`)
       .then(res => {
+        // Externer Funnel: sofort redirect
+        if (res.redirect_to) {
+          window.location.replace(res.redirect_to);
+          return;
+        }
         setData(res);
         if (res.funnel?.pixel_id) loadMetaPixel(res.funnel.pixel_id);
       })
@@ -49,9 +54,9 @@ export default function PublicFunnel() {
 
   async function onSubmit(payload) {
     await publicApi(`/funnel/${funnelId}/bewerbung`, { method: 'POST', body: payload });
-    if (window.fbq && data?.funnel?.conversion_ziel) {
+    // Pixel-Event nur bei NICHT-KO-Submit
+    if (!payload.ko_kriterium && window.fbq && data?.funnel?.conversion_ziel) {
       const evt = data.funnel.conversion_ziel;
-      // Standard-Events nutzen track, Custom-Events trackCustom
       const standard = ['Lead', 'CompleteRegistration', 'SubmitApplication'];
       if (standard.includes(evt)) window.fbq('track', evt);
       else window.fbq('trackCustom', evt);

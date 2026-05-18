@@ -16,7 +16,43 @@ const BRANCHE_LABEL = {
 
 /* ───────────────────── Fragen vorschlagen ───────────────────── */
 
+// 3 garantierte Basisfragen — werden IMMER zuerst vorgeschlagen, selbst wenn die KI ausfällt.
+function buildStandardFragen(job) {
+  const rawStelle = (job?.stelle || 'dieser Stelle').trim();
+  const stelleClean = rawStelle.replace(/\s*\([mwfd][\/\\mwfd\s\-]+\)\s*$/i, '').trim();
+  return [
+    {
+      text: `Hast du eine Ausbildung als ${stelleClean}?`,
+      options: [
+        { text: 'Ja, abgeschlossen' },
+        { text: 'In Ausbildung' },
+        { text: 'Nein, aber Erfahrung' },
+        { text: 'Weder noch' },
+      ],
+    },
+    {
+      text: 'Hast du einen Führerschein Klasse B?',
+      options: [
+        { text: 'Ja' },
+        { text: 'Nein' },
+      ],
+    },
+    {
+      text: 'Was beschreibt dich am besten?',
+      options: [
+        { text: 'Teamfähigkeit' },
+        { text: 'Eigeninitiative' },
+        { text: 'Zuverlässigkeit' },
+        { text: 'Belastbarkeit' },
+      ],
+    },
+  ];
+}
+
 export async function generateFragenVorschlaege(job, kunde) {
+  const standard = buildStandardFragen(job);
+
+  // Branchenspezifische Zusatzfragen via Claude (best-effort)
   const fd = job.formdata_komplett || {};
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const kontext = `Stelle: ${job.stelle || '-'}
@@ -26,39 +62,43 @@ Geforderte Ausbildung: ${fd.ausbildung || '-'}
 Quereinsteiger willkommen: ${job.quereinsteiger ? 'ja' : 'nein'}
 Reisebereitschaft erforderlich: ${job.reisebereitschaft ? 'ja' : 'nein'}`;
 
-  const prompt = `Du bist Recruiting-Funnel-Experte. Schlage 4-6 prägnante Multiple-Choice-Fragen für eine Bewerbungsseite vor — eine pro Screen.
+  const prompt = `Du bist Recruiting-Funnel-Experte. Wir haben bereits 3 Basisfragen abgedeckt: Ausbildung/Qualifikation, Führerschein Klasse B, Soft Skills. Schlage 1-3 ZUSÄTZLICHE branchenspezifische Multiple-Choice-Fragen vor — KEINE Doppelungen zu diesen 3 Themen.
 
 ${kontext}
 
-Branchenspezifisch sinnvoll fragen:
-- Handwerk: Gesellenbrief / Meister, Führerschein-Klassen, Berufserfahrung
+Branchenspezifisch sinnvoll:
+- Handwerk: weitere Führerschein-Klassen, Berufserfahrung in Jahren, Spezialisierung
 - Pflege: Examiniert, Schichtbereitschaft, Wochenendarbeit
-- Logistik: Führerschein-Klassen, Schichtbereitschaft
-- Allgemein: Verfügbarkeit (Start), Berufserfahrung, Motivation
+- Logistik: weitere Führerschein-Klassen, Schichtbereitschaft
+- Allgemein: Verfügbarkeit ab wann, konkrete Berufserfahrung in Jahren
 
 Pro Frage:
-- text: KURZ (max 10 Wörter), Du-Ansprache, freundlich, NICHT bürokratisch
-- options: 2-4 Antwort-Optionen, KURZ (1-3 Wörter idealerweise)
-- "Sonstiges" oder "Lieber persönlich" ist OK als 4. Option
+- text: KURZ (max 10 Wörter), Du-Ansprache, freundlich
+- options: 2-4 Antwort-Optionen, KURZ (1-3 Wörter)
 
-Antworte NUR mit JSON, keine Markdown-Backticks, keine ID-Felder (die generieren wir):
-{
-  "fragen": [
-    { "text": "...", "options": ["...", "..."] }
-  ]
-}`;
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "fragen": [{ "text": "...", "options": ["...", "..."] }] }`;
 
-  const data = await callClaudeWithRetry({
-    model: CLAUDE_MODEL,
-    max_tokens: 1500,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  const parsed = parseJsonContent(data);
-  const fragen = Array.isArray(parsed.fragen) ? parsed.fragen : [];
-  return fragen.slice(0, 6).map(f => ({
-    text: String(f.text || '').trim(),
-    options: Array.isArray(f.options) ? f.options.map(o => String(o).trim()).filter(Boolean).slice(0, 4) : [],
-  })).filter(f => f.text && f.options.length >= 2);
+  let zusatz = [];
+  try {
+    const data = await callClaudeWithRetry({
+      model: CLAUDE_MODEL,
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const parsed = parseJsonContent(data);
+    const raw = Array.isArray(parsed.fragen) ? parsed.fragen : [];
+    zusatz = raw.slice(0, 3).map(f => ({
+      text: String(f.text || '').trim(),
+      options: Array.isArray(f.options)
+        ? f.options.map(o => ({ text: String(o).trim() })).filter(o => o.text).slice(0, 4)
+        : [],
+    })).filter(f => f.text && f.options.length >= 2);
+  } catch (err) {
+    console.warn('[fragen-vorschlaege] KI-Zusatz failed:', err.message);
+  }
+
+  return [...standard, ...zusatz];
 }
 
 /* ───────────────────── Initial-Screens (Texte) generieren ───────────────────── */

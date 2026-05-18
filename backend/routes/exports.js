@@ -34,7 +34,10 @@ function filterByIds(list, ids) {
 router.get('/jobs/:id/export', async (req, res) => {
   try {
     const data = await loadFullJob(req.params.id);
-    const funnelUrl = data.funnel?.id ? `${PUBLIC_BASE}/f/${data.funnel.id}` : null;
+    // Externer Funnel → externe URL, sonst interne PUBLIC_BASE/f/:id
+    const funnelUrl = !data.funnel?.id ? null
+      : (data.funnel.extern && data.funnel.extern_url) ? data.funnel.extern_url
+      : `${PUBLIC_BASE}/f/${data.funnel.id}`;
     res.json({ ...data, funnel_url: funnelUrl });
   } catch (err) {
     res.status(404).json({ error: err.message });
@@ -89,7 +92,9 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
     const selCreatives = filterByIds(creatives, creative_ids);
     const selAdcopies = filterByIds(adcopies, adcopy_ids);
-    const funnelUrl = include_funnel && funnel?.id ? `${PUBLIC_BASE}/f/${funnel.id}` : null;
+    const funnelUrl = !include_funnel || !funnel?.id ? null
+      : (funnel.extern && funnel.extern_url) ? funnel.extern_url
+      : `${PUBLIC_BASE}/f/${funnel.id}`;
 
     await sendEntwurfsMail({
       to: to.trim(), betreff, anschreiben, job, kunde,

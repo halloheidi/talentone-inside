@@ -13,10 +13,17 @@ import { useEffect, useMemo, useState } from 'react';
  *  - readonly?: bool
  *  - jumpToIndex?: number   // im Editor: zeigt diesen Screen direkt an
  */
+// Normalisiert Optionen: String-Optionen werden zu Objekten, Object-Optionen bleiben.
+function normalizeOptions(options) {
+  if (!Array.isArray(options)) return [];
+  return options.map(o => typeof o === 'string' ? { text: o } : (o || { text: '' }));
+}
+
 export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readonly, jumpToIndex }) {
   const screens = Array.isArray(funnel?.screens) ? funnel.screens : [];
   const [step, setStep] = useState(0);
   const [antworten, setAntworten] = useState({});
+  const [koTriggered, setKoTriggered] = useState(false);
   const [contact, setContact] = useState({ name: '', email: '', telefon: '' });
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitDone, setSubmitDone] = useState(false);
@@ -51,9 +58,32 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
 
   function pickOption(opt) {
     if (screen?.type !== 'question') return;
+    if (opt?.ko) setKoTriggered(true);
     setAntworten(prev => ({ ...prev, [screen.id]: opt }));
     next();
   }
+
+  // Wenn KO ausgelöst wurde und User auf letzter Frage → KO-Bewerbung speichern (still im Hintergrund)
+  // und Absage-Screen zeigen. Wird vom Contact-Screen aus aufgerufen über useEffect bzw. direkt via screen-Type.
+  async function submitKoBewerbung() {
+    if (readonly || !onSubmit) return;
+    try {
+      const antwortenList = screens
+        .filter(s => s.type === 'question')
+        .map(s => ({ frage_id: s.id, frage_text: s.text, antwort: antworten[s.id]?.text || null }));
+      await onSubmit({ name: '', email: '', telefon: '', antworten: antwortenList, ko_kriterium: true });
+    } catch (err) {
+      console.warn('[funnel] ko-submit:', err.message);
+    }
+  }
+
+  // Beim Erreichen des contact-Screens via KO: still submitten + Absage zeigen
+  useEffect(() => {
+    if (koTriggered && screen?.type === 'contact' && !submitDone) {
+      submitKoBewerbung();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [koTriggered, screen?.type]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -66,15 +96,16 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
     try {
       const antwortenList = screens
         .filter(s => s.type === 'question')
-        .map(s => ({ frage_id: s.id, frage_text: s.text, antwort: antworten[s.id] || null }));
-      await onSubmit({ ...contact, antworten: antwortenList });
+        .map(s => ({ frage_id: s.id, frage_text: s.text, antwort: antworten[s.id]?.text || null }));
+      await onSubmit({ ...contact, antworten: antwortenList, ko_kriterium: false });
       setSubmitDone(true);
     } catch (err) { setSubmitError(err.message); }
     finally { setSubmitBusy(false); }
   }
 
   function reset() {
-    setStep(0); setAntworten({}); setContact({ name: '', email: '', telefon: '' }); setSubmitDone(false);
+    setStep(0); setAntworten({}); setContact({ name: '', email: '', telefon: '' });
+    setSubmitDone(false); setKoTriggered(false);
   }
 
   const wrap = (content) => frame === 'phone'
@@ -200,9 +231,9 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
           <>
             <h2 className="funnel-q">{screen.text || ''}</h2>
             <div className="funnel-options">
-              {(screen.options || []).map((opt, i) => (
+              {normalizeOptions(screen.options).map((opt, i) => (
                 <button key={i} type="button" className="funnel-option" onClick={() => pickOption(opt)}>
-                  {opt}
+                  {opt.text}
                 </button>
               ))}
             </div>
@@ -210,8 +241,18 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
           </>
         )}
 
-        {/* CONTACT */}
-        {screen.type === 'contact' && (
+        {/* CONTACT: bei KO Absage-Screen statt Kontaktformular */}
+        {screen.type === 'contact' && koTriggered && (
+          <>
+            <div className="funnel-ko-emoji">🙏</div>
+            <h2 className="funnel-q">Vielen Dank für dein Interesse!</h2>
+            <p className="funnel-q-sub">
+              Leider passt es aktuell nicht zu den Anforderungen dieser Stelle.
+              Wir wünschen dir viel Erfolg bei deiner weiteren Suche!
+            </p>
+          </>
+        )}
+        {screen.type === 'contact' && !koTriggered && (
           <>
             <h2 className="funnel-q">{screen.headline || 'Wie können wir dich erreichen?'}</h2>
             {screen.body && <p className="funnel-q-sub">{screen.body}</p>}

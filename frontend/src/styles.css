@@ -2369,6 +2369,78 @@ button { font-family: inherit; }
 }
 .adcopy-skeleton > div.short { width: 60%; }
 
+/* ───────── Funnel: Mode-Toggle (intern vs extern) ───────── */
+.funnel-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding: 6px;
+  background: var(--line-2);
+  border-radius: var(--radius-sm);
+}
+.funnel-mode-btn {
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.funnel-mode-btn:hover { color: var(--ink); }
+.funnel-mode-btn.is-active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Bei extern: linke Spalte ausgegraut, rechts ausgeblendet */
+.funnel-editor-cols.is-extern .funnel-editor-left > fieldset:not(:first-of-type) {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.funnel-editor-cols.is-extern .funnel-editor-right {
+  display: none;
+}
+.funnel-editor-cols.is-extern { grid-template-columns: 1fr; }
+
+/* KO-Flag in Options-Editor */
+.option-row { display: flex; align-items: center; gap: 6px; }
+.option-row.is-ko { background: rgba(220, 38, 38, 0.05); border-radius: var(--radius-sm); padding: 2px; }
+.option-ko-flag {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity 0.12s, background 0.12s, border-color 0.12s;
+}
+.option-ko-flag:hover { opacity: 0.8; }
+.option-ko-flag.is-ko {
+  opacity: 1;
+  background: rgba(220, 38, 38, 0.1);
+  border-color: var(--danger);
+}
+
+/* Funnel-Public: KO-Absage-Screen */
+.funnel-ko-emoji {
+  font-size: 56px;
+  text-align: center;
+  margin: 16px 0 4px;
+}
+.funnel-contact .funnel-ko-emoji + .funnel-q,
+.funnel-contact .funnel-ko-emoji + h2 {
+  text-align: center;
+}
+
 /* ───────── Funnel-Editor Layout ───────── */
 .funnel-editor-cols {
   display: grid;
