@@ -33,7 +33,7 @@ const BRANDING = {
   nowagwirth: {
     name: 'Nowag & Wirth', primary: '#1a3a6c', accent: '#ffd966', accentInk: '#1a3a6c',
     footer: 'Nowag & Wirth — Digitales Marketing', website: 'https://nowagwirth.de',
-    logo: <span>Nowag &amp; Wirth</span>,
+    logo: <img src="/nowagwirth-logo.png" alt="Nowag & Wirth" style={{ height: 32, background: '#fff', borderRadius: 6, padding: '4px 8px', display: 'inline-block' }} />,
   },
 };
 

@@ -31,7 +31,7 @@ const BRANDING = {
     accentInk: '#1a3a6c',
     footer: 'Nowag & Wirth — Digitales Marketing',
     website: 'https://nowagwirth.de',
-    logoHtml: '<span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Nowag &amp; Wirth</span>',
+    logoHtml: `<img src="${(process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de')}/nowagwirth-logo.png" alt="Nowag &amp; Wirth" height="36" style="display:inline-block;background:#fff;border-radius:6px;padding:4px 8px;">`,
   },
 };
 export function getBranding(agentur) {
