@@ -3,6 +3,28 @@ import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
 import { getBrand } from '../lib/branding.js';
 
+// Meta Pixel — TalentOne (Formular-Eingang als Lead)
+const META_PIXEL_ID = import.meta.env.VITE_META_PIXEL_ID || '1696247654718860';
+function loadMetaPixel(pixelId) {
+  if (!pixelId || typeof window === 'undefined' || window.fbq) return;
+  /* eslint-disable */
+  !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){
+    n.callMethod ? n.callMethod.apply(n,arguments) : n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window,document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+  /* eslint-enable */
+  window.fbq('init', pixelId);
+  window.fbq('track', 'PageView');
+}
+function getCookie(name) {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 function BrandHeader({ agentur }) {
   const brand = getBrand(agentur);
   if (brand.key === 'nowagwirth') {
@@ -132,6 +154,8 @@ export default function PublicFormular() {
   const [submitError, setSubmitError] = useState('');
   const logoInputRef = useRef(null);
   const fotosInputRef = useRef(null);
+
+  useEffect(() => { loadMetaPixel(META_PIXEL_ID); }, []);
 
   useEffect(() => {
     publicApi(`/formular/${token}`)
@@ -301,6 +325,13 @@ export default function PublicFormular() {
         ...(form.benefits || []),
         ...(form.benefits_zusatz ? form.benefits_zusatz.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : []),
       ];
+      // Pixel-Lead-Event clientseitig
+      try {
+        if (window.fbq) {
+          window.fbq('track', 'Lead', { content_name: 'Briefing-Formular', source: form.firmenname });
+        }
+      } catch { /* noop */ }
+
       await publicApi(`/formular/${token}/submit`, {
         method: 'POST',
         body: {
@@ -321,6 +352,8 @@ export default function PublicFormular() {
             quereinsteiger: form.quereinsteiger,
           },
           formdata: form,
+          _fbp: getCookie('_fbp'),
+          _fbc: getCookie('_fbc'),
         },
       });
       setDone(true);

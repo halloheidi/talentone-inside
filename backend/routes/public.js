@@ -237,6 +237,31 @@ router.post('/formular/:token/submit', async (req, res) => {
     // Antwort sofort raus
     res.status(201).json({ ok: true });
 
+    // CAPI Lead-Event (best-effort, blockt nicht)
+    if (process.env.META_PIXEL_ID && process.env.META_CAPI_TOKEN) {
+      (async () => {
+        try {
+          const { sendCapiEvent } = await import('../capi.js');
+          const clientIp = (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() || req.ip;
+          await sendCapiEvent({
+            pixelId: process.env.META_PIXEL_ID,
+            accessToken: process.env.META_CAPI_TOKEN,
+            eventName: 'Lead',
+            eventSourceUrl: `${getPublicBaseUrl(updated.agentur)}/formular/${req.params.token}`,
+            userData: {
+              email: updated.email,
+              phone: updated.telefon,
+              clientIp,
+              userAgent: req.headers['user-agent'],
+              fbp: req.body?._fbp,
+              fbc: req.body?._fbc,
+            },
+            customData: { content_name: 'Briefing-Formular', source: updated.firmenname },
+          });
+        } catch (err) { console.warn('[CAPI/formular]', err.message); }
+      })().catch(err => console.error('[CAPI/formular-uncaught]', err.message));
+    }
+
     // Hintergrund: Farben + Mitarbeiter-Mail
     (async () => {
       // Farben aus Logo bevorzugt, sonst Website
