@@ -48,6 +48,27 @@ function StarRating({ value, onChange }) {
   );
 }
 
+function AmpelSelector({ value, onChange }) {
+  const opts = [
+    { v: 'gruen', emoji: '🟢', title: 'Grün: passt — Kontakt aufnehmen' },
+    { v: 'gelb',  emoji: '🟡', title: 'Gelb: Kleinigkeit — anrufen' },
+    { v: 'rot',   emoji: '🔴', title: 'Rot: passt nicht' },
+  ];
+  return (
+    <div className="ampel-selector">
+      {opts.map(o => (
+        <button
+          key={o.v}
+          type="button"
+          className={`ampel-dot ${value === o.v ? 'is-on' : ''}`}
+          title={o.title}
+          onClick={e => { e.stopPropagation(); onChange(value === o.v ? null : o.v); }}
+        >{o.emoji}</button>
+      ))}
+    </div>
+  );
+}
+
 function csvDownload(filename, rows) {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -303,6 +324,7 @@ export default function BewerbungenOverview() {
           <table className="bewerbungen-table">
             <thead>
               <tr>
+                <th style={{ width: 110 }}>Ampel</th>
                 <SortHeader k="created_at" label="Datum" />
                 <SortHeader k="name" label="Bewerber" />
                 <SortHeader k="kunde" label="Kunde" />
@@ -328,6 +350,9 @@ export default function BewerbungenOverview() {
                 const job = b.talentone_jobs;
                 return (
                   <tr key={b.id} className={b.ko_kriterium ? 'is-ko' : ''}>
+                    <td onClick={e => e.stopPropagation()}>
+                      <AmpelSelector value={n.ampel} onChange={v => updateNotiz(b.id, { ampel: v })} />
+                    </td>
                     <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
                     <td className="td-name">
                       <button className="link-button" onClick={() => setSelectedBewerbung(b)}>
@@ -419,10 +444,13 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
             <AnrufversucheBlock value={note.anrufversuche || []} onChange={v => onUpdate({ anrufversuche: v })} />
           </section>
 
-          {/* 3. Status + Bewertung + Nächste Aktion */}
+          {/* 3. Ampel + Status + Bewertung + Nächste Aktion */}
           <section>
-            <h3>Status & Bewertung</h3>
+            <h3>Status &amp; Bewertung</h3>
             <div className="slideover-form">
+              <label className="slideover-full"><span>Ampel (für den Kunden sichtbar)</span>
+                <AmpelSelector value={note.ampel} onChange={v => onUpdate({ ampel: v })} />
+              </label>
               <label><span>Status</span>
                 <select className="cell-input" value={note.status || 'neu'} onChange={e => onUpdate({ status: e.target.value })}>
                   {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
