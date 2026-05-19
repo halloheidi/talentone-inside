@@ -4536,3 +4536,26 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .pub-status-select.pub-status-absage     { background-color: #f4d6d6; color: #80201f; }
 .pub-status-badge.pub-status-ungeeignet  { background: #ececea; color: #5a5955; }
 .pub-status-badge.pub-status-absage      { background: #f4d6d6; color: #80201f; }
+
+/* ─── Bewerbungen-Übersicht: Telefonisten-Quickfilter ─── */
+.bew-overview-head { gap: 16px; flex-wrap: wrap; }
+.bew-overview-quickfilter {
+  display: flex; gap: 8px; margin-right: auto;
+}
+.bew-quick-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; background: #fff; border: 1px solid var(--line);
+  border-radius: 100px; cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--ink-2); transition: all 0.1s;
+}
+.bew-quick-toggle:hover { background: #fafaf8; }
+.bew-quick-toggle.is-on { background: var(--ink-1); color: #fff; border-color: var(--ink-1); }
+.bew-quick-dot {
+  display: inline-block; width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); text-align: center; line-height: 16px;
+  font-size: 11px;
+}
+.bew-quick-toggle:not(.is-on) .bew-quick-dot {
+  background: transparent; border: 1px solid var(--line);
+}
+.bew-quick-count { font-weight: 500; opacity: 0.75; font-size: 12px; }

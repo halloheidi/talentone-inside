@@ -67,7 +67,9 @@ export default function BewerbungenOverview() {
   const [data, setData] = useState({ bewerbungen: [], notizen: {}, feedback: {}, stats: {} });
   const [selectedBewerbung, setSelectedBewerbung] = useState(null);
 
-  // Filter
+  // Filter — Telefonisten-Defaults: nur Vorqualifizierung + nur offen
+  const [nurVorqual, setNurVorqual] = useState(true);
+  const [nurOffen, setNurOffen] = useState(true);
   const [kundeFilter, setKundeFilter] = useState('');
   const [jobFilter, setJobFilter] = useState('');
   const [quelleFilter, setQuelleFilter] = useState('');
@@ -115,9 +117,20 @@ export default function BewerbungenOverview() {
     return Array.from(map.values()).sort((a, b) => (a.stelle || '').localeCompare(b.stelle || ''));
   }, [data.bewerbungen]);
 
+  // Counter für die beiden Telefonisten-Toggles (auf Basis-Datenmenge, vor anderen Filtern)
+  const counts = useMemo(() => {
+    const vorqualAll = data.bewerbungen.filter(b => b.talentone_jobs?.vorqualifizierung).length;
+    const vorqualOffen = data.bewerbungen.filter(b =>
+      b.talentone_jobs?.vorqualifizierung && !data.notizen[b.id]?.erledigt
+    ).length;
+    return { vorqualAll, vorqualOffen, alle: data.bewerbungen.length };
+  }, [data]);
+
   // Client-side Filter
   const filtered = useMemo(() => {
     let list = data.bewerbungen;
+    if (nurVorqual) list = list.filter(b => b.talentone_jobs?.vorqualifizierung);
+    if (nurOffen) list = list.filter(b => !data.notizen[b.id]?.erledigt);
     if (kundeFilter) list = list.filter(b => b.talentone_jobs?.kunde_id === kundeFilter);
     if (jobFilter) list = list.filter(b => b.job_id === jobFilter);
     if (agenturFilter) list = list.filter(b => b.talentone_jobs?.talentone_kunden?.agentur === agenturFilter);
@@ -140,7 +153,7 @@ export default function BewerbungenOverview() {
       return 0;
     });
     return list;
-  }, [data, kundeFilter, jobFilter, agenturFilter, statusFilter, sortKey, sortAsc]);
+  }, [data, nurVorqual, nurOffen, kundeFilter, jobFilter, agenturFilter, statusFilter, sortKey, sortAsc]);
 
   async function updateNotiz(bewId, patch) {
     setData(prev => ({ ...prev, notizen: { ...prev.notizen, [bewId]: { ...(prev.notizen[bewId] || {}), ...patch } } }));
@@ -190,6 +203,26 @@ export default function BewerbungenOverview() {
     <div className="bew-overview">
       <header className="bew-overview-head">
         <h1>Bewerbungen</h1>
+        <div className="bew-overview-quickfilter">
+          <button
+            className={`bew-quick-toggle ${nurVorqual ? 'is-on' : ''}`}
+            onClick={() => setNurVorqual(v => !v)}
+            title="Nur Bewerbungen aus Jobs mit Telefonischer Vorqualifizierung"
+          >
+            <span className="bew-quick-dot">{nurVorqual ? '✓' : ''}</span>
+            Nur Vorqualifizierung
+            <span className="bew-quick-count">({counts.vorqualAll})</span>
+          </button>
+          <button
+            className={`bew-quick-toggle ${nurOffen ? 'is-on' : ''}`}
+            onClick={() => setNurOffen(v => !v)}
+            title="Nur noch nicht als erledigt markierte Bewerber"
+          >
+            <span className="bew-quick-dot">{nurOffen ? '✓' : ''}</span>
+            Nur offen
+            <span className="bew-quick-count">({nurVorqual ? counts.vorqualOffen : counts.alle - data.bewerbungen.filter(b => data.notizen[b.id]?.erledigt).length})</span>
+          </button>
+        </div>
         <button className="btn-ghost" onClick={exportCsv} disabled={filtered.length === 0}>⬇ CSV-Export ({filtered.length})</button>
       </header>
 
