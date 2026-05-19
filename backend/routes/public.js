@@ -441,7 +441,7 @@ router.post('/review/:token', async (req, res) => {
 
 /* ════════════════════ Public Bewerberliste (Token) ════════════════════ */
 
-const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'abgesagt'];
+const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'abgesagt'];
 
 async function loadJobByToken(token) {
   const { data } = await supabase
@@ -479,7 +479,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
       supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, updated_at')
+        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, ampel, updated_at')
         .in('bewerbung_id', ids),
     ]);
     for (const f of fb.data || []) feedback[f.bewerbung_id] = f;
@@ -493,6 +493,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
         vg_vereinbart_am: r.vg_vereinbart_am,
         eingestellt: r.eingestellt,
         kunde_kontaktiert: r.kunde_kontaktiert,
+        ampel: r.ampel,
         updated_at: r.updated_at,
       };
     }

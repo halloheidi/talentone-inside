@@ -43,6 +43,9 @@ router.patch('/:id/notiz', async (req, res) => {
     if (body[k] !== undefined) patch[k] = (body[k]?.toString().trim()) || null;
   }
   if (body.erledigt !== undefined) patch.erledigt = !!body.erledigt;
+  if (body.ampel !== undefined) {
+    patch.ampel = ['gruen', 'gelb', 'rot'].includes(body.ampel) ? body.ampel : null;
+  }
   if (body.vg_vereinbart_am !== undefined) {
     patch.vg_vereinbart_am = body.vg_vereinbart_am || null;
   }

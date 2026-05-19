@@ -71,6 +71,27 @@ function DebouncedInput({ value, onSave, type = 'text', placeholder, rows }) {
   return <input className="cell-input" type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
 }
 
+function AmpelSelector({ value, onChange }) {
+  const opts = [
+    { v: 'gruen', emoji: '🟢', title: 'Grün: passt — Kontakt aufnehmen' },
+    { v: 'gelb',  emoji: '🟡', title: 'Gelb: Kleinigkeit — anrufen' },
+    { v: 'rot',   emoji: '🔴', title: 'Rot: passt nicht' },
+  ];
+  return (
+    <div className="ampel-selector">
+      {opts.map(o => (
+        <button
+          key={o.v}
+          type="button"
+          className={`ampel-dot ${value === o.v ? 'is-on' : ''}`}
+          title={o.title}
+          onClick={(e) => { e.stopPropagation(); onChange(value === o.v ? null : o.v); }}
+        >{o.emoji}</button>
+      ))}
+    </div>
+  );
+}
+
 function StarRating({ value, onChange }) {
   return (
     <div className="star-rating">
@@ -227,6 +248,10 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
           <section>
             <h3>Status &amp; Termin</h3>
             <div className="slideover-form">
+              <label className="slideover-full">
+                <span>Ampel (für den Kunden sichtbar)</span>
+                <AmpelSelector value={n.ampel} onChange={v => onPatch({ ampel: v })} />
+              </label>
               <label className="slideover-half">
                 <span>Status</span>
                 <select className="cell-input" value={n.status || 'neu'} onChange={e => onPatch({ status: e.target.value })}>
@@ -418,8 +443,10 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
       const n = data.notizen[b.id] || {};
       const fb = data.feedback[b.id] || {};
       const norm = normalized.get(b.id) || {};
+      const ampelLabel = n.ampel === 'gruen' ? '🟢 Grün' : n.ampel === 'gelb' ? '🟡 Gelb' : n.ampel === 'rot' ? '🔴 Rot' : '';
       const row = {
         Erledigt: n.erledigt ? '✓' : '',
+        Ampel: telefonistenMode ? ampelLabel : '',
         Datum: new Date(b.created_at).toLocaleString('de-DE'),
         Name: norm.name || '',
         Status: STATUS_OPTIONS.find(o => o.value === (n.status || 'neu'))?.label || '',
@@ -545,6 +572,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
             <thead>
               <tr>
                 {telefonistenMode && <th style={{ width: 40 }}></th>}
+                {telefonistenMode && <th style={{ width: 110 }}>Ampel</th>}
                 <th>Datum</th>
                 <th>Name</th>
                 {telefonistenMode && <th>Status</th>}
@@ -589,6 +617,11 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                     {telefonistenMode && (
                       <td onClick={e => e.stopPropagation()} className="td-erledigt">
                         <input type="checkbox" checked={!!n.erledigt} onChange={e => updateNotiz(b.id, { erledigt: e.target.checked })} />
+                      </td>
+                    )}
+                    {telefonistenMode && (
+                      <td onClick={e => e.stopPropagation()}>
+                        <AmpelSelector value={n.ampel} onChange={v => updateNotiz(b.id, { ampel: v })} />
                       </td>
                     )}
                     <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>

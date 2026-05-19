@@ -4444,3 +4444,95 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   border-radius: 8px;
 }
 .pub-recruiter-sync h3 { color: #5a6418; margin-top: 0 !important; }
+
+/* ═════════════════════ Ampel-System ═════════════════════ */
+
+/* Intern: AmpelSelector im Slide-Over + Tabelle */
+.ampel-selector { display: inline-flex; gap: 4px; }
+.ampel-dot {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent;
+  background: transparent; cursor: pointer; font-size: 14px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; opacity: 0.35; transition: opacity 0.15s, border-color 0.15s;
+}
+.ampel-dot:hover { opacity: 0.7; }
+.ampel-dot.is-on {
+  opacity: 1;
+  border-color: var(--ink-1);
+  background: #fff;
+}
+
+/* ─── Public: Erklärungsbox ─── */
+.pub-ampel-info {
+  background: #fff; border: 1px solid #ececea; border-radius: 12px;
+  padding: 0; margin-bottom: 16px; overflow: hidden;
+}
+.pub-ampel-info > summary {
+  list-style: none; cursor: pointer; padding: 12px 16px;
+  font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px;
+  user-select: none;
+}
+.pub-ampel-info > summary::-webkit-details-marker { display: none; }
+.pub-ampel-info > summary::after {
+  content: '▸'; margin-left: auto; color: var(--ink-3); transition: transform 0.15s;
+}
+.pub-ampel-info[open] > summary::after { transform: rotate(90deg); }
+.pub-ampel-info-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  padding: 0 16px 16px;
+}
+@media (max-width: 700px) { .pub-ampel-info-grid { grid-template-columns: 1fr; } }
+.pub-ampel-info-card {
+  padding: 12px 14px; border-radius: 8px; border-left: 4px solid #ccc;
+}
+.pub-ampel-card-gruen { background: #e9f5ec; border-left-color: #1d5a30; }
+.pub-ampel-card-gelb  { background: #fff8e1; border-left-color: #b07d00; }
+.pub-ampel-card-rot   { background: #fce8e8; border-left-color: #80201f; }
+.pub-ampel-info-head { font-size: 13.5px; font-weight: 700; margin-bottom: 4px; }
+.pub-ampel-info-desc { font-size: 12.5px; color: #2a2a2a; line-height: 1.5; }
+
+/* ─── Public: Ampel-Filter-Buttons ─── */
+.pub-ampel-filter {
+  display: flex; gap: 4px; background: #fff; border-radius: 100px; padding: 4px;
+  border: 1px solid #e8e7e3;
+}
+.pub-ampel-fbtn {
+  padding: 6px 12px; background: transparent; border: none; border-radius: 100px;
+  cursor: pointer; font-size: 13px; color: #5a5955; font-weight: 600;
+}
+.pub-ampel-fbtn.is-active { background: var(--pub-primary, #0a0a0a); color: #fff; }
+
+/* ─── Public: Ampel-Dot in der Tabelle/Karte ─── */
+.pub-td-ampel { text-align: center; padding: 6px !important; font-size: 16px; }
+.pub-ampel-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; font-size: 14px;
+}
+
+/* Zeile bekommt linken farbigen Strich entsprechend Ampel */
+.pub-tr.pub-row-ampel-gruen { box-shadow: inset 4px 0 0 #1d5a30; }
+.pub-tr.pub-row-ampel-gelb  { box-shadow: inset 4px 0 0 #d4a800; }
+.pub-tr.pub-row-ampel-rot   { box-shadow: inset 4px 0 0 #80201f; }
+
+/* Mobile-Karte: Ampel-Badge oben */
+.pub-mcard.pub-row-ampel-gruen { border-left-color: #1d5a30; border-left-width: 4px; }
+.pub-mcard.pub-row-ampel-gelb  { border-left-color: #d4a800; border-left-width: 4px; }
+.pub-mcard.pub-row-ampel-rot   { border-left-color: #80201f; border-left-width: 4px; }
+.pub-mcard-ampel {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 3px 9px; background: #f4f3f0; border-radius: 100px;
+  margin-bottom: 4px;
+}
+
+/* ─── Abgeschlossen-Stil (Ungeeignet / Absage) ─── */
+.pub-tr.is-abgeschlossen { opacity: 0.5; background: #fafaf8; }
+.pub-tr.is-abgeschlossen td { color: #5a5955; }
+.pub-tr.is-abgeschlossen td strong { text-decoration: line-through; color: #9a9994; }
+.pub-mcard.is-abgeschlossen { opacity: 0.5; background: #fafaf8; }
+.pub-mcard.is-abgeschlossen .pub-mcard-name { text-decoration: line-through; color: #9a9994; }
+
+/* Neue Status-Farben (Ungeeignet / Absage) */
+.pub-status-select.pub-status-ungeeignet { background-color: #ececea; color: #5a5955; }
+.pub-status-select.pub-status-absage     { background-color: #f4d6d6; color: #80201f; }
+.pub-status-badge.pub-status-ungeeignet  { background: #ececea; color: #5a5955; }
+.pub-status-badge.pub-status-absage      { background: #f4d6d6; color: #80201f; }

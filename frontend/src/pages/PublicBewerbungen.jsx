@@ -9,8 +9,19 @@ const STATUS_OPTIONS = [
   { value: 'interessant',            label: 'Interessant' },
   { value: 'vorstellungsgespraech',  label: 'Vorstellungsgespräch' },
   { value: 'eingestellt',            label: 'Eingestellt' },
-  { value: 'abgesagt',               label: 'Abgesagt' },
+  { value: 'ungeeignet',             label: 'Ungeeignet' },
+  { value: 'absage',                 label: 'Absage' },
 ];
+
+// Stati, die einen Bewerber als "erledigt/abgeschlossen" markieren
+const STATUS_ABGESCHLOSSEN = new Set(['ungeeignet', 'absage']);
+
+const AMPEL_INFO = {
+  gruen: { emoji: '🟢', label: 'Grün', desc: 'Dieser Kandidat passt — jetzt Kontakt aufnehmen!' },
+  gelb:  { emoji: '🟡', label: 'Gelb', desc: 'Auf jeden Fall anrufen! Nur eine Kleinigkeit passt noch nicht ganz — im Gespräch klären.' },
+  rot:   { emoji: '🔴', label: 'Rot',  desc: 'Passt leider nicht — keine Kontaktaufnahme nötig.' },
+};
+const AMPEL_SORT_ORDER = { gruen: 0, gelb: 1, rot: 2 };
 
 const BRAND = {
   talentone: {
@@ -284,10 +295,13 @@ export default function PublicBewerbungen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
-  const [filter, setFilter] = useState('alle');
+  // Default: nur aktive Bewerber (ohne Ungeeignet/Absage)
+  const [aktivFilter, setAktivFilter] = useState('aktive'); // 'alle' | 'aktive' | 'erledigte'
+  const [ampelFilter, setAmpelFilter] = useState('alle');   // 'alle' | 'gruen' | 'gelb' | 'rot'
   const [sortAsc, setSortAsc] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [erklaerungOffen, setErklaerungOffen] = useState(true);
 
   useEffect(() => {
     let cancel = false;
@@ -386,17 +400,48 @@ export default function PublicBewerbungen() {
     return norm?.antworten.find(a => (a.frage_text || '').trim() === frage)?.antwort || '';
   }
 
+  function ampelFor(bewId) {
+    return data?.recruiter_sync?.[bewId]?.ampel || null;
+  }
+
+  const counts = useMemo(() => {
+    if (!data) return { alle: 0, aktive: 0, erledigte: 0 };
+    let aktive = 0, erledigte = 0;
+    for (const b of data.bewerbungen) {
+      const st = data.feedback[b.id]?.status;
+      if (STATUS_ABGESCHLOSSEN.has(st)) erledigte++;
+      else aktive++;
+    }
+    return { alle: data.bewerbungen.length, aktive, erledigte };
+  }, [data]);
+
   const bewerbungen = useMemo(() => {
     if (!data) return [];
     let list = data.bewerbungen.slice();
-    if (filter === 'qualifiziert') list = list.filter(b => !b.ko_kriterium);
+
+    // Aktiv-/Erledigt-Filter
+    if (aktivFilter === 'aktive') {
+      list = list.filter(b => !STATUS_ABGESCHLOSSEN.has(data.feedback[b.id]?.status));
+    } else if (aktivFilter === 'erledigte') {
+      list = list.filter(b => STATUS_ABGESCHLOSSEN.has(data.feedback[b.id]?.status));
+    }
+
+    // Ampel-Filter
+    if (ampelFilter !== 'alle') {
+      list = list.filter(b => ampelFor(b.id) === ampelFilter);
+    }
+
+    // Sort: Ampel-Reihenfolge gewinnt (Grün → Gelb → Rot → leer), dann Datum
     list.sort((a, b) => {
+      const aa = AMPEL_SORT_ORDER[ampelFor(a.id)] ?? 99;
+      const bb = AMPEL_SORT_ORDER[ampelFor(b.id)] ?? 99;
+      if (aa !== bb) return aa - bb;
       const da = new Date(a.created_at).getTime();
       const db = new Date(b.created_at).getTime();
       return sortAsc ? da - db : db - da;
     });
     return list;
-  }, [data, filter, sortAsc]);
+  }, [data, aktivFilter, ampelFilter, sortAsc]);
 
   if (loading) return <div className="pub-shell"><div className="pub-loading">Lade…</div></div>;
   if (error) return <div className="pub-shell"><div className="pub-error">{error}</div></div>;
@@ -421,10 +466,32 @@ export default function PublicBewerbungen() {
       </header>
 
       <main className="pub-main">
+        {/* Ampel-Erklärungsbox */}
+        <details className="pub-ampel-info" open={erklaerungOffen} onToggle={e => setErklaerungOffen(e.target.open)}>
+          <summary>
+            <span>🚦 So lesen Sie die Ampel-Bewertung des {brand.name}-Teams</span>
+          </summary>
+          <div className="pub-ampel-info-grid">
+            {Object.entries(AMPEL_INFO).map(([key, info]) => (
+              <div key={key} className={`pub-ampel-info-card pub-ampel-card-${key}`}>
+                <div className="pub-ampel-info-head">{info.emoji} {info.label}</div>
+                <div className="pub-ampel-info-desc">{info.desc}</div>
+              </div>
+            ))}
+          </div>
+        </details>
+
         <div className="pub-toolbar">
           <div className="pub-filter-group">
-            <button className={`pub-filter ${filter === 'alle' ? 'is-active' : ''}`} onClick={() => setFilter('alle')}>Alle</button>
-            <button className={`pub-filter ${filter === 'qualifiziert' ? 'is-active' : ''}`} onClick={() => setFilter('qualifiziert')}>Nur qualifizierte</button>
+            <button className={`pub-filter ${aktivFilter === 'aktive' ? 'is-active' : ''}`} onClick={() => setAktivFilter('aktive')}>Nur aktive ({counts.aktive})</button>
+            <button className={`pub-filter ${aktivFilter === 'alle' ? 'is-active' : ''}`} onClick={() => setAktivFilter('alle')}>Alle ({counts.alle})</button>
+            <button className={`pub-filter ${aktivFilter === 'erledigte' ? 'is-active' : ''}`} onClick={() => setAktivFilter('erledigte')}>Erledigte ({counts.erledigte})</button>
+          </div>
+          <div className="pub-ampel-filter">
+            <button className={`pub-ampel-fbtn ${ampelFilter === 'alle' ? 'is-active' : ''}`} onClick={() => setAmpelFilter('alle')}>Alle Ampeln</button>
+            <button className={`pub-ampel-fbtn ${ampelFilter === 'gruen' ? 'is-active' : ''}`} onClick={() => setAmpelFilter('gruen')} title="Nur Grün">🟢</button>
+            <button className={`pub-ampel-fbtn ${ampelFilter === 'gelb' ? 'is-active' : ''}`} onClick={() => setAmpelFilter('gelb')} title="Nur Gelb">🟡</button>
+            <button className={`pub-ampel-fbtn ${ampelFilter === 'rot' ? 'is-active' : ''}`} onClick={() => setAmpelFilter('rot')} title="Nur Rot">🔴</button>
           </div>
           <div className="pub-toolbar-right">
             <button className="pub-add-col-btn" onClick={() => setManagerOpen(true)}>⚙ Spalten anpassen</button>
@@ -441,6 +508,7 @@ export default function PublicBewerbungen() {
               <table className="pub-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 36 }}></th>
                     <th>Datum</th>
                     <th>Name</th>
                     <th>Status</th>
@@ -455,8 +523,22 @@ export default function PublicBewerbungen() {
                   {bewerbungen.map(b => {
                     const norm = normalized.get(b.id) || {};
                     const fb = data.feedback[b.id] || {};
+                    const ampel = ampelFor(b.id);
+                    const isAbgeschlossen = STATUS_ABGESCHLOSSEN.has(fb.status);
+                    const rowCls = [
+                      'pub-tr',
+                      b.ko_kriterium && 'is-ko',
+                      selectedId === b.id && 'is-selected',
+                      isAbgeschlossen && 'is-abgeschlossen',
+                      ampel && `pub-row-ampel-${ampel}`,
+                    ].filter(Boolean).join(' ');
                     return (
-                      <tr key={b.id} className={`pub-tr ${b.ko_kriterium ? 'is-ko' : ''} ${selectedId === b.id ? 'is-selected' : ''}`} onClick={() => setSelectedId(b.id)}>
+                      <tr key={b.id} className={rowCls} onClick={() => setSelectedId(b.id)}>
+                        <td className="pub-td-ampel">
+                          {ampel ? (
+                            <span className={`pub-ampel-dot pub-ampel-dot-${ampel}`} title={AMPEL_INFO[ampel].label}>{AMPEL_INFO[ampel].emoji}</span>
+                          ) : <span className="pub-muted">·</span>}
+                        </td>
                         <td className="pub-td-date">{new Date(b.created_at).toLocaleDateString('de-DE')}</td>
                         <td><strong>{norm.name || '—'}</strong></td>
                         <td className="pub-td-status">
@@ -487,8 +569,17 @@ export default function PublicBewerbungen() {
               {bewerbungen.map(b => {
                 const norm = normalized.get(b.id) || {};
                 const fb = data.feedback[b.id] || {};
+                const ampel = ampelFor(b.id);
+                const isAbgeschlossen = STATUS_ABGESCHLOSSEN.has(fb.status);
+                const mcardCls = [
+                  'pub-mcard',
+                  b.ko_kriterium && 'is-ko',
+                  isAbgeschlossen && 'is-abgeschlossen',
+                  ampel && `pub-row-ampel-${ampel}`,
+                ].filter(Boolean).join(' ');
                 return (
-                  <div key={b.id} className={`pub-mcard ${b.ko_kriterium ? 'is-ko' : ''}`} onClick={() => setSelectedId(b.id)}>
+                  <div key={b.id} className={mcardCls} onClick={() => setSelectedId(b.id)}>
+                    {ampel && <div className="pub-mcard-ampel">{AMPEL_INFO[ampel].emoji} {AMPEL_INFO[ampel].label}</div>}
                     <div className="pub-mcard-head">
                       <div>
                         <div className="pub-mcard-date">{new Date(b.created_at).toLocaleDateString('de-DE')}</div>
