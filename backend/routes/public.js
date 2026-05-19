@@ -228,6 +228,7 @@ router.post('/formular/:token/submit', async (req, res) => {
       quereinsteiger: !!jobPatch.quereinsteiger,
       eingabe_methode: 'formular',
       formdata_komplett: formdata,
+      vorqualifizierung: updated.agentur === 'nowagwirth',
     };
     const { data: job, error: jErr } = await supabase
       .from('talentone_jobs').insert(jobRow).select().single();
@@ -472,15 +473,28 @@ router.get('/bewerbungen/:token', async (req, res) => {
   const ids = (bewerbungen || []).map(b => b.id);
   let feedback = {};
   let werte = {};
+  let recruiterSync = {};  // pro Bewerbung-ID: nur kundenrelevante Recruiter-Felder
   if (ids.length > 0) {
-    const [fb, w] = await Promise.all([
+    const [fb, w, n] = await Promise.all([
       supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
+      supabase.from('talentone_bewerber_notizen')
+        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, updated_at')
+        .in('bewerbung_id', ids),
     ]);
     for (const f of fb.data || []) feedback[f.bewerbung_id] = f;
     for (const x of w.data || []) {
       if (!werte[x.bewerbung_id]) werte[x.bewerbung_id] = {};
       werte[x.bewerbung_id][x.spalte_id] = x.wert;
+    }
+    for (const r of n.data || []) {
+      recruiterSync[r.bewerbung_id] = {
+        recruiter_status: r.status,
+        vg_vereinbart_am: r.vg_vereinbart_am,
+        eingestellt: r.eingestellt,
+        kunde_kontaktiert: r.kunde_kontaktiert,
+        updated_at: r.updated_at,
+      };
     }
   }
 
@@ -499,6 +513,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
     feedback,
     spalten: spalten || [],
     werte,
+    recruiter_sync: recruiterSync,
   });
 });
 

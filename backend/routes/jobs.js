@@ -27,9 +27,23 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   const { kunde_id } = req.body || {};
   if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
+
+  // Default vorqualifizierung: true bei nowagwirth-Kunden, false bei talentone
+  let defaultVorqual = false;
+  if (req.body?.vorqualifizierung === undefined) {
+    const { data: k } = await supabase
+      .from('talentone_kunden').select('agentur').eq('id', kunde_id).maybeSingle();
+    defaultVorqual = k?.agentur === 'nowagwirth';
+  }
+
+  const insertRow = {
+    vorqualifizierung: defaultVorqual,
+    ...req.body,
+  };
+
   const { data, error } = await supabase
     .from('talentone_jobs')
-    .insert(req.body)
+    .insert(insertRow)
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
@@ -40,7 +54,7 @@ const ALLOWED_JOB_FIELDS = [
   'stelle', 'region', 'gehalt', 'benefits', 'besonderheiten',
   'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
   'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
-  'interne_spalten', 'vorqualifizierung',
+  'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder',
 ];
 
 router.patch('/:id', async (req, res) => {

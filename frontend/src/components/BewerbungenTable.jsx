@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 
-/* Vordefinierte interne Spalten */
+/* Vordefinierte interne Spalten (schlanke Ansicht — wenn vorqualifizierung aus) */
 const INTERNE_SPALTEN_DEFS = {
   status:        { label: 'Status', width: 130 },
   bewertung:     { label: 'Bewertung', width: 110 },
@@ -21,6 +21,12 @@ const STATUS_OPTIONS = [
   { value: 'weitergeleitet', label: 'Weitergeleitet' },
 ];
 
+const EINGESTELLT_OPTIONS = [
+  { value: 'offen', label: 'Offen' },
+  { value: 'ja',    label: 'Ja' },
+  { value: 'nein',  label: 'Nein' },
+];
+
 const ANRUF_ERGEBNIS_OPTIONS = [
   { value: '', label: '—' },
   { value: 'erreicht', label: '✓ Erreicht' },
@@ -36,17 +42,12 @@ const FEEDBACK_LABELS = {
   abgesagt: 'Abgesagt',
 };
 
-/* ─── Debounced field — saves wert nach 600ms Idle ─── */
+/* ─── Debounced Input ─── */
 function DebouncedInput({ value, onSave, type = 'text', placeholder, rows }) {
   const [local, setLocal] = useState(value ?? '');
   const timerRef = useRef(null);
   const lastSavedRef = useRef(value ?? '');
-
-  useEffect(() => {
-    setLocal(value ?? '');
-    lastSavedRef.current = value ?? '';
-  }, [value]);
-
+  useEffect(() => { setLocal(value ?? ''); lastSavedRef.current = value ?? ''; }, [value]);
   function onChange(e) {
     const v = e.target.value;
     setLocal(v);
@@ -57,7 +58,6 @@ function DebouncedInput({ value, onSave, type = 'text', placeholder, rows }) {
       onSave(v);
     }, 600);
   }
-
   function flushOnBlur() {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     if (local !== lastSavedRef.current) {
@@ -65,81 +65,42 @@ function DebouncedInput({ value, onSave, type = 'text', placeholder, rows }) {
       onSave(local);
     }
   }
-
   if (rows) {
-    return (
-      <textarea
-        className="cell-input"
-        rows={rows}
-        value={local}
-        placeholder={placeholder}
-        onChange={onChange}
-        onBlur={flushOnBlur}
-      />
-    );
+    return <textarea className="cell-input" rows={rows} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
   }
-  return (
-    <input
-      className="cell-input"
-      type={type}
-      value={local}
-      placeholder={placeholder}
-      onChange={onChange}
-      onBlur={flushOnBlur}
-    />
-  );
+  return <input className="cell-input" type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
 }
 
-/* Sterne 1-5 */
 function StarRating({ value, onChange }) {
   return (
     <div className="star-rating">
       {[1, 2, 3, 4, 5].map(n => (
-        <button
-          key={n}
-          type="button"
-          className={`star ${n <= (value || 0) ? 'is-on' : ''}`}
-          onClick={() => onChange(value === n ? null : n)}
-          title={`${n} Stern${n === 1 ? '' : 'e'}`}
-        >★</button>
+        <button key={n} type="button" className={`star ${n <= (value || 0) ? 'is-on' : ''}`} onClick={() => onChange(value === n ? null : n)}>★</button>
       ))}
     </div>
   );
 }
 
-/* Anrufversuche-Zelle (3 Slots) */
-function AnrufversucheCell({ value, onChange }) {
+/* ─── Anrufversuche-Block (3 Zeilen, für Slide-Over) ─── */
+function AnrufversucheBlock({ value, onChange }) {
   const arr = Array.isArray(value) ? value : [];
-  function patch(i, patchObj) {
+  function patch(i, p) {
     const next = [...arr];
-    next[i] = { ...(next[i] || {}), ...patchObj };
+    next[i] = { ...(next[i] || {}), ...p };
     onChange(next);
   }
   return (
-    <div className="anruf-cell">
+    <div className="anrufversuche-block">
       {[0, 1, 2].map(i => {
         const a = arr[i] || {};
         return (
-          <div key={i} className="anruf-row">
+          <div key={i} className="anrufversuch-row">
             <span className="anruf-num">#{i + 1}</span>
-            <input
-              type="date"
-              className="cell-input cell-date"
-              value={a.datum ? String(a.datum).slice(0, 10) : ''}
-              onChange={e => patch(i, { datum: e.target.value || null })}
-            />
-            <select
-              className="cell-input"
-              value={a.ergebnis || ''}
-              onChange={e => patch(i, { ergebnis: e.target.value || null })}
-            >
+            <input type="date" className="cell-input cell-date" value={a.datum ? String(a.datum).slice(0, 10) : ''} onChange={e => patch(i, { datum: e.target.value || null })} />
+            <select className="cell-input" value={a.ergebnis || ''} onChange={e => patch(i, { ergebnis: e.target.value || null })}>
               {ANRUF_ERGEBNIS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <DebouncedInput
-              value={a.notiz || ''}
-              placeholder="Notiz"
-              onSave={v => patch(i, { notiz: v })}
-            />
+            <DebouncedInput value={a.notiz || ''} placeholder="Notiz" onSave={v => patch(i, { notiz: v })} />
           </div>
         );
       })}
@@ -147,7 +108,25 @@ function AnrufversucheCell({ value, onChange }) {
   );
 }
 
-/* CSV-Export */
+/* ─── Vorqualifizierungs-Feld (typabhängig) ─── */
+function VorqualField({ feld, value, onChange }) {
+  if (feld.typ === 'dropdown' && Array.isArray(feld.optionen)) {
+    return (
+      <select className="cell-input" value={value || ''} onChange={e => onChange(e.target.value)}>
+        <option value="">—</option>
+        {feld.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+  if (feld.typ === 'datum') {
+    return (
+      <input type="date" className="cell-input cell-date" value={(value || '').slice(0, 10)} onChange={e => onChange(e.target.value)} />
+    );
+  }
+  return <DebouncedInput value={value || ''} onSave={onChange} />;
+}
+
+/* ─── CSV Export ─── */
 function downloadCsv(filename, rows) {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -164,16 +143,175 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-export default function BewerbungenTable({ job, internalSpalten: internalSpaltenProp, onChangeInternalSpalten }) {
-  // Anruf-Spalte nur sichtbar wenn telefonische Vorqualifizierung aktiv
+/* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
+function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, kundenname, onPatch, onPatchAnrufversuche, onClose }) {
+  if (!bewerbung) return null;
+  const n = notiz || {};
+  const fb = feedback || {};
+  const antworten = norm?.antworten || [];
+
+  return (
+    <div className="slideover-backdrop" onClick={onClose}>
+      <aside className="slideover slideover-telefonist" onClick={e => e.stopPropagation()}>
+        <header className="slideover-head">
+          <div>
+            <h2>{norm?.name || '(ohne Namen)'}</h2>
+            <p className="muted">
+              {new Date(bewerbung.created_at).toLocaleString('de-DE')} · {bewerbung.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}
+              {bewerbung.ko_kriterium && <> · <span className="ko-badge">KO</span></>}
+            </p>
+          </div>
+          <button className="btn-ghost" onClick={onClose}>×</button>
+        </header>
+
+        <div className="slideover-body">
+          {/* Kontakt + Tel-Button */}
+          <section>
+            <h3>Kontakt</h3>
+            <dl className="slideover-dl">
+              <dt>Name</dt><dd>{norm?.name || <span className="muted">—</span>}</dd>
+              <dt>E-Mail</dt><dd>{norm?.email ? <a href={`mailto:${norm.email}`}>{norm.email}</a> : <span className="muted">—</span>}</dd>
+              <dt>Telefon</dt>
+              <dd>
+                {norm?.telefon ? (
+                  <a className="tel-button" href={`tel:${norm.telefon}`}>📞 {norm.telefon}</a>
+                ) : <span className="muted">—</span>}
+              </dd>
+            </dl>
+          </section>
+
+          {/* Anrufversuche */}
+          <section className="slideover-anrufversuche">
+            <h3>Anrufversuche</h3>
+            <AnrufversucheBlock value={n.anrufversuche} onChange={onPatchAnrufversuche} />
+          </section>
+
+          {/* Vorqualifizierungs-Felder */}
+          {vorqualFelder.length > 0 && (
+            <section>
+              <h3>Vorqualifizierung</h3>
+              <div className="slideover-form">
+                {vorqualFelder.map((feld, idx) => (
+                  <label key={`${feld.name}-${idx}`} className={feld.typ === 'dropdown' ? 'slideover-half' : 'slideover-full'}>
+                    <span>{feld.name}</span>
+                    <VorqualField
+                      feld={feld}
+                      value={(n.vorqualifizierung_werte || {})[feld.name] || ''}
+                      onChange={v => {
+                        const next = { ...(n.vorqualifizierung_werte || {}), [feld.name]: v };
+                        onPatch({ vorqualifizierung_werte: next });
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Notiz + Bewertung */}
+          <section>
+            <h3>Notiz &amp; Bewertung</h3>
+            <div className="slideover-form">
+              <label className="slideover-half">
+                <span>Bewertung</span>
+                <StarRating value={n.bewertung || 0} onChange={v => onPatch({ bewertung: v })} />
+              </label>
+              <label className="slideover-full">
+                <span>Notiz</span>
+                <DebouncedInput rows={4} value={n.notizen || ''} onSave={v => onPatch({ notizen: v })} />
+              </label>
+            </div>
+          </section>
+
+          {/* Status + VG + Eingestellt + Kontaktiert */}
+          <section>
+            <h3>Status &amp; Termin</h3>
+            <div className="slideover-form">
+              <label className="slideover-half">
+                <span>Status</span>
+                <select className="cell-input" value={n.status || 'neu'} onChange={e => onPatch({ status: e.target.value })}>
+                  {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              <label className="slideover-half">
+                <span>Eingestellt</span>
+                <select className="cell-input" value={n.eingestellt || 'offen'} onChange={e => onPatch({ eingestellt: e.target.value })}>
+                  {EINGESTELLT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              <label className="slideover-half">
+                <span>N&amp;W kontaktiert am</span>
+                <input type="date" className="cell-input cell-date" value={(n.nw_kontaktiert || '').slice(0,10)} onChange={e => onPatch({ nw_kontaktiert: e.target.value || null })} />
+              </label>
+              <label className="slideover-half">
+                <span>{kundenname || 'Kunde'} kontaktiert am</span>
+                <input type="date" className="cell-input cell-date" value={(n.kunde_kontaktiert || '').slice(0,10)} onChange={e => onPatch({ kunde_kontaktiert: e.target.value || null })} />
+              </label>
+              <label className="slideover-half">
+                <span>Vorstellungsgespräch vereinbart</span>
+                <input type="datetime-local" className="cell-input" value={n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toISOString().slice(0,16) : ''} onChange={e => onPatch({ vg_vereinbart_am: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+              </label>
+              <label className="slideover-half">
+                <span>Gehaltswunsch</span>
+                <DebouncedInput value={n.gehaltswunsch || ''} onSave={v => onPatch({ gehaltswunsch: v })} />
+              </label>
+              <label className="slideover-half">
+                <span>Verfügbarkeit</span>
+                <DebouncedInput value={n.verfuegbarkeit || ''} onSave={v => onPatch({ verfuegbarkeit: v })} />
+              </label>
+            </div>
+          </section>
+
+          {/* Funnel-Antworten (Referenz) */}
+          {antworten.length > 0 && (
+            <section>
+              <details className="slideover-details">
+                <summary><h3>Funnel-Antworten ({antworten.length})</h3></summary>
+                <ul className="slideover-antworten">
+                  {antworten.map((a, i) => (
+                    <li key={i}>
+                      <div className="slideover-frage">{a.frage_text}</div>
+                      <div className="slideover-antwort">→ {a.antwort}</div>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </section>
+          )}
+
+          {fb.status && (
+            <section>
+              <h3>Kundenfeedback <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span></h3>
+              {fb.notizen && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0' }}>{fb.notizen}</p>}
+            </section>
+          )}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/* ═════════════════════ HAUPTKOMPONENTE ═════════════════════ */
+
+export default function BewerbungenTable({ job, kunde, internalSpalten: internalSpaltenProp, onChangeInternalSpalten }) {
+  const telefonistenMode = !!job?.vorqualifizierung;
+  const vorqualFelder = useMemo(() => {
+    const f = Array.isArray(job?.vorqualifizierung_felder) ? job.vorqualifizierung_felder : [];
+    return f.filter(x => x && x.name);
+  }, [job?.vorqualifizierung_felder]);
+
+  // Anruf-Spalten nur sichtbar wenn vorqualifizierung aktiv (für schlanke Ansicht)
   const internalSpalten = useMemo(() => {
-    if (job?.vorqualifizierung) return internalSpaltenProp;
-    return internalSpaltenProp.filter(k => k !== 'anrufversuche');
-  }, [internalSpaltenProp, job?.vorqualifizierung]);
+    if (telefonistenMode) return internalSpaltenProp;
+    return (internalSpaltenProp || []).filter(k => k !== 'anrufversuche');
+  }, [internalSpaltenProp, telefonistenMode]);
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ bewerbungen: [], notizen: {}, feedback: {}, werte: {} });
   const [spalten, setSpalten] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [filter, setFilter] = useState('alle'); // alle | offen | erledigt
 
   async function loadAll() {
     setLoading(true);
@@ -192,14 +330,14 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
 
-  /* Normalisierte Bewerbungen (Perspective-roh wird sauber gerendert) */
+  /* Normalisierte Bewerbungen */
   const normalized = useMemo(() => {
     const map = new Map();
     for (const b of data.bewerbungen) map.set(b.id, normalizeBewerbung(b));
     return map;
   }, [data.bewerbungen]);
 
-  /* Dynamische Funnel-Fragen-Spalten — alle unique frage_text aus normalisierten Antworten */
+  /* Funnel-Frage-Spalten */
   const frageSpalten = useMemo(() => {
     const seen = new Map();
     for (const b of data.bewerbungen) {
@@ -217,7 +355,7 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
     return norm?.antworten.find(a => (a?.frage_text || '').trim() === frage)?.antwort ?? '';
   }
 
-  /* Inline-Update der Notizen */
+  /* Inline-Updates */
   async function updateNotiz(bewId, patch) {
     setData(prev => ({
       ...prev,
@@ -226,9 +364,7 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
     try {
       const res = await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: patch });
       setData(prev => ({ ...prev, notizen: { ...prev.notizen, [bewId]: res.notiz } }));
-    } catch (err) {
-      console.error('[notiz-save]', err.message);
-    }
+    } catch (err) { console.error('[notiz-save]', err.message); }
   }
 
   async function updateCustomCol(bewId, spalteId, wert) {
@@ -238,12 +374,10 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
     }));
     try {
       await api(`/bewerbungen/${bewId}/spalten/${spalteId}`, { method: 'PUT', body: { wert } });
-    } catch (err) {
-      console.error('[wert-save]', err.message);
-    }
+    } catch (err) { console.error('[wert-save]', err.message); }
   }
 
-  /* Eigene Spalten verwalten */
+  /* Eigene Spalten */
   const [neueSpalteName, setNeueSpalteName] = useState('');
   const [neueSpalteTyp, setNeueSpalteTyp] = useState('text');
   async function addSpalte() {
@@ -264,37 +398,54 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
       setSpalten(prev => prev.filter(s => s.id !== spalteId));
     } catch (err) { alert(err.message); }
   }
-
   function toggleInternal(key) {
-    const active = internalSpalten.includes(key);
-    const next = active ? internalSpalten.filter(s => s !== key) : [...internalSpalten, key];
+    const active = internalSpaltenProp.includes(key);
+    const next = active ? internalSpaltenProp.filter(s => s !== key) : [...internalSpaltenProp, key];
     onChangeInternalSpalten(next);
   }
 
+  /* Filter */
+  const filteredBewerbungen = useMemo(() => {
+    let list = data.bewerbungen;
+    if (filter === 'offen')    list = list.filter(b => !data.notizen[b.id]?.erledigt);
+    if (filter === 'erledigt') list = list.filter(b =>  !!data.notizen[b.id]?.erledigt);
+    return list;
+  }, [data, filter]);
+
+  /* CSV-Export */
   function exportCsv() {
-    const rows = data.bewerbungen.map(b => {
+    const rows = filteredBewerbungen.map(b => {
       const n = data.notizen[b.id] || {};
       const fb = data.feedback[b.id] || {};
+      const norm = normalized.get(b.id) || {};
       const row = {
+        Erledigt: n.erledigt ? '✓' : '',
         Datum: new Date(b.created_at).toLocaleString('de-DE'),
-        Name: b.name || '',
-        EMail: b.email || '',
-        Telefon: b.telefon || '',
-        Quelle: b.quelle === 'perspective' ? 'Perspective' : 'TalentOne',
-        KO: b.ko_kriterium ? 'Ja' : '',
+        Name: norm.name || '',
+        Status: STATUS_OPTIONS.find(o => o.value === (n.status || 'neu'))?.label || '',
       };
-      for (const f of frageSpalten) row[f] = antwortFor(b, f);
-      if (internalSpalten.includes('status')) row['Status'] = n.status || 'neu';
-      if (internalSpalten.includes('bewertung')) row['Bewertung'] = n.bewertung || '';
-      if (internalSpalten.includes('gehaltswunsch')) row['Gehaltswunsch'] = n.gehaltswunsch || '';
-      if (internalSpalten.includes('verfuegbarkeit')) row['Verfügbarkeit'] = n.verfuegbarkeit || '';
-      if (internalSpalten.includes('naechste_aktion')) row['Nächste Aktion'] = n.naechste_aktion || '';
-      if (internalSpalten.includes('notizen')) row['Notizen'] = n.notizen || '';
-      if (internalSpalten.includes('anrufversuche')) {
-        const arr = Array.isArray(n.anrufversuche) ? n.anrufversuche : [];
-        row['Anrufversuche'] = arr.map((a, i) => `#${i+1} ${a.datum || ''} ${a.ergebnis || ''} ${a.notiz || ''}`).join(' | ');
+      if (telefonistenMode) {
+        row['NW kontaktiert'] = n.nw_kontaktiert || '';
+        row[`${kunde?.firmenname || 'Kunde'} kontaktiert`] = n.kunde_kontaktiert || '';
       }
-      for (const s of spalten) row[s.name] = (data.werte[b.id]?.[s.id]) ?? '';
+      row.Telefon = norm.telefon || '';
+      row.EMail = norm.email || '';
+      row.Quelle = b.quelle === 'perspective' ? 'Perspective' : 'TalentOne';
+      row.KO = b.ko_kriterium ? 'Ja' : '';
+      for (const f of frageSpalten) row[f] = antwortFor(b, f);
+      if (telefonistenMode) {
+        for (const f of vorqualFelder) {
+          row[`VQ: ${f.name}`] = (n.vorqualifizierung_werte || {})[f.name] || '';
+        }
+        row.Notiz = n.notizen || '';
+        row.Bewertung = n.bewertung || '';
+        row.VG = n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toLocaleString('de-DE') : '';
+        row.Eingestellt = EINGESTELLT_OPTIONS.find(o => o.value === (n.eingestellt || 'offen'))?.label || '';
+      } else {
+        for (const s of spalten) row[s.name] = (data.werte[b.id]?.[s.id]) ?? '';
+        if (internalSpalten.includes('bewertung')) row.Bewertung = n.bewertung || '';
+        if (internalSpalten.includes('notizen')) row.Notizen = n.notizen || '';
+      }
       if (fb.status) row['Kundenfeedback'] = FEEDBACK_LABELS[fb.status] || fb.status;
       return row;
     });
@@ -303,38 +454,40 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
 
   if (loading) return <div className="motiv-sub">Lade Bewerbungen…</div>;
 
-  const bewerbungen = data.bewerbungen;
+  const selected = selectedId ? data.bewerbungen.find(b => b.id === selectedId) : null;
+  const offen = data.bewerbungen.filter(b => !data.notizen[b.id]?.erledigt).length;
+  const erledigt = data.bewerbungen.length - offen;
 
   return (
     <div className="bewerbungen-wrap">
       <div className="bewerbungen-toolbar">
-        <strong>{bewerbungen.length} Bewerbungen</strong>
+        <strong>{data.bewerbungen.length} Bewerbungen</strong>
+        {telefonistenMode && (
+          <div className="bew-filter-group">
+            <button className={`bew-filter ${filter === 'alle' ? 'is-active' : ''}`} onClick={() => setFilter('alle')}>Alle ({data.bewerbungen.length})</button>
+            <button className={`bew-filter ${filter === 'offen' ? 'is-active' : ''}`} onClick={() => setFilter('offen')}>Offen ({offen})</button>
+            <button className={`bew-filter ${filter === 'erledigt' ? 'is-active' : ''}`} onClick={() => setFilter('erledigt')}>Erledigt ({erledigt})</button>
+          </div>
+        )}
         <button className="btn-ghost btn-sm" onClick={() => setShowConfig(v => !v)}>
-          {showConfig ? '✕ Konfiguration schließen' : '⚙ Interne Spalten konfigurieren'}
+          {showConfig ? '✕ Konfiguration' : '⚙ Spalten konfigurieren'}
         </button>
-        <button className="btn-ghost btn-sm" onClick={exportCsv} disabled={bewerbungen.length === 0}>
-          ⬇ CSV-Export
-        </button>
+        <button className="btn-ghost btn-sm" onClick={exportCsv} disabled={filteredBewerbungen.length === 0}>⬇ CSV-Export</button>
       </div>
 
-      {showConfig && (
+      {showConfig && !telefonistenMode && (
         <div className="bewerbungen-config">
           <div className="config-section">
             <strong>Vordefinierte Spalten</strong>
             <div className="checkbox-grid">
-              {Object.entries(INTERNE_SPALTEN_DEFS).map(([key, def]) => (
+              {Object.entries(INTERNE_SPALTEN_DEFS).filter(([key]) => key !== 'anrufversuche' || telefonistenMode).map(([key, def]) => (
                 <label key={key} className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={internalSpalten.includes(key)}
-                    onChange={() => toggleInternal(key)}
-                  />
+                  <input type="checkbox" checked={(internalSpaltenProp || []).includes(key)} onChange={() => toggleInternal(key)} />
                   <span>{def.label}</span>
                 </label>
               ))}
             </div>
           </div>
-
           <div className="config-section">
             <strong>Eigene Spalten</strong>
             {spalten.length === 0 && <p className="pane-hint">Noch keine eigenen Spalten.</p>}
@@ -345,12 +498,7 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
               </div>
             ))}
             <div className="custom-col-add">
-              <input
-                type="text"
-                placeholder="Neuer Spaltenname"
-                value={neueSpalteName}
-                onChange={e => setNeueSpalteName(e.target.value)}
-              />
+              <input type="text" placeholder="Neuer Spaltenname" value={neueSpalteName} onChange={e => setNeueSpalteName(e.target.value)} />
               <select value={neueSpalteTyp} onChange={e => setNeueSpalteTyp(e.target.value)}>
                 <option value="text">Text</option>
                 <option value="datum">Datum</option>
@@ -361,112 +509,194 @@ export default function BewerbungenTable({ job, internalSpalten: internalSpalten
         </div>
       )}
 
-      {bewerbungen.length === 0
-        ? <div className="motiv-sub" style={{ marginTop: 16 }}>Noch keine Bewerbungen.</div>
-        : (
-          <div className="bewerbungen-table-scroll">
-            <table className="bewerbungen-table">
-              <thead>
-                <tr>
-                  <th>Datum</th>
-                  <th>Name</th>
-                  <th>E-Mail</th>
-                  <th>Telefon</th>
-                  <th>Quelle</th>
-                  <th>KO</th>
-                  {frageSpalten.map(f => <th key={`q-${f}`} className="th-frage">{f}</th>)}
-                  {internalSpalten.map(key => INTERNE_SPALTEN_DEFS[key] && (
-                    <th key={`i-${key}`} style={{ minWidth: INTERNE_SPALTEN_DEFS[key].width }}>
-                      {INTERNE_SPALTEN_DEFS[key].label}
-                    </th>
-                  ))}
-                  {spalten.map(s => <th key={`c-${s.id}`}>{s.name}</th>)}
-                  <th>Kundenfeedback</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bewerbungen.map(b => {
-                  const n = data.notizen[b.id] || {};
-                  const fb = data.feedback[b.id] || {};
-                  const norm = normalized.get(b.id) || { name: b.name, email: b.email, telefon: b.telefon };
-                  return (
-                    <tr key={b.id} className={b.ko_kriterium ? 'is-ko' : ''}>
-                      <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                      <td className="td-name"><strong>{norm.name || '—'}</strong></td>
-                      <td>{norm.email ? <a href={`mailto:${norm.email}`}>{norm.email}</a> : '—'}</td>
-                      <td>{norm.telefon ? <a href={`tel:${norm.telefon}`}>{norm.telefon}</a> : '—'}</td>
-                      <td><span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}</span></td>
-                      <td>{b.ko_kriterium ? <span className="ko-badge">KO</span> : ''}</td>
-
-                      {frageSpalten.map(f => (
-                        <td key={`q-${b.id}-${f}`} className="td-antwort">{antwortFor(b, f) || <span className="muted">—</span>}</td>
-                      ))}
-
-                      {internalSpalten.map(key => {
-                        if (!INTERNE_SPALTEN_DEFS[key]) return null;
-                        if (key === 'status') return (
-                          <td key={`i-${b.id}-${key}`}>
-                            <select className="cell-input" value={n.status || 'neu'} onChange={e => updateNotiz(b.id, { status: e.target.value })}>
-                              {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                          </td>
-                        );
-                        if (key === 'bewertung') return (
-                          <td key={`i-${b.id}-${key}`}>
-                            <StarRating value={n.bewertung || 0} onChange={v => updateNotiz(b.id, { bewertung: v })} />
-                          </td>
-                        );
-                        if (key === 'anrufversuche') return (
-                          <td key={`i-${b.id}-${key}`} className="td-anrufe">
-                            <AnrufversucheCell value={n.anrufversuche} onChange={arr => updateNotiz(b.id, { anrufversuche: arr })} />
-                          </td>
-                        );
-                        const isLong = key === 'notizen';
-                        return (
-                          <td key={`i-${b.id}-${key}`}>
-                            <DebouncedInput
-                              value={n[key] || ''}
-                              onSave={v => updateNotiz(b.id, { [key]: v })}
-                              rows={isLong ? 2 : undefined}
-                            />
-                          </td>
-                        );
-                      })}
-
-                      {spalten.map(s => (
-                        <td key={`c-${b.id}-${s.id}`}>
-                          {s.typ === 'dropdown' && Array.isArray(s.optionen) ? (
-                            <select className="cell-input" value={data.werte[b.id]?.[s.id] || ''} onChange={e => updateCustomCol(b.id, s.id, e.target.value)}>
-                              <option value="">—</option>
-                              {s.optionen.map(o => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                          ) : s.typ === 'datum' ? (
-                            <input type="date" className="cell-input cell-date" value={(data.werte[b.id]?.[s.id] || '').slice(0,10)} onChange={e => updateCustomCol(b.id, s.id, e.target.value)} />
-                          ) : (
-                            <DebouncedInput value={data.werte[b.id]?.[s.id] || ''} onSave={v => updateCustomCol(b.id, s.id, v)} />
-                          )}
-                        </td>
-                      ))}
-
-                      <td>
-                        {fb.status ? (
-                          <div className="kundenfeedback-cell">
-                            <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span>
-                            {fb.vorstellungsgespraech_am && (
-                              <span className="kundenfeedback-meta">VG: {new Date(fb.vorstellungsgespraech_am).toLocaleString('de-DE')}</span>
-                            )}
-                            {fb.notizen && <span className="kundenfeedback-meta" title={fb.notizen}>📝 {fb.notizen.slice(0, 30)}{fb.notizen.length > 30 ? '…' : ''}</span>}
-                          </div>
-                        ) : <span className="muted">—</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {showConfig && telefonistenMode && (
+        <div className="bewerbungen-config">
+          <p className="pane-hint">
+            Vorqualifizierungs-Felder werden im Stelle-Tab verwaltet. Hier können Sie zusätzlich
+            eigene Tabellen-Spalten anlegen.
+          </p>
+          <div className="config-section">
+            <strong>Eigene Spalten</strong>
+            {spalten.map(s => (
+              <div key={s.id} className="custom-col-row">
+                <span>{s.name} <em className="muted">({s.typ})</em></span>
+                <button className="btn-ghost btn-sm btn-danger" onClick={() => removeSpalte(s.id)}>×</button>
+              </div>
+            ))}
+            <div className="custom-col-add">
+              <input type="text" placeholder="Neuer Spaltenname" value={neueSpalteName} onChange={e => setNeueSpalteName(e.target.value)} />
+              <select value={neueSpalteTyp} onChange={e => setNeueSpalteTyp(e.target.value)}>
+                <option value="text">Text</option>
+                <option value="datum">Datum</option>
+              </select>
+              <button className="btn-ghost btn-sm" onClick={addSpalte}>+ Hinzufügen</button>
+            </div>
           </div>
-        )
-      }
+        </div>
+      )}
+
+      {filteredBewerbungen.length === 0 ? (
+        <div className="motiv-sub" style={{ marginTop: 16 }}>
+          {data.bewerbungen.length === 0 ? 'Noch keine Bewerbungen.' : 'Keine Bewerbungen passen zum Filter.'}
+        </div>
+      ) : (
+        <div className="bewerbungen-table-scroll">
+          <table className="bewerbungen-table">
+            <thead>
+              <tr>
+                {telefonistenMode && <th style={{ width: 40 }}></th>}
+                <th>Datum</th>
+                <th>Name</th>
+                {telefonistenMode && <th>Status</th>}
+                {telefonistenMode && <>
+                  <th>N&amp;W kontaktiert am</th>
+                  <th>{kunde?.firmenname || 'Kunde'} kontaktiert am</th>
+                </>}
+                <th>Telefon</th>
+                <th>E-Mail</th>
+                {!telefonistenMode && <th>Quelle</th>}
+                {!telefonistenMode && <th>KO</th>}
+                {frageSpalten.map(f => <th key={`q-${f}`} className="th-frage">{f}</th>)}
+                {telefonistenMode && vorqualFelder.map((f, i) => (
+                  <th key={`vq-${i}`} className="th-vorqual">{f.name}</th>
+                ))}
+                {!telefonistenMode && internalSpalten.map(key => INTERNE_SPALTEN_DEFS[key] && (
+                  <th key={`i-${key}`} style={{ minWidth: INTERNE_SPALTEN_DEFS[key].width }}>
+                    {INTERNE_SPALTEN_DEFS[key].label}
+                  </th>
+                ))}
+                {telefonistenMode && <>
+                  <th>Notiz / Bewertung</th>
+                  <th>VG vereinbart</th>
+                  <th>Eingestellt</th>
+                </>}
+                {spalten.map(s => <th key={`c-${s.id}`}>{s.name}</th>)}
+                <th>Kundenfeedback</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBewerbungen.map(b => {
+                const n = data.notizen[b.id] || {};
+                const fb = data.feedback[b.id] || {};
+                const norm = normalized.get(b.id) || {};
+                const rowClass = [
+                  b.ko_kriterium && 'is-ko',
+                  n.erledigt && 'is-erledigt',
+                  selectedId === b.id && 'is-selected',
+                ].filter(Boolean).join(' ');
+                return (
+                  <tr key={b.id} className={rowClass} onClick={() => telefonistenMode && setSelectedId(b.id)} style={telefonistenMode ? { cursor: 'pointer' } : {}}>
+                    {telefonistenMode && (
+                      <td onClick={e => e.stopPropagation()} className="td-erledigt">
+                        <input type="checkbox" checked={!!n.erledigt} onChange={e => updateNotiz(b.id, { erledigt: e.target.checked })} />
+                      </td>
+                    )}
+                    <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                    <td className="td-name"><strong>{norm.name || '—'}</strong></td>
+                    {telefonistenMode && (
+                      <td onClick={e => e.stopPropagation()}>
+                        <select className={`cell-input status-cell-${n.status || 'neu'}`} value={n.status || 'neu'} onChange={e => updateNotiz(b.id, { status: e.target.value })}>
+                          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </td>
+                    )}
+                    {telefonistenMode && (
+                      <>
+                        <td onClick={e => e.stopPropagation()}>
+                          <input type="date" className="cell-input cell-date" value={(n.nw_kontaktiert || '').slice(0,10)} onChange={e => updateNotiz(b.id, { nw_kontaktiert: e.target.value || null })} />
+                        </td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <input type="date" className="cell-input cell-date" value={(n.kunde_kontaktiert || '').slice(0,10)} onChange={e => updateNotiz(b.id, { kunde_kontaktiert: e.target.value || null })} />
+                        </td>
+                      </>
+                    )}
+                    <td>{norm.telefon ? <a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a> : '—'}</td>
+                    <td>{norm.email ? <a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a> : '—'}</td>
+                    {!telefonistenMode && <td><span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}</span></td>}
+                    {!telefonistenMode && <td>{b.ko_kriterium ? <span className="ko-badge">KO</span> : ''}</td>}
+                    {frageSpalten.map(f => (
+                      <td key={`q-${b.id}-${f}`} className="td-antwort">{antwortFor(b, f) || <span className="muted">—</span>}</td>
+                    ))}
+                    {telefonistenMode && vorqualFelder.map((f, i) => (
+                      <td key={`vq-${b.id}-${i}`} onClick={e => e.stopPropagation()}>
+                        <VorqualField
+                          feld={f}
+                          value={(n.vorqualifizierung_werte || {})[f.name] || ''}
+                          onChange={v => {
+                            const next = { ...(n.vorqualifizierung_werte || {}), [f.name]: v };
+                            updateNotiz(b.id, { vorqualifizierung_werte: next });
+                          }}
+                        />
+                      </td>
+                    ))}
+                    {!telefonistenMode && internalSpalten.map(key => {
+                      if (!INTERNE_SPALTEN_DEFS[key]) return null;
+                      if (key === 'status') return (
+                        <td key={`i-${b.id}-${key}`}>
+                          <select className="cell-input" value={n.status || 'neu'} onChange={e => updateNotiz(b.id, { status: e.target.value })}>
+                            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </td>
+                      );
+                      if (key === 'bewertung') return (
+                        <td key={`i-${b.id}-${key}`}><StarRating value={n.bewertung || 0} onChange={v => updateNotiz(b.id, { bewertung: v })} /></td>
+                      );
+                      const isLong = key === 'notizen';
+                      return (
+                        <td key={`i-${b.id}-${key}`}><DebouncedInput value={n[key] || ''} onSave={v => updateNotiz(b.id, { [key]: v })} rows={isLong ? 2 : undefined} /></td>
+                      );
+                    })}
+                    {telefonistenMode && (
+                      <>
+                        <td onClick={e => e.stopPropagation()} style={{ minWidth: 180 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <StarRating value={n.bewertung || 0} onChange={v => updateNotiz(b.id, { bewertung: v })} />
+                            <DebouncedInput value={n.notizen || ''} onSave={v => updateNotiz(b.id, { notizen: v })} rows={2} />
+                          </div>
+                        </td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <input type="datetime-local" className="cell-input" value={n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toISOString().slice(0,16) : ''} onChange={e => updateNotiz(b.id, { vg_vereinbart_am: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+                        </td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <select className={`cell-input eingestellt-${n.eingestellt || 'offen'}`} value={n.eingestellt || 'offen'} onChange={e => updateNotiz(b.id, { eingestellt: e.target.value })}>
+                            {EINGESTELLT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </td>
+                      </>
+                    )}
+                    {spalten.map(s => (
+                      <td key={`c-${b.id}-${s.id}`} onClick={e => e.stopPropagation()}>
+                        {s.typ === 'datum'
+                          ? <input type="date" className="cell-input cell-date" value={(data.werte[b.id]?.[s.id] || '').slice(0,10)} onChange={e => updateCustomCol(b.id, s.id, e.target.value)} />
+                          : <DebouncedInput value={data.werte[b.id]?.[s.id] || ''} onSave={v => updateCustomCol(b.id, s.id, v)} />}
+                      </td>
+                    ))}
+                    <td>
+                      {fb.status ? (
+                        <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span>
+                      ) : <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {telefonistenMode && selected && (
+        <TelefonistenSlideOver
+          bewerbung={selected}
+          norm={normalized.get(selected.id)}
+          notiz={data.notizen[selected.id]}
+          feedback={data.feedback[selected.id]}
+          vorqualFelder={vorqualFelder}
+          kundenname={kunde?.firmenname}
+          onPatch={patch => updateNotiz(selected.id, patch)}
+          onPatchAnrufversuche={arr => updateNotiz(selected.id, { anrufversuche: arr })}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
     </div>
   );
 }

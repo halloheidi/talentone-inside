@@ -156,8 +156,30 @@ function SpaltenManagerModal({ open, onClose, spalten, onAdd, onRemove }) {
   );
 }
 
+/* ─── Recruiter-Sync Anzeige (read-only für Kunden) ─── */
+const RECRUITER_STATUS_LABELS = {
+  neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessiert',
+  abgesagt: 'Abgesagt', weitergeleitet: 'Weitergeleitet',
+};
+function RecruiterSyncSection({ sync, brandName }) {
+  if (!sync) return null;
+  const hasData = sync.recruiter_status || sync.vg_vereinbart_am || (sync.eingestellt && sync.eingestellt !== 'offen') || sync.kunde_kontaktiert;
+  if (!hasData) return null;
+  return (
+    <section className="pub-recruiter-sync">
+      <h3>Vom {brandName || 'Recruiter'}</h3>
+      <dl className="pub-slideover-dl">
+        {sync.recruiter_status && <><dt>Status</dt><dd>{RECRUITER_STATUS_LABELS[sync.recruiter_status] || sync.recruiter_status}</dd></>}
+        {sync.kunde_kontaktiert && <><dt>Sie kontaktiert</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
+        {sync.vg_vereinbart_am && <><dt>VG vereinbart</dt><dd>{new Date(sync.vg_vereinbart_am).toLocaleString('de-DE')}</dd></>}
+        {sync.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
+      </dl>
+    </section>
+  );
+}
+
 /* ─── Slide-Over für Bewerber-Detail ─── */
-function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, onPatchFeedback, onSetWert, onClose }) {
+function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, onPatchFeedback, onSetWert, onClose }) {
   if (!bewerbung) return null;
   const norm = normalized || {};
   const fb = feedback || {};
@@ -188,6 +210,9 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, on
               <dt>Telefon</dt><dd>{norm.telefon ? <a href={`tel:${norm.telefon}`}>{norm.telefon}</a> : '—'}</dd>
             </dl>
           </section>
+
+          {/* Vom Recruiter (sync) */}
+          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} />
 
           {/* Funnel-Antworten */}
           {norm.antworten?.length > 0 && (
@@ -513,6 +538,8 @@ export default function PublicBewerbungen() {
         feedback={selected ? data.feedback[selected.id] : null}
         spalten={data.spalten || []}
         werte={selected ? data.werte?.[selected.id] : null}
+        recruiterSync={selected ? data.recruiter_sync?.[selected.id] : null}
+        brandName={brand.name}
         onPatchFeedback={body => selected && patchFeedback(selected.id, body)}
         onSetWert={(spalteId, v) => selected && setSpalteWert(selected.id, spalteId, v)}
         onClose={() => setSelectedId(null)}

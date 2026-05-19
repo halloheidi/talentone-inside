@@ -279,26 +279,8 @@ export default function JobFunnel() {
       )}
 
       {/* Telefonische Vorqualifizierung */}
-      <fieldset className="formular-section">
-        <legend>Telefonische Vorqualifizierung</legend>
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={!!job.vorqualifizierung}
-            onChange={async (e) => {
-              await api(`/jobs/${job.id}`, { method: 'PATCH', body: { vorqualifizierung: e.target.checked } });
-              reload?.();
-            }}
-          />
-          <span>
-            <strong>Telefonische Vorqualifizierung durch uns</strong>
-            <span className="pane-hint" style={{ display: 'block', marginTop: 2 }}>
-              Wenn aktiviert, erscheinen in der Bewerberliste prominent die Anrufversuche-Spalten —
-              für Mitarbeiter, die Bewerber anrufen und qualifizieren.
-            </span>
-          </span>
-        </label>
-      </fieldset>
+      <VorqualifizierungSection job={job} reload={reload} />
+
 
       {/* Empfänger der Bewerbungs-Mails */}
       <fieldset className="formular-section">
@@ -403,6 +385,7 @@ export default function JobFunnel() {
             <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
             <BewerbungenTable
               job={job}
+              kunde={kunde}
               internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
               onChangeInternalSpalten={async (next) => {
                 await api(`/jobs/${job.id}`, { method: 'PATCH', body: { interne_spalten: next } });
@@ -513,6 +496,137 @@ export default function JobFunnel() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ═════════════════════ Vorqualifizierungs-Section ═════════════════════ */
+
+function VorqualifizierungSection({ job, reload }) {
+  const felder = Array.isArray(job.vorqualifizierung_felder) ? job.vorqualifizierung_felder : [];
+  const [busy, setBusy] = useState(false);
+  const [showFelder, setShowFelder] = useState(felder.length > 0);
+  const [newName, setNewName] = useState('');
+  const [newTyp, setNewTyp] = useState('text');
+  const [newOptionen, setNewOptionen] = useState('');
+
+  async function toggleVorqual(checked) {
+    await api(`/jobs/${job.id}`, { method: 'PATCH', body: { vorqualifizierung: checked } });
+    reload?.();
+    if (checked && felder.length === 0) {
+      // Auto-trigger KI-Vorschlag
+      await suggestFromAI();
+    }
+  }
+
+  async function suggestFromAI() {
+    setBusy(true);
+    try {
+      const res = await api(`/bewerbungen/job/${job.id}/vorqualifizierung-vorschlaege`, { method: 'POST' });
+      await api(`/jobs/${job.id}`, { method: 'PATCH', body: { vorqualifizierung_felder: res.felder } });
+      reload?.();
+      setShowFelder(true);
+    } catch (err) {
+      alert('KI-Vorschlag fehlgeschlagen: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveFelder(next) {
+    await api(`/jobs/${job.id}`, { method: 'PATCH', body: { vorqualifizierung_felder: next } });
+    reload?.();
+  }
+
+  async function addFeld() {
+    if (!newName.trim()) return;
+    const optionen = newTyp === 'dropdown'
+      ? newOptionen.split(',').map(s => s.trim()).filter(Boolean)
+      : undefined;
+    const next = [...felder, { name: newName.trim(), typ: newTyp, ...(optionen ? { optionen } : {}) }];
+    await saveFelder(next);
+    setNewName(''); setNewTyp('text'); setNewOptionen('');
+  }
+  async function removeFeld(idx) {
+    if (!confirm('Feld entfernen?')) return;
+    await saveFelder(felder.filter((_, i) => i !== idx));
+  }
+  async function renameFeld(idx, name) {
+    const next = felder.map((f, i) => i === idx ? { ...f, name } : f);
+    await saveFelder(next);
+  }
+
+  return (
+    <fieldset className="formular-section">
+      <legend>Telefonische Vorqualifizierung</legend>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={!!job.vorqualifizierung}
+          onChange={e => toggleVorqual(e.target.checked)}
+          disabled={busy}
+        />
+        <span>
+          <strong>Telefonische Vorqualifizierung durch uns</strong>
+          <span className="pane-hint" style={{ display: 'block', marginTop: 2 }}>
+            Wenn aktiviert: Bewerberliste schaltet auf Telefonisten-Ansicht — Anruf-Spalten, Status-Dropdown, Vorqualifizierungs-Felder werden inline editierbar.
+          </span>
+        </span>
+      </label>
+
+      {job.vorqualifizierung && (
+        <div style={{ marginTop: 18 }}>
+          <div className="vorqual-head">
+            <strong>Vorqualifizierungs-Felder ({felder.length})</strong>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-ghost btn-sm" onClick={() => setShowFelder(v => !v)}>
+                {showFelder ? '✕ Liste schließen' : 'Felder anzeigen'}
+              </button>
+              <button type="button" className="btn-ghost btn-sm" onClick={suggestFromAI} disabled={busy}>
+                {busy ? 'KI generiert…' : (felder.length === 0 ? '✨ KI-Vorschläge holen' : '✨ Neu vorschlagen')}
+              </button>
+            </div>
+          </div>
+
+          {felder.length === 0 && !busy && (
+            <p className="pane-hint" style={{ marginTop: 8 }}>
+              Noch keine Felder angelegt. Hol dir per KI passende Vorschläge basierend auf Stelle + Branche + Funnel-Fragen.
+            </p>
+          )}
+
+          {showFelder && felder.length > 0 && (
+            <div className="vorqual-list">
+              {felder.map((f, i) => (
+                <div key={i} className="vorqual-row">
+                  <input
+                    type="text"
+                    className="vorqual-name"
+                    defaultValue={f.name}
+                    onBlur={e => { if (e.target.value !== f.name) renameFeld(i, e.target.value); }}
+                  />
+                  <span className="vorqual-typ">{f.typ}{f.typ === 'dropdown' && f.optionen ? ` (${f.optionen.length})` : ''}</span>
+                  <button type="button" className="btn-ghost btn-sm btn-danger" onClick={() => removeFeld(i)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showFelder && (
+            <div className="vorqual-add">
+              <input type="text" placeholder="Neues Feld z.B. Führerschein" value={newName} onChange={e => setNewName(e.target.value)} />
+              <select value={newTyp} onChange={e => setNewTyp(e.target.value)}>
+                <option value="text">Text</option>
+                <option value="dropdown">Auswahl</option>
+                <option value="datum">Datum</option>
+              </select>
+              {newTyp === 'dropdown' && (
+                <input type="text" placeholder="Optionen, Komma getrennt" value={newOptionen} onChange={e => setNewOptionen(e.target.value)} />
+              )}
+              <button type="button" className="btn-ghost btn-sm" onClick={addFeld}>+ Hinzufügen</button>
+            </div>
+          )}
+        </div>
+      )}
+    </fieldset>
   );
 }
 

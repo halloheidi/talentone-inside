@@ -4373,3 +4373,74 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 /* Mobile-Karte: klickbar */
 .pub-mcard { cursor: pointer; transition: box-shadow 0.15s; }
 .pub-mcard:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+
+/* ═════════════════════ Telefonisten-Ansicht (BewerbungenTable) ═════════════════════ */
+
+.bew-filter-group {
+  display: flex; gap: 0; background: #fff; border: 1px solid var(--line);
+  border-radius: 100px; padding: 3px; margin-right: auto; margin-left: 12px;
+}
+.bew-filter {
+  padding: 5px 12px; border: none; background: transparent; border-radius: 100px;
+  cursor: pointer; font-size: 12px; color: var(--ink-2); font-weight: 600;
+}
+.bew-filter.is-active { background: var(--ink-1); color: #fff; }
+
+.td-erledigt { text-align: center; padding: 4px !important; }
+.td-erledigt input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--ink-1); }
+
+.bewerbungen-table tr.is-erledigt { opacity: 0.55; background: #fafaf8; }
+.bewerbungen-table tr.is-erledigt td { color: var(--ink-3); }
+.bewerbungen-table tr.is-selected { background: #fff8e1 !important; box-shadow: inset 3px 0 0 #d4a800; }
+.bewerbungen-table tr.is-selected.is-ko { background: #fff3cd !important; }
+
+.bewerbungen-table th.th-vorqual { background: #f0f7ee; }
+.bewerbungen-table .status-cell-kontaktiert  { background: #e0eaf7; color: #1f3a72; }
+.bewerbungen-table .status-cell-interessiert { background: #e6f4d8; color: #345a14; }
+.bewerbungen-table .status-cell-abgesagt     { background: #f4d8d8; color: #80201f; }
+.bewerbungen-table .status-cell-weitergeleitet { background: #f0e0f4; color: #5a1c70; }
+.bewerbungen-table .eingestellt-ja           { background: #d4f1d9; color: #145c1f; font-weight: 600; }
+.bewerbungen-table .eingestellt-nein         { background: #f4d8d8; color: #80201f; font-weight: 600; }
+
+/* ─── Telefonisten Slide-Over ─── */
+.slideover-telefonist { width: 600px; }
+@media (max-width: 700px) { .slideover-telefonist { width: 100vw; } }
+.slideover-half { grid-column: span 1; }
+.slideover-full { grid-column: 1 / -1; }
+.tel-button {
+  display: inline-block; padding: 8px 16px; background: var(--ink-1); color: #fff !important;
+  border-radius: 100px; text-decoration: none !important; font-weight: 600; font-size: 14px;
+}
+.tel-button:hover { opacity: 0.85; }
+
+/* ─── Vorqualifizierungs-Manager im JobFunnel ─── */
+.vorqual-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.vorqual-list {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 10px;
+}
+.vorqual-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: #fafaf8; border-radius: var(--radius-sm);
+}
+.vorqual-row .vorqual-name { flex: 1; padding: 4px 8px; border: 1px solid transparent;
+  background: transparent; border-radius: 4px; font-size: 13px; }
+.vorqual-row .vorqual-name:hover { background: #fff; border-color: var(--line); }
+.vorqual-row .vorqual-name:focus { outline: none; background: #fff; border-color: var(--line); }
+.vorqual-typ { font-size: 11px; color: var(--ink-3); font-style: italic; min-width: 100px; }
+.vorqual-add {
+  display: flex; gap: 6px; align-items: center; margin-top: 10px;
+}
+.vorqual-add input, .vorqual-add select {
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px;
+  font-size: 13px; font-family: inherit;
+}
+.vorqual-add input[type="text"]:first-child { flex: 1; min-width: 180px; }
+
+/* ─── Public-Seite: Recruiter-Sync-Section ─── */
+.pub-recruiter-sync {
+  background: #fafff0; border: 1px solid #e8f0b8; padding: 14px 16px;
+  border-radius: 8px;
+}
+.pub-recruiter-sync h3 { color: #5a6418; margin-top: 0 !important; }

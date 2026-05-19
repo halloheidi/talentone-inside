@@ -77,7 +77,11 @@ router.post('/quick-create', async (req, res) => {
 
     const { data: job, error: jErr } = await supabase
       .from('talentone_jobs')
-      .insert({ ...jobData, kunde_id: kunde.id })
+      .insert({
+        ...jobData,
+        kunde_id: kunde.id,
+        vorqualifizierung: kunde.agentur === 'nowagwirth',
+      })
       .select()
       .single();
     if (jErr) {

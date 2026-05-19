@@ -3,11 +3,15 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 
 const router = Router();
 
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+
 const NOTIZ_STATI = ['neu', 'kontaktiert', 'interessiert', 'abgesagt', 'weitergeleitet'];
 const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'abgesagt'];
+const EINGESTELLT_VALUES = ['ja', 'nein', 'offen'];
 
 const ANRUF_ERGEBNISSE = ['erreicht', 'nicht_erreicht', 'mailbox'];
 
@@ -22,7 +26,7 @@ function sanitizeAnrufversuche(arr) {
 
 /* ════════════════════ Notizen (intern) ════════════════════ */
 
-// PATCH /api/bewerbungen/:id/notiz  body: { status?, bewertung?, gehaltswunsch?, ... }
+// PATCH /api/bewerbungen/:id/notiz  body: { status?, bewertung?, erledigt?, nw_kontaktiert?, kunde_kontaktiert?, vg_vereinbart_am?, eingestellt?, vorqualifizierung_werte?, ... }
 router.patch('/:id/notiz', async (req, res) => {
   const bewId = req.params.id;
   const patch = {};
@@ -34,8 +38,20 @@ router.patch('/:id/notiz', async (req, res) => {
     const n = Number(body.bewertung);
     patch.bewertung = (Number.isInteger(n) && n >= 1 && n <= 5) ? n : null;
   }
-  for (const k of ['gehaltswunsch', 'verfuegbarkeit', 'naechste_aktion', 'notizen']) {
+  for (const k of ['gehaltswunsch', 'verfuegbarkeit', 'naechste_aktion', 'notizen',
+                   'nw_kontaktiert', 'kunde_kontaktiert']) {
     if (body[k] !== undefined) patch[k] = (body[k]?.toString().trim()) || null;
+  }
+  if (body.erledigt !== undefined) patch.erledigt = !!body.erledigt;
+  if (body.vg_vereinbart_am !== undefined) {
+    patch.vg_vereinbart_am = body.vg_vereinbart_am || null;
+  }
+  if (body.eingestellt !== undefined) {
+    patch.eingestellt = EINGESTELLT_VALUES.includes(body.eingestellt) ? body.eingestellt : 'offen';
+  }
+  if (body.vorqualifizierung_werte !== undefined) {
+    patch.vorqualifizierung_werte = (body.vorqualifizierung_werte && typeof body.vorqualifizierung_werte === 'object')
+      ? body.vorqualifizierung_werte : {};
   }
   if (body.anrufversuche !== undefined) {
     patch.anrufversuche = sanitizeAnrufversuche(body.anrufversuche);
@@ -50,6 +66,101 @@ router.patch('/:id/notiz', async (req, res) => {
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ notiz: data });
+});
+
+/* ════════════════════ Vorqualifizierungs-Felder (KI-Vorschlag) ════════════════════ */
+
+const VORQUAL_STANDARD = [
+  { name: 'Ausbildung', typ: 'text' },
+  { name: 'Alter', typ: 'text' },
+  { name: 'Aktuelle Situation', typ: 'text' },
+  { name: 'Motivation / Wechselgrund', typ: 'text' },
+  { name: 'Gehaltsvorstellung (brutto)', typ: 'text' },
+  { name: 'Erreichbarkeit', typ: 'dropdown', optionen: ['Jederzeit', 'Vormittags', 'Mittags', 'Nachmittags', 'Abends'] },
+  { name: 'PLZ / Wohnort', typ: 'text' },
+];
+
+// POST /api/bewerbungen/job/:jobId/vorqualifizierung-vorschlaege
+// Liefert (und speichert) eine Liste von Vorqualifizierungs-Feldern basierend auf Stelle + Branche.
+router.post('/job/:jobId/vorqualifizierung-vorschlaege', async (req, res) => {
+  try {
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('*').eq('id', req.params.jobId).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase
+      .from('talentone_kunden').select('firmenname, branche').eq('id', job.kunde_id).maybeSingle();
+
+    const { data: funnel } = await supabase
+      .from('talentone_funnels').select('screens').eq('job_id', job.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+    const funnelFragen = [];
+    for (const s of funnel?.screens || []) {
+      if (s.type === 'question' && s.text) funnelFragen.push(s.text);
+    }
+
+    const prompt = `Du bist Recruiting-Experte. Schlage Vorqualifizierungs-Felder vor, die ein Telefonist beim Erstgespräch mit einem Bewerber abfragen sollte.
+
+KONTEXT:
+- Firma: ${kunde?.firmenname || '—'}
+- Branche: ${kunde?.branche || '—'}
+- Stelle: ${job.stelle || '—'}
+- Region: ${job.region || '—'}
+${funnelFragen.length ? `- Bereits im Funnel abgefragt:\n  · ${funnelFragen.join('\n  · ')}` : ''}
+
+AUFGABE:
+Schlage 2-5 BRANCHENSPEZIFISCHE Zusatzfelder vor (über die unten genannten Standard-Felder hinaus, die immer dabei sind). Beispiele je Branche:
+- Handwerk/Bau: Führerschein (Dropdown Ja/Nein/Aktuell nicht), Reisebereitschaft
+- Einzelhandel/Gastro: Deutsch-Level (Dropdown), Voll-/Teilzeit, Erfahrung Kundenumgang
+- Technik/IT: Skills/Kenntnisse, Erfahrung in Jahren
+- Pflege/Medizin: Schichtbereitschaft, Pflegegrad-Erfahrung
+
+WICHTIG: Felder NICHT vorschlagen, die schon im Funnel oben abgefragt werden!
+
+ANTWORT als reines JSON-Array:
+[
+  { "name": "Führerschein", "typ": "dropdown", "optionen": ["Ja", "Nein", "Aktuell nicht"] },
+  { "name": "Reisebereitschaft", "typ": "text" }
+]
+
+typ ist eines von: "text", "dropdown", "datum". Bei "dropdown" zwingend "optionen": [].`;
+
+    let branchenspezifisch = [];
+    try {
+      const claude = await callClaudeWithRetry({
+        model: CLAUDE_MODEL,
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const parsed = parseJsonContent(claude);
+      if (Array.isArray(parsed)) {
+        branchenspezifisch = parsed
+          .filter(f => f && typeof f === 'object' && f.name)
+          .map(f => ({
+            name: String(f.name).slice(0, 80),
+            typ: ['text', 'dropdown', 'datum'].includes(f.typ) ? f.typ : 'text',
+            optionen: f.typ === 'dropdown' && Array.isArray(f.optionen)
+              ? f.optionen.map(o => String(o).slice(0, 80)).filter(Boolean).slice(0, 10)
+              : undefined,
+          }))
+          .slice(0, 8);
+      }
+    } catch (err) {
+      console.warn('[vorqual-ki]', err.message);
+    }
+
+    const felder = [...VORQUAL_STANDARD, ...branchenspezifisch];
+
+    // Direkt am Job speichern
+    await supabase.from('talentone_jobs')
+      .update({ vorqualifizierung_felder: felder })
+      .eq('id', job.id);
+
+    res.json({ felder });
+  } catch (err) {
+    console.error('[vorqual-vorschlaege]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ════════════════════ Eigene Spalten pro Job ════════════════════ */
