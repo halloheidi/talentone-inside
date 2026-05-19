@@ -135,46 +135,232 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
   return await response.json();
 }
 
-/* ─────────────────── Mitarbeiter-Benachrichtigung (intern, immer TalentOne) ─────────────────── */
+/* ═════════════ Interne Mitarbeiter-Benachrichtigungen ═════════════ */
 
-export async function sendFormularEingang({ to, kundenname, kundeUrl }) {
+// Empfänger-Liste aus Env (Komma-getrennt). Fallback: info@nowagwirth.de.
+export function getNotificationRecipients() {
+  const raw = process.env.NOTIFICATION_EMAILS || 'info@nowagwirth.de';
+  return raw.split(',')
+    .map(s => s.trim())
+    .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+}
+
+async function sendInternalNotification({ subject, html, text }) {
   if (!process.env.RESEND_API_KEY) {
-    console.warn('[mail] RESEND_API_KEY nicht gesetzt — Mitarbeiter-Mail übersprungen.');
+    console.warn('[mail] RESEND_API_KEY nicht gesetzt — interne Benachrichtigung übersprungen.');
     return null;
   }
-
-  const html = `<!doctype html>
-<html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0a0a0a;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
-<table width="540" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;max-width:540px;width:100%;">
-  <tr><td style="background:#0a0a0a;padding:20px 28px;">
-    <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Talent<span style="color:#d4ff00;">One</span> · Inside</span>
-  </td></tr>
-  <tr><td style="padding:24px 28px;">
-    <h1 style="font-size:20px;margin:0 0 8px;font-weight:700;letter-spacing:-0.02em;">Formular ausgefüllt</h1>
-    <p style="font-size:14px;line-height:1.55;color:#2a2a2a;margin:0 0 18px;"><strong>${escape(kundenname || 'Ein Kunde')}</strong> hat das Briefing-Formular ausgefüllt — das Projekt ist startklar.</p>
-    <a href="${kundeUrl}" style="display:inline-block;background:#0a0a0a;color:#d4ff00;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:100px;">→ Kunde im Inside-Tool öffnen</a>
-  </td></tr>
-</table></td></tr></table></body></html>`;
-
+  const recipients = getNotificationRecipients();
+  if (recipients.length === 0) {
+    console.warn('[mail] Keine gültigen NOTIFICATION_EMAILS — übersprungen.');
+    return null;
+  }
   try {
     const response = await fetch(RESEND_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
       body: JSON.stringify({
-        from: INTERNAL_FROM, to,
-        subject: `[Inside] Formular ausgefüllt: ${kundenname || 'Neuer Kunde'}`,
+        from: INTERNAL_FROM,
+        to: recipients,
+        subject,
         html,
-        text: `${kundenname || 'Ein Kunde'} hat das Briefing-Formular ausgefüllt.\nLink: ${kundeUrl}`,
+        text,
       }),
     });
     if (!response.ok) {
       const body = await response.text();
-      console.warn(`[mail] Mitarbeiter-Benachrichtigung fehlgeschlagen ${response.status}: ${body.slice(0, 200)}`);
+      console.warn(`[mail] interne Benachrichtigung ${response.status}: ${body.slice(0, 200)}`);
     }
     return response.ok;
   } catch (err) {
-    console.warn('[mail] Mitarbeiter-Benachrichtigung Fehler:', err.message);
+    console.warn('[mail] interne Benachrichtigung Fehler:', err.message);
     return false;
   }
+}
+
+/* ── Formular ausgefüllt — interne Mail mit allen Daten ── */
+
+export async function sendFormularEingang({ kunde, job, formdata, kundeUrl }) {
+  const brand = getBranding(kunde?.agentur);
+  const kundenname = kunde?.firmenname || 'Neuer Kunde';
+  const stelle = job?.stelle || 'Stelle';
+
+  const benefits = Array.isArray(job?.benefits) ? job.benefits.filter(Boolean) : [];
+
+  const kundenZeilen = [
+    ['Firmenname',     kunde?.firmenname],
+    ['Ansprechpartner', kunde?.ansprechpartner],
+    ['E-Mail',         kunde?.email],
+    ['Telefon',        kunde?.telefon],
+    ['Website',        kunde?.website_url],
+    ['Branche',        kunde?.branche],
+  ].filter(([, v]) => (v ?? '').toString().trim());
+
+  const jobZeilen = [
+    ['Stelle',            job?.stelle],
+    ['Region',            job?.region],
+    ['Gehalt',            job?.gehalt],
+    ['Reisebereitschaft', job?.reisebereitschaft ? 'Ja' : null],
+    ['Quereinsteiger',    job?.quereinsteiger ? 'Ja' : null],
+    ['Besonderheiten',    job?.besonderheiten],
+  ].filter(([, v]) => (v ?? '').toString().trim());
+
+  const fd = formdata || {};
+  const formdataLabels = {
+    mitarbeiter_anzahl:        'Mitarbeiterzahl',
+    unterschied:               'Was unterscheidet das Unternehmen',
+    mitarbeiter_gerne:         'Warum arbeiten Mitarbeiter gerne hier',
+    unternehmenskultur:        'Unternehmenskultur',
+    ausbildung:                'Passende Ausbildung',
+    kandidat_eigenschaften:    'Eigenschaften idealer Kandidat',
+  };
+  const formdataZeilen = Object.entries(formdataLabels)
+    .map(([k, label]) => [label, fd[k]])
+    .filter(([, v]) => (v ?? '').toString().trim());
+
+  function tableHtml(rows) {
+    return `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+${rows.map(([k, v]) => `
+  <tr>
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:38%;vertical-align:top;">${escape(k)}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;">${escape(String(v))}</td>
+  </tr>`).join('')}
+</table>`;
+  }
+
+  const benefitsHtml = benefits.length === 0 ? '' :
+    `<h3 style="font-size:13px;color:#0a0a0a;margin:18px 0 6px;font-weight:700;">Benefits</h3>
+     <p style="font-size:13px;color:#0a0a0a;margin:0;line-height:1.6;">${escape(benefits.join(' · '))}</p>`;
+
+  const html = `<!doctype html>
+<html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0a0a0a;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;max-width:600px;width:100%;">
+  <tr><td style="background:${brand.primary};padding:18px 28px;">${brand.logoHtml}</td></tr>
+  <tr><td style="padding:24px 28px 8px;">
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Neues Projekt · ${escape(brand.name)}</p>
+    <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 4px;color:#0a0a0a;">${escape(kundenname)}</h1>
+    <p style="font-size:13px;color:#5a5955;margin:0 0 6px;">hat das Briefing-Formular ausgefüllt für <strong>${escape(stelle)}</strong></p>
+  </td></tr>
+  <tr><td style="padding:14px 28px 4px;">
+    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:14px 0 8px;">Kunde</h2>
+    ${tableHtml(kundenZeilen)}
+    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:22px 0 8px;">Stelle</h2>
+    ${tableHtml(jobZeilen)}
+    ${benefitsHtml}
+    ${formdataZeilen.length === 0 ? '' : `
+      <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:22px 0 8px;">Unternehmens-Briefing</h2>
+      ${tableHtml(formdataZeilen)}
+    `}
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+      <tr><td align="center">
+        <a href="${escape(kundeUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:100px;">→ Projekt im Inside-Tool öffnen</a>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:18px 28px;background:#fafaf8;border-top:1px solid #ececea;text-align:center;">
+    <p style="font-size:11px;color:#9a9994;margin:0;">Inside · interne Benachrichtigung</p>
+  </td></tr>
+</table></td></tr></table></body></html>`;
+
+  const textLines = [
+    `${kundenname} hat das Briefing-Formular ausgefüllt — Stelle: ${stelle}.`,
+    '',
+    'Kunde:',
+    ...kundenZeilen.map(([k, v]) => `  ${k}: ${v}`),
+    '',
+    'Stelle:',
+    ...jobZeilen.map(([k, v]) => `  ${k}: ${v}`),
+  ];
+  if (benefits.length) textLines.push('', `Benefits: ${benefits.join(', ')}`);
+  if (formdataZeilen.length) {
+    textLines.push('', 'Unternehmens-Briefing:');
+    for (const [k, v] of formdataZeilen) textLines.push(`  ${k}: ${v}`);
+  }
+  textLines.push('', `Link: ${kundeUrl}`);
+
+  return sendInternalNotification({
+    subject: `Neues Projekt: ${kundenname} hat Formular ausgefüllt`,
+    html,
+    text: textLines.join('\n'),
+  });
+}
+
+/* ── Kunde gibt Entwürfe frei oder schickt Änderungswünsche ── */
+
+export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl }) {
+  const brand = getBranding(kunde?.agentur);
+  const kundenname = kunde?.firmenname || 'Ein Kunde';
+  const stelle = job?.stelle || 'Stelle';
+  const isFreigegeben = status === 'freigegeben';
+
+  // Kommentare als Liste (kommentare ist ein Object: { creative_<id>: "...", adcopy_<id>: "..." })
+  const kommentarRows = kommentare && typeof kommentare === 'object'
+    ? Object.entries(kommentare).filter(([, v]) => (v || '').trim())
+    : [];
+
+  function labelForKey(k) {
+    if (k.startsWith('creative_')) return `Creative ${k.slice('creative_'.length, 'creative_'.length + 8)}`;
+    if (k.startsWith('adcopy_'))   return `Ad-Copy ${k.slice('adcopy_'.length, 'adcopy_'.length + 8)}`;
+    if (k === 'funnel')            return 'Funnel';
+    if (k === 'allgemein')         return 'Allgemein';
+    return k;
+  }
+
+  const kommentareHtml = kommentarRows.length === 0 ? '' : `
+    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:22px 0 8px;">Kommentare des Kunden</h2>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+    ${kommentarRows.map(([k, v]) => `
+      <tr>
+        <td style="padding:10px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:35%;vertical-align:top;">${escape(labelForKey(k))}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;white-space:pre-wrap;">${escape(String(v))}</td>
+      </tr>`).join('')}
+    </table>`;
+
+  const headline = isFreigegeben ? 'Entwürfe freigegeben' : 'Änderungswünsche';
+  const lead = isFreigegeben
+    ? `${kundenname} hat die Entwürfe für <strong>${escape(stelle)}</strong> freigegeben — alles bereit zum Schalten.`
+    : `${kundenname} hat Änderungswünsche zu den Entwürfen für <strong>${escape(stelle)}</strong>.`;
+  const subjectEmoji = isFreigegeben ? '✅' : '📝';
+  const subjectSuffix = isFreigegeben ? 'hat Entwürfe freigegeben' : 'hat Änderungswünsche';
+
+  const html = `<!doctype html>
+<html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,Helvetica,Arial,sans-serif;color:#0a0a0a;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;max-width:560px;width:100%;">
+  <tr><td style="background:${brand.primary};padding:18px 28px;">${brand.logoHtml}</td></tr>
+  <tr><td style="padding:24px 28px 8px;">
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">${subjectEmoji} Review · ${escape(brand.name)}</p>
+    <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(headline)}</h1>
+    <p style="font-size:14px;color:#2a2a2a;margin:0;line-height:1.55;">${lead}</p>
+    ${kommentareHtml}
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">
+      <tr><td align="center">
+        <a href="${escape(jobUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:100px;">→ Projekt im Inside-Tool öffnen</a>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:18px 28px;background:#fafaf8;border-top:1px solid #ececea;text-align:center;">
+    <p style="font-size:11px;color:#9a9994;margin:0;">Inside · interne Benachrichtigung</p>
+  </td></tr>
+</table></td></tr></table></body></html>`;
+
+  const textLines = [
+    `${kundenname} — ${headline} (${stelle})`,
+    '',
+    isFreigegeben ? 'Status: Freigegeben — bereit zum Schalten.' : 'Status: Änderungswünsche',
+  ];
+  if (kommentarRows.length) {
+    textLines.push('', 'Kommentare:');
+    for (const [k, v] of kommentarRows) {
+      textLines.push(`\n${labelForKey(k)}:`, v);
+    }
+  }
+  textLines.push('', `Link zum Projekt: ${jobUrl}`);
+
+  return sendInternalNotification({
+    subject: `${subjectEmoji} ${kundenname} ${subjectSuffix}`,
+    html,
+    text: textLines.join('\n'),
+  });
 }

@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung } from '../mail.js';
 
 const router = Router();
 
@@ -253,12 +253,13 @@ router.post('/formular/:token/submit', async (req, res) => {
       }
       if (farben) await supabase.from('talentone_kunden').update({ farben }).eq('id', kunde.id);
 
-      // Mitarbeiter benachrichtigen
+      // Mitarbeiter benachrichtigen (mit allen Daten + Branding der Agentur)
       try {
         await sendFormularEingang({
-          to: MITARBEITER_MAIL,
-          kundenname: updated.firmenname,
-          kundeUrl: `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}`,
+          kunde: updated,
+          job,
+          formdata,
+          kundeUrl: `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}/jobs/${job.id}/stelle`,
         });
       } catch (err) { console.warn('[formular-bg] Mitarbeiter-Mail:', err.message); }
     })().catch(err => console.error('[formular-bg] uncaught:', err));
@@ -399,7 +400,7 @@ router.post('/review/:token', async (req, res) => {
     return res.status(400).json({ error: 'status muss "freigegeben" oder "aenderungen" sein.' });
   }
   const { data: job } = await supabase
-    .from('talentone_jobs').select('id, review_token').eq('review_token', req.params.token).maybeSingle();
+    .from('talentone_jobs').select('*').eq('review_token', req.params.token).maybeSingle();
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
 
   // Upsert: existiert schon ein Review für den Job → updaten, sonst insert
@@ -407,21 +408,34 @@ router.post('/review/:token', async (req, res) => {
     .from('talentone_reviews').select('id').eq('job_id', job.id)
     .order('updated_at', { ascending: false }).limit(1).maybeSingle();
 
+  let savedReview;
   if (existing) {
     const { data, error } = await supabase
       .from('talentone_reviews')
       .update({ status, kommentare: kommentare || null })
       .eq('id', existing.id).select().single();
     if (error) return res.status(500).json({ error: error.message });
-    return res.json({ ok: true, review: data });
+    savedReview = data;
+  } else {
+    const { data, error } = await supabase
+      .from('talentone_reviews')
+      .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null })
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    savedReview = data;
   }
 
-  const { data, error } = await supabase
-    .from('talentone_reviews')
-    .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null })
-    .select().single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json({ ok: true, review: data });
+  // Mitarbeiter benachrichtigen (best-effort, blockt nicht)
+  (async () => {
+    try {
+      const { data: kunde } = await supabase
+        .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+      const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
+      await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl });
+    } catch (err) { console.warn('[review-mail]', err.message); }
+  })().catch(err => console.error('[review-mail-uncaught]', err.message));
+
+  res.status(existing ? 200 : 201).json({ ok: true, review: savedReview });
 });
 
 /* ════════════════════ Public Bewerberliste (Token) ════════════════════ */
