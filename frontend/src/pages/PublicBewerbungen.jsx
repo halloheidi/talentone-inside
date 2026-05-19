@@ -1,28 +1,29 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 const STATUS_OPTIONS = [
-  { value: 'neu', label: 'Neu' },
-  { value: 'interessant', label: 'Interessant' },
-  { value: 'vorstellungsgespraech', label: 'Vorstellungsgespräch' },
-  { value: 'eingestellt', label: 'Eingestellt' },
-  { value: 'abgesagt', label: 'Abgesagt' },
+  { value: 'neu',                    label: 'Neu' },
+  { value: 'interessant',            label: 'Interessant' },
+  { value: 'vorstellungsgespraech',  label: 'Vorstellungsgespräch' },
+  { value: 'eingestellt',            label: 'Eingestellt' },
+  { value: 'abgesagt',               label: 'Abgesagt' },
 ];
 
 const BRAND = {
   talentone: {
-    name: 'TalentOne', primary: '#0a0a0a', accent: '#d4ff00',
+    name: 'TalentOne', primary: '#0a0a0a', accent: '#d4ff00', accentInk: '#0a0a0a',
     website: 'https://talent-one.de', footer: 'Made with ♥ by TalentOne',
   },
   nowagwirth: {
-    name: 'Nowag & Wirth', primary: '#1a3a6c', accent: '#ffd966',
-    website: 'https://nowagwirth.de', footer: 'Made with ♥ by Nowag & Wirth',
+    name: 'Nowag & Wirth', primary: '#0a0a0a', accent: '#980000', accentInk: '#ffffff',
+    website: 'https://nowagwirth.com', footer: 'Made with ♥ by Nowag & Wirth',
   },
 };
 
+/* ─── Debounced Text/Textarea ─── */
 function DebouncedInput({ value, onSave, type = 'text', rows, placeholder }) {
   const [local, setLocal] = useState(value ?? '');
   const timerRef = useRef(null);
@@ -45,64 +46,210 @@ function DebouncedInput({ value, onSave, type = 'text', rows, placeholder }) {
   return <input type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
 }
 
-function AddSpalteForm({ onAdd }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  function submit() {
-    if (!name.trim()) return;
-    onAdd(name.trim());
-    setName('');
-    setOpen(false);
-  }
-  if (!open) {
+/* ─── Inline Status-Dropdown (für Tabelle) ─── */
+function StatusSelect({ value, onChange }) {
+  return (
+    <select
+      className={`pub-status-select pub-status-${value || 'neu'}`}
+      value={value || 'neu'}
+      onChange={e => onChange(e.target.value)}
+      onClick={e => e.stopPropagation()}
+    >
+      {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/* ─── Custom-Field Cell (Type-aware Editor) ─── */
+function CustomFieldCell({ spalte, wert, onChange, fullWidth }) {
+  if (spalte.typ === 'dropdown' && Array.isArray(spalte.optionen) && spalte.optionen.length > 0) {
     return (
-      <button type="button" className="pub-add-col-btn" onClick={() => setOpen(true)}>
-        + Eigene Spalte
-      </button>
+      <select className="pub-custom-input" value={wert || ''} onChange={e => onChange(e.target.value)}>
+        <option value="">—</option>
+        {spalte.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+  if (spalte.typ === 'datum') {
+    return (
+      <input
+        type="date"
+        className="pub-custom-input"
+        value={(wert || '').slice(0, 10)}
+        onChange={e => onChange(e.target.value)}
+      />
     );
   }
   return (
-    <div className="pub-add-col-form">
-      <input
-        autoFocus
-        type="text"
-        placeholder="z.B. Gehaltswunsch, Wechselmotivation"
-        value={name}
-        onChange={e => setName(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setName(''); setOpen(false); } }}
-      />
-      <button type="button" onClick={submit}>Hinzufügen</button>
-      <button type="button" className="pub-cancel" onClick={() => { setName(''); setOpen(false); }}>×</button>
+    <DebouncedInput value={wert || ''} onSave={onChange} placeholder={fullWidth ? `${spalte.name}…` : ''} />
+  );
+}
+
+/* ─── Spalten-Manager Modal ─── */
+function SpaltenManagerModal({ open, onClose, spalten, onAdd, onRemove }) {
+  const [name, setName] = useState('');
+  const [typ, setTyp] = useState('text');
+  const [optionenText, setOptionenText] = useState('');
+
+  function submit() {
+    if (!name.trim()) return;
+    const optionen = typ === 'dropdown'
+      ? optionenText.split(',').map(s => s.trim()).filter(Boolean)
+      : null;
+    onAdd({ name: name.trim(), typ, optionen });
+    setName(''); setTyp('text'); setOptionenText('');
+  }
+  if (!open) return null;
+  return (
+    <div className="pub-modal-backdrop" onClick={onClose}>
+      <div className="pub-modal" onClick={e => e.stopPropagation()}>
+        <header className="pub-modal-head">
+          <h2>Eigene Spalten</h2>
+          <button className="pub-modal-close" onClick={onClose}>×</button>
+        </header>
+        <div className="pub-modal-body">
+          <p className="pub-modal-hint">
+            Fügen Sie eigene Felder hinzu, die für Ihre Bewerber relevant sind — z.B. Gehaltswunsch,
+            Wechselmotivation, Erfahrung, Alter, Erreichbarkeit, Interview-Notiz. Werte werden pro Bewerber gespeichert.
+          </p>
+
+          {spalten.length > 0 && (
+            <div className="pub-spalten-list">
+              {spalten.map(s => (
+                <div key={s.id} className="pub-spalten-list-row">
+                  <span><strong>{s.name}</strong> <em className="pub-muted">({s.typ})</em></span>
+                  <button className="pub-spalten-remove" onClick={() => onRemove(s.id)}>Entfernen</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pub-spalten-add">
+            <h3>Neue Spalte hinzufügen</h3>
+            <div className="pub-spalten-add-grid">
+              <label>
+                <span>Name</span>
+                <input type="text" placeholder="z.B. Gehaltswunsch" value={name} onChange={e => setName(e.target.value)} />
+              </label>
+              <label>
+                <span>Typ</span>
+                <select value={typ} onChange={e => setTyp(e.target.value)}>
+                  <option value="text">Text</option>
+                  <option value="dropdown">Auswahl</option>
+                  <option value="datum">Datum</option>
+                </select>
+              </label>
+              {typ === 'dropdown' && (
+                <label className="pub-full">
+                  <span>Optionen (Komma-getrennt)</span>
+                  <input type="text" placeholder="z.B. Ja, Nein, Vielleicht" value={optionenText} onChange={e => setOptionenText(e.target.value)} />
+                </label>
+              )}
+              <div className="pub-spalten-add-actions">
+                <button type="button" className="pub-modal-primary" onClick={submit} disabled={!name.trim()}>+ Hinzufügen</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function EditableFeedbackBlock({ fb, onPatch }) {
+/* ─── Slide-Over für Bewerber-Detail ─── */
+function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, onPatchFeedback, onSetWert, onClose }) {
+  if (!bewerbung) return null;
+  const norm = normalized || {};
+  const fb = feedback || {};
   return (
-    <div className="pub-feedback-grid">
-      <label>
-        <span>Status</span>
-        <select value={fb.status || 'neu'} onChange={e => onPatch({ status: e.target.value })}>
-          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </label>
-      <label>
-        <span>Vorstellungsgespräch am</span>
-        <input
-          type="datetime-local"
-          value={fb.vorstellungsgespraech_am ? new Date(fb.vorstellungsgespraech_am).toISOString().slice(0,16) : ''}
-          onChange={e => onPatch({ vorstellungsgespraech_am: e.target.value ? new Date(e.target.value).toISOString() : null })}
-        />
-      </label>
-      <label className="pub-full">
-        <span>Notizen</span>
-        <DebouncedInput
-          rows={3}
-          value={fb.notizen || ''}
-          placeholder="Eigene Anmerkungen…"
-          onSave={v => onPatch({ notizen: v })}
-        />
-      </label>
+    <div className="pub-slideover-backdrop" onClick={onClose}>
+      <aside className="pub-slideover" onClick={e => e.stopPropagation()}>
+        <header className="pub-slideover-head">
+          <div>
+            <h2>{norm.name || '(ohne Namen)'}</h2>
+            <p className="pub-slideover-meta">
+              {new Date(bewerbung.created_at).toLocaleString('de-DE')}
+              {bewerbung.ko_kriterium && <> · <span className="pub-ko-badge">KO</span></>}
+              {fb.status && fb.status !== 'neu' && (
+                <> · <span className={`pub-status-badge pub-status-${fb.status}`}>{STATUS_OPTIONS.find(o => o.value === fb.status)?.label}</span></>
+              )}
+            </p>
+          </div>
+          <button className="pub-slideover-close" onClick={onClose}>×</button>
+        </header>
+
+        <div className="pub-slideover-body">
+          {/* Kontakt */}
+          <section>
+            <h3>Kontakt</h3>
+            <dl className="pub-slideover-dl">
+              <dt>Name</dt><dd>{norm.name || '—'}</dd>
+              <dt>E-Mail</dt><dd>{norm.email ? <a href={`mailto:${norm.email}`}>{norm.email}</a> : '—'}</dd>
+              <dt>Telefon</dt><dd>{norm.telefon ? <a href={`tel:${norm.telefon}`}>{norm.telefon}</a> : '—'}</dd>
+            </dl>
+          </section>
+
+          {/* Funnel-Antworten */}
+          {norm.antworten?.length > 0 && (
+            <section>
+              <h3>Antworten aus dem Bewerbungs-Funnel</h3>
+              <ul className="pub-slideover-antworten">
+                {norm.antworten.map((a, i) => (
+                  <li key={i}>
+                    <div className="pub-slideover-frage">{a.frage_text}</div>
+                    <div className="pub-slideover-antwort">→ {a.antwort}</div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Ihre Einschätzung — Status / VG / Notizen */}
+          <section>
+            <h3>Ihre Einschätzung</h3>
+            <div className="pub-slideover-form">
+              <label>
+                <span>Status</span>
+                <select value={fb.status || 'neu'} onChange={e => onPatchFeedback({ status: e.target.value })}>
+                  {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Vorstellungsgespräch am</span>
+                <input
+                  type="datetime-local"
+                  value={fb.vorstellungsgespraech_am ? new Date(fb.vorstellungsgespraech_am).toISOString().slice(0,16) : ''}
+                  onChange={e => onPatchFeedback({ vorstellungsgespraech_am: e.target.value ? new Date(e.target.value).toISOString() : null })}
+                />
+              </label>
+              <label className="pub-full">
+                <span>Notizen</span>
+                <DebouncedInput rows={4} value={fb.notizen || ''} placeholder="Eigene Anmerkungen…" onSave={v => onPatchFeedback({ notizen: v })} />
+              </label>
+            </div>
+          </section>
+
+          {/* Eigene Felder */}
+          {spalten?.length > 0 && (
+            <section>
+              <h3>Ihre eigenen Felder</h3>
+              <div className="pub-slideover-customs">
+                {spalten.map(s => (
+                  <label key={s.id} className="pub-full">
+                    <span>{s.name}</span>
+                    <CustomFieldCell
+                      spalte={s}
+                      wert={werte?.[s.id] || ''}
+                      onChange={v => onSetWert(s.id, v)}
+                      fullWidth
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
@@ -114,7 +261,8 @@ export default function PublicBewerbungen() {
   const [data, setData] = useState(null);
   const [filter, setFilter] = useState('alle');
   const [sortAsc, setSortAsc] = useState(false);
-  const [expandedIds, setExpandedIds] = useState(new Set());
+  const [selectedId, setSelectedId] = useState(null);
+  const [managerOpen, setManagerOpen] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -149,14 +297,13 @@ export default function PublicBewerbungen() {
     } catch (err) { console.error(err); }
   }
 
-  /* ─── Custom Spalten (vom Kunden verwaltet) ─── */
-  async function addSpalte(name) {
-    if (!name?.trim()) return;
+  /* ─── Custom Spalten ─── */
+  async function addSpalte({ name, typ, optionen }) {
     try {
       const res = await fetch(`${API_BASE}/public/bewerbungen/${token}/spalten`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, typ, optionen }),
       });
       if (!res.ok) throw new Error('Spalte konnte nicht angelegt werden.');
       const j = await res.json();
@@ -188,15 +335,7 @@ export default function PublicBewerbungen() {
     } catch (err) { console.error(err); }
   }
 
-  function toggleExpand(id) {
-    setExpandedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  // Normalisierte Bewerbungen
+  /* ─── Daten-Derivate ─── */
   const normalized = useMemo(() => {
     if (!data) return new Map();
     const m = new Map();
@@ -204,7 +343,6 @@ export default function PublicBewerbungen() {
     return m;
   }, [data]);
 
-  // Dynamische Frage-Spalten
   const frageSpalten = useMemo(() => {
     if (!data) return [];
     const seen = new Set();
@@ -239,8 +377,10 @@ export default function PublicBewerbungen() {
   if (error) return <div className="pub-shell"><div className="pub-error">{error}</div></div>;
   if (!data) return null;
 
+  const selected = selectedId ? data.bewerbungen.find(b => b.id === selectedId) : null;
+
   return (
-    <div className="pub-shell" style={{ '--pub-primary': brand.primary, '--pub-accent': brand.accent }}>
+    <div className="pub-shell" style={{ '--pub-primary': brand.primary, '--pub-accent': brand.accent, '--pub-accent-ink': brand.accentInk }}>
       <header className="pub-header" style={{ background: brand.primary }}>
         <div className="pub-header-inner">
           <div>
@@ -262,21 +402,10 @@ export default function PublicBewerbungen() {
             <button className={`pub-filter ${filter === 'qualifiziert' ? 'is-active' : ''}`} onClick={() => setFilter('qualifiziert')}>Nur qualifizierte</button>
           </div>
           <div className="pub-toolbar-right">
-            <AddSpalteForm onAdd={addSpalte} />
+            <button className="pub-add-col-btn" onClick={() => setManagerOpen(true)}>⚙ Spalten anpassen</button>
             <button className="pub-sort" onClick={() => setSortAsc(v => !v)}>Datum {sortAsc ? '↑' : '↓'}</button>
           </div>
         </div>
-        {(data.spalten || []).length > 0 && (
-          <div className="pub-spalten-bar">
-            <span className="pub-spalten-label">Ihre eigenen Spalten:</span>
-            {(data.spalten || []).map(s => (
-              <span key={s.id} className="pub-spalten-chip">
-                {s.name}
-                <button type="button" onClick={() => removeSpalte(s.id)} title="Entfernen">×</button>
-              </span>
-            ))}
-          </div>
-        )}
 
         {bewerbungen.length === 0 ? (
           <div className="pub-empty">Noch keine Bewerbungen.</div>
@@ -287,73 +416,54 @@ export default function PublicBewerbungen() {
               <table className="pub-table">
                 <thead>
                   <tr>
-                    <th></th>
                     <th>Datum</th>
                     <th>Name</th>
+                    <th>Status</th>
                     <th>E-Mail</th>
                     <th>Telefon</th>
                     <th>KO</th>
                     {frageSpalten.map(f => <th key={f}>{f}</th>)}
-                    {(data.spalten || []).map(s => (
-                      <th key={s.id} className="pub-th-custom">{s.name}</th>
-                    ))}
-                    <th>Status</th>
+                    {(data.spalten || []).map(s => <th key={s.id} className="pub-th-custom">{s.name}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {bewerbungen.map(b => {
                     const norm = normalized.get(b.id) || {};
                     const fb = data.feedback[b.id] || {};
-                    const expanded = expandedIds.has(b.id);
                     return (
-                      <Fragment key={b.id}>
-                        <tr className={`pub-tr ${b.ko_kriterium ? 'is-ko' : ''} ${expanded ? 'is-expanded' : ''}`} onClick={() => toggleExpand(b.id)}>
-                          <td className="pub-td-toggle">{expanded ? '▾' : '▸'}</td>
-                          <td className="pub-td-date">{new Date(b.created_at).toLocaleDateString('de-DE')}</td>
-                          <td><strong>{norm.name || '—'}</strong></td>
-                          <td>{norm.email ? <a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a> : '—'}</td>
-                          <td>{norm.telefon ? <a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a> : '—'}</td>
-                          <td>{b.ko_kriterium ? <span className="pub-ko-badge">KO</span> : ''}</td>
-                          {frageSpalten.map(f => <td key={f} className="pub-td-antwort">{antwortFor(b.id, f) || <span className="pub-muted">—</span>}</td>)}
-                          {(data.spalten || []).map(s => (
-                            <td key={s.id} className="pub-td-custom" onClick={e => e.stopPropagation()}>
-                              <DebouncedInput
-                                value={data.werte?.[b.id]?.[s.id] || ''}
-                                onSave={v => setSpalteWert(b.id, s.id, v)}
-                              />
-                            </td>
-                          ))}
-                          <td>
-                            {fb.status && fb.status !== 'neu' && (
-                              <span className={`pub-status-badge pub-status-${fb.status}`}>{STATUS_OPTIONS.find(o => o.value === fb.status)?.label}</span>
-                            )}
+                      <tr key={b.id} className={`pub-tr ${b.ko_kriterium ? 'is-ko' : ''} ${selectedId === b.id ? 'is-selected' : ''}`} onClick={() => setSelectedId(b.id)}>
+                        <td className="pub-td-date">{new Date(b.created_at).toLocaleDateString('de-DE')}</td>
+                        <td><strong>{norm.name || '—'}</strong></td>
+                        <td className="pub-td-status">
+                          <StatusSelect value={fb.status} onChange={v => patchFeedback(b.id, { status: v })} />
+                        </td>
+                        <td>{norm.email ? <a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a> : '—'}</td>
+                        <td>{norm.telefon ? <a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a> : '—'}</td>
+                        <td>{b.ko_kriterium ? <span className="pub-ko-badge">KO</span> : ''}</td>
+                        {frageSpalten.map(f => <td key={f} className="pub-td-antwort">{antwortFor(b.id, f) || <span className="pub-muted">—</span>}</td>)}
+                        {(data.spalten || []).map(s => (
+                          <td key={s.id} className="pub-td-custom" onClick={e => e.stopPropagation()}>
+                            <CustomFieldCell
+                              spalte={s}
+                              wert={data.werte?.[b.id]?.[s.id] || ''}
+                              onChange={v => setSpalteWert(b.id, s.id, v)}
+                            />
                           </td>
-                        </tr>
-                        {expanded && (
-                          <tr className="pub-tr-expand">
-                            <td colSpan={7 + frageSpalten.length + (data.spalten?.length || 0)} onClick={e => e.stopPropagation()}>
-                              <div className="pub-expand-inner">
-                                <h4>Ihre Einschätzung</h4>
-                                <EditableFeedbackBlock fb={fb} onPatch={body => patchFeedback(b.id, body)} />
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                        ))}
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
 
-            {/* Mobile: Karten mit allen Infos */}
+            {/* Mobile: Karten */}
             <div className="pub-cards">
               {bewerbungen.map(b => {
                 const norm = normalized.get(b.id) || {};
                 const fb = data.feedback[b.id] || {};
-                const expanded = expandedIds.has(b.id);
                 return (
-                  <div key={b.id} className={`pub-mcard ${b.ko_kriterium ? 'is-ko' : ''}`}>
+                  <div key={b.id} className={`pub-mcard ${b.ko_kriterium ? 'is-ko' : ''}`} onClick={() => setSelectedId(b.id)}>
                     <div className="pub-mcard-head">
                       <div>
                         <div className="pub-mcard-date">{new Date(b.created_at).toLocaleDateString('de-DE')}</div>
@@ -367,8 +477,8 @@ export default function PublicBewerbungen() {
                       </div>
                     </div>
                     <dl className="pub-mcard-contact">
-                      {norm.email && <><dt>E-Mail</dt><dd><a href={`mailto:${norm.email}`}>{norm.email}</a></dd></>}
-                      {norm.telefon && <><dt>Telefon</dt><dd><a href={`tel:${norm.telefon}`}>{norm.telefon}</a></dd></>}
+                      {norm.email && <><dt>E-Mail</dt><dd><a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a></dd></>}
+                      {norm.telefon && <><dt>Telefon</dt><dd><a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a></dd></>}
                     </dl>
                     {norm.antworten?.length > 0 && (
                       <ul className="pub-mcard-antworten">
@@ -380,27 +490,9 @@ export default function PublicBewerbungen() {
                         ))}
                       </ul>
                     )}
-                    {(data.spalten || []).length > 0 && (
-                      <div className="pub-mcard-customs">
-                        {(data.spalten || []).map(s => (
-                          <label key={s.id} className="pub-mcard-custom">
-                            <span>{s.name}</span>
-                            <DebouncedInput
-                              value={data.werte?.[b.id]?.[s.id] || ''}
-                              onSave={v => setSpalteWert(b.id, s.id, v)}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    <button className="pub-mcard-toggle" onClick={() => toggleExpand(b.id)}>
-                      {expanded ? '✕ Schließen' : 'Status & Notizen bearbeiten ▸'}
+                    <button className="pub-mcard-toggle" onClick={e => { e.stopPropagation(); setSelectedId(b.id); }}>
+                      Details bearbeiten ▸
                     </button>
-                    {expanded && (
-                      <div className="pub-mcard-feedback">
-                        <EditableFeedbackBlock fb={fb} onPatch={body => patchFeedback(b.id, body)} />
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -414,6 +506,25 @@ export default function PublicBewerbungen() {
         <span> · </span>
         <a href={brand.website} target="_blank" rel="noreferrer">{brand.website.replace(/^https?:\/\//, '')}</a>
       </footer>
+
+      <BewerberSlideOver
+        bewerbung={selected}
+        normalized={selected ? normalized.get(selected.id) : null}
+        feedback={selected ? data.feedback[selected.id] : null}
+        spalten={data.spalten || []}
+        werte={selected ? data.werte?.[selected.id] : null}
+        onPatchFeedback={body => selected && patchFeedback(selected.id, body)}
+        onSetWert={(spalteId, v) => selected && setSpalteWert(selected.id, spalteId, v)}
+        onClose={() => setSelectedId(null)}
+      />
+
+      <SpaltenManagerModal
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        spalten={data.spalten || []}
+        onAdd={addSpalte}
+        onRemove={removeSpalte}
+      />
     </div>
   );
 }

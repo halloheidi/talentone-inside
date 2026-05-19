@@ -488,12 +488,18 @@ router.get('/bewerbungen/:token', async (req, res) => {
   });
 });
 
-// POST /api/public/bewerbungen/:token/spalten  body: { name }
+// POST /api/public/bewerbungen/:token/spalten  body: { name, typ?, optionen? }
 router.post('/bewerbungen/:token/spalten', async (req, res) => {
   const job = await loadJobByToken(req.params.token);
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
   const name = req.body?.name?.toString().trim();
   if (!name) return res.status(400).json({ error: 'name fehlt.' });
+  const rawTyp = req.body?.typ;
+  const typ = ['text', 'dropdown', 'datum'].includes(rawTyp) ? rawTyp : 'text';
+  const rawOptionen = req.body?.optionen;
+  const optionen = typ === 'dropdown' && Array.isArray(rawOptionen)
+    ? rawOptionen.map(o => String(o).slice(0, 80)).filter(Boolean).slice(0, 30)
+    : null;
 
   const { data: last } = await supabase
     .from('talentone_bewerber_spalten')
@@ -507,7 +513,8 @@ router.post('/bewerbungen/:token/spalten', async (req, res) => {
     .insert({
       job_id: job.id,
       name: name.slice(0, 80),
-      typ: 'text',
+      typ,
+      optionen,
       sichtbar_fuer: 'kunde',
       reihenfolge: (last?.reihenfolge ?? -1) + 1,
     })
