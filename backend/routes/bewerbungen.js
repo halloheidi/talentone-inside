@@ -287,7 +287,7 @@ router.get('/', async (req, res) => {
 
   let q = supabase
     .from('talentone_bewerbungen')
-    .select('*, talentone_jobs!inner(id, stelle, region, kunde_id, bewerbungen_token, vorqualifizierung, talentone_kunden!inner(id, firmenname, agentur))')
+    .select('*, talentone_jobs!inner(id, stelle, region, kunde_id, bewerbungen_token, vorqualifizierung, vorqualifizierung_felder, talentone_kunden!inner(id, firmenname, agentur))')
     .order('created_at', { ascending: false });
 
   if (job_id) q = q.eq('job_id', job_id);

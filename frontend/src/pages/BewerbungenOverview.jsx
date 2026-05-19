@@ -138,6 +138,26 @@ export default function BewerbungenOverview() {
     return Array.from(map.values()).sort((a, b) => (a.stelle || '').localeCompare(b.stelle || ''));
   }, [data.bewerbungen]);
 
+  // Union aller einzigartigen Vorqualifizierungs-Felder über alle sichtbaren Jobs.
+  // Pro Bewerbung wird die Zelle nur gerendert, wenn der zugehörige Job dieses Feld hat.
+  // Wenn nach einem einzigen Job gefiltert ist, zeigen wir nur dessen Felder.
+  const vorqualSpalten = useMemo(() => {
+    const seen = new Map(); // name -> feld (typ, optionen)
+    for (const b of data.bewerbungen) {
+      const felder = b.talentone_jobs?.vorqualifizierung_felder;
+      if (!Array.isArray(felder)) continue;
+      for (const f of felder) {
+        if (f?.name && !seen.has(f.name)) seen.set(f.name, f);
+      }
+    }
+    return Array.from(seen.values());
+  }, [data.bewerbungen]);
+
+  function jobHatFeld(job, feldName) {
+    return Array.isArray(job?.vorqualifizierung_felder) &&
+      job.vorqualifizierung_felder.some(f => f?.name === feldName);
+  }
+
   // Counter für die beiden Telefonisten-Toggles (auf Basis-Datenmenge, vor anderen Filtern)
   const counts = useMemo(() => {
     const vorqualAll = data.bewerbungen.filter(b => b.talentone_jobs?.vorqualifizierung).length;
@@ -336,6 +356,9 @@ export default function BewerbungenOverview() {
                 <th>Nächste Aktion</th>
                 <SortHeader k="bewertung" label="Bewertung" />
                 <th>Notizen</th>
+                {vorqualSpalten.map((f, i) => (
+                  <th key={`vq-h-${i}`} className="th-vorqual">{f.name}</th>
+                ))}
                 <th>Kundenfeedback</th>
               </tr>
             </thead>
@@ -382,6 +405,31 @@ export default function BewerbungenOverview() {
                     <td className="td-notizen-preview" title={n.notizen || ''}>
                       {n.notizen ? <span>{n.notizen.slice(0, 60)}{n.notizen.length > 60 ? '…' : ''}</span> : <span className="muted">—</span>}
                     </td>
+                    {vorqualSpalten.map((feld, idx) => {
+                      const jobOfRow = b.talentone_jobs;
+                      if (!jobHatFeld(jobOfRow, feld.name)) {
+                        return <td key={`vq-c-${idx}`} className="muted" style={{ background: '#fafaf8' }}>—</td>;
+                      }
+                      const wert = (n.vorqualifizierung_werte || {})[feld.name] || '';
+                      const update = (v) => {
+                        const next = { ...(n.vorqualifizierung_werte || {}), [feld.name]: v };
+                        updateNotiz(b.id, { vorqualifizierung_werte: next });
+                      };
+                      return (
+                        <td key={`vq-c-${idx}`} onClick={e => e.stopPropagation()}>
+                          {feld.typ === 'dropdown' && Array.isArray(feld.optionen) ? (
+                            <select className="cell-input" value={wert} onChange={e => update(e.target.value)}>
+                              <option value="">—</option>
+                              {feld.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          ) : feld.typ === 'datum' ? (
+                            <input type="date" className="cell-input cell-date" value={(wert || '').slice(0, 10)} onChange={e => update(e.target.value)} />
+                          ) : (
+                            <DebouncedInput value={wert} onSave={update} />
+                          )}
+                        </td>
+                      );
+                    })}
                     <td>
                       {fb.status ? (
                         <span className={`kundenfeedback-badge kundenfeedback-${fb.status}`}>
@@ -477,6 +525,37 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
               </label>
             </div>
           </section>
+
+          {/* 4b. Vorqualifizierungs-Felder (aus dem Job) */}
+          {Array.isArray(job?.vorqualifizierung_felder) && job.vorqualifizierung_felder.filter(f => f?.name).length > 0 && (
+            <section>
+              <h3>Vorqualifizierung</h3>
+              <div className="slideover-form">
+                {job.vorqualifizierung_felder.filter(f => f?.name).map((feld, idx) => {
+                  const wert = (note.vorqualifizierung_werte || {})[feld.name] || '';
+                  const update = (v) => {
+                    const next = { ...(note.vorqualifizierung_werte || {}), [feld.name]: v };
+                    onUpdate({ vorqualifizierung_werte: next });
+                  };
+                  return (
+                    <label key={`vq-${idx}`} className={feld.typ === 'dropdown' ? '' : 'slideover-full'}>
+                      <span>{feld.name}</span>
+                      {feld.typ === 'dropdown' && Array.isArray(feld.optionen) ? (
+                        <select className="cell-input" value={wert} onChange={e => update(e.target.value)}>
+                          <option value="">—</option>
+                          {feld.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : feld.typ === 'datum' ? (
+                        <input type="date" className="cell-input" value={(wert || '').slice(0, 10)} onChange={e => update(e.target.value)} />
+                      ) : (
+                        <DebouncedInput value={wert} onSave={update} />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           {/* 5. Notizen */}
           <section>
