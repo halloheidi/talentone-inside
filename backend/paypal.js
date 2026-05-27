@@ -148,6 +148,47 @@ export async function fetchInvoice(invoiceId) {
 }
 
 /**
+ * Verifiziert eine eingehende PayPal-Webhook-Signatur über die PayPal API.
+ * https://developer.paypal.com/api/rest/webhooks/notifications/verify-webhook-signature/
+ *
+ * @param {object} opts
+ * @param {object} opts.headers       Express-Request-Headers (case-insensitive)
+ * @param {object} opts.body          Parsed Webhook-Event (JSON-Objekt)
+ * @returns {Promise<boolean>}
+ */
+export async function verifyWebhookSignature({ headers, body }) {
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID;
+  if (!webhookId) {
+    console.warn('[PayPal-Webhook] PAYPAL_WEBHOOK_ID nicht gesetzt — Verifikation übersprungen.');
+    return false;
+  }
+  // Express normalisiert Headers auf lowercase
+  const h = headers;
+  const verifyBody = {
+    transmission_id:   h['paypal-transmission-id'],
+    transmission_time: h['paypal-transmission-time'],
+    cert_url:          h['paypal-cert-url'],
+    auth_algo:         h['paypal-auth-algo'],
+    transmission_sig:  h['paypal-transmission-sig'],
+    webhook_id:        webhookId,
+    webhook_event:     body,
+  };
+  if (!verifyBody.transmission_id || !verifyBody.transmission_sig) {
+    return false;
+  }
+  try {
+    const res = await paypalFetch('/v1/notifications/verify-webhook-signature', {
+      method: 'POST',
+      body: verifyBody,
+    });
+    return res?.verification_status === 'SUCCESS';
+  } catch (err) {
+    console.warn('[PayPal-Webhook] Verifikation fehlgeschlagen:', err.message);
+    return false;
+  }
+}
+
+/**
  * Normalisiert PayPal-Status auf unser Schema: 'entwurf' | 'offen' | 'bezahlt' | 'ueberfaellig' | 'storniert'.
  */
 export function mapStatus(paypalStatus) {

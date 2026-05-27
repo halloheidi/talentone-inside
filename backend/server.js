@@ -11,6 +11,7 @@ import publicRouter from './routes/public.js';
 import webhooksRouter from './routes/webhooks.js';
 import bewerbungenRouter from './routes/bewerbungen.js';
 import zahlungenRouter from './routes/zahlungen.js';
+import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -45,6 +46,9 @@ app.use('/api/creatives', requireAuth, creativesRouter);
 app.use('/api/adcopies', requireAuth, adcopiesRouter);
 app.use('/api/funnels', requireAuth, funnelsRouter);
 app.use('/api/bewerbungen', requireAuth, bewerbungenRouter);
+// PayPal Webhook — KEIN Auth (PayPal ruft direkt auf, Signatur-Verifikation im Handler).
+// Muss VOR dem auth-geschützten zahlungenRouter mit gleicher Basis-URL gemountet werden.
+app.use('/api/zahlungen/webhook', zahlungenWebhookRouter);
 app.use('/api/zahlungen', requireAuth, zahlungenRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
