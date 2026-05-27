@@ -364,3 +364,77 @@ export async function sendReviewBenachrichtigung({ kunde, job, status, kommentar
     text: textLines.join('\n'),
   });
 }
+
+/* ════════════════════ PayPal-Zahlungslink an Kunden ════════════════════ */
+
+function formatEur(cent) {
+  const v = (cent / 100).toFixed(2).replace('.', ',');
+  return v.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
+}
+
+export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY nicht gesetzt.');
+  }
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const betragStr = formatEur(zahlung.betrag_cent);
+  const stelle = job?.stelle || 'Projekt';
+  const firma = kunde?.firmenname || 'euer Team';
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Rechnung · ${escape(brand.name)}</p>
+      <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(betragStr)}</h1>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Werbebudget für <strong>${escape(stelle)}</strong></p>
+
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:6px 0 18px;">
+        <tr>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:40%;">Beschreibung</td>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;">${escape(zahlung.beschreibung || '—')}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">Betrag</td>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:600;">${escape(betragStr)}</td>
+        </tr>
+        ${zahlung.faelligkeit ? `
+        <tr>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">Fälligkeit</td>
+          <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;">${escape(new Date(zahlung.faelligkeit).toLocaleDateString('de-DE'))}</td>
+        </tr>` : ''}
+        ${zahlung.paypal_invoice_number ? `
+        <tr>
+          <td style="padding:8px 0;font-size:12px;color:#5a5955;">Rechnungs-Nr.</td>
+          <td style="padding:8px 0;font-size:13px;color:#0a0a0a;">${escape(zahlung.paypal_invoice_number)}</td>
+        </tr>` : ''}
+      </table>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(zahlung.pay_link)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:16px;padding:16px 32px;border-radius:100px;letter-spacing:0.02em;">→ Jetzt bezahlen mit PayPal</a>
+      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Sichere Zahlung über PayPal — Konto nicht zwingend nötig (auch Kreditkarte möglich).</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen einfach auf diese Mail antworten.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `Rechnung für ${stelle}\n\nBetrag: ${betragStr}\nBeschreibung: ${zahlung.beschreibung || ''}\n${zahlung.faelligkeit ? `Fällig: ${new Date(zahlung.faelligkeit).toLocaleDateString('de-DE')}\n` : ''}\nJetzt bezahlen: ${zahlung.pay_link}\n\nViele Grüße\nEuer ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      reply_to: getMailReplyTo(brand),
+      subject: `Rechnung Werbebudget — ${stelle}`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
