@@ -248,6 +248,9 @@ export default function JobExport() {
         </div>
       )}
 
+      {/* ─────── Zahlungen (PayPal) ─────── */}
+      <ZahlungenSection job={job} kunde={kunde} />
+
       {/* ─────── Versand-Status oben ─────── */}
       {letzterVersand && (
         <div className="versand-status">
@@ -451,4 +454,154 @@ export default function JobExport() {
       </Modal>
     </div>
   );
+}
+
+/* ═══════════════════ Zahlungen / PayPal ═══════════════════ */
+
+function ZahlungenSection({ job, kunde }) {
+  const [zahlungen, setZahlungen] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await api(`/zahlungen?job_id=${job.id}`);
+      setZahlungen(res.zahlungen || []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
+
+  // Form-State im Modal
+  const defaultDesc = `Werbebudget ${job.stelle || 'Stelle'} — ${kunde?.firmenname || ''}`.trim();
+  const [betrag, setBetrag] = useState('');
+  const [beschreibung, setBeschreibung] = useState(defaultDesc);
+  const [faelligkeit, setFaelligkeit] = useState('');
+
+  function openModal() {
+    setBetrag(''); setBeschreibung(defaultDesc); setFaelligkeit('');
+    setError(''); setModalOpen(true);
+  }
+
+  async function createZahlung() {
+    setError(''); setBusy(true);
+    try {
+      const res = await api(`/zahlungen/job/${job.id}`, {
+        method: 'POST',
+        body: { betrag, beschreibung, faelligkeit: faelligkeit || null },
+      });
+      setZahlungen(prev => [res.zahlung, ...prev]);
+      setModalOpen(false);
+      try { await navigator.clipboard.writeText(res.zahlung.pay_link); } catch { /* noop */ }
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusy(false); }
+  }
+
+  async function sendMail(z) {
+    if (!confirm(`Zahlungslink per Mail an ${kunde?.email || 'Kunden'} senden?`)) return;
+    try {
+      const res = await api(`/zahlungen/${z.id}/send`, { method: 'POST', body: {} });
+      setZahlungen(prev => prev.map(x => x.id === z.id ? res.zahlung : x));
+    } catch (err) { alert(err.message); }
+  }
+  async function refreshStatus(z) {
+    try {
+      const res = await api(`/zahlungen/${z.id}/refresh`, { method: 'POST', body: {} });
+      setZahlungen(prev => prev.map(x => x.id === z.id ? res.zahlung : x));
+    } catch (err) { alert(err.message); }
+  }
+  async function deleteZahlung(z) {
+    if (!confirm('Zahlung lokal entfernen? (Die PayPal-Rechnung bleibt bei PayPal bestehen.)')) return;
+    try {
+      await api(`/zahlungen/${z.id}`, { method: 'DELETE' });
+      setZahlungen(prev => prev.filter(x => x.id !== z.id));
+    } catch (err) { alert(err.message); }
+  }
+
+  function fmtEur(cent) {
+    return (cent / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+  }
+
+  return (
+    <div className="zahlungen-section">
+      <div className="zahlungen-head">
+        <div>
+          <div className="zahlungen-title">💳 Zahlungen / Rechnungen (PayPal)</div>
+          <p className="zahlungen-hint">Erstelle Zahlungslinks und sende sie direkt an {kunde?.firmenname || 'den Kunden'}.</p>
+        </div>
+        <button className="btn-primary btn-sm" onClick={openModal}>+ Zahlungslink erstellen</button>
+      </div>
+
+      {loading ? <div className="muted">Lade…</div> : (
+        zahlungen.length === 0
+          ? <div className="muted" style={{ padding: '12px 0' }}>Noch keine Zahlung angelegt.</div>
+          : (
+            <table className="zahlungen-table">
+              <thead><tr>
+                <th>Datum</th><th>Betrag</th><th>Status</th><th>Versand</th><th>PayPal-Link</th><th></th>
+              </tr></thead>
+              <tbody>
+                {zahlungen.map(z => (
+                  <tr key={z.id} className={`status-row-${z.status}`}>
+                    <td>{new Date(z.created_at).toLocaleDateString('de-DE')}</td>
+                    <td><strong>{fmtEur(z.betrag_cent)}</strong></td>
+                    <td><span className={`zahlung-status zahlung-${z.status}`}>{statusLabel(z.status)}{z.bezahlt_am ? ' · ' + new Date(z.bezahlt_am).toLocaleDateString('de-DE') : ''}</span></td>
+                    <td>{z.gesendet_am ? `✉ ${new Date(z.gesendet_am).toLocaleDateString('de-DE')}` : <span className="muted">—</span>}</td>
+                    <td>
+                      {z.pay_link
+                        ? <a href={z.pay_link} target="_blank" rel="noreferrer" className="zahlung-link">öffnen ↗</a>
+                        : <span className="muted">—</span>}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn-ghost btn-sm" onClick={() => refreshStatus(z)} title="Status aktualisieren">↻</button>
+                      <button className="btn-ghost btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(z.pay_link); } catch {} }} disabled={!z.pay_link}>Kopieren</button>
+                      {z.status !== 'bezahlt' && <button className="btn-ghost btn-sm" onClick={() => sendMail(z)}>Mail</button>}
+                      <button className="btn-ghost btn-sm btn-danger" onClick={() => deleteZahlung(z)}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+      )}
+
+      {modalOpen && (
+        <Modal open={modalOpen} onClose={() => !busy && setModalOpen(false)} title="Zahlungslink erstellen"
+               actions={<>
+                 <button className="btn-ghost" onClick={() => setModalOpen(false)} disabled={busy}>Abbrechen</button>
+                 <button className="btn-primary" onClick={createZahlung} disabled={busy || !betrag}>{busy ? 'Erstelle…' : 'Erstellen'}</button>
+               </>}>
+          <div className="form-grid">
+            <label className="field field-full">
+              <span>Betrag *</span>
+              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betrag} onChange={e => setBetrag(e.target.value)} />
+            </label>
+            <label className="field field-full">
+              <span>Beschreibung</span>
+              <input type="text" value={beschreibung} onChange={e => setBeschreibung(e.target.value)} />
+            </label>
+            <label className="field">
+              <span>Fälligkeit (optional)</span>
+              <input type="date" value={faelligkeit} onChange={e => setFaelligkeit(e.target.value)} />
+            </label>
+          </div>
+          {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
+          <p className="pane-hint" style={{ marginTop: 14 }}>
+            Die Rechnung wird in eurem PayPal Business-Account angelegt. Der Zahlungslink wird im Anschluss in die Zwischenablage kopiert — du kannst ihn dann per Mail-Button an {kunde?.email || 'den Kunden'} schicken.
+          </p>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function statusLabel(s) {
+  return ({
+    entwurf: 'Entwurf', offen: '⏳ Offen', bezahlt: '✅ Bezahlt',
+    ueberfaellig: '⚠ Überfällig', storniert: 'Storniert',
+  })[s] || s;
 }

@@ -15,6 +15,10 @@ function GlobalNav() {
         <Icon name="users" />
         <span>Bewerbungen</span>
       </NavLink>
+      <NavLink to="/zahlungen" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>Zahlungen</span>
+      </NavLink>
     </nav>
   );
 }
