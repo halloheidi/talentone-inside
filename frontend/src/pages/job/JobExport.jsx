@@ -570,15 +570,25 @@ function ZahlungenSection({ job, kunde }) {
       )}
 
       {modalOpen && (
-        <Modal open={modalOpen} onClose={() => !busy && setModalOpen(false)} title="Zahlungslink erstellen"
-               actions={<>
-                 <button className="btn-ghost" onClick={() => setModalOpen(false)} disabled={busy}>Abbrechen</button>
-                 <button className="btn-primary" onClick={createZahlung} disabled={busy || !betrag}>{busy ? 'Erstelle…' : 'Erstellen'}</button>
-               </>}>
+        <Modal
+          open={modalOpen}
+          onClose={() => !busy && setModalOpen(false)}
+          title="Zahlungslink erstellen"
+          footer={
+            <div className="zahlung-modal-actions">
+              <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)} disabled={busy}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-zahlung-cta" onClick={createZahlung} disabled={busy || !betrag}>
+                {busy ? '⏳ Erstelle…' : '💳 Zahlungslink erstellen'}
+              </button>
+            </div>
+          }
+        >
           <div className="form-grid">
             <label className="field field-full">
               <span>Betrag *</span>
-              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betrag} onChange={e => setBetrag(e.target.value)} />
+              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betrag} onChange={e => setBetrag(e.target.value)} autoFocus />
             </label>
             <label className="field field-full">
               <span>Beschreibung</span>
