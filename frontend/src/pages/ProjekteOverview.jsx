@@ -15,14 +15,17 @@ const STATUS_LABELS = {
   abgeschlossen: 'Abgeschlossen',
 };
 
-// Kanban-Spalten (Vorbereitungs-Stati werden zusammengefasst)
+// Kanban-Spalten — jede Status-Stufe einzeln
 const KANBAN_COLUMNS = [
-  { key: 'vorbereitung',  label: 'Vorbereitung',  match: ['vorbereitung', 'kickoff_vereinbart', 'onboarding', 'golive_vereinbart'] },
-  { key: 'warte_auf_go',  label: 'Warte auf Go!', match: ['warte_auf_go'] },
-  { key: 'live',          label: 'Live',          match: ['live'] },
-  { key: 'pausiert',      label: 'Pausiert',      match: ['pausiert'] },
-  { key: 'hold',          label: 'Hold',          match: ['hold'] },
-  { key: 'abgeschlossen', label: 'Abgeschlossen', match: ['abgeschlossen'] },
+  { key: 'vorbereitung',       label: 'Kunde ohne Kick-Off', color: '#dc2626', match: ['vorbereitung'] },
+  { key: 'kickoff_vereinbart', label: 'Kick-Off vereinbart', color: '#3b82f6', match: ['kickoff_vereinbart'] },
+  { key: 'onboarding',         label: 'Onboarding',          color: '#8b5cf6', match: ['onboarding'] },
+  { key: 'golive_vereinbart',  label: 'Go-Live vereinbart',  color: '#f59e0b', match: ['golive_vereinbart'] },
+  { key: 'warte_auf_go',       label: 'Warte auf Go!',       color: '#b45309', match: ['warte_auf_go'] },
+  { key: 'live',               label: 'Live',                color: '#15803d', match: ['live'] },
+  { key: 'pausiert',           label: 'Pausiert',            color: '#6b7280', match: ['pausiert'] },
+  { key: 'hold',               label: 'Hold',                color: '#1f2937', match: ['hold'] },
+  { key: 'abgeschlossen',      label: 'Abgeschlossen',       color: '#10b981', match: ['abgeschlossen'] },
 ];
 
 const CHECK_KEYS = [
@@ -269,7 +272,7 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
         return (
           <div key={col.key} className="kanban-col" onDragOver={onDragOver} onDrop={e => onDrop(e, col.key)}>
             <div className="kanban-col-head">
-              <strong>{col.label}</strong>
+              <span className="kanban-col-pill" style={{ background: col.color }}>{col.label}</span>
               <span className="kanban-col-count">{cards.length}</span>
             </div>
             <div className="kanban-col-body">

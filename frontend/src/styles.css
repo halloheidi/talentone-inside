@@ -4641,10 +4641,10 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   padding: 4px; border: 1px solid var(--line); margin-right: auto; margin-left: 16px;
 }
 
-/* ─── Kanban ─── */
+/* ─── Kanban (9 Spalten, full width) ─── */
 .kanban {
-  display: grid; grid-template-columns: repeat(6, minmax(260px, 1fr));
-  gap: 12px; overflow-x: auto; padding: 4px 0 16px;
+  display: grid; grid-template-columns: repeat(9, minmax(210px, 1fr));
+  gap: 10px; overflow-x: auto; padding: 4px 0 16px;
 }
 .kanban-col {
   background: #fafaf8; border: 1px solid var(--line); border-radius: var(--radius-sm);
@@ -4652,12 +4652,17 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 }
 .kanban-col-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 4px 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
-  font-size: 13px;
+  padding: 0 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+  gap: 6px;
+}
+.kanban-col-pill {
+  display: inline-block; padding: 4px 10px; border-radius: 100px;
+  font-size: 11px; font-weight: 700; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .kanban-col-count {
   background: #ececea; color: var(--ink-2); font-size: 11px; font-weight: 700;
-  border-radius: 100px; padding: 2px 9px;
+  border-radius: 100px; padding: 2px 9px; flex-shrink: 0;
 }
 .kanban-col-body { display: flex; flex-direction: column; gap: 8px; }
 .kanban-card {
