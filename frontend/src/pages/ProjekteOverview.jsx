@@ -16,6 +16,22 @@ const STATUS_LABELS = {
 };
 
 // Kanban-Spalten — jede Status-Stufe einzeln
+const PROJEKTART_OPTIONEN = [
+  'Mitarbeitergewinnung',
+  'TalentOne - Mitarbeitergewinnung',
+  'Abo',
+  'Neukundengewinnung',
+  'Social Media Betreuung',
+  'Employer Branding',
+  'Mitarbeiterbefragung',
+  'Homepage',
+  'Karriereseite',
+];
+
+const PROJEKTDAUER_OPTIONEN = [
+  '30 Tage', '60 Tage', '90 Tage', '6 Monate', '12 Monate', 'abo',
+];
+
 const KANBAN_COLUMNS = [
   { key: 'vorbereitung',       label: 'Kunde ohne Kick-Off', color: '#dc2626', match: ['vorbereitung'] },
   { key: 'kickoff_vereinbart', label: 'Kick-Off vereinbart', color: '#3b82f6', match: ['kickoff_vereinbart'] },
@@ -426,9 +442,26 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate }) {
                   {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </label>
-              <label><span>Verantwortlich</span><DebouncedInput value={projekt.verantwortlich || ''} onSave={patchField('verantwortlich')} /></label>
-              <label><span>Projektart</span><DebouncedInput value={projekt.projektart || ''} onSave={patchField('projektart')} /></label>
-              <label><span>Projektdauer</span><DebouncedInput value={projekt.projektdauer || ''} onSave={patchField('projektdauer')} /></label>
+              <label><span>Verantwortlich</span>
+                <select className="cell-input" value={projekt.verantwortlich || ''} onChange={e => patch({ verantwortlich: e.target.value || null })}>
+                  <option value="">—</option>
+                  {team.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                </select>
+              </label>
+              <label><span>Projektart</span>
+                <select className="cell-input" value={projekt.projektart || ''} onChange={e => patch({ projektart: e.target.value || null })}>
+                  <option value="">—</option>
+                  {PROJEKTART_OPTIONEN.map(o => <option key={o} value={o}>{o}</option>)}
+                  {projekt.projektart && !PROJEKTART_OPTIONEN.includes(projekt.projektart) && <option value={projekt.projektart}>{projekt.projektart}</option>}
+                </select>
+              </label>
+              <label><span>Projektdauer</span>
+                <select className="cell-input" value={projekt.projektdauer || ''} onChange={e => patch({ projektdauer: e.target.value || null })}>
+                  <option value="">—</option>
+                  {PROJEKTDAUER_OPTIONEN.map(o => <option key={o} value={o}>{o}</option>)}
+                  {projekt.projektdauer && !PROJEKTDAUER_OPTIONEN.includes(projekt.projektdauer) && <option value={projekt.projektdauer}>{projekt.projektdauer}</option>}
+                </select>
+              </label>
               <label className="slideover-full"><span>Gesuchte Positionen</span><DebouncedInput value={projekt.gesuchte_positionen || ''} onSave={patchField('gesuchte_positionen')} /></label>
               <label className="slideover-full"><span>Standorte</span><DebouncedInput value={projekt.standorte || ''} onSave={patchField('standorte')} /></label>
             </div>
@@ -678,7 +711,12 @@ function CreateProjektModal({ team, onClose, onCreated }) {
       <div className="form-grid">
         <label className="field field-full"><span>Projektname</span><input type="text" autoFocus value={form.projekt} onChange={e => setForm({ ...form, projekt: e.target.value })} /></label>
         <label className="field field-full"><span>Kunde / Firma</span><input type="text" value={form.kunde} onChange={e => setForm({ ...form, kunde: e.target.value })} /></label>
-        <label className="field"><span>Projektart</span><input type="text" value={form.projektart} onChange={e => setForm({ ...form, projektart: e.target.value })} /></label>
+        <label className="field"><span>Projektart</span>
+          <select value={form.projektart} onChange={e => setForm({ ...form, projektart: e.target.value })}>
+            <option value="">—</option>
+            {PROJEKTART_OPTIONEN.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </label>
         <label className="field"><span>Verantwortlich</span>
           <select value={form.verantwortlich} onChange={e => setForm({ ...form, verantwortlich: e.target.value })}>
             <option value="">—</option>
