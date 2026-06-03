@@ -14,6 +14,8 @@ const BRANDING = {
   talentone: {
     key: 'talentone',
     name: 'TalentOne',
+    firma: 'TalentOne (Nowag & Wirth GmbH & Co. KG)',
+    adresse: { strasse: 'Bäckerstr. 2', plz: '40213', ort: 'Düsseldorf', land: 'DE' },
     domain: TALENTONE_DOMAIN,
     websiteUrl: 'https://talent-one.de',
     // Mail
@@ -34,6 +36,8 @@ const BRANDING = {
   nowagwirth: {
     key: 'nowagwirth',
     name: 'Nowag & Wirth',
+    firma: 'Nowag & Wirth GmbH & Co. KG',
+    adresse: { strasse: 'Bäckerstr. 2', plz: '40213', ort: 'Düsseldorf', land: 'DE' },
     domain: NOWAGWIRTH_DOMAIN,
     websiteUrl: 'https://nowagwirth.com',
     // Mail (Domain in Resend verifiziert: nowagwirth.com)

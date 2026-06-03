@@ -475,14 +475,27 @@ function ZahlungenSection({ job, kunde }) {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
 
-  // Form-State im Modal
+  // Form-State im Modal (Netto-Eingabe, automatische MwSt-Berechnung)
   const defaultDesc = `Werbebudget ${job.stelle || 'Stelle'} — ${kunde?.firmenname || ''}`.trim();
-  const [betrag, setBetrag] = useState('');
+  const [betragNetto, setBetragNetto] = useState('');
+  const [kleinunternehmer, setKleinunternehmer] = useState(false);
+  const [leistungszeitraum, setLeistungszeitraum] = useState('');
   const [beschreibung, setBeschreibung] = useState(defaultDesc);
   const [faelligkeit, setFaelligkeit] = useState('');
 
+  function parseNettoCent(input) {
+    const s = String(input || '').replace(/\s+/g, '').replace(/€/g, '');
+    const num = Number(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(num) && num > 0 ? Math.round(num * 100) : 0;
+  }
+  const nettoCent  = parseNettoCent(betragNetto);
+  const mwstCent   = kleinunternehmer ? 0 : Math.round(nettoCent * 0.19);
+  const bruttoCent = nettoCent + mwstCent;
+  function fmtLive(c) { return (c / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+
   function openModal() {
-    setBetrag(''); setBeschreibung(defaultDesc); setFaelligkeit('');
+    setBetragNetto(''); setKleinunternehmer(false); setLeistungszeitraum('');
+    setBeschreibung(defaultDesc); setFaelligkeit('');
     setError(''); setModalOpen(true);
   }
 
@@ -491,7 +504,13 @@ function ZahlungenSection({ job, kunde }) {
     try {
       const res = await api(`/zahlungen/job/${job.id}`, {
         method: 'POST',
-        body: { betrag, beschreibung, faelligkeit: faelligkeit || null },
+        body: {
+          betrag_netto: betragNetto,
+          kleinunternehmer,
+          leistungszeitraum: leistungszeitraum || null,
+          beschreibung,
+          faelligkeit: faelligkeit || null,
+        },
       });
       setZahlungen(prev => [res.zahlung, ...prev]);
       setModalOpen(false);
@@ -499,6 +518,34 @@ function ZahlungenSection({ job, kunde }) {
     } catch (err) {
       setError(err.message);
     } finally { setBusy(false); }
+  }
+
+  async function createEasybillManually(z) {
+    if (!confirm('easybill-Rechnung jetzt erstellen?')) return;
+    try {
+      const res = await api(`/zahlungen/${z.id}/easybill/manual`, { method: 'POST', body: {} });
+      setZahlungen(prev => prev.map(x => x.id === z.id ? res.zahlung : x));
+    } catch (err) { alert(err.message); }
+  }
+  async function sendRechnung(z) {
+    if (!confirm(`Rechnung als PDF an ${kunde?.email || 'Kunden'} senden?`)) return;
+    try {
+      await api(`/zahlungen/${z.id}/rechnung/send`, { method: 'POST', body: {} });
+      alert('Rechnung verschickt.');
+    } catch (err) { alert(err.message); }
+  }
+  function openPdf(z) {
+    // PDF-Endpoint braucht Auth → wir laden mit fetch+Bearer und öffnen Blob
+    (async () => {
+      const sup = (await import('../../lib/supabase.js')).supabase;
+      const token = (await sup.auth.getSession()).data.session?.access_token;
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || '/api'}/zahlungen/${z.id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { alert('PDF konnte nicht geladen werden.'); return; }
+      const blob = await res.blob();
+      window.open(URL.createObjectURL(blob), '_blank');
+    })();
   }
 
   async function sendMail(z) {
@@ -542,28 +589,49 @@ function ZahlungenSection({ job, kunde }) {
           : (
             <table className="zahlungen-table">
               <thead><tr>
-                <th>Datum</th><th>Betrag</th><th>Status</th><th>Versand</th><th>PayPal-Link</th><th></th>
+                <th>Datum</th><th>Netto</th><th>MwSt</th><th>Brutto</th><th>Status</th><th>easybill</th><th>Aktionen</th>
               </tr></thead>
               <tbody>
-                {zahlungen.map(z => (
-                  <tr key={z.id} className={`status-row-${z.status}`}>
-                    <td>{new Date(z.created_at).toLocaleDateString('de-DE')}</td>
-                    <td><strong>{fmtEur(z.betrag_cent)}</strong></td>
-                    <td><span className={`zahlung-status zahlung-${z.status}`}>{statusLabel(z.status)}{z.bezahlt_am ? ' · ' + new Date(z.bezahlt_am).toLocaleDateString('de-DE') : ''}</span></td>
-                    <td>{z.gesendet_am ? `✉ ${new Date(z.gesendet_am).toLocaleDateString('de-DE')}` : <span className="muted">—</span>}</td>
-                    <td>
-                      {z.pay_link
-                        ? <a href={z.pay_link} target="_blank" rel="noreferrer" className="zahlung-link">öffnen ↗</a>
-                        : <span className="muted">—</span>}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn-ghost btn-sm" onClick={() => refreshStatus(z)} title="Status aktualisieren">↻</button>
-                      <button className="btn-ghost btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(z.pay_link); } catch {} }} disabled={!z.pay_link}>Kopieren</button>
-                      {z.status !== 'bezahlt' && <button className="btn-ghost btn-sm" onClick={() => sendMail(z)}>Mail</button>}
-                      <button className="btn-ghost btn-sm btn-danger" onClick={() => deleteZahlung(z)}>×</button>
-                    </td>
-                  </tr>
-                ))}
+                {zahlungen.map(z => {
+                  const netto  = z.betrag_netto  ?? Math.round((z.betrag_cent || 0) / 1.19);
+                  const mwst   = z.betrag_mwst   ?? ((z.betrag_cent || 0) - netto);
+                  const brutto = z.betrag_brutto ?? z.betrag_cent ?? 0;
+                  return (
+                    <tr key={z.id} className={`status-row-${z.status}`}>
+                      <td>{new Date(z.created_at).toLocaleDateString('de-DE')}</td>
+                      <td>{fmtEur(netto)}</td>
+                      <td className="muted">{z.kleinunternehmer ? '—' : fmtEur(mwst)}</td>
+                      <td><strong>{fmtEur(brutto)}</strong></td>
+                      <td><span className={`zahlung-status zahlung-${z.status}`}>{statusLabel(z.status)}{z.bezahlt_am ? ' · ' + new Date(z.bezahlt_am).toLocaleDateString('de-DE') : ''}</span></td>
+                      <td>
+                        {z.easybill_invoice_number
+                          ? <span className="zahlung-status zahlung-bezahlt" title={z.easybill_id}>{z.easybill_invoice_number}</span>
+                          : z.easybill_status?.startsWith('fehler')
+                            ? <span className="zahlung-status zahlung-ueberfaellig" title={z.easybill_status}>⚠ Fehler</span>
+                            : z.status === 'bezahlt'
+                              ? <span className="muted">⏳ wird erstellt</span>
+                              : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn-ghost btn-sm" onClick={() => refreshStatus(z)} title="PayPal-Status aktualisieren">↻</button>
+                        {z.pay_link && z.status !== 'bezahlt' && (
+                          <button className="btn-ghost btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(z.pay_link); } catch {} }}>Pay-Link</button>
+                        )}
+                        {z.status !== 'bezahlt' && <button className="btn-ghost btn-sm" onClick={() => sendMail(z)}>Mail (Pay)</button>}
+                        {z.status === 'bezahlt' && !z.easybill_id && (
+                          <button className="btn-ghost btn-sm" onClick={() => createEasybillManually(z)}>Rechnung erstellen</button>
+                        )}
+                        {z.easybill_id && (
+                          <>
+                            <button className="btn-ghost btn-sm" onClick={() => openPdf(z)}>PDF</button>
+                            <button className="btn-ghost btn-sm" onClick={() => sendRechnung(z)}>Mail (RE)</button>
+                          </>
+                        )}
+                        <button className="btn-ghost btn-sm btn-danger" onClick={() => deleteZahlung(z)}>×</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )
@@ -579,29 +647,56 @@ function ZahlungenSection({ job, kunde }) {
               <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)} disabled={busy}>
                 Abbrechen
               </button>
-              <button type="button" className="btn-zahlung-cta" onClick={createZahlung} disabled={busy || !betrag}>
-                {busy ? '⏳ Erstelle…' : '💳 Zahlungslink erstellen'}
+              <button type="button" className="btn-zahlung-cta" onClick={createZahlung} disabled={busy || !nettoCent}>
+                {busy ? '⏳ Erstelle…' : `💳 ${fmtLive(bruttoCent || 0)} anfordern`}
               </button>
             </div>
           }
         >
           <div className="form-grid">
             <label className="field field-full">
-              <span>Betrag *</span>
-              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betrag} onChange={e => setBetrag(e.target.value)} autoFocus />
+              <span>Netto-Betrag *</span>
+              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betragNetto} onChange={e => setBetragNetto(e.target.value)} autoFocus />
             </label>
-            <label className="field field-full">
-              <span>Beschreibung</span>
-              <input type="text" value={beschreibung} onChange={e => setBeschreibung(e.target.value)} />
+
+            {/* Live-Brutto-Anzeige */}
+            <div className="field field-full">
+              <div className="brutto-box">
+                <div className="brutto-row">
+                  <span>Netto</span>
+                  <strong>{fmtLive(nettoCent)}</strong>
+                </div>
+                <div className="brutto-row">
+                  <span>+ 19% MwSt</span>
+                  <strong className={kleinunternehmer ? 'muted' : ''}>{kleinunternehmer ? '—' : fmtLive(mwstCent)}</strong>
+                </div>
+                <div className="brutto-row brutto-row-total">
+                  <span>= Brutto (PayPal)</span>
+                  <strong>{fmtLive(bruttoCent)}</strong>
+                </div>
+              </div>
+              <label className="checkbox-row" style={{ marginTop: 8 }}>
+                <input type="checkbox" checked={kleinunternehmer} onChange={e => setKleinunternehmer(e.target.checked)} />
+                <span>Kleinunternehmer §19 UStG (keine MwSt)</span>
+              </label>
+            </div>
+
+            <label className="field">
+              <span>Leistungszeitraum</span>
+              <input type="text" placeholder="z.B. Juni 2026" value={leistungszeitraum} onChange={e => setLeistungszeitraum(e.target.value)} />
             </label>
             <label className="field">
               <span>Fälligkeit (optional)</span>
               <input type="date" value={faelligkeit} onChange={e => setFaelligkeit(e.target.value)} />
             </label>
+            <label className="field field-full">
+              <span>Beschreibung</span>
+              <input type="text" value={beschreibung} onChange={e => setBeschreibung(e.target.value)} />
+            </label>
           </div>
           {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
           <p className="pane-hint" style={{ marginTop: 14 }}>
-            Die Rechnung wird in eurem PayPal Business-Account angelegt. Der Zahlungslink wird im Anschluss in die Zwischenablage kopiert — du kannst ihn dann per Mail-Button an {kunde?.email || 'den Kunden'} schicken.
+            Der PayPal-Zahlungslink wird über den <strong>Brutto-Betrag</strong> erstellt. Sobald der Kunde bezahlt hat, wird automatisch eine easybill-Rechnung erzeugt — du kannst sie dann als PDF herunterladen oder direkt an {kunde?.email || 'den Kunden'} versenden.
           </p>
         </Modal>
       )}

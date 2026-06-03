@@ -4788,3 +4788,20 @@ body.proj-fullwidth .content {
   font-size: 13px; background: #fff; font-family: inherit;
 }
 @media (max-width: 700px) { .projekt-picker-grid { grid-template-columns: 1fr; } }
+
+/* ─── Zahlungs-Modal: Live-Brutto-Box ─── */
+.brutto-box {
+  background: #fafaf8; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.brutto-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; color: var(--ink-3);
+}
+.brutto-row strong { color: var(--ink-1); font-weight: 600; }
+.brutto-row-total {
+  border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px;
+  font-size: 15px;
+}
+.brutto-row-total strong { font-size: 17px; color: var(--ink-1); font-weight: 700; }

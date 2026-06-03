@@ -4,7 +4,9 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { createInvoice, fetchInvoice, mapStatus } from '../paypal.js';
-import { sendZahlungsMail } from '../mail.js';
+import { sendZahlungsMail, sendRechnungsMail } from '../mail.js';
+import * as easybill from '../easybill.js';
+import { getBranding } from '../branding.js';
 
 const router = Router();
 
@@ -33,11 +35,15 @@ router.get('/', async (req, res) => {
 });
 
 /* POST /api/zahlungen/job/:jobId
-   body: { betrag, beschreibung?, faelligkeit? } */
+   body: { betrag_netto, kleinunternehmer?, beschreibung?, leistungszeitraum?, faelligkeit? } */
 router.post('/job/:jobId', async (req, res) => {
-  const { betrag, beschreibung, faelligkeit } = req.body || {};
-  const cent = parseAmount(betrag);
-  if (!cent) return res.status(400).json({ error: 'Bitte einen gültigen Betrag eingeben (z.B. 1500 oder 1.500,00).' });
+  const { betrag_netto, kleinunternehmer, beschreibung, leistungszeitraum, faelligkeit } = req.body || {};
+  const nettoCent = parseAmount(betrag_netto);
+  if (!nettoCent) return res.status(400).json({ error: 'Bitte einen gültigen Netto-Betrag eingeben.' });
+
+  const klein = !!kleinunternehmer;
+  const mwstCent   = klein ? 0 : Math.round(nettoCent * 0.19);
+  const bruttoCent = nettoCent + mwstCent;
 
   try {
     const { data: job } = await supabase
@@ -50,8 +56,9 @@ router.post('/job/:jobId', async (req, res) => {
     const desc = beschreibung?.trim()
       || `Werbebudget ${job.stelle || 'Stelle'} — ${kunde.firmenname || 'Kunde'}`;
 
+    // PayPal-Invoice immer auf BRUTTO
     const invoice = await createInvoice({
-      amountCent: cent,
+      amountCent: bruttoCent,
       description: desc,
       faelligkeit: faelligkeit || null,
       customerEmail: kunde.email,
@@ -69,7 +76,12 @@ router.post('/job/:jobId', async (req, res) => {
         paypal_invoice_id: invoice.id,
         paypal_invoice_number: invoice.invoice_number,
         pay_link: invoice.pay_link,
-        betrag_cent: cent,
+        betrag_cent: bruttoCent,
+        betrag_netto: nettoCent,
+        betrag_mwst: mwstCent,
+        betrag_brutto: bruttoCent,
+        kleinunternehmer: klein,
+        leistungszeitraum: leistungszeitraum || null,
         waehrung: 'EUR',
         beschreibung: desc,
         faelligkeit: faelligkeit || null,
@@ -84,6 +96,125 @@ router.post('/job/:jobId', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
+
+/* POST /api/zahlungen/:id/easybill/manual — Fallback: easybill-Rechnung manuell anstoßen */
+router.post('/:id/easybill/manual', async (req, res) => {
+  const result = await triggerEasybillForZahlung(req.params.id);
+  if (result.error) return res.status(502).json({ error: result.error });
+  res.json({ zahlung: result.zahlung });
+});
+
+/* GET /api/zahlungen/:id/pdf — PDF aus easybill streamen */
+router.get('/:id/pdf', async (req, res) => {
+  const { data: z } = await supabase
+    .from('talentone_zahlungen').select('easybill_id, easybill_invoice_number, beschreibung')
+    .eq('id', req.params.id).maybeSingle();
+  if (!z?.easybill_id) return res.status(404).json({ error: 'Keine easybill-Rechnung verknüpft.' });
+  try {
+    const pdf = await easybill.getInvoicePdf(z.easybill_id);
+    const fname = `${z.easybill_invoice_number || 'rechnung'}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    res.send(pdf);
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+/* POST /api/zahlungen/:id/rechnung/send — Rechnung als PDF-Anhang an Kunden */
+router.post('/:id/rechnung/send', async (req, res) => {
+  const { to } = req.body || {};
+  const { data: z } = await supabase
+    .from('talentone_zahlungen').select('*').eq('id', req.params.id).maybeSingle();
+  if (!z) return res.status(404).json({ error: 'Zahlung nicht gefunden.' });
+  if (!z.easybill_id) return res.status(400).json({ error: 'Keine easybill-Rechnung — bitte erst erstellen.' });
+
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('*').eq('id', z.kunde_id).maybeSingle();
+  const recipientRaw = (to || kunde?.email || '').toString();
+  const recipients = recipientRaw.split(/[,;]/).map(s => s.trim()).filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+  if (recipients.length === 0) return res.status(400).json({ error: 'Keine gültige Empfänger-Mail.' });
+
+  try {
+    const pdf = await easybill.getInvoicePdf(z.easybill_id);
+    await sendRechnungsMail({
+      to: recipients,
+      kunde, zahlung: z,
+      pdfBuffer: pdf,
+      pdfFilename: `${z.easybill_invoice_number || 'rechnung'}.pdf`,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[rechnung-send]', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/* ════════════ Easybill-Erzeugung (shared mit Webhook) ════════════ */
+
+export async function triggerEasybillForZahlung(zahlungId) {
+  if (!process.env.EASYBILL_API_KEY) return { error: 'EASYBILL_API_KEY nicht gesetzt.' };
+
+  const { data: z } = await supabase
+    .from('talentone_zahlungen').select('*').eq('id', zahlungId).maybeSingle();
+  if (!z) return { error: 'Zahlung nicht gefunden.' };
+  if (z.easybill_id) return { zahlung: z }; // schon erstellt
+
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('*').eq('id', z.kunde_id).maybeSingle();
+  if (!kunde) return { error: 'Kunde nicht gefunden.' };
+
+  try {
+    const customer = await easybill.findOrCreateCustomer({
+      firmenname: kunde.firmenname,
+      ansprechpartner: kunde.ansprechpartner,
+      email: kunde.email,
+      telefon: kunde.telefon,
+      strasse: kunde.strasse || null,
+      plz: kunde.plz || null,
+      ort: kunde.ort || null,
+      land: 'DE',
+    });
+    const customerId = customer?.id;
+    if (!customerId) throw new Error('Keine easybill-customer_id erhalten.');
+
+    const paidAt = z.bezahlt_am || new Date().toISOString();
+    const invoice = await easybill.createInvoice({
+      customerId,
+      beschreibung: z.beschreibung || 'Werbebudget',
+      nettoCent: z.betrag_netto || Math.round((z.betrag_brutto || z.betrag_cent) / 1.19),
+      steuerProzent: z.kleinunternehmer ? 0 : 19,
+      kleinunternehmer: !!z.kleinunternehmer,
+      leistungszeitraum: z.leistungszeitraum || null,
+      paidAtIso: paidAt,
+      externalReference: z.paypal_invoice_id || z.id,
+    });
+    const invoiceId = invoice?.id;
+    if (!invoiceId) throw new Error('Keine easybill-document_id erhalten.');
+
+    // Finalisieren (auf "done" setzen, holt Rechnungsnummer)
+    let finalized;
+    try { finalized = await easybill.finalizeInvoice(invoiceId); }
+    catch (err) { console.warn('[easybill-finalize]', err.message); finalized = invoice; }
+
+    const invNumber = finalized?.number || invoice?.number || null;
+
+    const { data: updated } = await supabase
+      .from('talentone_zahlungen')
+      .update({
+        easybill_id: String(invoiceId),
+        easybill_invoice_number: invNumber,
+        easybill_status: 'erstellt',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', zahlungId).select().single();
+    return { zahlung: updated };
+  } catch (err) {
+    console.error('[easybill-create]', err.message);
+    await supabase.from('talentone_zahlungen')
+      .update({ easybill_status: `fehler: ${err.message.slice(0,120)}` })
+      .eq('id', zahlungId);
+    return { error: err.message };
+  }
+}
 
 /* POST /api/zahlungen/:id/send  body: { to? (Komma-Liste) } — schickt brand-eigene Mail mit Pay-Link */
 router.post('/:id/send', async (req, res) => {

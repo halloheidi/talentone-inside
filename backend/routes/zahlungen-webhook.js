@@ -85,6 +85,16 @@ router.post('/', async (req, res) => {
       } else {
         console.log(`[PayPal-Webhook] ${eventType} → Zahlung ${zahlung.id.slice(0,8)} = ${newStatus}`);
       }
+
+      // Bei PAID: automatisch easybill-Rechnung erzeugen (best-effort)
+      if (newStatus === 'bezahlt' && process.env.EASYBILL_API_KEY) {
+        try {
+          const { triggerEasybillForZahlung } = await import('./zahlungen.js');
+          const result = await triggerEasybillForZahlung(zahlung.id);
+          if (result.error) console.warn('[easybill-auto]', result.error);
+          else console.log(`[easybill-auto] Rechnung erstellt für Zahlung ${zahlung.id.slice(0,8)}`);
+        } catch (err) { console.warn('[easybill-auto]', err.message); }
+      }
     } catch (err) {
       console.error('[PayPal-Webhook] Unerwarteter Fehler:', err.message);
     }

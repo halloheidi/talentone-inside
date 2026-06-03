@@ -480,3 +480,49 @@ export async function sendMentionMail({ to, mentionedName, autor, projektName, k
   }
   return await response.json();
 }
+
+/* ════════════════════ Rechnung als PDF an Kunden ════════════════════ */
+
+export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFilename }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const rechnungsNr = zahlung.easybill_invoice_number || zahlung.paypal_invoice_number || '—';
+  const firma = kunde?.firmenname || 'euer Team';
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Rechnung · ${escape(brand.name)}</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 8px;color:#0a0a0a;">${escape(String(rechnungsNr))}</h1>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Vielen Dank für eure Zahlung! Anbei erhaltet ihr eure Rechnung als PDF im Anhang.</p>
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0 0 6px;">${escape(zahlung.beschreibung || '')}</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `Rechnung ${rechnungsNr}\n\n${zahlung.beschreibung || ''}\n\nDie Rechnung findet ihr im Anhang.\n\nViele Grüße\nEuer ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      reply_to: getMailReplyTo(brand),
+      subject: `Rechnung ${rechnungsNr} — ${firma}`,
+      html, text,
+      attachments: pdfBuffer ? [{
+        filename: pdfFilename || 'rechnung.pdf',
+        content: Buffer.isBuffer(pdfBuffer) ? pdfBuffer.toString('base64') : pdfBuffer,
+      }] : [],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}

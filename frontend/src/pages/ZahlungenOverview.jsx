@@ -116,9 +116,11 @@ export default function ZahlungenOverview() {
                   <th>Kunde</th>
                   <th>Stelle</th>
                   <th>Beschreibung</th>
-                  <th>Betrag</th>
+                  <th>Netto</th>
+                  <th>MwSt</th>
+                  <th>Brutto</th>
                   <th>Status</th>
-                  <th>Versendet</th>
+                  <th>easybill</th>
                   <th>Bezahlt</th>
                   <th></th>
                 </tr>
@@ -127,15 +129,28 @@ export default function ZahlungenOverview() {
                 {filtered.map(z => {
                   const k = z.talentone_jobs?.talentone_kunden;
                   const job = z.talentone_jobs;
+                  const netto  = z.betrag_netto  ?? Math.round((z.betrag_cent || 0) / 1.19);
+                  const mwst   = z.betrag_mwst   ?? ((z.betrag_cent || 0) - netto);
+                  const brutto = z.betrag_brutto ?? z.betrag_cent ?? 0;
                   return (
                     <tr key={z.id}>
                       <td className="td-date">{new Date(z.created_at).toLocaleDateString('de-DE')}</td>
                       <td>{k ? <Link to={`/kunden/${k.id}`}>{k.firmenname}</Link> : '—'}</td>
                       <td>{job && k ? <Link to={`/kunden/${k.id}/jobs/${job.id}/export`}>{job.stelle || '—'}</Link> : '—'}</td>
                       <td style={{ maxWidth: 240 }}>{z.beschreibung || ''}</td>
-                      <td><strong>{fmtEur(z.betrag_cent)}</strong></td>
+                      <td>{fmtEur(netto)}</td>
+                      <td className="muted">{z.kleinunternehmer ? '—' : fmtEur(mwst)}</td>
+                      <td><strong>{fmtEur(brutto)}</strong></td>
                       <td><span className={`zahlung-status zahlung-${z.status}`}>{STATUS_LABEL[z.status] || z.status}</span></td>
-                      <td>{z.gesendet_am ? new Date(z.gesendet_am).toLocaleDateString('de-DE') : <span className="muted">—</span>}</td>
+                      <td>
+                        {z.easybill_invoice_number
+                          ? <span title={z.easybill_id}>{z.easybill_invoice_number}</span>
+                          : z.easybill_status?.startsWith('fehler')
+                            ? <span className="zahlung-status zahlung-ueberfaellig" title={z.easybill_status}>⚠ Fehler</span>
+                            : z.status === 'bezahlt'
+                              ? <span className="muted">⏳</span>
+                              : <span className="muted">—</span>}
+                      </td>
                       <td>{z.bezahlt_am ? new Date(z.bezahlt_am).toLocaleDateString('de-DE') : <span className="muted">—</span>}</td>
                       <td>
                         {z.pay_link && <a href={z.pay_link} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">öffnen ↗</a>}
