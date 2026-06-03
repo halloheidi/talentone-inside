@@ -4770,3 +4770,21 @@ body.proj-fullwidth .content {
 .slideover-projekt { background: #fafaf8; }
 .slideover-projekt .slideover-head { background: #fff; }
 
+
+/* ─── Projekt-Eckdaten im QuickCreate ─── */
+.projekt-picker {
+  padding: 14px 18px; margin-bottom: 16px;
+  background: #fafaf8; border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.projekt-picker-label {
+  display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px;
+}
+.projekt-picker-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.projekt-picker-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.projekt-picker-grid label > span { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.projekt-picker-grid select {
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 13px; background: #fff; font-family: inherit;
+}
+@media (max-width: 700px) { .projekt-picker-grid { grid-template-columns: 1fr; } }

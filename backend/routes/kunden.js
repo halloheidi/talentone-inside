@@ -22,8 +22,13 @@ function decodeBase64File(fileData) {
 //   url     → req.body.url                  (Puppeteer + Claude + Farb-Scrape)
 //   file    → req.body.fileData (base64) + req.body.fileType
 //   logo (alle): req.body.logo = { fileData, fileName?, contentType? }
+const PROJEKTE_STATI = [
+  'vorbereitung', 'kickoff_vereinbart', 'onboarding', 'golive_vereinbart',
+  'warte_auf_go', 'live', 'pausiert', 'hold', 'abgeschlossen',
+];
+
 router.post('/quick-create', async (req, res) => {
-  const { mode, logo, agentur } = req.body || {};
+  const { mode, logo, agentur, projekt_status, projektart, verantwortlich } = req.body || {};
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
   let kundeData = { agentur: finalAgentur };
   let jobData = {};
@@ -89,6 +94,22 @@ router.post('/quick-create', async (req, res) => {
       await supabase.from('talentone_kunden').delete().eq('id', kunde.id);
       return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
     }
+
+    // Projekt in Kanban anlegen (Kanban/Liste-Übersicht)
+    const status = PROJEKTE_STATI.includes(projekt_status) ? projekt_status : 'kickoff_vereinbart';
+    const projektName = job.stelle || kunde.firmenname || 'Neues Projekt';
+    await supabase.from('talentone_projekte').insert({
+      projekt: projektName,
+      kunde: kunde.firmenname,
+      kunde_id: kunde.id,
+      status,
+      projektart: projektart || (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+      gesuchte_positionen: job.stelle || null,
+      standorte: job.region || null,
+      verantwortlich: verantwortlich || null,
+      email: kunde.email || null,
+      updated_at: new Date().toISOString(),
+    });
 
     // Antwort sofort raus — Logo + Farb-Extraktion sind best-effort und blockieren nicht.
     res.status(201).json({ kunde, job });

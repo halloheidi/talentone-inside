@@ -1,7 +1,23 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import { api } from '../lib/api.js';
+
+const PROJEKT_STATUS_OPTIONS = [
+  { value: 'kickoff_vereinbart', label: 'Kick-Off vereinbart' },
+  { value: 'vorbereitung',       label: 'Kunde ohne Kick-Off' },
+  { value: 'onboarding',         label: 'Onboarding' },
+  { value: 'golive_vereinbart',  label: 'Go-Live vereinbart' },
+  { value: 'warte_auf_go',       label: 'Warte auf Go!' },
+  { value: 'live',               label: 'Live' },
+  { value: 'pausiert',           label: 'Pausiert' },
+  { value: 'hold',               label: 'Hold' },
+];
+const PROJEKTART_OPTIONEN = [
+  'Mitarbeitergewinnung', 'TalentOne - Mitarbeitergewinnung', 'Abo',
+  'Neukundengewinnung', 'Social Media Betreuung', 'Employer Branding',
+  'Mitarbeiterbefragung', 'Homepage', 'Karriereseite',
+];
 
 const TABS = [
   { id: 'url', label: 'URL' },
@@ -43,6 +59,14 @@ export default function QuickCreateModal({ open, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [agentur, setAgentur] = useState('talentone');
+  const [projektStatus, setProjektStatus] = useState('kickoff_vereinbart');
+  const [projektart, setProjektart] = useState('');
+  const [verantwortlich, setVerantwortlich] = useState('');
+  const [team, setTeam] = useState([]);
+
+  useEffect(() => {
+    api('/projekte/team').then(r => setTeam(r.team || [])).catch(() => setTeam([]));
+  }, []);
 
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -64,6 +88,9 @@ export default function QuickCreateModal({ open, onClose }) {
     setError('');
     setBusy(false);
     setAgentur('talentone');
+    setProjektStatus('kickoff_vereinbart');
+    setProjektart('');
+    setVerantwortlich('');
     setUrl('');
     setFile(null);
     setManual(EMPTY_MANUAL);
@@ -149,6 +176,9 @@ export default function QuickCreateModal({ open, onClose }) {
       }
 
       body.agentur = agentur;
+      body.projekt_status = projektStatus;
+      body.projektart = projektart || null;
+      body.verantwortlich = verantwortlich || null;
       const res = await api('/kunden/quick-create', { method: 'POST', body });
       reset();
       onClose();
@@ -201,6 +231,35 @@ export default function QuickCreateModal({ open, onClose }) {
           </label>
         </div>
       </div>
+
+      {/* Projekt-Eckdaten — landen direkt im Kanban */}
+      {tab !== 'invite' && (
+        <div className="projekt-picker">
+          <label className="projekt-picker-label">Projekt-Eckdaten (für Kanban-Übersicht)</label>
+          <div className="projekt-picker-grid">
+            <label>
+              <span>Status</span>
+              <select value={projektStatus} onChange={e => setProjektStatus(e.target.value)} disabled={busy}>
+                {PROJEKT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Projektart</span>
+              <select value={projektart} onChange={e => setProjektart(e.target.value)} disabled={busy}>
+                <option value="">— Auto (passend zur Agentur) —</option>
+                {PROJEKTART_OPTIONEN.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Verantwortlich</span>
+              <select value={verantwortlich} onChange={e => setVerantwortlich(e.target.value)} disabled={busy}>
+                <option value="">—</option>
+                {team.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+      )}
 
       <div className="modal-tabs">
         {TABS.map(t => (
