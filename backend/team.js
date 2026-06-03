@@ -3,10 +3,9 @@
 
 export const TEAM_MEMBERS = [
   { name: 'Andrea S.',    email: 'andrea.saltaleggio@nowagwirth.de' },
-  { name: 'Christian R.', email: 'christian.r@nowagwirth.de' },
   { name: 'Johannes W.',  email: 'johannes.wirth@nowagwirth.de' },
-  { name: 'Daniel N.',    email: 'daniel.n@nowagwirth.de' },
-  { name: 'Laura M.',     email: 'laura.m@nowagwirth.de' },
+  { name: 'Laura M.',     email: 'laura.mueller@nowagwirth.de' },
+  { name: 'Daniel N.',    email: 'daniel.nowag@nowagwirth.de' },
 ];
 
 export function findMemberByName(name) {
