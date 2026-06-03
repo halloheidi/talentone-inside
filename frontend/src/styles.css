@@ -4633,3 +4633,103 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   font-size: 10.5px; font-weight: 700; color: var(--ink-1); letter-spacing: 0.02em;
   z-index: 2;
 }
+
+/* ═════════════════════ Projekte: View-Toggle + Kanban + Slide-Over + Kommentare ═════════════════════ */
+
+.proj-overview .proj-view-toggle {
+  display: flex; gap: 4px; background: #fff; border-radius: 100px;
+  padding: 4px; border: 1px solid var(--line); margin-right: auto; margin-left: 16px;
+}
+
+/* ─── Kanban ─── */
+.kanban {
+  display: grid; grid-template-columns: repeat(6, minmax(260px, 1fr));
+  gap: 12px; overflow-x: auto; padding: 4px 0 16px;
+}
+.kanban-col {
+  background: #fafaf8; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  display: flex; flex-direction: column; min-height: 400px; padding: 10px;
+}
+.kanban-col-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 4px 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+  font-size: 13px;
+}
+.kanban-col-count {
+  background: #ececea; color: var(--ink-2); font-size: 11px; font-weight: 700;
+  border-radius: 100px; padding: 2px 9px;
+}
+.kanban-col-body { display: flex; flex-direction: column; gap: 8px; }
+.kanban-card {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 10px 12px; cursor: pointer; transition: all 0.1s;
+  border-left: 4px solid transparent;
+}
+.kanban-card:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.kanban-card.card-zuf-good { border-left-color: #16a34a; }
+.kanban-card.card-zuf-ok   { border-left-color: #ca8a04; }
+.kanban-card.card-zuf-bad  { border-left-color: #dc2626; }
+.kanban-card-firma { font-weight: 700; font-size: 13.5px; color: var(--ink-1); }
+.kanban-card-pos   { font-size: 12px; color: var(--ink-3); margin-top: 2px; line-height: 1.4; }
+.kanban-card-meta  { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; }
+.kanban-badge {
+  display: inline-block; padding: 2px 8px; background: #f4f3f0; color: var(--ink-3);
+  font-size: 10px; font-weight: 600; border-radius: 100px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.kanban-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; background: var(--ink-1);
+  color: var(--accent); font-size: 10px; font-weight: 700;
+}
+.kanban-empty {
+  text-align: center; color: var(--ink-4); font-size: 12px; padding: 14px 0;
+}
+
+/* ─── Slide-Over Projekt ─── */
+.slideover-projekt { width: 720px; }
+@media (max-width: 800px) { .slideover-projekt { width: 100vw; } }
+
+.checklist-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.checklist-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: #fafaf8; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.checklist-item.is-done { background: #e9f5ec; }
+.checklist-item.is-done span:first-of-type { color: #145c1f; font-weight: 500; }
+.checklist-item input[type="checkbox"] { accent-color: var(--ink-1); transform: scale(1.1); }
+.checklist-auto {
+  margin-left: auto; font-size: 11px; padding: 1px 6px; background: var(--accent);
+  border-radius: 100px; color: var(--ink-1); font-weight: 700;
+}
+@media (max-width: 600px) { .checklist-grid { grid-template-columns: 1fr; } }
+
+/* ─── Kommentare im Slide-Over ─── */
+.kommentar-block { display: flex; flex-direction: column; gap: 14px; }
+.kommentar-compose { position: relative; }
+.mention-dropdown {
+  position: absolute; bottom: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.1); padding: 4px;
+  max-height: 180px; overflow-y: auto; z-index: 10;
+}
+.mention-option {
+  display: block; width: 100%; padding: 6px 10px; border: none; background: transparent;
+  text-align: left; cursor: pointer; border-radius: 6px; font-family: inherit; font-size: 13px;
+}
+.mention-option:hover { background: #f4f3f0; }
+.kommentar-list { display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto; }
+.kommentar-item { padding: 10px 12px; background: #fafaf8; border-radius: 8px; border-left: 3px solid var(--accent); }
+.kommentar-item.is-airtable { border-left-color: #5a5955; opacity: 0.85; }
+.kommentar-meta { font-size: 12px; color: var(--ink-3); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.airtable-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 7px;
+  background: #ececea; color: var(--ink-3); border-radius: 100px;
+}
+.kommentar-text { font-size: 13.5px; color: var(--ink-1); line-height: 1.5; white-space: pre-wrap; }
+.kommentar-actions { display: flex; gap: 6px; margin-top: 6px; }
+.mention-chip {
+  background: var(--accent); color: var(--ink-1); padding: 1px 6px;
+  border-radius: 100px; font-weight: 600; font-size: 12px;
+}

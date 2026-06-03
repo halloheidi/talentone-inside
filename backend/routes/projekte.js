@@ -3,6 +3,9 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { computeAutoChecklist, mergeChecklist } from '../projekt-sync.js';
+import { TEAM_MEMBERS, findMemberByName } from '../team.js';
+import { sendMentionMail } from '../mail.js';
 
 const router = Router();
 
@@ -72,13 +75,35 @@ router.post('/', async (req, res) => {
   res.status(201).json({ projekt: data });
 });
 
-/* GET /api/projekte/:id */
+/* GET /api/projekte/team — Mitglieder-Liste für @-Mention-Autocomplete */
+router.get('/team', (_req, res) => {
+  res.json({ team: TEAM_MEMBERS });
+});
+
+/* GET /api/projekte/:id — single mit Auto-Sync der Checkliste */
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('talentone_projekte').select('*').eq('id', req.params.id).maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
-  res.json({ projekt: data });
+
+  // Auto-Sync wenn mit Kunde verknüpft
+  let autoKeys = [];
+  if (data.kunde_id) {
+    try {
+      const auto = await computeAutoChecklist(data.kunde_id);
+      const { checkliste, auto_set } = mergeChecklist(data.checkliste, auto);
+      autoKeys = auto_set;
+      data.checkliste = checkliste;
+      data.auto_keys = autoKeys;
+      // Auto-Updates persistieren (nur wenn sich was geändert hat)
+      if (autoKeys.length) {
+        await supabase.from('talentone_projekte')
+          .update({ checkliste, updated_at: new Date().toISOString() }).eq('id', data.id);
+      }
+    } catch (err) { console.warn('[projekt-sync]', err.message); }
+  }
+  res.json({ projekt: data, auto_keys: autoKeys });
 });
 
 /* PATCH /api/projekte/:id — inline-Update */
@@ -141,7 +166,25 @@ router.post('/:id/kommentare', async (req, res) => {
 
   res.status(201).json({ kommentar: data });
 
-  // @-Mention-E-Mail im Hintergrund (best-effort) — kommt in Iteration 2
+  // @-Mention-E-Mail im Hintergrund (best-effort)
+  if (erw.length > 0) {
+    (async () => {
+      try {
+        for (const name of erw) {
+          const member = findMemberByName(name);
+          if (!member?.email) continue;
+          await sendMentionMail({
+            to: member.email,
+            mentionedName: name,
+            autor: autorName,
+            projektName: projekt.projekt || 'Projekt',
+            kommentar: text.trim(),
+            projektUrl: `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/projekte?id=${projekt.id}`,
+          });
+        }
+      } catch (err) { console.warn('[mention-mail]', err.message); }
+    })().catch(err => console.error('[mention-mail-uncaught]', err.message));
+  }
 });
 
 /* PATCH /api/projekte/kommentare/:id */

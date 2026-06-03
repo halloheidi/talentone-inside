@@ -438,3 +438,45 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
   }
   return await response.json();
 }
+
+/* ════════════════════ @-Mention im Projekt-Kommentar ════════════════════ */
+
+export async function sendMentionMail({ to, mentionedName, autor, projektName, kommentar, projektUrl }) {
+  if (!process.env.RESEND_API_KEY) return null;
+  const brand = getBranding('nowagwirth');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📣 Du wurdest erwähnt</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(autor)} hat dich in <span style="color:${brand.accent};">${escape(projektName)}</span> erwähnt</h1>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Hallo ${escape(mentionedName)}, hier ist der Kommentar:</p>
+
+      <div style="padding:14px 16px;background:#fafaf8;border-left:3px solid ${brand.accent};border-radius:6px;margin:0 0 18px;">
+        <p style="font-size:14px;color:#0a0a0a;margin:0;line-height:1.55;white-space:pre-wrap;">${escape(kommentar)}</p>
+      </div>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(projektUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:100px;">→ Direkt zum Projekt</a>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${autor} hat dich in "${projektName}" erwähnt:\n\n${kommentar}\n\nLink: ${projektUrl}`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: [to],
+      reply_to: getMailReplyTo(brand),
+      subject: `${autor} hat dich in ${projektName} erwähnt`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    console.warn(`[mention-mail] Resend ${response.status}: ${body.slice(0,200)}`);
+    return null;
+  }
+  return await response.json();
+}
