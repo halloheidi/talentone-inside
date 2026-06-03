@@ -123,6 +123,37 @@ export default function ProjekteOverview() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [team, setTeam] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll(ids) {
+    setSelectedIds(prev => {
+      const allSelected = ids.every(id => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) ids.forEach(id => next.delete(id));
+      else ids.forEach(id => next.add(id));
+      return next;
+    });
+  }
+  async function bulkDelete() {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    if (!confirm(`${ids.length} Projekt${ids.length === 1 ? '' : 'e'} wirklich löschen? Alle zugehörigen Kommentare gehen auch verloren.`)) return;
+    const errors = [];
+    for (const id of ids) {
+      try { await api(`/projekte/${id}`, { method: 'DELETE' }); }
+      catch (err) { errors.push(`${id.slice(0, 8)}: ${err.message}`); }
+    }
+    setProjekte(prev => prev.filter(p => !selectedIds.has(p.id)));
+    setSelectedIds(new Set());
+    if (errors.length) alert(`${errors.length} Fehler:\n${errors.join('\n')}`);
+  }
 
   async function load() {
     setLoading(true);
@@ -229,6 +260,11 @@ export default function ProjekteOverview() {
           <button className={`pub-filter ${view === 'liste' ? 'is-active' : ''}`} onClick={() => setView('liste')}>Liste</button>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {selectedIds.size > 0 && (
+            <button className="btn-ghost btn-danger" onClick={bulkDelete}>
+              🗑 {selectedIds.size} löschen
+            </button>
+          )}
           <button className="btn-ghost" onClick={exportKommentare} disabled={!filtered.length}>📝 Alle Kommentare</button>
           <button className="btn-ghost" onClick={exportCsv} disabled={!filtered.length}>⬇ CSV-Export</button>
           <button className="btn-primary" onClick={() => setShowCreate(true)}>+ Neues Projekt</button>
@@ -259,7 +295,8 @@ export default function ProjekteOverview() {
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
           ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} />
-          : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone} />
+          : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
+                       selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} />
       }
 
       {showCreate && <CreateProjektModal team={team} onClose={() => setShowCreate(false)} onCreated={p => { setProjekte(prev => [p, ...prev]); setShowCreate(false); }} />}
@@ -327,11 +364,23 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
 
 /* ═════════════════════ LISTEN-ANSICHT (kompakt) ═════════════════════ */
 
-function ListView({ filtered, onCardClick, updateField, checklistDone }) {
+function ListView({ filtered, onCardClick, updateField, checklistDone, selectedIds, toggleSelect, toggleSelectAll }) {
+  const ids = filtered.map(p => p.id);
+  const allSelected = ids.length > 0 && ids.every(id => selectedIds.has(id));
+  const someSelected = ids.some(id => selectedIds.has(id));
   return (
     <div className="bewerbungen-table-scroll">
       <table className="bewerbungen-table">
         <thead><tr>
+          <th style={{ width: 36 }}>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
+              onChange={() => toggleSelectAll(ids)}
+              title={allSelected ? 'Alle abwählen' : 'Alle auswählen'}
+            />
+          </th>
           <th>#</th><th>Projekt</th><th>Kunde</th><th>Status</th><th>Verantw.</th>
           <th>Projektart</th><th>Positionen</th><th>Standorte</th><th>Checkliste</th>
           <th>Komm.</th><th>Pixel</th><th>Letzter Kontakt</th>
@@ -339,8 +388,12 @@ function ListView({ filtered, onCardClick, updateField, checklistDone }) {
         <tbody>
           {filtered.map(p => {
             const done = checklistDone(p.checkliste);
+            const isChecked = selectedIds.has(p.id);
             return (
-              <tr key={p.id} onClick={() => onCardClick(p.id)} style={{ cursor: 'pointer' }}>
+              <tr key={p.id} onClick={() => onCardClick(p.id)} style={{ cursor: 'pointer' }} className={isChecked ? 'is-selected' : ''}>
+                <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
+                  <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(p.id)} />
+                </td>
                 <td className="td-date">{p.projektnummer || '—'}</td>
                 <td><strong>{p.projekt || '—'}</strong></td>
                 <td>{p.kunde || '—'}</td>
