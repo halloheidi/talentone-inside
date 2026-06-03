@@ -119,6 +119,12 @@ export default function ProjekteOverview() {
   }
   useEffect(() => { load(); }, []);
 
+  // Full-width-Layout für Kanban — hebt .content max-width 1200px auf
+  useEffect(() => {
+    document.body.classList.add('proj-fullwidth');
+    return () => document.body.classList.remove('proj-fullwidth');
+  }, []);
+
   const verantworten = useMemo(() => Array.from(new Set(projekte.map(p => p.verantwortlich).filter(Boolean))).sort(), [projekte]);
   const arten = useMemo(() => Array.from(new Set(projekte.map(p => p.projektart).filter(Boolean))).sort(), [projekte]);
 
