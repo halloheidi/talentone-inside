@@ -12,6 +12,7 @@ import webhooksRouter from './routes/webhooks.js';
 import bewerbungenRouter from './routes/bewerbungen.js';
 import zahlungenRouter from './routes/zahlungen.js';
 import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
+import projekteRouter from './routes/projekte.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api/bewerbungen', requireAuth, bewerbungenRouter);
 // Muss VOR dem auth-geschützten zahlungenRouter mit gleicher Basis-URL gemountet werden.
 app.use('/api/zahlungen/webhook', zahlungenWebhookRouter);
 app.use('/api/zahlungen', requireAuth, zahlungenRouter);
+app.use('/api/projekte', requireAuth, projekteRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 app.use((err, req, res, _next) => {
