@@ -291,7 +291,7 @@ ${rows.map(([k, v]) => `
 const STIL_LABEL = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
 const FORMAT_LABEL = { quadrat: '1:1', story: '9:16' };
 
-export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives = [], adcopies = [] }) {
+export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives = [], adcopies = [], snapshot = {} }) {
   const brand = getBranding(kunde?.agentur);
   const kundenname = kunde?.firmenname || 'Ein Kunde';
   const stelle = job?.stelle || 'Stelle';
@@ -308,7 +308,9 @@ export async function sendReviewBenachrichtigung({ kunde, job, status, kommentar
   function renderKey(k) {
     if (k.startsWith('creative_')) {
       const id = k.slice('creative_'.length);
-      const c = creativesById.get(id);
+      // Snapshot zuerst, dann Live-DB
+      const snap = snapshot?.[k];
+      const c = (snap && snap.bild_url) ? snap : creativesById.get(id);
       if (c?.bild_url) {
         const fmt = FORMAT_LABEL[c.format] || c.format || '';
         const typ = c.typ === 'video' ? 'Video' : 'Bild';
@@ -321,12 +323,13 @@ export async function sendReviewBenachrichtigung({ kunde, job, status, kommentar
             </div>
           </div>`;
       }
-      return `<strong>Creative</strong> <span style="color:#9a9994;font-size:11px;">${escape(id.slice(0, 8))}…</span>`;
+      return `<div><strong>Creative</strong> <span style="color:#9a9994;font-size:11px;">${escape(id.slice(0, 8))}…</span></div><div style="font-size:11px;color:#b91c1c;margin-top:4px;">⚠ Original-Bild nicht mehr verfügbar (Creative wurde regeneriert)</div>`;
     }
     if (k.startsWith('adcopy_')) {
       const id = k.slice('adcopy_'.length);
-      const a = adcopiesById.get(id);
-      const stilLabel = a?.stil ? (STIL_LABEL[a.stil] || a.stil) : 'Ad-Copy';
+      const snap = snapshot?.[k];
+      const stil = snap?.stil || adcopiesById.get(id)?.stil;
+      const stilLabel = stil ? (STIL_LABEL[stil] || stil) : 'Ad-Copy';
       return `<div style="font-size:13px;font-weight:700;color:#0a0a0a;">${escape(stilLabel)}</div><div style="font-size:10.5px;color:#9a9994;margin-top:2px;">${escape(id.slice(0, 8))}…</div>`;
     }
     if (k === 'funnel')    return '<strong>Funnel</strong>';

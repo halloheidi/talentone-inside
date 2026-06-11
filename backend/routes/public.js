@@ -434,18 +434,37 @@ router.post('/review/:token', async (req, res) => {
     .from('talentone_reviews').select('id').eq('job_id', job.id)
     .order('updated_at', { ascending: false }).limit(1).maybeSingle();
 
+  // Snapshot der referenzierten Creatives + Adcopies zum Zeitpunkt des Reviews
+  // → bleibt erhalten auch wenn Creatives später regeneriert/gelöscht werden.
+  const [{ data: creativesNow = [] }, { data: adcopiesNow = [] }] = await Promise.all([
+    supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+    supabase.from('talentone_adcopies').select('id, stil').eq('job_id', job.id),
+  ]);
+  const kommentare_snapshot = {};
+  for (const key of Object.keys(kommentare || {})) {
+    if (key.startsWith('creative_')) {
+      const id = key.slice('creative_'.length);
+      const c = creativesNow.find(x => x.id === id);
+      if (c) kommentare_snapshot[key] = { bild_url: c.bild_url, format: c.format, typ: c.typ };
+    } else if (key.startsWith('adcopy_')) {
+      const id = key.slice('adcopy_'.length);
+      const a = adcopiesNow.find(x => x.id === id);
+      if (a) kommentare_snapshot[key] = { stil: a.stil };
+    }
+  }
+
   let savedReview;
   if (existing) {
     const { data, error } = await supabase
       .from('talentone_reviews')
-      .update({ status, kommentare: kommentare || null })
+      .update({ status, kommentare: kommentare || null, kommentare_snapshot })
       .eq('id', existing.id).select().single();
     if (error) return res.status(500).json({ error: error.message });
     savedReview = data;
   } else {
     const { data, error } = await supabase
       .from('talentone_reviews')
-      .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null })
+      .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null, kommentare_snapshot })
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
     savedReview = data;
@@ -462,7 +481,7 @@ router.post('/review/:token', async (req, res) => {
         supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
-      await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives, adcopies });
+      await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives, adcopies, snapshot: kommentare_snapshot });
     } catch (err) { console.warn('[review-mail]', err.message); }
   })().catch(err => console.error('[review-mail-uncaught]', err.message));
 

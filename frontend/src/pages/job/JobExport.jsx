@@ -284,16 +284,21 @@ export default function JobExport() {
                   {kommentarEntries.map(([key, text]) => {
                     const stilLabels = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
                     const fmtLabels  = { quadrat: '1:1', story: '9:16' };
+                    const snap = review?.kommentare_snapshot?.[key];
                     if (key.startsWith('creative_')) {
                       const id = key.slice('creative_'.length);
-                      const c = (creatives || []).find(x => x.id === id);
+                      // Snapshot zuerst, dann Live-DB
+                      const c = (snap && snap.bild_url) ? snap : (creatives || []).find(x => x.id === id);
                       return (
                         <li key={key} className="review-k-creative">
-                          {c?.bild_url && <img src={c.bild_url} alt="" className="review-k-thumb" />}
+                          {c?.bild_url
+                            ? <img src={c.bild_url} alt="" className="review-k-thumb" />
+                            : <div className="review-k-thumb review-k-thumb-missing" title="Bild nicht mehr verfügbar">—</div>}
                           <div className="review-k-body">
                             <div className="review-k-label">
                               <span className="review-k-pill">{fmtLabels[c?.format] || c?.format || 'Creative'}</span>
                               {c?.typ === 'video' && <span className="review-k-pill review-k-pill-video">Video</span>}
+                              {!c?.bild_url && <span className="review-k-warning">⚠ Bild nicht mehr verfügbar</span>}
                             </div>
                             <div className="review-k-text">{text}</div>
                           </div>
@@ -302,11 +307,11 @@ export default function JobExport() {
                     }
                     if (key.startsWith('adcopy_')) {
                       const id = key.slice('adcopy_'.length);
-                      const a = (adcopies || []).find(x => x.id === id);
+                      const stil = snap?.stil || (adcopies || []).find(x => x.id === id)?.stil;
                       return (
                         <li key={key} className="review-k-adcopy">
                           <div className="review-k-label">
-                            <span className="review-k-pill review-k-pill-style">{stilLabels[a?.stil] || a?.stil || 'Ad-Copy'}</span>
+                            <span className="review-k-pill review-k-pill-style">{stilLabels[stil] || stil || 'Ad-Copy'}</span>
                           </div>
                           <div className="review-k-text">{text}</div>
                         </li>

@@ -4805,3 +4805,35 @@ body.proj-fullwidth .content {
   font-size: 15px;
 }
 .brutto-row-total strong { font-size: 17px; color: var(--ink-1); font-weight: 700; }
+
+/* ─── Review-Status: Kommentare mit Thumbnails + Style-Labels ─── */
+.review-kommentar-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 12px; }
+.review-kommentar-list > li {
+  padding: 12px 14px; background: #fafaf8; border-radius: 8px;
+  border-left: 3px solid var(--accent);
+}
+.review-k-creative { display: flex; gap: 14px; align-items: flex-start; }
+.review-k-thumb {
+  width: 120px; height: auto; border-radius: 8px; border: 1px solid var(--line);
+  display: block; flex-shrink: 0;
+}
+.review-k-body { flex: 1; min-width: 0; }
+.review-k-label { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.review-k-pill {
+  display: inline-block; padding: 2px 9px; border-radius: 100px;
+  background: var(--ink-1); color: #fff; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.review-k-pill-video { background: #b45309; }
+.review-k-pill-style { background: var(--accent); color: var(--accent-ink); }
+.review-k-text { font-size: 13.5px; color: var(--ink-1); white-space: pre-wrap; line-height: 1.5; }
+
+.review-k-thumb-missing {
+  width: 120px; height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  background: #fafaf8; color: #9a9994;
+  border: 1px dashed #ddd9d0; font-size: 18px;
+}
+.review-k-warning {
+  font-size: 11px; color: #b91c1c; margin-left: 4px;
+}
