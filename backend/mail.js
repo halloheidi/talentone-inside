@@ -288,32 +288,73 @@ ${rows.map(([k, v]) => `
 
 /* ── Kunde gibt Entwürfe frei oder schickt Änderungswünsche ── */
 
-export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl }) {
+const STIL_LABEL = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
+const FORMAT_LABEL = { quadrat: '1:1', story: '9:16' };
+
+export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives = [], adcopies = [] }) {
   const brand = getBranding(kunde?.agentur);
   const kundenname = kunde?.firmenname || 'Ein Kunde';
   const stelle = job?.stelle || 'Stelle';
   const isFreigegeben = status === 'freigegeben';
+
+  const creativesById = new Map(creatives.map(c => [c.id, c]));
+  const adcopiesById  = new Map(adcopies.map(a => [a.id, a]));
 
   // Kommentare als Liste (kommentare ist ein Object: { creative_<id>: "...", adcopy_<id>: "..." })
   const kommentarRows = kommentare && typeof kommentare === 'object'
     ? Object.entries(kommentare).filter(([, v]) => (v || '').trim())
     : [];
 
-  function labelForKey(k) {
-    if (k.startsWith('creative_')) return `Creative ${k.slice('creative_'.length, 'creative_'.length + 8)}`;
-    if (k.startsWith('adcopy_'))   return `Ad-Copy ${k.slice('adcopy_'.length, 'adcopy_'.length + 8)}`;
-    if (k === 'funnel')            return 'Funnel';
-    if (k === 'allgemein')         return 'Allgemein';
+  function renderKey(k) {
+    if (k.startsWith('creative_')) {
+      const id = k.slice('creative_'.length);
+      const c = creativesById.get(id);
+      if (c?.bild_url) {
+        const fmt = FORMAT_LABEL[c.format] || c.format || '';
+        const typ = c.typ === 'video' ? 'Video' : 'Bild';
+        return `
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <img src="${escape(c.bild_url)}" alt="Creative" width="120" style="display:block;width:120px;height:auto;border-radius:8px;border:1px solid #ececea;" />
+            <div style="font-size:12px;color:#5a5955;line-height:1.4;">
+              <span style="display:inline-block;padding:2px 8px;background:#0a0a0a;color:#fff;border-radius:100px;font-weight:700;font-size:10px;letter-spacing:0.04em;">${escape(fmt || '—')}</span>
+              <div style="margin-top:4px;color:#9a9994;font-size:10.5px;">${escape(typ)} · ${escape(id.slice(0, 8))}…</div>
+            </div>
+          </div>`;
+      }
+      return `<strong>Creative</strong> <span style="color:#9a9994;font-size:11px;">${escape(id.slice(0, 8))}…</span>`;
+    }
+    if (k.startsWith('adcopy_')) {
+      const id = k.slice('adcopy_'.length);
+      const a = adcopiesById.get(id);
+      const stilLabel = a?.stil ? (STIL_LABEL[a.stil] || a.stil) : 'Ad-Copy';
+      return `<div style="font-size:13px;font-weight:700;color:#0a0a0a;">${escape(stilLabel)}</div><div style="font-size:10.5px;color:#9a9994;margin-top:2px;">${escape(id.slice(0, 8))}…</div>`;
+    }
+    if (k === 'funnel')    return '<strong>Funnel</strong>';
+    if (k === 'allgemein') return '<strong>Allgemein</strong>';
+    return `<strong>${escape(k)}</strong>`;
+  }
+
+  function labelForText(k) {
+    if (k.startsWith('creative_')) {
+      const c = creativesById.get(k.slice('creative_'.length));
+      return `Creative ${FORMAT_LABEL[c?.format] || ''}`.trim();
+    }
+    if (k.startsWith('adcopy_')) {
+      const a = adcopiesById.get(k.slice('adcopy_'.length));
+      return `Ad-Copy ${STIL_LABEL[a?.stil] || ''}`.trim();
+    }
+    if (k === 'funnel') return 'Funnel';
+    if (k === 'allgemein') return 'Allgemein';
     return k;
   }
 
   const kommentareHtml = kommentarRows.length === 0 ? '' : `
-    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:22px 0 8px;">Kommentare des Kunden</h2>
+    <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:22px 0 10px;">Kommentare des Kunden</h2>
     <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
     ${kommentarRows.map(([k, v]) => `
       <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:35%;vertical-align:top;">${escape(labelForKey(k))}</td>
-        <td style="padding:10px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;white-space:pre-wrap;">${escape(String(v))}</td>
+        <td style="padding:14px 12px 14px 0;border-bottom:1px solid #ececea;width:40%;vertical-align:top;">${renderKey(k)}</td>
+        <td style="padding:14px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;white-space:pre-wrap;vertical-align:top;">${escape(String(v))}</td>
       </tr>`).join('')}
     </table>`;
 
@@ -353,7 +394,7 @@ export async function sendReviewBenachrichtigung({ kunde, job, status, kommentar
   if (kommentarRows.length) {
     textLines.push('', 'Kommentare:');
     for (const [k, v] of kommentarRows) {
-      textLines.push(`\n${labelForKey(k)}:`, v);
+      textLines.push(`\n${labelForText(k)}:`, v);
     }
   }
   textLines.push('', `Link zum Projekt: ${jobUrl}`);

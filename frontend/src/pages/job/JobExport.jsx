@@ -282,11 +282,40 @@ export default function JobExport() {
               {showKommentare && kommentarEntries.length > 0 && (
                 <ul className="review-kommentar-list">
                   {kommentarEntries.map(([key, text]) => {
-                    const [type, id] = key.split('_');
-                    const label = type === 'creative' ? 'Creative' : type === 'adcopy' ? 'Ad-Copy' : type === 'funnel' ? 'Funnel' : 'Allgemein';
+                    const stilLabels = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
+                    const fmtLabels  = { quadrat: '1:1', story: '9:16' };
+                    if (key.startsWith('creative_')) {
+                      const id = key.slice('creative_'.length);
+                      const c = (creatives || []).find(x => x.id === id);
+                      return (
+                        <li key={key} className="review-k-creative">
+                          {c?.bild_url && <img src={c.bild_url} alt="" className="review-k-thumb" />}
+                          <div className="review-k-body">
+                            <div className="review-k-label">
+                              <span className="review-k-pill">{fmtLabels[c?.format] || c?.format || 'Creative'}</span>
+                              {c?.typ === 'video' && <span className="review-k-pill review-k-pill-video">Video</span>}
+                            </div>
+                            <div className="review-k-text">{text}</div>
+                          </div>
+                        </li>
+                      );
+                    }
+                    if (key.startsWith('adcopy_')) {
+                      const id = key.slice('adcopy_'.length);
+                      const a = (adcopies || []).find(x => x.id === id);
+                      return (
+                        <li key={key} className="review-k-adcopy">
+                          <div className="review-k-label">
+                            <span className="review-k-pill review-k-pill-style">{stilLabels[a?.stil] || a?.stil || 'Ad-Copy'}</span>
+                          </div>
+                          <div className="review-k-text">{text}</div>
+                        </li>
+                      );
+                    }
+                    const label = key === 'funnel' ? 'Funnel' : key === 'allgemein' ? 'Allgemein' : key;
                     return (
                       <li key={key}>
-                        <span className="review-k-label">{label}{id ? ` (${id.slice(0,6)})` : ''}:</span>
+                        <span className="review-k-label">{label}:</span>
                         <span className="review-k-text">{text}</span>
                       </li>
                     );

@@ -456,8 +456,13 @@ router.post('/review/:token', async (req, res) => {
     try {
       const { data: kunde } = await supabase
         .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+      // Creatives + Adcopies laden, damit die Mail Thumbnails + Style-Labels zeigen kann
+      const [{ data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
+        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+        supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
+      ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
-      await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl });
+      await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives, adcopies });
     } catch (err) { console.warn('[review-mail]', err.message); }
   })().catch(err => console.error('[review-mail-uncaught]', err.message));
 
