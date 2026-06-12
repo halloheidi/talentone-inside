@@ -5,7 +5,9 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
-import { getPublicBaseUrl } from '../branding.js';
+import { sendReaktivierungsMail } from '../mail.js';
+import { logReaktivierung } from '../close.js';
+import { getPublicBaseUrl, getBranding } from '../branding.js';
 
 const router = Router();
 
@@ -134,6 +136,61 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[export/email]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/export/reaktivierung
+   body: { to, customText, creative_ids?, create_close_task?, ansprechpartner? } */
+router.post('/jobs/:id/export/reaktivierung', async (req, res) => {
+  const { to, customText, creative_ids, create_close_task = true, ansprechpartner } = req.body || {};
+  if (!to?.trim()) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
+
+  try {
+    const { job, kunde, creatives } = await loadFullJob(req.params.id);
+    const brand = getBranding(kunde?.agentur);
+    const selCreatives = filterByIds(creatives, creative_ids);
+    const calLink = brand.calReaktivierungUrl || brand.calBeratungsUrl;
+
+    await sendReaktivierungsMail({
+      to: to.trim(),
+      kunde,
+      job,
+      ansprechpartner: ansprechpartner || kunde?.ansprechpartner,
+      customText,
+      creatives: selCreatives,
+      calLink,
+    });
+
+    // Close-Task (best-effort, blockt niemals)
+    let closeResult = null;
+    if (create_close_task) {
+      closeResult = await logReaktivierung({
+        leadIdOrEmail: kunde?.close_lead_id || kunde?.email || to.trim(),
+        kundenname: kunde?.firmenname,
+        stelle: job?.stelle,
+      });
+    }
+
+    // Historie speichern
+    const { error: insErr } = await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: to.trim(),
+      betreff: `Reaktivierung: Frische KI-Creatives für ${job.stelle || 'Stelle'}`,
+      gesendet_von: req.user?.email || null,
+      typ: 'reaktivierung',
+      inhalte: {
+        creative_ids: selCreatives.map(c => c.id),
+        customText: customText || null,
+        cal_link: calLink,
+        close: closeResult,
+      },
+    });
+    if (insErr) console.warn('[export/reaktivierung] Historie-Insert:', insErr.message);
+
+    res.json({ ok: true, close: closeResult });
+  } catch (err) {
+    console.error('[export/reaktivierung]', err.message);
     res.status(503).json({ error: err.message });
   }
 });

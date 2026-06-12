@@ -40,6 +40,14 @@ export default function JobExport() {
   const [review, setReview] = useState(null);
   const [showKommentare, setShowKommentare] = useState(false);
 
+  // Reaktivierungs-Modal
+  const [showReak, setShowReak] = useState(false);
+  const [reakForm, setReakForm] = useState({
+    to: '', customText: '', create_close_task: true, selected: new Set(),
+  });
+  const [reakBusy, setReakBusy] = useState(false);
+  const [reakMsg, setReakMsg] = useState('');
+
   function load() {
     setLoading(true);
     setError('');
@@ -211,6 +219,67 @@ export default function JobExport() {
     }
   }
 
+  /* ───── Reaktivierungs-Modal ───── */
+  function openReakModal() {
+    const stelle = job?.stelle || 'eure offene Stelle';
+    const grußname = kunde?.ansprechpartner || 'zusammen';
+    const calLink = 'https://calendly.com/andrea-saltaleggio/drafts';
+    const defaultText = `Hallo ${grußname},
+
+wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für deine offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
+
+Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
+
+Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich): ${calLink}`;
+    // Standardmäßig nur Bild-Creatives vorausgewählt (Videos werden in der Mail eh nicht eingebettet)
+    const bildIds = (data?.creatives || [])
+      .filter(c => c.typ !== 'video' && c.bild_url)
+      .slice(0, 6)
+      .map(c => c.id);
+    setReakForm({
+      to: kunde?.email || '',
+      customText: defaultText,
+      create_close_task: true,
+      selected: new Set(bildIds),
+    });
+    setReakMsg('');
+    setShowReak(true);
+  }
+
+  function toggleReakCreative(id) {
+    setReakForm(prev => {
+      const n = new Set(prev.selected);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return { ...prev, selected: n };
+    });
+  }
+
+  async function sendReak() {
+    if (!reakForm.to.trim()) { setReakMsg('Empfänger-Mail fehlt.'); return; }
+    if (reakForm.selected.size === 0) { setReakMsg('Mindestens ein Creative auswählen.'); return; }
+    setReakBusy(true);
+    setReakMsg('');
+    try {
+      const res = await api(`/jobs/${job.id}/export/reaktivierung`, {
+        method: 'POST',
+        body: {
+          to: reakForm.to,
+          customText: reakForm.customText,
+          creative_ids: Array.from(reakForm.selected),
+          create_close_task: reakForm.create_close_task,
+        },
+      });
+      const closeInfo = res.close ? ' · Close-Task angelegt' : (reakForm.create_close_task ? ' · Close-Task nicht erstellt (Lead nicht gefunden)' : '');
+      setReakMsg(`Mail verschickt!${closeInfo}`);
+      api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+      setTimeout(() => setShowReak(false), 1400);
+    } catch (err) {
+      setReakMsg(err.message);
+    } finally {
+      setReakBusy(false);
+    }
+  }
+
   if (loading) return <div className="card empty">Lade Export…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
 
@@ -219,7 +288,8 @@ export default function JobExport() {
   const funnel = data?.funnel;
   const allCreativesSelected = creatives.length > 0 && selectedCreatives.size === creatives.length;
 
-  const letzterVersand = versand[0];
+  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung') || versand[0];
+  const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
   const kommentarEntries = review?.kommentare && typeof review.kommentare === 'object'
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
@@ -430,6 +500,31 @@ export default function JobExport() {
       </div>
       {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
 
+      {/* ─────── Kunden-Reaktivierung ─────── */}
+      <fieldset className="formular-section" style={{ marginTop: 22 }}>
+        <legend>Kunden-Reaktivierung</legend>
+        {letzteReaktivierung ? (
+          <div className="versand-status" style={{ marginBottom: 10 }}>
+            <span>🔄 Reaktivierungs-Mail gesendet am <strong>{new Date(letzteReaktivierung.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzteReaktivierung.empfaenger}</strong></span>
+          </div>
+        ) : (
+          <p className="pane-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+            Sende frische KI-Creatives an den Kunden, um ihn nach Kampagnen-Ende zu reaktivieren.
+            Im Modal kannst du den Text anpassen, Creatives auswählen und optional einen Task in Close anlegen.
+          </p>
+        )}
+        <button
+          className="btn-primary"
+          onClick={openReakModal}
+          disabled={!kunde?.email || (data?.creatives || []).filter(c => c.typ !== 'video' && c.bild_url).length === 0}
+        >
+          🔄 Neue Creatives zur Reaktivierung schicken
+        </button>
+        {(data?.creatives || []).filter(c => c.typ !== 'video' && c.bild_url).length === 0 && (
+          <div className="motiv-sub" style={{ marginTop: 6 }}>Keine Bild-Creatives vorhanden — bitte zuerst generieren.</div>
+        )}
+      </fieldset>
+
       {/* ─────── Versand-Historie ─────── */}
       {versand.length > 0 && (
         <fieldset className="formular-section" style={{ marginTop: 22 }}>
@@ -485,6 +580,77 @@ export default function JobExport() {
           )}
         </div>
         {mailMsg && <div className="form-msg" style={{ marginTop: 10 }}>{mailMsg}</div>}
+      </Modal>
+
+      {/* ─────── Reaktivierungs-Modal ─────── */}
+      <Modal
+        open={showReak}
+        onClose={() => !reakBusy && setShowReak(false)}
+        title="🔄 Neue Creatives zur Reaktivierung schicken"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setShowReak(false)} disabled={reakBusy}>Abbrechen</button>
+            <button
+              className="btn-primary"
+              onClick={sendReak}
+              disabled={reakBusy || !reakForm.to.trim() || reakForm.selected.size === 0}
+            >
+              {reakBusy ? 'Sende…' : 'Absenden'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Die Mail enthält nur die ausgewählten Creatives (max. 6 Bilder) und einen Termin-Button.
+          Kein Funnel, keine Ad-Copies, keine Review-Seite.
+        </p>
+
+        {/* Creatives auswählen */}
+        <div className="form-grid">
+          <div className="field field-full">
+            <span>Creatives ({reakForm.selected.size} ausgewählt)</span>
+            <div className="export-grid" style={{ marginTop: 8 }}>
+              {(data?.creatives || []).filter(c => c.typ !== 'video' && c.bild_url).map(c => {
+                const checked = reakForm.selected.has(c.id);
+                return (
+                  <label key={c.id} className={`export-card ${checked ? 'is-checked' : ''}`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleReakCreative(c.id)} />
+                    <div className="export-thumb">
+                      <img src={c.bild_url} alt="" loading="lazy" />
+                      <span className={`format-badge format-${c.format}`}>{badgeFor(c)}</span>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            {reakForm.selected.size > 6 && (
+              <div className="motiv-sub" style={{ marginTop: 6, color: 'var(--warn, #c87)' }}>
+                In der Mail werden maximal 6 Bilder eingebettet — der Rest wird ignoriert.
+              </div>
+            )}
+          </div>
+
+          <label className="field field-full">
+            <span>An</span>
+            <input type="email" value={reakForm.to} onChange={e => setReakForm({ ...reakForm, to: e.target.value })} />
+          </label>
+
+          <label className="field field-full">
+            <span>Mail-Text (Du-Form, bearbeitbar)</span>
+            <textarea rows={10} value={reakForm.customText} onChange={e => setReakForm({ ...reakForm, customText: e.target.value })} />
+          </label>
+
+          <label className="field-checkbox">
+            <input
+              type="checkbox"
+              checked={reakForm.create_close_task}
+              onChange={e => setReakForm({ ...reakForm, create_close_task: e.target.checked })}
+            />
+            <span>Task in Close anlegen (Daniel Nowag, fällig in 7 Tagen) + Note am Lead</span>
+          </label>
+        </div>
+
+        {reakMsg && <div className="form-msg" style={{ marginTop: 10 }}>{reakMsg}</div>}
       </Modal>
     </div>
   );

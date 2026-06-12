@@ -570,3 +570,81 @@ export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFile
   }
   return await response.json();
 }
+
+/* ════════════════════ Reaktivierungs-Mail mit eingebetteten Creatives ════════════════════ */
+
+export async function sendReaktivierungsMail({ to, replyTo, kunde, job, ansprechpartner, customText, creatives = [], calLink }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const grußname = ansprechpartner || kunde?.ansprechpartner || 'zusammen';
+  const stelle = job?.stelle || 'eure offene Stelle';
+
+  // Standard-Text falls Mitarbeiter nichts eintippt
+  const introText = (customText || '').trim() || `Hallo ${grußname},
+
+wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für deine offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
+
+Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
+
+Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich): ${calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl}`;
+
+  // Nur Bilder (keine Videos) für Image-Embed, max. 6 Stück
+  const bildCreatives = (creatives || []).filter(c => c.typ !== 'video' && c.bild_url).slice(0, 6);
+
+  const creativesHtml = bildCreatives.length === 0 ? '' : `
+    <tr><td style="padding:14px 32px 8px;">
+      <h2 style="font-size:13px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#5a5955;margin:12px 0 14px;">Neue Werbeanzeigen</h2>
+      <table width="100%" cellpadding="0" cellspacing="8" style="border-collapse:separate;">
+        ${bildCreatives.map((c, i) => i % 2 === 0 ? `<tr>
+          <td width="50%" valign="top" style="padding:6px;">
+            <img src="${escape(c.bild_url)}" alt="Creative" width="240" style="display:block;width:100%;max-width:240px;height:auto;border-radius:10px;border:1px solid #ececea;" />
+          </td>
+          ${bildCreatives[i+1] ? `<td width="50%" valign="top" style="padding:6px;">
+            <img src="${escape(bildCreatives[i+1].bild_url)}" alt="Creative" width="240" style="display:block;width:100%;max-width:240px;height:auto;border-radius:10px;border:1px solid #ececea;" />
+          </td>` : '<td width="50%"></td>'}
+        </tr>` : '').join('')}
+      </table>
+    </td></tr>`;
+
+  const calUrl = calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl;
+
+  // Render plain-text als HTML mit <p>-Absätzen — Cal-Link wird als Button am Ende separat
+  const introHtml = introText
+    .split(/\n\s*\n/)
+    .map(para => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(para).replace(/\n/g, '<br>').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#0a0a0a;">$1</a>')}</p>`)
+    .join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔄 Reaktivierung · ${escape(brand.name)}</p>
+      ${introHtml}
+    </td></tr>
+    ${creativesHtml}
+    <tr><td align="center" style="padding:18px 32px 28px;">
+      <a href="${escape(calUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Termin buchen (unverbindlich)</a>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${introText}\n\nTermin buchen: ${calUrl}\n\nViele Grüße\nEuer ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      reply_to: replyTo || getMailReplyTo(brand),
+      subject: `Frische KI-Werbeanzeigen für ${stelle} — reaktivieren?`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}

@@ -29,6 +29,8 @@ const BRANDING = {
     // Texte
     footer: 'TalentOne — Recruiting neu gedacht',
     madeWith: 'Made with ♥ by TalentOne',
+    calBeratungsUrl: 'https://cal.com/talent-one/kostenloses-beratungsgesprach',
+    calReaktivierungUrl: 'https://calendly.com/andrea-saltaleggio/drafts',
     // Logo
     logoHtml: '<span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">Talent<span style="color:#d4ff00;">One</span></span>',
     logoUrl: null,
@@ -51,6 +53,8 @@ const BRANDING = {
     // Texte
     footer: 'Nowag & Wirth — Digitales Marketing',
     madeWith: 'Made with ♥ by Nowag & Wirth',
+    calBeratungsUrl: 'https://calendly.com/andrea-saltaleggio/drafts',
+    calReaktivierungUrl: 'https://calendly.com/andrea-saltaleggio/drafts',
     // Logo
     logoHtml: '__LOGO_PLACEHOLDER__', // wird dynamisch ersetzt
     logoUrl: null,
