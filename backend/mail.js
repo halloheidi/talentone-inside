@@ -637,6 +637,7 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
     body: JSON.stringify({
       from: getMailFrom(brand),
       to: recipients,
+      cc: ['info@nowagwirth.de'],
       reply_to: replyTo || getMailReplyTo(brand),
       subject: `Frische KI-Werbeanzeigen für ${stelle} — reaktivieren?`,
       html, text,
