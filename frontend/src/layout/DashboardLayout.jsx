@@ -23,6 +23,10 @@ function GlobalNav() {
         <Icon name="users" />
         <span>Projekte</span>
       </NavLink>
+      <NavLink to="/analyse-funnel" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>Analyse-Funnel</span>
+      </NavLink>
     </nav>
   );
 }
