@@ -5,6 +5,7 @@ import { fileToBase64, downloadFromUrl } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
 import Icon from '../../components/Icon.jsx';
 import Lightbox from '../../components/Lightbox.jsx';
+import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
@@ -25,11 +26,7 @@ export default function JobCreatives() {
 
   // Upload
   const [logoUploading, setLogoUploading] = useState(false);
-  const [pendingFile, setPendingFile] = useState(null);   // Datei + Beschreibungs-Modal
-  const [pendingDesc, setPendingDesc] = useState('');
-  const [pendingBusy, setPendingBusy] = useState(false);
   const logoInputRef = useRef(null);
-  const personInputRef = useRef(null);
 
   // Generation
   const [varianten, setVarianten] = useState(1);
@@ -181,40 +178,6 @@ export default function JobCreatives() {
       alert(`Logo-Upload fehlgeschlagen: ${err.message}`);
     } finally {
       setLogoUploading(false);
-    }
-  }
-
-  /* ───── Personen-Foto-Upload (mit Beschreibung) ───── */
-  function onPersonChange(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setPendingFile(file);
-    setPendingDesc('');
-  }
-
-  async function submitPersonUpload() {
-    if (!pendingFile) return;
-    setPendingBusy(true);
-    try {
-      const fileData = await fileToBase64(pendingFile);
-      const res = await api(`/kunden/${kunde.id}/referenzbilder`, {
-        method: 'POST',
-        body: {
-          fileData, fileName: pendingFile.name,
-          contentType: pendingFile.type || 'image/jpeg',
-          beschreibung: pendingDesc.trim() || null,
-        },
-      });
-      setPersonen(prev => [res.referenzbild, ...prev]);
-      const id = res.referenzbild.id;
-      if (mode === 'ki') setPersonId(id); else setFotoId(id);
-      setPendingFile(null);
-      setPendingDesc('');
-    } catch (err) {
-      alert(`Upload fehlgeschlagen: ${err.message}`);
-    } finally {
-      setPendingBusy(false);
     }
   }
 
@@ -476,16 +439,15 @@ export default function JobCreatives() {
               </button>
             );
           })}
-          <label className="ref-card ref-card-upload">
-            <input
-              ref={personInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              style={{ display: 'none' }}
-              onChange={onPersonChange}
-            />
-            <span>+ Person hochladen</span>
-          </label>
+          <MultiPhotoUpload
+            kundeId={kunde?.id}
+            onUploaded={(rb) => {
+              setPersonen(prev => [rb, ...prev]);
+              if (mode === 'ki') setPersonId(rb.id); else setFotoId(rb.id);
+            }}
+            dropZoneClassName="ref-card ref-card-upload"
+            trigger={<span>+ Foto(s) hochladen<br/><small style={{ fontSize: 10, color: 'var(--ink-3)' }}>Mehrere möglich · Drag &amp; Drop</small></span>}
+          />
         </div>
       </section>
 
@@ -600,39 +562,6 @@ export default function JobCreatives() {
           />
         )}
       </section>
-
-      {/* ───── Personen-Upload Modal: Beschreibung erfassen ───── */}
-      <Modal
-        open={!!pendingFile}
-        onClose={() => !pendingBusy && setPendingFile(null)}
-        title="Wer ist auf dem Foto?"
-        footer={
-          <>
-            <button className="btn-ghost" onClick={() => setPendingFile(null)} disabled={pendingBusy}>Abbrechen</button>
-            <button className="btn-primary" onClick={submitPersonUpload} disabled={pendingBusy}>
-              {pendingBusy ? 'Lade hoch…' : 'Hochladen'}
-            </button>
-          </>
-        }
-      >
-        <p className="pane-hint">
-          Eine kurze Beschreibung hilft der KI später beim Einsetzen der Person in die Szene.
-        </p>
-        <label className="field field-full">
-          <span>Beschreibung (optional)</span>
-          <input
-            type="text"
-            placeholder="z.B. Max Müller, Geschäftsführer"
-            value={pendingDesc}
-            onChange={e => setPendingDesc(e.target.value)}
-          />
-        </label>
-        {pendingFile && (
-          <div className="form-msg" style={{ marginTop: 6 }}>
-            Datei: <strong>{pendingFile.name}</strong> · {(pendingFile.size / 1024).toFixed(0)} KB
-          </div>
-        )}
-      </Modal>
 
       {/* ───────── Rework-Modal ───────── */}
       <Modal

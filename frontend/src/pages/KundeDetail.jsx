@@ -1,24 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { fileToBase64 } from '../lib/files.js';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
-
-const EMPTY_JOB = { stelle: '', region: '', gehalt: '' };
+import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
+import NewProjectModal from '../components/NewProjectModal.jsx';
 
 const DEFAULT_ANFRAGE = `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
 
 export default function KundeDetail() {
   const { kundeId } = useParams();
-  const nav = useNavigate();
   const [kunde, setKunde] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState(EMPTY_JOB);
-  const [creating, setCreating] = useState(false);
 
   const [showAnfrage, setShowAnfrage] = useState(false);
   const [anfrageText, setAnfrageText] = useState(DEFAULT_ANFRAGE);
@@ -280,22 +277,6 @@ export default function KundeDetail() {
     }
   }
 
-  async function onCreate(e) {
-    e?.preventDefault();
-    if (!form.stelle.trim()) return;
-    setCreating(true);
-    try {
-      const res = await api('/jobs', { method: 'POST', body: { kunde_id: kundeId, ...form } });
-      setShowCreate(false);
-      setForm(EMPTY_JOB);
-      nav(`/kunden/${kundeId}/jobs/${res.job.id}`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setCreating(false);
-    }
-  }
-
   if (loading) return <div className="card empty">Lade…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!kunde) return <div className="card empty"><h2>Kunde nicht gefunden</h2></div>;
@@ -515,21 +496,41 @@ export default function KundeDetail() {
         )}
       </div>
 
-      {referenzbilder.length > 0 && (
-        <div className="ref-strip">
-          <div className="ref-strip-title">
-            Verfügbar: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)
-          </div>
-          <div className="ref-strip-grid">
-            {referenzbilder.slice(0, 8).map(r => (
-              <a key={r.id} href={r.bild_url} target="_blank" rel="noreferrer" className="ref-strip-thumb" title={r.typ}>
-                <img src={r.bild_url} alt="" />
-                {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
-              </a>
-            ))}
-          </div>
+      <div className="ref-strip">
+        <div className="ref-strip-title">
+          {referenzbilder.length > 0
+            ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)</>
+            : <>Noch keine Referenzbilder hinterlegt.</>}
         </div>
-      )}
+        <div className="ref-strip-grid">
+          {referenzbilder.slice(0, 12).map(r => (
+            <div key={r.id} className="ref-strip-thumb" title={r.beschreibung || r.typ}>
+              <a href={r.bild_url} target="_blank" rel="noreferrer">
+                <img src={r.bild_url} alt="" />
+              </a>
+              {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
+              <button
+                type="button"
+                className="ref-strip-del"
+                title="Löschen"
+                onClick={async () => {
+                  if (!confirm('Bild wirklich löschen?')) return;
+                  try {
+                    await api(`/kunden/referenzbilder/${r.id}`, { method: 'DELETE' });
+                    setReferenzbilder(prev => prev.filter(x => x.id !== r.id));
+                  } catch (err) { alert(err.message); }
+                }}
+              >×</button>
+            </div>
+          ))}
+          <MultiPhotoUpload
+            kundeId={kundeId}
+            onUploaded={(rb) => setReferenzbilder(prev => [rb, ...prev])}
+            dropZoneClassName="ref-strip-upload"
+            trigger={<span>+ Foto(s)<br/><small>Drag &amp; Drop</small></span>}
+          />
+        </div>
+      </div>
 
       <div className="section-head">
         <div>
@@ -587,41 +588,11 @@ export default function KundeDetail() {
         {anfrageMsg && <div className="form-msg" style={{ marginTop: 8 }}>{anfrageMsg}</div>}
       </Modal>
 
-      <Modal
+      <NewProjectModal
         open={showCreate}
-        onClose={() => !creating && setShowCreate(false)}
-        title="Neues Projekt"
-        footer={
-          <>
-            <button className="btn-ghost" onClick={() => setShowCreate(false)} disabled={creating}>
-              Abbrechen
-            </button>
-            <button className="btn-primary" onClick={onCreate} disabled={creating || !form.stelle.trim()}>
-              {creating ? 'Speichere…' : 'Anlegen'}
-            </button>
-          </>
-        }
-      >
-        <form onSubmit={onCreate} className="form-grid">
-          <label className="field field-full">
-            <span>Stellenbezeichnung *</span>
-            <input
-              value={form.stelle}
-              onChange={e => setForm({ ...form, stelle: e.target.value })}
-              required
-              placeholder="z.B. Servicetechniker:in im Außendienst"
-            />
-          </label>
-          <label className="field">
-            <span>Region</span>
-            <input value={form.region} onChange={e => setForm({ ...form, region: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Gehalt</span>
-            <input value={form.gehalt} onChange={e => setForm({ ...form, gehalt: e.target.value })} />
-          </label>
-        </form>
-      </Modal>
+        kunde={kunde}
+        onClose={() => setShowCreate(false)}
+      />
     </div>
   );
 }

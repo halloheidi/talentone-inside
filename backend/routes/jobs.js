@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
+import { extractFromUrl, extractFromFile, toJob } from '../extractor.js';
+import { sendUploadAnfrage } from '../mail.js';
+import { getPublicBaseUrl } from '../branding.js';
 
 const router = Router();
 
@@ -22,6 +25,123 @@ router.get('/:id', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Job nicht gefunden.' });
   res.json({ job: data });
+});
+
+/* POST /api/jobs/quick-create
+   Erstellt einen Job für einen BESTEHENDEN Kunden via URL/PDF/Manual/Formular.
+   body: { kunde_id, mode: 'url'|'file'|'manual'|'formular', url?|fileData+fileType?|job?, customText? } */
+router.post('/quick-create', async (req, res) => {
+  const { kunde_id, mode, customText } = req.body || {};
+  if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
+
+  const { data: kunde, error: kErr } = await supabase
+    .from('talentone_kunden').select('*').eq('id', kunde_id).maybeSingle();
+  if (kErr || !kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  // Modus „formular" — Wartendes Projekt + Briefing-Anfrage-Mail
+  if (mode === 'formular') {
+    if (!kunde.email) return res.status(400).json({ error: 'Kunde hat keine E-Mail-Adresse.' });
+    const { data: job, error: jErr } = await supabase
+      .from('talentone_jobs')
+      .insert({
+        kunde_id,
+        stelle: '[Briefing ausstehend]',
+        eingabe_methode: 'neu',
+        vorqualifizierung: kunde.agentur === 'nowagwirth',
+        formdata_komplett: { _wartet_auf_briefing: true },
+      })
+      .select().single();
+    if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
+
+    // Mail mit Briefing-Anfrage versenden (Upload-Link mit personalisiertem Text)
+    let token = kunde.upload_token;
+    if (!token) {
+      token = (await import('node:crypto')).randomUUID();
+      await supabase.from('talentone_kunden').update({ upload_token: token }).eq('id', kunde_id);
+    }
+    const uploadUrl = `${getPublicBaseUrl(kunde.agentur)}/upload/${token}`;
+    const defaultText = `wir starten ein neues Projekt für euch und brauchen dafür ein paar Briefing-Infos: Stelle, Region, Benefits, Gehalt, Eigenheiten der Position. Bitte schickt uns die Details — gerne per Mail-Antwort oder direkt über euren persönlichen Upload-Link (Fotos / Logo / Stellenanzeige als PDF).`;
+
+    try {
+      await sendUploadAnfrage({
+        to: kunde.email,
+        kundenname: kunde.firmenname || 'euer Team',
+        ansprechpartner: kunde.ansprechpartner,
+        uploadUrl,
+        customText: customText || defaultText,
+        agentur: kunde.agentur,
+      });
+    } catch (err) {
+      console.error('[jobs/quick-create/formular] Mail:', err.message);
+      // Job bleibt — Team kann manuell nachfassen
+    }
+
+    // Projekt in Kanban anlegen
+    await supabase.from('talentone_projekte').insert({
+      projekt: '[Wartet auf Briefing]',
+      kunde: kunde.firmenname,
+      kunde_id,
+      job_id: job.id,
+      agentur: kunde.agentur,
+      status: 'vorbereitung',
+    }).then(() => {}).catch(() => {});
+
+    return res.status(201).json({ job, mode: 'formular', mailSent: true });
+  }
+
+  // URL / PDF / Manual — extrahiert oder direkt übernommene Job-Daten
+  let jobData = {};
+  try {
+    if (mode === 'manual') {
+      const { job = {} } = req.body;
+      if (!job.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
+      jobData = {
+        stelle: job.stelle.trim(),
+        region: job.region || null,
+        gehalt: job.gehalt || null,
+        eingabe_methode: 'neu',
+      };
+    } else if (mode === 'url') {
+      const { url } = req.body;
+      if (!url?.trim()) return res.status(400).json({ error: 'URL fehlt.' });
+      const extracted = await extractFromUrl(url);
+      jobData = toJob(extracted, 'url', url);
+      if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
+    } else if (mode === 'file') {
+      const { fileData, fileType } = req.body;
+      if (!fileData) return res.status(400).json({ error: 'Datei fehlt.' });
+      const extracted = await extractFromFile(fileData, fileType);
+      jobData = toJob(extracted, 'pdf');
+      if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
+    } else {
+      return res.status(400).json({ error: 'Unbekannter Modus.' });
+    }
+
+    const { data: job, error: jErr } = await supabase
+      .from('talentone_jobs')
+      .insert({
+        ...jobData,
+        kunde_id,
+        vorqualifizierung: kunde.agentur === 'nowagwirth',
+      })
+      .select().single();
+    if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
+
+    // Projekt in Kanban
+    await supabase.from('talentone_projekte').insert({
+      projekt: job.stelle || 'Neues Projekt',
+      kunde: kunde.firmenname,
+      kunde_id,
+      job_id: job.id,
+      agentur: kunde.agentur,
+      status: 'kickoff_vereinbart',
+    }).then(() => {}).catch(() => {});
+
+    res.status(201).json({ job });
+  } catch (err) {
+    console.error('[jobs/quick-create]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/', async (req, res) => {
