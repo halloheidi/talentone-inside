@@ -47,22 +47,28 @@ router.post('/upload', async (req, res) => {
       const buffer = Buffer.from(f.fileData, 'base64');
       const bildUrl = await uploadBuffer({ bucket: CREATIVES_BUCKET, path, buffer, contentType: ct });
 
-      const { data, error: insErr } = await supabase
+      const baseRow = { job_id, format, typ, bild_url: bildUrl, status: 'fertig', prompt: null };
+
+      // Erst mit quelle='upload' versuchen — wenn Spalte fehlt, Fallback ohne quelle
+      let { data, error: insErr } = await supabase
         .from('talentone_creatives')
-        .insert({
-          job_id, format, typ, bild_url: bildUrl,
-          status: 'fertig',
-          quelle: 'upload',
-          prompt: null,
-        })
+        .insert({ ...baseRow, quelle: 'upload' })
         .select().single();
+      if (insErr && /column.*quelle.*does not exist|could not find.*quelle/i.test(insErr.message)) {
+        console.warn('[creatives/upload] quelle-Spalte fehlt — Fallback ohne quelle. Bitte SQL-Migration anwenden.');
+        const retry = await supabase.from('talentone_creatives').insert(baseRow).select().single();
+        data = retry.data;
+        insErr = retry.error;
+      }
+
       if (insErr) {
-        // Storage-Datei zurückrollen
+        console.error(`[creatives/upload] DB-Insert fehlgeschlagen für ${f.fileName}:`, insErr.message);
         errors.push({ index: i, error: insErr.message });
         continue;
       }
       inserted.push(data);
     } catch (err) {
+      console.error(`[creatives/upload] Datei ${i} (${f?.fileName}) fehlgeschlagen:`, err.message);
       errors.push({ index: i, error: err.message });
     }
   }
