@@ -127,13 +127,14 @@ ${motiv}
 - Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
 
 TEXT-ELEMENTE (in dieser Reihenfolge von oben nach unten, sauber lesbar):
-1. LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten${hasLogo ? '' : ' — entfällt, kein Logo vorhanden'}
-2. FIRMENNAME klein und unauffällig: "${firmenname}" — entweder direkt links vom Logo oder als kleiner Untertitel darunter (max. 14-16% Bildhöhe insgesamt für den Header-Bereich)
-3. HAUPTSPRUCH zentral: ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
-4. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80% der Größe), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche klar hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" am Ende MUSS lesbar dargestellt werden — entweder direkt im selben Textblock oder als kleiner Untertitel.
-${ort ? `5. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung, gleiche Schriftart. Nur der Ort, KEIN Umkreis/Radius.\n6` : '5'}. BENEFIT-TAGS unten: 3-4 kompakte, abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
+1. ${hasLogo
+    ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
+    : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
+2. HAUPTSPRUCH zentral: ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80% der Größe), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche klar hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" am Ende MUSS lesbar dargestellt werden — entweder direkt im selben Textblock oder als kleiner Untertitel.
+${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung, gleiche Schriftart. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte, abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
    Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", keine Sätze
-${ort ? '7' : '6'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent, gerne mit Pfeil
+${ort ? '6' : '5'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent, gerne mit Pfeil
 
 DESIGN-REGELN:
 - HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast-Hintergrund/Linie) > Benefits (klein) > Firmenname & CTA (sehr klein)
@@ -167,12 +168,13 @@ ${refLines}
 ${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
 OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto, in dieser Reihenfolge von oben nach unten):
-1. LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten${hasLogo ? '' : ' — entfällt, kein Logo vorhanden'}
-2. FIRMENNAME klein: "${firmenname}" — links neben dem Logo oder als Untertitel
-3. HAUPTSPRUCH zentral oder im oberen Drittel: kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
-4. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80%), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" MUSS lesbar dargestellt werden.
-${ort ? `5. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung. Nur der Ort, KEIN Umkreis/Radius.\n6` : '5'}. BENEFIT-TAGS unten: 3-4 kompakte abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
-${ort ? '7' : '6'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent
+1. ${hasLogo
+    ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
+    : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
+2. HAUPTSPRUCH zentral oder im oberen Drittel: kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80%), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" MUSS lesbar dargestellt werden.
+${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
+${ort ? '6' : '5'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent
 
 DESIGN-REGELN:
 - HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast) > Benefits (klein) > Firmenname & CTA (sehr klein)
