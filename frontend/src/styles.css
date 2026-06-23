@@ -1599,6 +1599,19 @@ button { font-family: inherit; }
   border-radius: 100px;
   backdrop-filter: blur(4px);
 }
+.creative-upload-badge {
+  position: absolute;
+  top: 40px;          /* unterhalb des format-badge */
+  left: 10px;
+  padding: 3px 8px;
+  background: var(--accent, #e8ff3d);
+  color: var(--ink-1, #0a0a0a);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-radius: 100px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.10);
+}
 .creative-foot {
   display: flex;
   align-items: center;

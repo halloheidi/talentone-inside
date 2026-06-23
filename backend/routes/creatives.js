@@ -4,9 +4,74 @@ import {
   generateMotivVorschlaege,
   generateVariant,
   deleteFromStorage,
+  STORAGE_BUCKET as CREATIVES_BUCKET,
 } from '../imagegen.js';
+import { uploadBuffer, extFromMime, safeFilenameStem } from '../storage.js';
 
 const router = Router();
+
+const VALID_FORMATS = new Set(['quadrat', 'story', 'sonstiges']);
+const VALID_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+const VALID_VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime']);
+
+/* POST /api/creatives/upload  body: { job_id, files: [{ fileData, fileName, contentType, format }] }
+   Lädt N fertige Creatives (Bilder/Videos) hoch — gleicher Bucket, gleiche Galerie wie generierte.
+   Markiert sie via quelle='upload' damit das Frontend ein "Hochgeladen"-Badge zeigen kann. */
+router.post('/upload', async (req, res) => {
+  const { job_id, files } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  if (!Array.isArray(files) || files.length === 0) return res.status(400).json({ error: 'Keine Dateien übergeben.' });
+
+  const inserted = [];
+  const errors = [];
+
+  for (const [i, f] of files.entries()) {
+    try {
+      if (!f?.fileData || !f?.contentType) {
+        errors.push({ index: i, error: 'fileData / contentType fehlt.' });
+        continue;
+      }
+      const ct = String(f.contentType).toLowerCase();
+      const isImage = VALID_IMAGE_MIMES.has(ct);
+      const isVideo = VALID_VIDEO_MIMES.has(ct);
+      if (!isImage && !isVideo) {
+        errors.push({ index: i, error: `Nicht unterstützter Typ: ${ct}` });
+        continue;
+      }
+      const format = VALID_FORMATS.has(f.format) ? f.format : 'sonstiges';
+      const typ = isVideo ? 'video' : 'bild';
+      const ext = extFromMime(ct, isVideo ? 'mp4' : 'png');
+      const stem = safeFilenameStem(f.fileName);
+      const path = `${job_id}/${format}-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${stem}.${ext}`;
+
+      const buffer = Buffer.from(f.fileData, 'base64');
+      const bildUrl = await uploadBuffer({ bucket: CREATIVES_BUCKET, path, buffer, contentType: ct });
+
+      const { data, error: insErr } = await supabase
+        .from('talentone_creatives')
+        .insert({
+          job_id, format, typ, bild_url: bildUrl,
+          status: 'fertig',
+          quelle: 'upload',
+          prompt: null,
+        })
+        .select().single();
+      if (insErr) {
+        // Storage-Datei zurückrollen
+        errors.push({ index: i, error: insErr.message });
+        continue;
+      }
+      inserted.push(data);
+    } catch (err) {
+      errors.push({ index: i, error: err.message });
+    }
+  }
+
+  if (inserted.length === 0) {
+    return res.status(500).json({ error: 'Kein Creative konnte gespeichert werden.', details: errors });
+  }
+  res.status(201).json({ creatives: inserted, errors: errors.length ? errors : undefined });
+});
 
 /* GET /api/creatives?job_id=… — Galerie für ein Projekt */
 router.get('/', async (req, res) => {

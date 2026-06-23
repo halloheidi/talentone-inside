@@ -6,6 +6,7 @@ import Modal from '../../components/Modal.jsx';
 import Icon from '../../components/Icon.jsx';
 import Lightbox from '../../components/Lightbox.jsx';
 import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
+import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
@@ -27,6 +28,7 @@ export default function JobCreatives() {
   // Upload
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef(null);
+  const [showCreativeUpload, setShowCreativeUpload] = useState(false);
 
   // Generation
   const [varianten, setVarianten] = useState(1);
@@ -500,12 +502,15 @@ export default function JobCreatives() {
             <h2 className="section-title">Galerie</h2>
             <p className="section-sub">{creatives.length} Creative{creatives.length === 1 ? '' : 's'} für dieses Projekt.</p>
           </div>
+          <button className="btn-ghost btn-sm" onClick={() => setShowCreativeUpload(true)} title="Eigene Bilder/Videos hochladen">
+            <Icon name="plus" /> Fertiges Creative hochladen
+          </button>
         </div>
         {loadingGalerie && <div className="card empty">Lade Galerie…</div>}
         {!loadingGalerie && creatives.length === 0 && (
           <div className="card empty">
             <h2>Noch keine Creatives</h2>
-            <p>Wähle oben einen Modus und klick auf „Creatives generieren".</p>
+            <p>Wähle oben einen Modus und klick auf „Creatives generieren" — oder lade rechts oben fertige Anzeigen hoch.</p>
           </div>
         )}
         {creatives.length > 0 && (
@@ -530,8 +535,11 @@ export default function JobCreatives() {
                     <img src={c.bild_url} alt="" loading="lazy" />
                   )}
                   <span className={`format-badge format-${c.format}`}>
-                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
+                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'sonstiges' ? '?' : '1:1')}
                   </span>
+                  {c.quelle === 'upload' && (
+                    <span className="creative-upload-badge" title="Manuell hochgeladen">⬆ Hochgeladen</span>
+                  )}
                   {c.bild_url && (
                     <button
                       type="button"
@@ -547,7 +555,7 @@ export default function JobCreatives() {
                 <div className="creative-foot">
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">
-                    {c.typ !== 'video' && (
+                    {c.typ !== 'video' && c.quelle !== 'upload' && (
                       <button className="btn-ghost btn-sm" onClick={() => openRework(c)}>Überarbeiten</button>
                     )}
                     {c.format === 'story' && c.typ !== 'video' && (
@@ -602,6 +610,14 @@ export default function JobCreatives() {
           <textarea rows={3} value={reworkMotiv} onChange={e => setReworkMotiv(e.target.value)} />
         </label>
       </Modal>
+
+      {/* ───────── Upload-Modal: fertige Creatives hochladen ───────── */}
+      <UploadCreativesModal
+        open={showCreativeUpload}
+        onClose={() => setShowCreativeUpload(false)}
+        jobId={job.id}
+        onUploaded={(c) => setCreatives(prev => [c, ...prev])}
+      />
     </div>
   );
 }
