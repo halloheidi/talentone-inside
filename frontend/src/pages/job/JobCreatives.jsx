@@ -75,31 +75,34 @@ export default function JobCreatives() {
   function startReelPolling(parentId) {
     if (reelPollRefs.current.has(parentId)) return;
     const startedAt = Date.now();
-    const TIMEOUT_MS = 6 * 60 * 1000;
-    const interval = setInterval(async () => {
+    // Reels brauchen 2-8 Min. Kein harter Timeout — Polling läuft mit Backoff
+    // weiter bis Reel da ist oder User die Seite verlässt.
+    let timer = null;
+    async function tick() {
       try {
         const res = await api(`/creatives?job_id=${job.id}`);
         const list = res.creatives || [];
         const reel = list.find(c => c.parent_id === parentId && c.typ === 'video');
         if (reel) {
-          clearInterval(interval);
+          if (timer) clearTimeout(timer);
           reelPollRefs.current.delete(parentId);
           setCreatives(list);
           setReelBusy(prev => { const n = new Set(prev); n.delete(parentId); return n; });
           return;
         }
-        if (Date.now() - startedAt > TIMEOUT_MS) {
-          clearInterval(interval);
-          reelPollRefs.current.delete(parentId);
-          setReelBusy(prev => { const n = new Set(prev); n.delete(parentId); return n; });
-          alert('Reel-Generierung dauert ungewöhnlich lang. Bitte später in der Galerie nachschauen oder Logs prüfen.');
-        }
       } catch (err) { console.warn('[reel-poll]', err.message); }
-    }, 6000);
-    reelPollRefs.current.set(parentId, interval);
+      const elapsedMin = (Date.now() - startedAt) / 60_000;
+      const delay = elapsedMin > 15 ? 30_000
+                  : elapsedMin > 6  ? 15_000
+                  : 6_000;
+      timer = setTimeout(tick, delay);
+      reelPollRefs.current.set(parentId, timer);
+    }
+    timer = setTimeout(tick, 6_000);
+    reelPollRefs.current.set(parentId, timer);
   }
   useEffect(() => () => {
-    reelPollRefs.current.forEach(id => clearInterval(id));
+    reelPollRefs.current.forEach(timer => clearTimeout(timer));
     reelPollRefs.current.clear();
   }, []);
 
@@ -191,28 +194,40 @@ export default function JobCreatives() {
     } catch (err) { alert(err.message); }
   }
 
-  /* ───── Polling ───── */
+  /* ───── Polling (mit Backoff statt hartem Timeout) ─────
+   * Phase 1 (0–5 Min):  alle 4s pollen — primäres Fenster
+   * Phase 2 (5–15 Min): alle 15s pollen — Hintergrund-Banner zeigen
+   * Phase 3 (>15 Min):  alle 30s pollen, dezenter Hinweis statt Fehler
+   * Endet nur wenn alle erwarteten Creatives da sind ODER User die Seite verlässt. */
   function stopPolling() {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
   }
   function startPolling(baselineCount, expectedNew) {
     stopPolling();
     const startedAt = Date.now();
-    const TIMEOUT_MS = 5 * 60 * 1000;
-    pollRef.current = setInterval(async () => {
+
+    async function tick() {
       try {
         const res = await api(`/creatives?job_id=${job.id}`);
         const list = res.creatives || [];
         setCreatives(list);
-        if (list.length - baselineCount >= expectedNew) {
-          stopPolling(); setGenerating(false); setExpected(0); return;
+        const have = list.length - baselineCount;
+        if (have >= expectedNew) {
+          stopPolling(); setGenerating(false); setExpected(0); setGenerateError(''); return;
         }
-        if (Date.now() - startedAt > TIMEOUT_MS) {
-          stopPolling(); setGenerating(false); setExpected(0);
-          setGenerateError('Generierung dauert ungewöhnlich lang. Bitte später nochmal prüfen.');
-        }
-      } catch (err) { console.warn('[poll]', err.message); }
-    }, 4000);
+      } catch (err) {
+        console.warn('[poll]', err.message);
+      }
+
+      // Adaptives Intervall (Backoff) — nie hart abbrechen,
+      // sondern auf längeres Polling umsteigen damit Backend in Ruhe fertig wird
+      const elapsedMin = (Date.now() - startedAt) / 60_000;
+      const delay = elapsedMin > 15 ? 30_000
+                  : elapsedMin > 5  ? 15_000
+                  : 4_000;
+      pollRef.current = setTimeout(tick, delay);
+    }
+    pollRef.current = setTimeout(tick, 4_000);
   }
   useEffect(() => () => stopPolling(), []);
 
