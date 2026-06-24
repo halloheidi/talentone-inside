@@ -144,7 +144,7 @@ export default function ProjekteOverview() {
   async function bulkDelete() {
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
-    if (!confirm(`${ids.length} Projekt${ids.length === 1 ? '' : 'e'} wirklich löschen? Alle zugehörigen Kommentare gehen auch verloren.`)) return;
+    if (!confirm(`${ids.length} Projekt${ids.length === 1 ? '' : 'e'} wirklich löschen? Alle zugehörigen Kommentare gehen auch verloren. Verknüpfte TalentOne-Kunden bleiben unberührt.`)) return;
     const errors = [];
     for (const id of ids) {
       try { await api(`/projekte/${id}`, { method: 'DELETE' }); }
@@ -153,6 +153,30 @@ export default function ProjekteOverview() {
     setProjekte(prev => prev.filter(p => !selectedIds.has(p.id)));
     setSelectedIds(new Set());
     if (errors.length) alert(`${errors.length} Fehler:\n${errors.join('\n')}`);
+  }
+
+  /* ─── Merge mehrerer Projekte ─── */
+  const [mergeOpen, setMergeOpen] = useState(false);
+  async function performMerge(hauptId) {
+    const mergedIds = Array.from(selectedIds).filter(id => id !== hauptId);
+    if (mergedIds.length === 0) return;
+    const haupt = projekte.find(p => p.id === hauptId);
+    if (!confirm(`${mergedIds.length} Projekt${mergedIds.length === 1 ? '' : 'e'} ins Hauptprojekt „${haupt?.projekt || haupt?.kunde || '?'}" zusammenführen?\n\nKommentare und Notizen werden übernommen, die zusammengeführten Projekte werden gelöscht. Verknüpfte TalentOne-Kunden bleiben unberührt. Das kann nicht rückgängig gemacht werden.`)) return;
+    try {
+      const res = await api('/projekte/merge', {
+        method: 'POST',
+        body: { haupt_id: hauptId, merged_ids: mergedIds },
+      });
+      // Frontend-State: andere entfernen, Hauptprojekt aktualisieren
+      setProjekte(prev => prev
+        .filter(p => !mergedIds.includes(p.id))
+        .map(p => p.id === hauptId ? { ...p, ...res.projekt } : p));
+      setSelectedIds(new Set());
+      setMergeOpen(false);
+      alert(`${mergedIds.length} Projekt${mergedIds.length === 1 ? '' : 'e'} erfolgreich zusammengeführt.`);
+    } catch (err) {
+      alert(`Merge fehlgeschlagen: ${err.message}`);
+    }
   }
 
   async function load() {
@@ -260,6 +284,11 @@ export default function ProjekteOverview() {
           <button className={`pub-filter ${view === 'liste' ? 'is-active' : ''}`} onClick={() => setView('liste')}>Liste</button>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {selectedIds.size >= 2 && (
+            <button className="btn-ghost" onClick={() => setMergeOpen(true)}>
+              🔗 {selectedIds.size} zusammenführen
+            </button>
+          )}
           {selectedIds.size > 0 && (
             <button className="btn-ghost btn-danger" onClick={bulkDelete}>
               🗑 {selectedIds.size} löschen
@@ -270,6 +299,14 @@ export default function ProjekteOverview() {
           <button className="btn-primary" onClick={() => setShowCreate(true)}>+ Neues Projekt</button>
         </div>
       </header>
+
+      {mergeOpen && (
+        <MergeProjekteModal
+          projekte={projekte.filter(p => selectedIds.has(p.id))}
+          onCancel={() => setMergeOpen(false)}
+          onConfirm={performMerge}
+        />
+      )}
 
       <section className="filter-bar">
         <div className="filter-group"><label>Suche</label>
@@ -308,6 +345,10 @@ export default function ProjekteOverview() {
           onClose={() => setSelectedId(null)}
           onUpdate={updated => {
             setProjekte(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
+          }}
+          onDeleted={(id) => {
+            setProjekte(prev => prev.filter(p => p.id !== id));
+            setSelectedId(null);
           }}
         />
       )}
@@ -421,7 +462,7 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
 
 /* ═════════════════════ SLIDE-OVER ═════════════════════ */
 
-function ProjektSlideOver({ projektId, team, onClose, onUpdate }) {
+function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [loading, setLoading] = useState(true);
   const [projekt, setProjekt] = useState(null);
   const [autoKeys, setAutoKeys] = useState([]);
@@ -480,7 +521,22 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate }) {
               {projekt.projektnummer ? ` · #${projekt.projektnummer}` : ''}
             </p>
           </div>
-          <button className="btn-ghost" onClick={onClose}>×</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              className="btn-ghost btn-danger btn-sm"
+              title="Projekt löschen"
+              onClick={async () => {
+                if (!confirm(`Projekt „${projekt.projekt || projekt.kunde || '(Unbenannt)'}" wirklich löschen? Alle zugehörigen Kommentare werden ebenfalls entfernt. Verknüpfte TalentOne-Kunden bleiben unberührt. Das kann nicht rückgängig gemacht werden.`)) return;
+                try {
+                  await api(`/projekte/${projektId}`, { method: 'DELETE' });
+                  onDeleted?.(projektId);
+                } catch (err) {
+                  alert(`Löschen fehlgeschlagen: ${err.message}`);
+                }
+              }}
+            >🗑 Löschen</button>
+            <button className="btn-ghost" onClick={onClose}>×</button>
+          </div>
         </header>
 
         <div className="slideover-body">
@@ -780,6 +836,74 @@ function CreateProjektModal({ team, onClose, onCreated }) {
         <label className="field field-full"><span>Standorte</span><input type="text" value={form.standorte} onChange={e => setForm({ ...form, standorte: e.target.value })} /></label>
       </div>
       {err && <div className="alert alert-error" style={{ marginTop: 12 }}>{err}</div>}
+    </Modal>
+  );
+}
+
+/* ═════════════════════ MERGE-MODAL ═════════════════════ */
+
+function MergeProjekteModal({ projekte, onCancel, onConfirm }) {
+  const [hauptId, setHauptId] = useState(projekte[0]?.id || null);
+  return (
+    <Modal
+      open={true}
+      onClose={onCancel}
+      title={`${projekte.length} Projekte zusammenführen`}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onCancel}>Abbrechen</button>
+          <button
+            className="btn-primary"
+            onClick={() => hauptId && onConfirm(hauptId)}
+            disabled={!hauptId}
+          >Zusammenführen</button>
+        </>
+      }
+    >
+      <p className="pane-hint">
+        Wähle das <strong>Hauptprojekt</strong> — die anderen Projekte werden hineingeführt und anschließend gelöscht.
+        Kommentare und Notizen aller Projekte werden übernommen, erledigte Checklisten-Punkte bleiben erledigt (OR-Logik).
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+        {projekte.map(p => (
+          <label
+            key={p.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px',
+              border: '1.5px solid ' + (hauptId === p.id ? 'var(--accent-dark, #c8df00)' : 'var(--line, #e2e0dc)'),
+              borderRadius: 10,
+              background: hauptId === p.id ? 'rgba(232,255,61,0.10)' : '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="radio"
+              name="haupt-projekt"
+              checked={hauptId === p.id}
+              onChange={() => setHauptId(p.id)}
+              style={{ width: 16, height: 16 }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{p.projekt || p.kunde || '—'}</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                {p.kunde && p.projekt ? p.kunde + ' · ' : ''}
+                {p.status || '—'}
+                {p.kommentar_count > 0 ? ` · ${p.kommentar_count} Kommentar${p.kommentar_count === 1 ? '' : 'e'}` : ''}
+              </div>
+            </div>
+            {hauptId === p.id && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 0.06, textTransform: 'uppercase',
+                padding: '2px 8px', background: 'var(--accent, #e8ff3d)', color: 'var(--ink-1)', borderRadius: 100,
+              }}>Hauptprojekt</span>
+            )}
+          </label>
+        ))}
+      </div>
+      <p className="pane-hint" style={{ marginTop: 14, fontSize: 12 }}>
+        ⚠ <strong>Kann nicht rückgängig gemacht werden.</strong> Verknüpfte TalentOne-Kunden (Creatives, Funnels, …) bleiben unberührt.
+      </p>
     </Modal>
   );
 }

@@ -174,6 +174,32 @@ router.get('/', async (req, res) => {
   res.json({ kunden: data });
 });
 
+/* GET /api/kunden/dubletten-check?q=Firmenname
+   Liefert ähnliche Kunden + Projekte für die Dubletten-Warnung beim Anlegen.
+   Trifft auf ilike-Match (case-insensitive, Teilstring) — bewusst großzügig. */
+router.get('/dubletten-check', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 3) return res.json({ kunden: [], projekte: [] });
+  const pattern = `%${q.replace(/[%_]/g, m => '\\' + m)}%`;
+  try {
+    const [kRes, pRes] = await Promise.all([
+      supabase.from('talentone_kunden')
+        .select('id,firmenname,email,agentur,created_at')
+        .ilike('firmenname', pattern).limit(10),
+      supabase.from('talentone_projekte')
+        .select('id,projekt,kunde,kunde_id,agentur,status,created_at')
+        .ilike('kunde', pattern).limit(10),
+    ]);
+    res.json({
+      kunden: kRes.data || [],
+      projekte: pRes.data || [],
+    });
+  } catch (err) {
+    console.error('[dubletten-check]', err.message);
+    res.json({ kunden: [], projekte: [] });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('talentone_kunden')

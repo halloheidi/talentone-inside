@@ -3,6 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import { api } from '../lib/api.js';
 
+// Debounced Dubletten-Check während des Tippens — sucht in Kunden + Projekten
+function useDubletten(firmenname) {
+  const [hits, setHits] = useState({ kunden: [], projekte: [] });
+  useEffect(() => {
+    const q = (firmenname || '').trim();
+    if (q.length < 3) { setHits({ kunden: [], projekte: [] }); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api(`/kunden/dubletten-check?q=${encodeURIComponent(q)}`);
+        setHits({ kunden: res.kunden || [], projekte: res.projekte || [] });
+      } catch (e) { /* still */ }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [firmenname]);
+  return hits;
+}
+
 const PROJEKT_STATUS_OPTIONS = [
   { value: 'kickoff_vereinbart', label: 'Kick-Off vereinbart' },
   { value: 'vorbereitung',       label: 'Kunde ohne Kick-Off' },
@@ -82,6 +99,11 @@ export default function QuickCreateModal({ open, onClose }) {
   // Invite-Tab: Kunde füllt selbst aus
   const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
   const [inviteSuccess, setInviteSuccess] = useState(null); // { firmenname, formularUrl } | null
+
+  // Dubletten-Check: nutzt das aktive Firmenname-Feld je nach Tab (manual / invite)
+  const watchedFirma = tab === 'invite' ? invite.firmenname : (tab === 'manual' ? manual.firmenname : '');
+  const dubletten = useDubletten(watchedFirma);
+  const hasDubletten = (dubletten.kunden.length + dubletten.projekte.length) > 0;
 
   function reset() {
     setTab('url');
@@ -352,6 +374,17 @@ export default function QuickCreateModal({ open, onClose }) {
                   <span>Firmenname (optional)</span>
                   <input value={invite.firmenname} onChange={e => setInvite({ ...invite, firmenname: e.target.value })} />
                 </label>
+                {tab === 'invite' && hasDubletten && (
+                  <div className="field-full">
+                    <DublettenHinweis
+                      hits={dubletten}
+                      onPickKunde={(k) => {
+                        reset(); onClose();
+                        nav(`/kunden/${k.id}`);
+                      }}
+                    />
+                  </div>
+                )}
                 <label className="field">
                   <span>Ansprechpartner (optional)</span>
                   <input value={invite.ansprechpartner} onChange={e => setInvite({ ...invite, ansprechpartner: e.target.value })} />
@@ -381,6 +414,17 @@ export default function QuickCreateModal({ open, onClose }) {
                 <span>Firmenname *</span>
                 <input value={manual.firmenname} onChange={e => setManual({ ...manual, firmenname: e.target.value })} required />
               </label>
+              {tab === 'manual' && hasDubletten && (
+                <div className="field-full">
+                  <DublettenHinweis
+                    hits={dubletten}
+                    onPickKunde={(k) => {
+                      reset(); onClose();
+                      nav(`/kunden/${k.id}`);
+                    }}
+                  />
+                </div>
+              )}
               <label className="field">
                 <span>Ansprechpartner</span>
                 <input value={manual.ansprechpartner} onChange={e => setManual({ ...manual, ansprechpartner: e.target.value })} />
@@ -457,5 +501,59 @@ export default function QuickCreateModal({ open, onClose }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+function DublettenHinweis({ hits, onPickKunde }) {
+  const all = [
+    ...hits.kunden.map(k => ({ type: 'kunde', id: k.id, name: k.firmenname, sub: k.email || k.agentur, raw: k })),
+    ...hits.projekte.map(p => ({ type: 'projekt', id: p.id, name: p.projekt || p.kunde, sub: p.kunde + (p.status ? ` · ${p.status}` : ''), raw: p })),
+  ].slice(0, 6);
+
+  return (
+    <div style={{
+      marginTop: 10, padding: '12px 14px',
+      background: '#fffbeb', border: '1.5px solid #f59e0b', borderRadius: 10,
+      fontSize: 13, color: 'var(--ink-1, #0a0a0a)',
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>
+        ⚠️ Ähnliche{all.length > 1 ? ' Einträge' : 'r Eintrag'} gefunden — derselbe Kunde?
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+        {all.map(item => (
+          <div key={item.type + item.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 10px', background: '#fff', border: '1px solid var(--line, #e2e0dc)',
+            borderRadius: 6, fontSize: 12.5,
+          }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase',
+              padding: '2px 6px',
+              background: item.type === 'kunde' ? 'rgba(20,170,80,0.12)' : 'rgba(100,100,100,0.12)',
+              color: item.type === 'kunde' ? '#15803d' : 'var(--ink-2, #5a5955)',
+              borderRadius: 100, flexShrink: 0,
+            }}>{item.type === 'kunde' ? 'Kunde' : 'Projekt'}</span>
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontWeight: 600, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{item.name}</div>
+              {item.sub && <div style={{ fontSize: 11, color: 'var(--ink-3, #999790)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{item.sub}</div>}
+            </div>
+            {item.type === 'kunde' && (
+              <button
+                type="button"
+                onClick={() => onPickKunde(item.raw)}
+                style={{
+                  fontSize: 11, fontWeight: 700, padding: '4px 10px',
+                  background: 'var(--ink-1, #0a0a0a)', color: '#fff', border: 'none',
+                  borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                }}
+              >Öffnen + Projekt anlegen →</button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ink-3, #5a5955)' }}>
+        Wenn es derselbe Kunde ist: oben „Öffnen" — dann legst du das neue Projekt direkt dort an. Sonst einfach ignorieren und unten weiter anlegen.
+      </div>
+    </div>
   );
 }

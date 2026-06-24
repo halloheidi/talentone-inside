@@ -379,21 +379,6 @@ export default function JobFunnel() {
             onClearImage={() => clearImage(activeScreen.id)}
           />}
 
-          {/* Bewerbungen */}
-          <fieldset className="formular-section bewerbungen-section">
-            <legend>Eingegangene Bewerbungen</legend>
-            <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
-            <BewerbungenTable
-              job={job}
-              kunde={kunde}
-              internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
-              onChangeInternalSpalten={async (next) => {
-                await api(`/jobs/${job.id}`, { method: 'PATCH', body: { interne_spalten: next } });
-                reload?.();
-              }}
-            />
-          </fieldset>
-
           {/* Tracking — nur bei internem Funnel (extern → Tracking läuft direkt in Perspective o.ä.) */}
           {!extern && (
           <fieldset className="formular-section">
@@ -444,6 +429,25 @@ export default function JobFunnel() {
           </div>
         </aside>
       </div>
+
+      {/* Bewerbungen — eigener Full-Width-Container damit die Tabelle mit
+          horizontalem Scroll nicht das 2-Spalten-Layout darüber sprengt.
+          Bei externem Funnel ausgeblendet (Tracking läuft dort extern). */}
+      {!(extern && externUrl.trim()) && (
+        <fieldset className="formular-section bewerbungen-section bewerbungen-fullwidth">
+          <legend>Eingegangene Bewerbungen</legend>
+          <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
+          <BewerbungenTable
+            job={job}
+            kunde={kunde}
+            internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
+            onChangeInternalSpalten={async (next) => {
+              await api(`/jobs/${job.id}`, { method: 'PATCH', body: { interne_spalten: next } });
+              reload?.();
+            }}
+          />
+        </fieldset>
+      )}
 
       {/* Bild-Picker-Modal */}
       <Modal

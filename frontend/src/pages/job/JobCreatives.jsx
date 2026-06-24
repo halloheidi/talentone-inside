@@ -213,6 +213,19 @@ export default function JobCreatives() {
         const res = await api(`/creatives?job_id=${job.id}`);
         const list = res.creatives || [];
         setCreatives(list);
+
+        // Backend hat einen aktuellen Fehler gemeldet (nach Generierungs-Start aufgetreten)?
+        const err = res.last_generation_error;
+        if (err && err.ts > startedAt) {
+          stopPolling();
+          setGenerating(false);
+          setExpected(0);
+          setGenerateError(err.friendly || err.error || 'Bildgenerierung fehlgeschlagen.');
+          // Server-Marker leeren damit nächster Run wieder sauber startet
+          api('/creatives/clear-error', { method: 'POST', body: { job_id: job.id } }).catch(() => {});
+          return;
+        }
+
         const have = list.length - baselineCount;
         if (have >= expectedNew) {
           stopPolling(); setGenerating(false); setExpected(0); setGenerateError(''); return;
@@ -221,8 +234,7 @@ export default function JobCreatives() {
         console.warn('[poll]', err.message);
       }
 
-      // Adaptives Intervall (Backoff) — nie hart abbrechen,
-      // sondern auf längeres Polling umsteigen damit Backend in Ruhe fertig wird
+      // Adaptives Intervall (Backoff)
       const elapsedMin = (Date.now() - startedAt) / 60_000;
       const delay = elapsedMin > 15 ? 30_000
                   : elapsedMin > 5  ? 15_000

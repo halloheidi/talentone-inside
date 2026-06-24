@@ -14,6 +14,53 @@ const VALID_FORMATS = new Set(['quadrat', 'story', 'sonstiges']);
 const VALID_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 const VALID_VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime']);
 
+/* In-Memory-Map für die jüngste Generation-Fehlermeldung pro Job.
+   Frontend pollt /api/creatives und bekommt last_generation_error mit, um
+   einen klaren Fehler anzuzeigen statt endlos zu warten. */
+const lastGenError = new Map(); // job_id -> { error, friendly, ts }
+
+function friendlyOpenAIError(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('billing_hard_limit_reached') || s.includes('billing limit') || s.includes('billing_hard_limit')) {
+    return 'OpenAI-Budget aufgebraucht — bitte im Dashboard das Spending-Limit erhöhen (platform.openai.com → Settings → Limits).';
+  }
+  if (s.includes('insufficient_quota')) {
+    return 'OpenAI-Guthaben aufgebraucht — bitte im Dashboard nachladen.';
+  }
+  if (s.includes('invalid_api_key') || s.includes('incorrect api key') || s.includes('401')) {
+    return 'OpenAI-API-Key ungültig — bitte im Backend-ENV prüfen.';
+  }
+  if (s.includes('rate_limit') || s.includes('429')) {
+    return 'OpenAI-Rate-Limit erreicht — bitte 1–2 Minuten warten und nochmal probieren.';
+  }
+  if (s.includes('content_policy') || s.includes('safety system')) {
+    return 'OpenAI hat den Prompt aus Content-Policy-Gründen abgelehnt — bitte Motiv anpassen.';
+  }
+  if (s.includes('timeout') || s.includes('etimedout')) {
+    return 'OpenAI-Anfrage hat zu lange gedauert (Timeout) — bitte erneut probieren.';
+  }
+  if (s.includes('storage') || s.includes('supabase')) {
+    return 'Bild wurde generiert, konnte aber nicht gespeichert werden — Storage-Bucket prüfen.';
+  }
+  // Fallback: erste paar Worte der Original-Meldung anzeigen
+  return `Fehler bei der Bildgenerierung: ${String(raw || '').slice(0, 180)}`;
+}
+
+export function recordGenError(jobId, rawError) {
+  if (!jobId) return;
+  lastGenError.set(jobId, {
+    error: String(rawError || '').slice(0, 500),
+    friendly: friendlyOpenAIError(rawError),
+    ts: Date.now(),
+  });
+}
+export function clearGenError(jobId) {
+  if (jobId) lastGenError.delete(jobId);
+}
+export function getGenError(jobId) {
+  return jobId ? lastGenError.get(jobId) || null : null;
+}
+
 /* POST /api/creatives/upload  body: { job_id, files: [{ fileData, fileName, contentType, format }] }
    Lädt N fertige Creatives (Bilder/Videos) hoch — gleicher Bucket, gleiche Galerie wie generierte.
    Markiert sie via quelle='upload' damit das Frontend ein "Hochgeladen"-Badge zeigen kann. */
@@ -79,13 +126,26 @@ router.post('/upload', async (req, res) => {
   res.status(201).json({ creatives: inserted, errors: errors.length ? errors : undefined });
 });
 
-/* GET /api/creatives?job_id=… — Galerie für ein Projekt */
+/* GET /api/creatives?job_id=… — Galerie für ein Projekt
+   Liefert zusätzlich last_generation_error, damit das Frontend Polling-Failures
+   sieht ohne separates Endpoint. */
 router.get('/', async (req, res) => {
   let q = supabase.from('talentone_creatives').select('*').order('created_at', { ascending: false });
   if (req.query.job_id) q = q.eq('job_id', req.query.job_id);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ creatives: data });
+  res.json({
+    creatives: data,
+    last_generation_error: req.query.job_id ? getGenError(req.query.job_id) : null,
+  });
+});
+
+/* POST /api/creatives/clear-error — Frontend bestätigt Anzeige des Fehlers,
+   damit er nicht beim nächsten Generierungsstart noch übrig ist. */
+router.post('/clear-error', (req, res) => {
+  const { job_id } = req.body || {};
+  if (job_id) clearGenError(job_id);
+  res.json({ ok: true });
 });
 
 /* POST /api/creatives/motiv-vorschlaege  body: { job_id }
@@ -144,6 +204,8 @@ router.post('/generate', async (req, res) => {
   }
 
   const expected = n * 2; // jede Variante × 2 Formate
+  // Alte Fehlermeldung clearen damit das Frontend nicht den Fehler vom letzten Run sieht
+  clearGenError(job_id);
   res.status(202).json({ accepted: true, expected, message: 'Generierung gestartet — Bilder erscheinen automatisch in der Galerie.' });
 
   // Hintergrund-Job
@@ -163,15 +225,24 @@ router.post('/generate', async (req, res) => {
           job_id, format, typ: 'bild', bild_url: bildUrl, prompt, status: 'fertig',
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
-        if (insErr) console.error(`[generate-bg] DB-Insert: ${insErr.message}`);
-        else console.log(`[generate-bg] ${allOk.length} Creative(s) für job ${job_id} fertig.`);
+        if (insErr) {
+          console.error(`[generate-bg] DB-Insert: ${insErr.message}`);
+          recordGenError(job_id, `DB-Insert fehlgeschlagen: ${insErr.message}`);
+        } else {
+          console.log(`[generate-bg] ${allOk.length} Creative(s) für job ${job_id} fertig.`);
+        }
       } else {
         console.error(`[generate-bg] Alle Bilder fehlgeschlagen für job ${job_id}`);
+        recordGenError(job_id, allErrors[0] || 'Alle Generierungsversuche fehlgeschlagen');
       }
     } catch (err) {
       console.error(`[generate-bg] Fehler:`, err.message);
+      recordGenError(job_id, err.message);
     }
-  })().catch(err => console.error('[generate-bg] uncaught:', err));
+  })().catch(err => {
+    console.error('[generate-bg] uncaught:', err);
+    recordGenError(job_id, err.message || String(err));
+  });
 });
 
 /* POST /api/creatives/:id/regenerate

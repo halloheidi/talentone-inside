@@ -120,11 +120,90 @@ router.patch('/:id', async (req, res) => {
   res.json({ projekt: data });
 });
 
-/* DELETE /api/projekte/:id */
+/* DELETE /api/projekte/:id — löscht auch alle zugehörigen Kommentare.
+   Verknüpfte talentone_kunden bleiben unberührt. */
 router.delete('/:id', async (req, res) => {
-  const { error } = await supabase.from('talentone_projekte').delete().eq('id', req.params.id);
+  const id = req.params.id;
+  // Erst Kommentare entfernen damit kein orphaned data zurückbleibt
+  const { error: kErr } = await supabase.from('talentone_kommentare').delete().eq('projekt_id', id);
+  if (kErr) console.warn('[projekte/delete] Kommentare:', kErr.message);
+  const { error } = await supabase.from('talentone_projekte').delete().eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* POST /api/projekte/merge  body: { haupt_id, merged_ids: [] }
+   Fasst N Projekte ins Hauptprojekt zusammen:
+   - Alle Kommentare der merged_ids werden auf haupt_id umgehängt
+   - Notizen werden konkateniert (mit Trennung)
+   - Checkliste: erledigte Punkte aus beiden = erledigt (OR-Logik)
+   - Die merged_ids werden anschließend gelöscht
+   Verknüpfte talentone_kunden bleiben unberührt. */
+router.post('/merge', async (req, res) => {
+  const { haupt_id, merged_ids } = req.body || {};
+  if (!haupt_id) return res.status(400).json({ error: 'haupt_id ist Pflicht.' });
+  if (!Array.isArray(merged_ids) || merged_ids.length === 0) {
+    return res.status(400).json({ error: 'merged_ids muss ein nicht-leeres Array sein.' });
+  }
+  const dups = merged_ids.filter(id => id === haupt_id);
+  if (dups.length) return res.status(400).json({ error: 'haupt_id darf nicht in merged_ids stehen.' });
+
+  try {
+    // Hauptprojekt + alle zu mergenden Projekte laden
+    const { data: haupt, error: hErr } = await supabase
+      .from('talentone_projekte').select('*').eq('id', haupt_id).maybeSingle();
+    if (hErr || !haupt) return res.status(404).json({ error: 'Hauptprojekt nicht gefunden.' });
+
+    const { data: others = [], error: oErr } = await supabase
+      .from('talentone_projekte').select('*').in('id', merged_ids);
+    if (oErr) return res.status(500).json({ error: oErr.message });
+    if (others.length === 0) return res.status(404).json({ error: 'Keine zu mergenden Projekte gefunden.' });
+
+    // 1) Kommentare umhängen
+    const { error: kErr } = await supabase
+      .from('talentone_kommentare')
+      .update({ projekt_id: haupt_id })
+      .in('projekt_id', merged_ids);
+    if (kErr) console.warn('[merge] Kommentare umhängen:', kErr.message);
+
+    // 2) Notizen zusammenführen
+    const allNotizen = [haupt.notizen, ...others.map(p => p.notizen)]
+      .map(n => (n || '').trim())
+      .filter(Boolean);
+    const mergedNotizen = allNotizen.length > 1
+      ? allNotizen.map((n, i) => i === 0 ? n : `\n\n──────── zusammengeführt ────────\n${n}`).join('')
+      : (allNotizen[0] || null);
+
+    // 3) Checkliste: OR-Logik (ein Punkt ist erledigt wenn er irgendwo erledigt war)
+    const mergedChecklist = { ...(haupt.checkliste || {}) };
+    for (const p of others) {
+      for (const [k, v] of Object.entries(p.checkliste || {})) {
+        if (v && !mergedChecklist[k]) mergedChecklist[k] = v;
+      }
+    }
+
+    // 4) Hauptprojekt updaten
+    const { data: updated, error: uErr } = await supabase
+      .from('talentone_projekte')
+      .update({
+        notizen: mergedNotizen,
+        checkliste: mergedChecklist,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', haupt_id).select().single();
+    if (uErr) return res.status(500).json({ error: `Hauptprojekt-Update: ${uErr.message}` });
+
+    // 5) Andere Projekte löschen
+    const { error: dErr } = await supabase
+      .from('talentone_projekte').delete().in('id', merged_ids);
+    if (dErr) return res.status(500).json({ error: `Merge-Delete: ${dErr.message}` });
+
+    console.log(`[projekte/merge] ${merged_ids.length} Projekt(e) in ${haupt_id.slice(0,8)} zusammengeführt.`);
+    res.json({ ok: true, projekt: updated, merged_count: merged_ids.length });
+  } catch (err) {
+    console.error('[projekte/merge]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ════════════════════ Kommentare ════════════════════ */

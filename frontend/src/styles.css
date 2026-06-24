@@ -2755,11 +2755,15 @@ button { font-family: inherit; }
 /* Bei extern mit URL: interne Editor-Sektionen komplett ausblenden, rechte Spalte weg.
    Sektionen die sichtbar bleiben: tracking (Pixel/CAPI). */
 .funnel-editor-cols.is-extern-active .screens-section,
-.funnel-editor-cols.is-extern-active .bewerbungen-section,
 .funnel-editor-cols.is-extern-active .funnel-editor-right {
   display: none;
 }
 .funnel-editor-cols.is-extern-active { grid-template-columns: 1fr; }
+
+/* Bewerber-Sektion: eigener Full-Width-Container unter dem Editor,
+   damit die Tabelle mit vielen Spalten + horizontalem Scroll nicht
+   das 2-Spalten-Layout darüber breiter zieht. */
+.bewerbungen-fullwidth { margin-top: 24px; }
 
 /* Disabled-Toggle (wenn extern-URL eingetragen ist) */
 .funnel-mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
