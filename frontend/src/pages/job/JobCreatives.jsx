@@ -139,6 +139,22 @@ export default function JobCreatives() {
   }
   useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id]);
 
+  /* ───── Kunden-Kommentare aus Review laden ───── */
+  const [reviewKommentare, setReviewKommentare] = useState({}); // { 'creative_<id>': text, ... }
+  const [reviewStatus, setReviewStatus] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    api(`/jobs/${job.id}/export/review`)
+      .then(res => {
+        if (cancelled) return;
+        const k = res.review?.kommentare;
+        setReviewKommentare(k && typeof k === 'object' ? k : {});
+        setReviewStatus(res.review?.status || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [job.id]);
+
   /* ───── Personen / Referenzbilder ───── */
   function loadPersonen() {
     if (!kunde?.id) return;
@@ -741,6 +757,9 @@ export default function JobCreatives() {
                   {c.quelle === 'upload' && (
                     <span className="creative-upload-badge" title="Manuell hochgeladen">⬆ Hochgeladen</span>
                   )}
+                  {(reviewKommentare[`creative_${c.id}`] || '').trim() && (
+                    <span className="creative-feedback-badge" title="Kunde hat einen Änderungswunsch hinterlassen">📝 Änderungswunsch</span>
+                  )}
                   {c.bild_url && (
                     <button
                       type="button"
@@ -753,6 +772,16 @@ export default function JobCreatives() {
                     </button>
                   )}
                 </button>
+                {(() => {
+                  const kommentar = (reviewKommentare[`creative_${c.id}`] || '').trim();
+                  if (!kommentar) return null;
+                  return (
+                    <div className="creative-kommentar" title="Kundenkommentar aus Review">
+                      <div className="creative-kommentar-head">📝 Änderungswunsch vom Kunden</div>
+                      <div className="creative-kommentar-body">{kommentar}</div>
+                    </div>
+                  );
+                })()}
                 <div className="creative-foot">
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">

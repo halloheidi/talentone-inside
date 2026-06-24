@@ -43,6 +43,20 @@ export default function JobAdCopies() {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
 
+  /* ───── Kunden-Kommentare aus Review laden ───── */
+  const [reviewKommentare, setReviewKommentare] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    api(`/jobs/${job.id}/export/review`)
+      .then(res => {
+        if (cancelled) return;
+        const k = res.review?.kommentare;
+        setReviewKommentare(k && typeof k === 'object' ? k : {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [job.id]);
+
   async function updateLinks() {
     setUpdateLinksBusy(true);
     try {
@@ -203,8 +217,20 @@ export default function JobAdCopies() {
                     <div className="adcopy-style">{s.label}</div>
                     <div className="adcopy-substyle">{s.subtitle} · {s.words}</div>
                   </div>
-                  {item?.bearbeitet && <span className="adcopy-edited-badge">bearbeitet</span>}
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {item?.bearbeitet && <span className="adcopy-edited-badge">bearbeitet</span>}
+                    {item && (reviewKommentare[`adcopy_${item.id}`] || '').trim() && (
+                      <span className="adcopy-feedback-badge" title="Kunde hat einen Änderungswunsch hinterlassen">📝 Änderungswunsch</span>
+                    )}
+                  </div>
                 </header>
+
+                {item && (reviewKommentare[`adcopy_${item.id}`] || '').trim() && (
+                  <div className="creative-kommentar" style={{ margin: '8px 0 12px' }}>
+                    <div className="creative-kommentar-head">📝 Änderungswunsch vom Kunden</div>
+                    <div className="creative-kommentar-body">{reviewKommentare[`adcopy_${item.id}`]}</div>
+                  </div>
+                )}
 
                 {!item && (genAllBusy || busy) && (
                   <div className="adcopy-skeleton">

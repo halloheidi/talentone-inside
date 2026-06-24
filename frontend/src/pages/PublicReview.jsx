@@ -218,24 +218,36 @@ export default function PublicReview() {
           />
         </section>
 
-        {!done && (
-          <div className="review-actions">
-            <button
-              className="review-btn-secondary"
-              onClick={() => submit('aenderungen')}
-              disabled={busy}
-            >
-              {busy === 'aenderungen' ? 'Sende…' : '📝 Änderungswünsche senden'}
-            </button>
-            <button
-              className="review-btn-primary"
-              onClick={() => submit('freigegeben')}
-              disabled={busy}
-            >
-              {busy === 'freigegeben' ? 'Sende…' : '✅ Alles freigeben'}
-            </button>
-          </div>
-        )}
+        {!done && (() => {
+          const hasComments = Object.values(kommentare).some(v => (v || '').trim().length > 0);
+          return (
+            <>
+              {hasComments && (
+                <div className="review-comments-hint">
+                  Du hast Anmerkungen hinterlassen — diese senden wir an unser Team zur Überarbeitung.
+                </div>
+              )}
+              <div className="review-actions">
+                <button
+                  className={hasComments ? 'review-btn-primary' : 'review-btn-secondary'}
+                  onClick={() => submit('aenderungen')}
+                  disabled={busy}
+                >
+                  {busy === 'aenderungen' ? 'Sende…' : '📝 Änderungswünsche senden'}
+                </button>
+                {!hasComments && (
+                  <button
+                    className="review-btn-primary"
+                    onClick={() => submit('freigegeben')}
+                    disabled={busy}
+                  >
+                    {busy === 'freigegeben' ? 'Sende…' : '✅ Alles freigeben'}
+                  </button>
+                )}
+              </div>
+            </>
+          );
+        })()}
       </main>
 
       <footer className="review-footer">

@@ -109,6 +109,24 @@ export default function JobFunnel() {
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
 
+  /* ───── Kundenkommentar aus Review (Funnel + allgemein) ───── */
+  const [reviewFunnelKommentar, setReviewFunnelKommentar] = useState('');
+  const [reviewAllgemeinKommentar, setReviewAllgemeinKommentar] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    api(`/jobs/${job.id}/export/review`)
+      .then(res => {
+        if (cancelled) return;
+        const k = res.review?.kommentare;
+        if (k && typeof k === 'object') {
+          setReviewFunnelKommentar((k['funnel'] || '').trim());
+          setReviewAllgemeinKommentar((k['general'] || k['allgemein'] || '').trim());
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [job.id]);
+
   const activeIndex = screens.findIndex(s => s.id === activeScreenId);
   const activeScreen = activeIndex >= 0 ? screens[activeIndex] : null;
 
@@ -239,6 +257,18 @@ export default function JobFunnel() {
 
   return (
     <div className="funnel-editor">
+      {(reviewFunnelKommentar || reviewAllgemeinKommentar) && (
+        <div className="creative-kommentar" style={{ marginBottom: 16 }}>
+          <div className="creative-kommentar-head">📝 Änderungswunsch vom Kunden zum Funnel</div>
+          {reviewFunnelKommentar && <div className="creative-kommentar-body">{reviewFunnelKommentar}</div>}
+          {reviewAllgemeinKommentar && (
+            <div className="creative-kommentar-body" style={{ marginTop: 6, fontStyle: 'italic' }}>
+              <strong>Allgemein:</strong> {reviewAllgemeinKommentar}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Toggle: Eigener vs. externer Funnel */}
       <div className="funnel-mode-toggle">
         <button
