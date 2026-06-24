@@ -11,7 +11,10 @@ const router = Router();
 
 const PROJEKTE_STATI = [
   'vorbereitung', 'kickoff_vereinbart', 'onboarding',
-  'golive_vereinbart', 'warte_auf_go', 'live',
+  'golive_vereinbart', 'warte_auf_go',
+  'feedbackschleife',  // Kunde hat Änderungswünsche, wir überarbeiten
+  'go',                // Kunde hat freigegeben, bereit zum Schalten
+  'live',
   'pausiert', 'hold', 'abgeschlossen',
 ];
 

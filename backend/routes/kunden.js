@@ -24,7 +24,8 @@ function decodeBase64File(fileData) {
 //   logo (alle): req.body.logo = { fileData, fileName?, contentType? }
 const PROJEKTE_STATI = [
   'vorbereitung', 'kickoff_vereinbart', 'onboarding', 'golive_vereinbart',
-  'warte_auf_go', 'live', 'pausiert', 'hold', 'abgeschlossen',
+  'warte_auf_go', 'feedbackschleife', 'go',
+  'live', 'pausiert', 'hold', 'abgeschlossen',
 ];
 
 router.post('/quick-create', async (req, res) => {

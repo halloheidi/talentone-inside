@@ -6,7 +6,8 @@ import { supabase } from '../supabase.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang, sendReviewBenachrichtigung } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail } from '../mail.js';
+import { findMemberByName } from '../team.js';
 
 const router = Router();
 
@@ -470,7 +471,8 @@ router.post('/review/:token', async (req, res) => {
     savedReview = data;
   }
 
-  // Mitarbeiter benachrichtigen (best-effort, blockt nicht)
+  // Mitarbeiter benachrichtigen (best-effort, blockt nicht) +
+  // Projekt-Kommentar + automatischer Status-Wechsel
   (async () => {
     try {
       const { data: kunde } = await supabase
@@ -482,6 +484,11 @@ router.post('/review/:token', async (req, res) => {
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
       await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives, adcopies, snapshot: kommentare_snapshot });
+
+      // ── Projekt-Sync: Kommentar + Status-Wechsel + Mail an Verantwortlichen ──
+      try {
+        await logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies });
+      } catch (err) { console.warn('[review-projekt-sync]', err.message); }
     } catch (err) { console.warn('[review-mail]', err.message); }
   })().catch(err => console.error('[review-mail-uncaught]', err.message));
 
@@ -682,5 +689,123 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   res.json({ feedback: data });
 });
+
+/* ════════════════════════════════════════════════════════════════
+ * Review → Projekt-Sync
+ * Findet das Projekt zum Kunden/Job, legt einen Auto-Kommentar an,
+ * setzt den Status auf 'feedbackschleife' oder 'go' und benachrichtigt
+ * den Verantwortlichen per Mail. Alles best-effort.
+ * ════════════════════════════════════════════════════════════════ */
+const STIL_LABEL = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
+const FORMAT_LABEL = { quadrat: '1:1', story: '9:16' };
+
+async function findProjektForJob(job, kunde) {
+  if (!kunde && !job?.kunde_id) return null;
+  // 1) Direkter Match via kunde_id
+  if (job?.kunde_id) {
+    const { data } = await supabase
+      .from('talentone_projekte').select('*')
+      .eq('kunde_id', job.kunde_id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (data) return data;
+  }
+  // 2) Fallback via firmenname (case-insensitive)
+  if (kunde?.firmenname) {
+    const { data } = await supabase
+      .from('talentone_projekte').select('*')
+      .ilike('kunde', kunde.firmenname)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
+function buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies }) {
+  const firma = kunde?.firmenname || 'Der Kunde';
+  if (status === 'freigegeben') {
+    const datum = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return `✅ Kunde ${firma} hat die Entwürfe freigegeben am ${datum}.`;
+  }
+  // status === 'aenderungen'
+  const eintraege = [];
+  for (const [key, raw] of Object.entries(kommentare || {})) {
+    const txt = (raw || '').trim();
+    if (!txt) continue;
+    if (key.startsWith('creative_')) {
+      const id = key.slice('creative_'.length);
+      const c = creatives.find(x => x.id === id);
+      const label = c
+        ? `Creative ${FORMAT_LABEL[c.format] || c.format || ''}${c.typ === 'video' ? ' (Reel)' : ''}`.trim()
+        : 'Creative';
+      eintraege.push(`• ${label}: ${txt}`);
+    } else if (key.startsWith('adcopy_')) {
+      const id = key.slice('adcopy_'.length);
+      const a = adcopies.find(x => x.id === id);
+      const label = a ? `Ad Copy ${STIL_LABEL[a.stil] || a.stil}` : 'Ad Copy';
+      eintraege.push(`• ${label}: ${txt}`);
+    } else if (key === 'funnel') {
+      eintraege.push(`• Funnel: ${txt}`);
+    } else if (key === 'general' || key === 'allgemein') {
+      eintraege.push(`• Allgemein: ${txt}`);
+    } else {
+      eintraege.push(`• ${key}: ${txt}`);
+    }
+  }
+  const body = eintraege.length
+    ? eintraege.join('\n\n')
+    : '(Keine spezifischen Anmerkungen — siehe Review-Seite)';
+  return `📝 Kunde ${firma} hat Änderungswünsche zu den Entwürfen gesendet:\n\n${body}`;
+}
+
+async function logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies }) {
+  const projekt = await findProjektForJob(job, kunde);
+  if (!projekt) {
+    console.log(`[review-projekt-sync] Kein Projekt zu Kunde ${kunde?.firmenname || job?.kunde_id} gefunden — skip.`);
+    return;
+  }
+
+  // 1) Auto-Kommentar
+  const text = buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies });
+  await supabase.from('talentone_kommentare').insert({
+    projekt_id: projekt.id,
+    autor: 'Kundenfeedback',
+    text,
+    quelle: 'review',
+    erwaehnungen: projekt.verantwortlich ? [projekt.verantwortlich] : [],
+  });
+
+  // 2) Status-Wechsel — aenderungen → feedbackschleife;
+  //    freigegeben → go (außer Projekt ist schon live, dann unverändert)
+  let newStatus = null;
+  if (status === 'aenderungen') {
+    newStatus = 'feedbackschleife';
+  } else if (status === 'freigegeben' && projekt.status !== 'live') {
+    newStatus = 'go';
+  }
+  if (newStatus && newStatus !== projekt.status) {
+    await supabase.from('talentone_projekte')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', projekt.id);
+    console.log(`[review-projekt-sync] Projekt ${projekt.id.slice(0,8)} → status=${newStatus}`);
+  }
+
+  // 3) E-Mail an Verantwortlichen (best-effort, nur bei Änderungen)
+  if (status === 'aenderungen' && projekt.verantwortlich) {
+    try {
+      const member = findMemberByName(projekt.verantwortlich);
+      if (member?.email) {
+        const projektUrl = `${process.env.PUBLIC_BASE_URL || 'https://inside.talent-one.de'}/projekte?id=${projekt.id}`;
+        await sendMentionMail({
+          to: member.email,
+          mentionedName: projekt.verantwortlich,
+          autor: 'Kundenfeedback',
+          projektName: projekt.projekt || projekt.kunde || 'Projekt',
+          kommentar: text,
+          projektUrl,
+        });
+      }
+    } catch (err) { console.warn('[review-projekt-sync] mention-mail:', err.message); }
+  }
+}
 
 export default router;

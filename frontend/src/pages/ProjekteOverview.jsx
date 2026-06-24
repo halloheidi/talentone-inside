@@ -9,6 +9,8 @@ const STATUS_LABELS = {
   onboarding: 'Onboarding',
   golive_vereinbart: 'Go-Live vereinbart',
   warte_auf_go: 'Warte auf Go!',
+  feedbackschleife: 'Feedbackschleife',
+  go: 'Go',
   live: 'Live',
   pausiert: 'Pausiert',
   hold: 'Hold',
@@ -38,6 +40,8 @@ const KANBAN_COLUMNS = [
   { key: 'onboarding',         label: 'Onboarding',          color: '#8b5cf6', match: ['onboarding'] },
   { key: 'golive_vereinbart',  label: 'Go-Live vereinbart',  color: '#f59e0b', match: ['golive_vereinbart'] },
   { key: 'warte_auf_go',       label: 'Warte auf Go!',       color: '#b45309', match: ['warte_auf_go'] },
+  { key: 'feedbackschleife',   label: '🔄 Feedbackschleife', color: '#ea580c', match: ['feedbackschleife'] },
+  { key: 'go',                 label: '✅ Go',               color: '#16a34a', match: ['go'] },
   { key: 'live',               label: 'Live',                color: '#15803d', match: ['live'] },
   { key: 'pausiert',           label: 'Pausiert',            color: '#6b7280', match: ['pausiert'] },
   { key: 'hold',               label: 'Hold',                color: '#1f2937', match: ['hold'] },
@@ -373,14 +377,23 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
               {cards.map(p => {
                 const done = checklistDone(p.checkliste);
                 const zufRand = p.zufriedenheit ? (p.zufriedenheit >= 4 ? 'good' : p.zufriedenheit >= 3 ? 'ok' : 'bad') : null;
+                const statusClass = p.status === 'feedbackschleife' ? 'card-status-feedback'
+                                  : p.status === 'go' ? 'card-status-go'
+                                  : '';
                 return (
                   <div
                     key={p.id}
                     draggable
                     onDragStart={e => onDragStart(e, p.id)}
                     onClick={() => onCardClick(p.id)}
-                    className={`kanban-card ${zufRand ? 'card-zuf-' + zufRand : ''}`}
+                    className={`kanban-card ${zufRand ? 'card-zuf-' + zufRand : ''} ${statusClass}`}
                   >
+                    {p.status === 'feedbackschleife' && (
+                      <span className="kanban-card-status-pill is-feedback">🔔 Neues Kundenfeedback</span>
+                    )}
+                    {p.status === 'go' && (
+                      <span className="kanban-card-status-pill is-go">✅ Vom Kunden freigegeben</span>
+                    )}
                     <div className="kanban-card-firma">{p.kunde || '—'}</div>
                     {p.gesuchte_positionen && <div className="kanban-card-pos">{p.gesuchte_positionen}{p.standorte ? ` · ${p.standorte}` : ''}</div>}
                     <div className="kanban-card-meta">
