@@ -57,16 +57,21 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 
 /* ───────────────────────── Spruch-Vorschläge (Headline) ───────────────────────── */
 
-export async function generateSpruchVorschlaege(job, kunde) {
+/**
+ * Spruch-Vorschläge — wahlweise mit Bild-Analyse (Claude Vision):
+ *  - opts.bildUrl:        wenn gesetzt, analysiert Claude die Bildszene und passt die Sprüche an
+ *  - opts.kontextHinweis: optionale Mitarbeiter-Notiz zum Bild ("Das sind die zwei Chefs, die rumblödeln")
+ *  - opts.motiv:          optionaler Motiv-Beschreibungstext (KI-Modus)
+ */
+export async function generateSpruchVorschlaege(job, kunde, opts = {}) {
+  const { bildUrl, kontextHinweis, motiv } = opts;
   const stelle = job.stelle || 'Mitarbeiter:in';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
   const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean).slice(0, 4) : [];
   const region = job.region || '';
 
-  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram). Schlage 4 starke deutsche Sprüche/Headlines vor, die auf das Creative für die Stelle "${stelle}"${branche ? ` in der Branche ${branche}` : ''}${region ? ` (${region})` : ''}${benefits.length ? ` mit Benefits: ${benefits.join(', ')}` : ''} gehören.
-
-ANFORDERUNGEN an JEDEN Spruch:
-- Max. 5-6 Wörter — knapp und auf den Punkt
+  const baseRules = `ANFORDERUNGEN an JEDEN Spruch:
+- Max. 5-8 Wörter — knapp und auf den Punkt
 - Emotional, neugierig machend (Curiosity) oder unerwartet
 - Sprich den Kandidaten direkt an (Du-Form möglich, aber nicht zwingend)
 - KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben", KEIN reines Stellentitel-Wiederholen
@@ -84,6 +89,45 @@ Liefere 4 UNTERSCHIEDLICHE Varianten — verschiedene Tonalitäten (1× emotiona
 Antworte NUR mit JSON, keine Markdown-Backticks:
 
 { "sprueche": ["Spruch 1", "Spruch 2", "Spruch 3", "Spruch 4"] }`;
+
+  const kontextZeile = `Stelle: "${stelle}"${branche ? ` · Branche ${branche}` : ''}${region ? ` · ${region}` : ''}${benefits.length ? ` · Benefits: ${benefits.join(', ')}` : ''}${motiv?.trim() ? ` · Motiv: "${motiv.trim()}"` : ''}`;
+
+  // ── Variante 1: MIT Bild (Vision) ──
+  if (bildUrl) {
+    const kontextNote = kontextHinweis?.trim()
+      ? `\n\nHINWEIS VOM MITARBEITER zum Bild (sehr wichtig — beachten!): "${kontextHinweis.trim()}"`
+      : '';
+    const visionPrompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram).
+
+KONTEXT: ${kontextZeile}${kontextNote}
+
+AUFGABE:
+1. Schau dir das Bild GENAU an: Was siehst du? Welche Stimmung? Welche Personen, Tätigkeit, Atmosphäre, welcher Moment ist eingefangen?
+2. Schlage dann 4 starke deutsche Sprüche/Headlines vor, die DIREKT auf diese Bildszene Bezug nehmen — z.B. eine Tätigkeit, eine Geste, eine Mimik, ein Detail. Die Sprüche sollen sich anfühlen als wären sie speziell für GENAU dieses Bild geschrieben.
+
+${baseRules}`;
+
+    const data = await callClaudeWithRetry({
+      model: CLAUDE_MODEL,
+      max_tokens: 700,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'url', url: bildUrl } },
+          { type: 'text', text: visionPrompt },
+        ],
+      }],
+    });
+    const parsed = parseJsonContent(data);
+    return Array.isArray(parsed.sprueche) ? parsed.sprueche.slice(0, 4) : [];
+  }
+
+  // ── Variante 2: OHNE Bild — Fallback wie bisher ──
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram). Schlage 4 starke deutsche Sprüche/Headlines vor.
+
+KONTEXT: ${kontextZeile}
+
+${baseRules}`;
 
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,

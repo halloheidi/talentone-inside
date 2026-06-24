@@ -1119,6 +1119,23 @@ button { font-family: inherit; }
   border-color: var(--accent-dark, #c8df00);
 }
 .spruch-card-verbessert:hover { background: #fffae8; }
+
+/* Vision-Block — Bildanalyse für Spruch-Vorschläge */
+.vision-block {
+  margin: 14px 0 16px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(232,255,61,0.10) 0%, var(--bg-2, #f0efed) 100%);
+  border: 1.5px solid var(--accent-dark, #c8df00);
+  border-radius: 12px;
+}
+.vision-block-head {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.vision-thumb {
+  width: 56px; height: 56px; border-radius: 8px; object-fit: cover;
+  border: 1.5px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  flex-shrink: 0;
+}
 .motiv-num {
   font-size: 10px;
   font-weight: 700;

@@ -26,6 +26,8 @@ export default function JobCreatives() {
   const [spruch, setSpruch] = useState('');
   const [verbessertVarianten, setVerbessertVarianten] = useState([]);
   const [verbessernBusy, setVerbessernBusy] = useState(false);
+  const [kontextHinweis, setKontextHinweis] = useState('');
+  const [spruechAusBild, setSpruechAusBild] = useState(false); // letzter Vorschlag basierte auf Vision
 
   // Personen-Referenzen (gemeinsame Liste für beide Modi)
   const [personen, setPersonen] = useState([]);
@@ -173,11 +175,18 @@ export default function JobCreatives() {
     }
   }
 
-  /* ───── Spruch-Vorschläge (beide Modi) ───── */
+  /* ───── Spruch-Vorschläge (beide Modi, mit optionalem Vision-Input) ───── */
+  // Aktuell gewähltes Bild für Vision-Analyse (foto-Modus: Hintergrund, ki-Modus: Person)
+  const aktivesBildId = mode === 'foto' ? fotoId : personId;
+  const aktivesBildUrl = aktivesBildId
+    ? (personen.find(p => p.id === aktivesBildId)?.bild_url || null)
+    : null;
+
   useEffect(() => {
-    // Beim ersten Mount für diesen Job auch Sprüche vorladen
+    // Beim ersten Mount für diesen Job Text-basierte Sprüche vorladen (ohne Bild)
     let cancelled = false;
     setSpruchVorschlaege([]);
+    setSpruechAusBild(false);
     setLoadingSprueche(true);
     api('/creatives/spruch-vorschlaege', { method: 'POST', body: { job_id: job.id } })
       .then(res => { if (!cancelled) setSpruchVorschlaege(res.sprueche || []); })
@@ -186,12 +195,18 @@ export default function JobCreatives() {
     return () => { cancelled = true; };
   }, [job.id]);
 
-  async function reloadSpruchVorschlaege() {
+  async function reloadSpruchVorschlaege(useVision = false) {
     setLoadingSprueche(true);
     setVerbessertVarianten([]);
     try {
-      const res = await api('/creatives/spruch-vorschlaege', { method: 'POST', body: { job_id: job.id } });
+      const body = { job_id: job.id, motiv: motiv || undefined };
+      if (useVision && aktivesBildUrl) {
+        body.bild_url = aktivesBildUrl;
+        body.kontext_hinweis = kontextHinweis.trim() || undefined;
+      }
+      const res = await api('/creatives/spruch-vorschlaege', { method: 'POST', body });
       setSpruchVorschlaege(res.sprueche || []);
+      setSpruechAusBild(!!res.used_vision);
     } catch (err) {
       alert(`Spruch-Vorschläge: ${err.message}`);
     } finally {
@@ -483,26 +498,72 @@ export default function JobCreatives() {
               Wähle einen Vorschlag oder schreibe deinen eigenen — landet als <strong>Haupt-Headline</strong> im Bild.
             </div>
           </div>
-          <button className="btn-ghost btn-sm" onClick={reloadSpruchVorschlaege} disabled={loadingSprueche}>
+          <button className="btn-ghost btn-sm" onClick={() => reloadSpruchVorschlaege(false)} disabled={loadingSprueche}>
             {loadingSprueche ? 'Lade…' : '🔄 Neue Vorschläge'}
           </button>
         </div>
+
+        {/* Vision-Block: nur sichtbar wenn ein Bild ausgewählt ist */}
+        {aktivesBildUrl && (
+          <div className="vision-block">
+            <div className="vision-block-head">
+              <img src={aktivesBildUrl} alt="" className="vision-thumb" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                  ✨ Sprüche zum {mode === 'foto' ? 'Hintergrund-Foto' : 'Personen-Foto'} generieren
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+                  Die KI schaut sich das Bild an und schlägt passende Headlines vor.
+                </div>
+              </div>
+            </div>
+            <label className="field field-full" style={{ marginTop: 10 }}>
+              <span>Kontext zum Bild (optional)</span>
+              <input
+                type="text"
+                placeholder='z.B. "Das sind die zwei Chefs, die rumblödeln" oder "Unser dienstältester Monteur"'
+                value={kontextHinweis}
+                onChange={e => setKontextHinweis(e.target.value)}
+                maxLength={200}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-primary btn-sm"
+              onClick={() => reloadSpruchVorschlaege(true)}
+              disabled={loadingSprueche}
+              style={{ marginTop: 10 }}
+            >
+              {loadingSprueche ? 'Analysiere Bild…' : '✨ Sprüche zum Bild vorschlagen'}
+            </button>
+          </div>
+        )}
 
         {loadingSprueche && spruchVorschlaege.length === 0 && (
           <div className="motiv-skeleton"><div /><div /><div /><div /></div>
         )}
 
         {spruchVorschlaege.length > 0 && (
-          <div className="spruch-grid">
-            {spruchVorschlaege.map((s, i) => (
-              <button
-                key={i}
-                type="button"
-                className={`spruch-card ${spruch === s ? 'is-active' : ''}`}
-                onClick={() => setSpruch(s)}
-              >{s}</button>
-            ))}
-          </div>
+          <>
+            {spruechAusBild && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', margin: '12px 0 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ padding: '2px 8px', background: 'rgba(232,255,61,0.25)', borderRadius: 100, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase', fontSize: 9.5 }}>
+                  📷 Aus Bild
+                </span>
+                <span>Diese Vorschläge basieren auf der Bildanalyse</span>
+              </div>
+            )}
+            <div className="spruch-grid">
+              {spruchVorschlaege.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`spruch-card ${spruch === s ? 'is-active' : ''}`}
+                  onClick={() => setSpruch(s)}
+                >{s}</button>
+              ))}
+            </div>
+          </>
         )}
 
         <label className="field field-full" style={{ marginTop: 14 }}>

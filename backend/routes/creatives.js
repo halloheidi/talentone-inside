@@ -167,17 +167,34 @@ router.post('/motiv-vorschlaege', async (req, res) => {
   }
 });
 
-/* POST /api/creatives/spruch-vorschlaege  body: { job_id }
-   Liefert 4 Headline-Vorschläge fürs Creative (knappe Curiosity-Sprüche). */
+/* POST /api/creatives/spruch-vorschlaege
+   body: { job_id, bild_url?, kontext_hinweis?, motiv? }
+   Liefert 4 Headlines. Wenn bild_url gesetzt: Claude Vision analysiert
+   das Bild und schlägt szenen-passende Sprüche vor.
+   Akzeptiert auch bild_url als talentone_referenzbilder.id (UUID) → wir
+   schlagen die bild_url dann selber nach. */
 router.post('/spruch-vorschlaege', async (req, res) => {
-  const { job_id } = req.body || {};
+  const { job_id, bild_url, referenzbild_id, kontext_hinweis, motiv } = req.body || {};
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   try {
     const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
     const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
-    const sprueche = await generateSpruchVorschlaege(job, kunde);
-    res.json({ sprueche });
+
+    // Wenn nur eine Referenzbild-ID kam, URL nachschlagen
+    let resolvedBildUrl = bild_url || null;
+    if (!resolvedBildUrl && referenzbild_id) {
+      const { data: ref } = await supabase
+        .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
+      resolvedBildUrl = ref?.bild_url || null;
+    }
+
+    const sprueche = await generateSpruchVorschlaege(job, kunde, {
+      bildUrl: resolvedBildUrl,
+      kontextHinweis: kontext_hinweis,
+      motiv,
+    });
+    res.json({ sprueche, used_vision: !!resolvedBildUrl });
   } catch (err) {
     console.error('[spruch-vorschlaege]', err.message);
     res.status(503).json({ error: err.message });
