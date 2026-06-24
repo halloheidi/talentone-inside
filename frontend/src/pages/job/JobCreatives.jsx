@@ -509,7 +509,7 @@ export default function JobCreatives() {
           <span>Finaler Spruch (frei editierbar)</span>
           <input
             type="text"
-            placeholder="z.B. „Hände, die was bewegen." oder leer lassen für KI-erfundenen Spruch"
+            placeholder='z.B. „Hände, die was bewegen." oder leer lassen für KI-erfundenen Spruch'
             value={spruch}
             onChange={e => { setSpruch(e.target.value); setVerbessertVarianten([]); }}
             maxLength={80}
