@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import {
   generateMotivVorschlaege,
+  generateSpruchVorschlaege,
+  verbessereSpruch,
   generateVariant,
   deleteFromStorage,
   STORAGE_BUCKET as CREATIVES_BUCKET,
@@ -165,13 +167,47 @@ router.post('/motiv-vorschlaege', async (req, res) => {
   }
 });
 
+/* POST /api/creatives/spruch-vorschlaege  body: { job_id }
+   Liefert 4 Headline-Vorschläge fürs Creative (knappe Curiosity-Sprüche). */
+router.post('/spruch-vorschlaege', async (req, res) => {
+  const { job_id } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  try {
+    const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
+    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const sprueche = await generateSpruchVorschlaege(job, kunde);
+    res.json({ sprueche });
+  } catch (err) {
+    console.error('[spruch-vorschlaege]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/creatives/spruch-verbessern  body: { job_id, spruch }
+   Liefert 3 verbesserte Varianten eines bestehenden Spruchs. */
+router.post('/spruch-verbessern', async (req, res) => {
+  const { job_id, spruch } = req.body || {};
+  if (!job_id || !spruch?.trim()) return res.status(400).json({ error: 'job_id und spruch sind Pflicht.' });
+  try {
+    const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
+    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const varianten = await verbessereSpruch({ spruch, job, kunde });
+    res.json({ varianten });
+  } catch (err) {
+    console.error('[spruch-verbessern]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
 /* POST /api/creatives/generate  body: { job_id, motiv, varianten?: 1-3 }
    Antwortet SOFORT mit 202 + erwarteter Bilderzahl. Die eigentliche Generierung
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id } = req.body || {};
-  console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten}`);
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch } = req.body || {};
+  console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten} spruch="${(spruch||'').slice(0,40)}"`);
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
   if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
@@ -214,7 +250,7 @@ router.post('/generate', async (req, res) => {
     console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);

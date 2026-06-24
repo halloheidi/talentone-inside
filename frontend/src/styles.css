@@ -1087,6 +1087,38 @@ button { font-family: inherit; }
   background: #fff;
   box-shadow: 0 0 0 2px rgba(10,10,10,0.05);
 }
+
+/* Spruch-Karten — kompakter als motiv-cards, da kürzere Texte */
+.spruch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.spruch-card {
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--bg-2, #f0efed);
+  border: 1.5px solid var(--line, #e2e0dc);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-1, #0a0a0a);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.05s;
+  line-height: 1.4;
+}
+.spruch-card:hover { border-color: var(--ink-4); background: #fff; }
+.spruch-card.is-active {
+  border-color: var(--accent-dark, #c8df00);
+  background: rgba(232,255,61,0.12);
+  box-shadow: 0 0 0 2px rgba(232,255,61,0.25);
+}
+.spruch-card-verbessert {
+  background: linear-gradient(180deg, #fffce8 0%, #fff 100%);
+  border-color: var(--accent-dark, #c8df00);
+}
+.spruch-card-verbessert:hover { background: #fffae8; }
 .motiv-num {
   font-size: 10px;
   font-weight: 700;

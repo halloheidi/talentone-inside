@@ -20,6 +20,13 @@ export default function JobCreatives() {
   const [auswahl, setAuswahl] = useState('');
   const [eigenes, setEigenes] = useState('');
 
+  // Spruch / Headline (beide Modi)
+  const [spruchVorschlaege, setSpruchVorschlaege] = useState([]);
+  const [loadingSprueche, setLoadingSprueche] = useState(false);
+  const [spruch, setSpruch] = useState('');
+  const [verbessertVarianten, setVerbessertVarianten] = useState([]);
+  const [verbessernBusy, setVerbessernBusy] = useState(false);
+
   // Personen-Referenzen (gemeinsame Liste für beide Modi)
   const [personen, setPersonen] = useState([]);
   const [personId, setPersonId] = useState(null);     // ausgewählte Person (Modus KI)
@@ -166,6 +173,49 @@ export default function JobCreatives() {
     }
   }
 
+  /* ───── Spruch-Vorschläge (beide Modi) ───── */
+  useEffect(() => {
+    // Beim ersten Mount für diesen Job auch Sprüche vorladen
+    let cancelled = false;
+    setSpruchVorschlaege([]);
+    setLoadingSprueche(true);
+    api('/creatives/spruch-vorschlaege', { method: 'POST', body: { job_id: job.id } })
+      .then(res => { if (!cancelled) setSpruchVorschlaege(res.sprueche || []); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingSprueche(false); });
+    return () => { cancelled = true; };
+  }, [job.id]);
+
+  async function reloadSpruchVorschlaege() {
+    setLoadingSprueche(true);
+    setVerbessertVarianten([]);
+    try {
+      const res = await api('/creatives/spruch-vorschlaege', { method: 'POST', body: { job_id: job.id } });
+      setSpruchVorschlaege(res.sprueche || []);
+    } catch (err) {
+      alert(`Spruch-Vorschläge: ${err.message}`);
+    } finally {
+      setLoadingSprueche(false);
+    }
+  }
+
+  async function verbessereDenSpruch() {
+    if (!spruch.trim()) return;
+    setVerbessernBusy(true);
+    setVerbessertVarianten([]);
+    try {
+      const res = await api('/creatives/spruch-verbessern', {
+        method: 'POST',
+        body: { job_id: job.id, spruch: spruch.trim() },
+      });
+      setVerbessertVarianten(res.varianten || []);
+    } catch (err) {
+      alert(`Verbessern: ${err.message}`);
+    } finally {
+      setVerbessernBusy(false);
+    }
+  }
+
   /* ───── Logo-Upload ───── */
   async function onLogoChange(e) {
     const file = e.target.files?.[0];
@@ -259,9 +309,10 @@ export default function JobCreatives() {
     setGenerating(true);
     const baseline = creatives.length;
     try {
+      const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined }
-        : { job_id: job.id, mode, varianten, foto_id: fotoId };
+        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch }
+        : { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
       setExpected(exp);
@@ -423,8 +474,85 @@ export default function JobCreatives() {
         </section>
       )}
 
+      {/* ───────── Spruch / Headline (beide Modi) ───────── */}
+      <section className="card-form spruch-section" style={{ marginTop: 18 }}>
+        <div className="motiv-head">
+          <div>
+            <div className="form-section-title" style={{ marginBottom: 4 }}>Spruch / Headline auf dem Creative</div>
+            <div className="motiv-sub">
+              Wähle einen Vorschlag oder schreibe deinen eigenen — landet als <strong>Haupt-Headline</strong> im Bild.
+            </div>
+          </div>
+          <button className="btn-ghost btn-sm" onClick={reloadSpruchVorschlaege} disabled={loadingSprueche}>
+            {loadingSprueche ? 'Lade…' : '🔄 Neue Vorschläge'}
+          </button>
+        </div>
+
+        {loadingSprueche && spruchVorschlaege.length === 0 && (
+          <div className="motiv-skeleton"><div /><div /><div /><div /></div>
+        )}
+
+        {spruchVorschlaege.length > 0 && (
+          <div className="spruch-grid">
+            {spruchVorschlaege.map((s, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`spruch-card ${spruch === s ? 'is-active' : ''}`}
+                onClick={() => setSpruch(s)}
+              >{s}</button>
+            ))}
+          </div>
+        )}
+
+        <label className="field field-full" style={{ marginTop: 14 }}>
+          <span>Finaler Spruch (frei editierbar)</span>
+          <input
+            type="text"
+            placeholder="z.B. „Hände, die was bewegen." oder leer lassen für KI-erfundenen Spruch"
+            value={spruch}
+            onChange={e => { setSpruch(e.target.value); setVerbessertVarianten([]); }}
+            maxLength={80}
+          />
+        </label>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={verbessereDenSpruch}
+            disabled={verbessernBusy || !spruch.trim()}
+          >
+            {verbessernBusy ? 'Verbessere…' : '✨ Mit KI verbessern'}
+          </button>
+          {spruch && (
+            <button type="button" className="btn-ghost btn-sm" onClick={() => { setSpruch(''); setVerbessertVarianten([]); }}>
+              Leeren
+            </button>
+          )}
+        </div>
+
+        {verbessertVarianten.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="form-section-title" style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 6 }}>
+              ✨ Verbesserte Varianten — klick zum Übernehmen
+            </div>
+            <div className="spruch-grid">
+              {verbessertVarianten.map((v, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="spruch-card spruch-card-verbessert"
+                  onClick={() => { setSpruch(v); setVerbessertVarianten([]); }}
+                >{v}</button>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* ───────── Personen-Sektion ───────── */}
-      <section className="card-form" style={{ marginTop: mode === 'ki' ? 18 : 0 }}>
+      <section className="card-form" style={{ marginTop: 18 }}>
         <div className="form-section-title" style={{ marginBottom: 4 }}>
           {mode === 'ki' ? 'Personen-Referenz (optional)' : 'Hintergrund-Foto auswählen'}
         </div>

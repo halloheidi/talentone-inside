@@ -55,6 +55,78 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
   return Array.isArray(parsed.motive) ? parsed.motive.slice(0, 3) : [];
 }
 
+/* ───────────────────────── Spruch-Vorschläge (Headline) ───────────────────────── */
+
+export async function generateSpruchVorschlaege(job, kunde) {
+  const stelle = job.stelle || 'Mitarbeiter:in';
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean).slice(0, 4) : [];
+  const region = job.region || '';
+
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram). Schlage 4 starke deutsche Sprüche/Headlines vor, die auf das Creative für die Stelle "${stelle}"${branche ? ` in der Branche ${branche}` : ''}${region ? ` (${region})` : ''}${benefits.length ? ` mit Benefits: ${benefits.join(', ')}` : ''} gehören.
+
+ANFORDERUNGEN an JEDEN Spruch:
+- Max. 5-6 Wörter — knapp und auf den Punkt
+- Emotional, neugierig machend (Curiosity) oder unerwartet
+- Sprich den Kandidaten direkt an (Du-Form möglich, aber nicht zwingend)
+- KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben", KEIN reines Stellentitel-Wiederholen
+- Stil: leicht provokant, augenzwinkernd, oder eine starke Frage — Hauptsache scroll-stoppend
+
+Gute Beispiele für andere Stellen (zur Inspiration, nicht 1:1 kopieren):
+- "Hände, die was bewegen."
+- "Schluss mit Schichtdienst-Bullshit."
+- "Dein Werkzeug. Deine Regeln."
+- "Wo Pflege noch Pflege ist."
+- "Mehr als nur ein Job."
+
+Liefere 4 UNTERSCHIEDLICHE Varianten — verschiedene Tonalitäten (1× emotional, 1× provokant/direkt, 1× Frage, 1× Benefit-fokussiert).
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+
+{ "sprueche": ["Spruch 1", "Spruch 2", "Spruch 3", "Spruch 4"] }`;
+
+  const data = await callClaudeWithRetry({
+    model: CLAUDE_MODEL,
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const parsed = parseJsonContent(data);
+  return Array.isArray(parsed.sprueche) ? parsed.sprueche.slice(0, 4) : [];
+}
+
+export async function verbessereSpruch({ spruch, job, kunde }) {
+  if (!spruch?.trim()) return [];
+  const stelle = job?.stelle || '';
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. Du bekommst einen bestehenden Spruch und sollst ihn STÄRKER, KNACKIGER und CATCHIER machen.
+
+KONTEXT: Stelle "${stelle}"${branche ? `, Branche ${branche}` : ''}.
+
+URSPRUNGSSPRUCH: "${spruch.trim()}"
+
+AUFGABE: Liefere 3 verbesserte Varianten — jeweils:
+- Max. 5-6 Wörter
+- Behält die Grund-Idee/Botschaft des Originals
+- ABER: schärfer, emotionaler, mehr Punch, scroll-stoppender
+- KEIN "Wir suchen dich", KEIN "Jetzt bewerben"
+- Variante 1: dieselbe Aussage, aber prägnanter
+- Variante 2: emotionaler/persönlicher
+- Variante 3: provokanter/mutiger
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+
+{ "varianten": ["Variante 1", "Variante 2", "Variante 3"] }`;
+
+  const data = await callClaudeWithRetry({
+    model: CLAUDE_MODEL,
+    max_tokens: 400,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const parsed = parseJsonContent(data);
+  return Array.isArray(parsed.varianten) ? parsed.varianten.slice(0, 3) : [];
+}
+
 /* ───────────────────────── Prompt-Composer ───────────────────────── */
 
 function pickBenefits(job) {
@@ -95,7 +167,7 @@ function cleanOrt(region) {
 }
 
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
-function buildPromptKI({ job, kunde, motiv, format, hasLogo, person }) {
+function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
@@ -130,7 +202,9 @@ TEXT-ELEMENTE (in dieser Reihenfolge von oben nach unten, sauber lesbar):
 1. ${hasLogo
     ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
     : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
-2. HAUPTSPRUCH zentral: ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+2. HAUPTSPRUCH zentral: ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". GROSS, fett, sofort fesselnd. Erfinde KEINEN eigenen Spruch — nutze GENAU diese Wörter, ggf. mit Zeilenumbruch (2-3 Wörter pro Zeile).`
+    : 'ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.'}
 3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80% der Größe), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche klar hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" am Ende MUSS lesbar dargestellt werden — entweder direkt im selben Textblock oder als kleiner Untertitel.
 ${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung, gleiche Schriftart. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte, abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
    Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", keine Sätze
@@ -146,7 +220,7 @@ DESIGN-REGELN:
 }
 
 // Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
-function buildPromptFoto({ job, kunde, format, hasLogo }) {
+function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const firmenname = kunde?.firmenname || '';
@@ -171,7 +245,9 @@ OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto, in dieser Reihenfolge von
 1. ${hasLogo
     ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
     : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
-2. HAUPTSPRUCH zentral oder im oberen Drittel: kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.
+2. HAUPTSPRUCH zentral oder im oberen Drittel: ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". GROSS, fett, sofort fesselnd. Erfinde KEINEN eigenen Spruch — nutze GENAU diese Wörter, ggf. mit Zeilenumbruch (2-3 Wörter pro Zeile).`
+    : 'kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.'}
 3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80%), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" MUSS lesbar dargestellt werden.
 ${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
 ${ort ? '6' : '5'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent
@@ -187,9 +263,9 @@ DESIGN-REGELN:
 }
 
 // Wrapper — wählt den passenden Prompt anhand des Modus.
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person }) {
-  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo });
-  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person });
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch }) {
+  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch });
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch });
 }
 
 /* ───────────────────────── Bild-Generierung ───────────────────────── */
@@ -259,7 +335,7 @@ function bufferToFile(buf, name, type) {
 //   mode='ki'   → komplett neu generieren (optional mit Person als Vorlage)
 //   mode='foto' → Foto als Hintergrund übernehmen, nur Overlay (Foto MUSS in referenceImages enthalten sein)
 // referenceImages-Reihenfolge: Logo (isLogo:true) IMMER zuerst falls vorhanden, dann Person/Foto.
-export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [] }) {
+export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
@@ -270,7 +346,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const refs = await loadReferenceImages(referenceImages);
   const hasLogo = !!referenceImages[0]?.isLogo;
   const person = referenceImages.find(r => !r.isLogo) || null;
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person });
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
 
   let response;
   if (refs.length > 0) {
@@ -320,10 +396,10 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [] }) {
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch }) {
   const formats = ['quadrat', 'story'];
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
