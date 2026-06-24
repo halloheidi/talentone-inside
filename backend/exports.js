@@ -420,6 +420,7 @@ ${sortedAdcopies.map(a => `
     body: JSON.stringify({
       from: getMailFrom(brand),
       to,
+      cc: ['info@nowagwirth.de'],
       reply_to: getMailReplyTo(brand),
       subject: betreff || `${kunde?.firmenname || 'Ihre Kampagne'} — Entwürfe zur Freigabe`,
       html,
