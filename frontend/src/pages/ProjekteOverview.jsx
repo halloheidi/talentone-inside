@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 
@@ -480,6 +481,13 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [projekt, setProjekt] = useState(null);
   const [autoKeys, setAutoKeys] = useState([]);
   const [kommentare, setKommentare] = useState([]);
+  const [kundenList, setKundenList] = useState([]);  // alle TalentOne-Kunden für Verknüpfungs-Dropdown
+  const [kundeQuery, setKundeQuery] = useState('');
+  const [showKundePicker, setShowKundePicker] = useState(false);
+
+  useEffect(() => {
+    api('/kunden').then(r => setKundenList(r.kunden || [])).catch(() => {});
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -559,6 +567,72 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
             <div className="slideover-form">
               <label className="slideover-full"><span>Projektname</span><DebouncedInput value={projekt.projekt || ''} onSave={patchField('projekt')} /></label>
               <label className="slideover-full"><span>Kunde / Firma</span><DebouncedInput value={projekt.kunde || ''} onSave={patchField('kunde')} /></label>
+              <div className="slideover-full">
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase', color: 'var(--ink-3)', display: 'block', marginBottom: 6 }}>
+                  Mit TalentOne-Kunde verknüpft
+                </span>
+                {projekt.kunde_id ? (() => {
+                  const k = kundenList.find(x => x.id === projekt.kunde_id);
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <strong style={{ display: 'block' }}>{k?.firmenname || '(unbekannter Kunde)'}</strong>
+                        {k?.email && <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{k.email}</span>}
+                      </span>
+                      <Link to={`/kunden/${projekt.kunde_id}`} className="btn-ghost btn-sm" style={{ textDecoration: 'none' }}>Öffnen →</Link>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        onClick={() => patch({ kunde_id: null })}
+                        title="Verknüpfung entfernen"
+                      >Trennen</button>
+                    </div>
+                  );
+                })() : (
+                  <>
+                    {!showKundePicker ? (
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        onClick={() => setShowKundePicker(true)}
+                        style={{ width: '100%', justifyContent: 'flex-start' }}
+                      >🔗 Mit bestehendem Kunden verknüpfen…</button>
+                    ) : (
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Kunden suchen — Firmenname…"
+                          value={kundeQuery}
+                          onChange={e => setKundeQuery(e.target.value)}
+                          autoFocus
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)', fontSize: 13, marginBottom: 4 }}
+                        />
+                        <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 6 }}>
+                          {(() => {
+                            const q = kundeQuery.trim().toLowerCase();
+                            const hits = kundenList
+                              .filter(k => !q || (k.firmenname || '').toLowerCase().includes(q) || (k.email || '').toLowerCase().includes(q))
+                              .slice(0, 25);
+                            if (hits.length === 0) return <div style={{ padding: 12, fontSize: 12, color: 'var(--ink-3)', textAlign: 'center' }}>Keine Treffer</div>;
+                            return hits.map(k => (
+                              <button
+                                key={k.id}
+                                type="button"
+                                onClick={() => { patch({ kunde_id: k.id }); setShowKundePicker(false); setKundeQuery(''); }}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', background: '#fff', border: 'none', borderBottom: '1px solid var(--bg-2)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13 }}
+                              >
+                                <strong>{k.firmenname || '—'}</strong>
+                                {k.email && <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)' }}>{k.email}</span>}
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                        <button type="button" className="btn-ghost btn-sm" onClick={() => { setShowKundePicker(false); setKundeQuery(''); }} style={{ marginTop: 6 }}>Abbrechen</button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
               <label><span>Status</span>
                 <select className="cell-input" value={projekt.status} onChange={e => patch({ status: e.target.value })}>
                   {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}

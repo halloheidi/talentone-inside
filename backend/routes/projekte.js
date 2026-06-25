@@ -185,18 +185,28 @@ router.post('/merge', async (req, res) => {
       }
     }
 
-    // 4) Hauptprojekt updaten
+    // 4) Verknüpfungs-Felder: vom ersten anderen Projekt übernehmen,
+    //    falls das Hauptprojekt sie nicht hat. So überlebt z.B. kunde_id
+    //    auch wenn ein Airtable-Import als Hauptprojekt gewählt wird.
+    const mergedKundeId = haupt.kunde_id || others.find(p => p.kunde_id)?.kunde_id || null;
+    const mergedCloseLeadId = haupt.close_lead_id || others.find(p => p.close_lead_id)?.close_lead_id || null;
+    const mergedEmail = haupt.email || others.find(p => p.email)?.email || null;
+
+    // 5) Hauptprojekt updaten
     const { data: updated, error: uErr } = await supabase
       .from('talentone_projekte')
       .update({
         notizen: mergedNotizen,
         checkliste: mergedChecklist,
+        kunde_id: mergedKundeId,
+        close_lead_id: mergedCloseLeadId,
+        email: mergedEmail,
         updated_at: new Date().toISOString(),
       })
       .eq('id', haupt_id).select().single();
     if (uErr) return res.status(500).json({ error: `Hauptprojekt-Update: ${uErr.message}` });
 
-    // 5) Andere Projekte löschen
+    // 6) Andere Projekte löschen
     const { error: dErr } = await supabase
       .from('talentone_projekte').delete().in('id', merged_ids);
     if (dErr) return res.status(500).json({ error: `Merge-Delete: ${dErr.message}` });
