@@ -6,6 +6,9 @@ import PDFDocument from 'pdfkit';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
+import { getInternalBcc } from './mail.js';
+
+const VORQUAL_BCC = 'jessica.buchmueller@nowagwirth.de';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const RESEND_API = 'https://api.resend.com/emails';
@@ -277,12 +280,15 @@ ${antworten.map(a => `
   if (sheetUrl) textParts.push(`\nGoogle Sheet: ${sheetUrl}`);
 
   const subjekt = `Neue Bewerbung für ${job?.stelle || 'Stelle'}${bewerbung?.name ? ` — ${bewerbung.name}` : ''}`;
+  // BCC: zentrale Empfänger + Jessica nur wenn Job mit telefonischer Vorqual läuft
+  const extraBcc = job?.vorqualifizierung ? [VORQUAL_BCC] : [];
   const response = await fetch(RESEND_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
       from: getMailFrom(brand),
       to: recipients,
+      bcc: getInternalBcc(extraBcc, recipients),
       reply_to: bewerbung?.email || getMailReplyTo(brand),
       subject: subjekt,
       html,
@@ -420,7 +426,7 @@ ${sortedAdcopies.map(a => `
     body: JSON.stringify({
       from: getMailFrom(brand),
       to,
-      cc: ['info@nowagwirth.de'],
+      bcc: getInternalBcc([], Array.isArray(to) ? to : [to]),
       reply_to: getMailReplyTo(brand),
       subject: betreff || `${kunde?.firmenname || 'Ihre Kampagne'} — Entwürfe zur Freigabe`,
       html,

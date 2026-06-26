@@ -5,7 +5,7 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
-import { sendReaktivierungsMail } from '../mail.js';
+import { sendReaktivierungsMail, sendKampagneLiveMail } from '../mail.js';
 import { logReaktivierung } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 
@@ -213,6 +213,66 @@ router.get('/jobs/:id/export/review', async (req, res) => {
     .order('updated_at', { ascending: false }).limit(1).maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ review: data });
+});
+
+/* POST /api/jobs/:id/export/kampagne-live
+   body: { to?, customText?, set_status_live? }
+   Mail an Kunden "🚀 Kampagne ist live!" + setzt das verknüpfte Projekt
+   automatisch auf Status 'live' (außer set_status_live = false).
+   Speichert in talentone_versand mit typ='kampagne_live', damit das
+   Frontend einen "Bereits gemeldet"-Hinweis zeigen kann. */
+router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
+  const { to, customText, set_status_live = true } = req.body || {};
+  try {
+    const { job, kunde } = await loadFullJob(req.params.id);
+    const recipient = (to || kunde?.email || '').trim();
+    if (!recipient) return res.status(400).json({ error: 'Kunden-E-Mail fehlt.' });
+
+    const baseUrl = getPublicBaseUrl(kunde?.agentur);
+    const bewerbungenUrl = job.bewerbungen_token
+      ? `${baseUrl}/bewerbungen/${job.bewerbungen_token}`
+      : null;
+
+    await sendKampagneLiveMail({
+      to: recipient,
+      kunde,
+      job,
+      ansprechpartner: kunde?.ansprechpartner,
+      customText,
+      bewerbungenUrl,
+    });
+
+    // Versand-Historie
+    const { error: insErr } = await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: recipient,
+      betreff: '🚀 Deine Kampagne ist live!',
+      gesendet_von: req.user?.email || null,
+      typ: 'kampagne_live',
+      inhalte: { bewerbungenUrl, customText: customText || null },
+    });
+    if (insErr) console.warn('[kampagne-live] Versand-Insert:', insErr.message);
+
+    // Projekt automatisch auf 'live' setzen (best-effort)
+    if (set_status_live && kunde?.id) {
+      try {
+        const { data: projekt } = await supabase
+          .from('talentone_projekte').select('id,status').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt && projekt.status !== 'live') {
+          await supabase.from('talentone_projekte')
+            .update({ status: 'live', updated_at: new Date().toISOString() })
+            .eq('id', projekt.id);
+          console.log(`[kampagne-live] Projekt ${projekt.id.slice(0,8)} → status=live`);
+        }
+      } catch (err) { console.warn('[kampagne-live] Status-Update:', err.message); }
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[kampagne-live]', err.message);
+    res.status(503).json({ error: err.message });
+  }
 });
 
 export default router;

@@ -8,6 +8,30 @@ const RESEND_API = 'https://api.resend.com/emails';
 // Intern (Mitarbeiter-Benachrichtigungen) — immer TalentOne-Absender
 const INTERNAL_FROM = 'TalentOne Inside <noreply@talent-one.de>';
 
+/**
+ * Interne BCC-Liste — geht bei jeder Kunden-Mail mit, unsichtbar.
+ * Konfiguriert via INTERNAL_BCC env var (Komma-getrennt). Fallback:
+ * info@nowagwirth.de + andrea.saltaleggio@nowagwirth.de.
+ * Optional extra-Empfänger (z.B. Jessica bei Vorqualifizierung).
+ * Filtert leere Strings + Duplikate, und schließt die `to`-Empfänger aus,
+ * damit niemand doppelt zugestellt wird.
+ */
+export function getInternalBcc(extra = [], excludeTo = []) {
+  const fromEnv = (process.env.INTERNAL_BCC ?? 'info@nowagwirth.de,andrea.saltaleggio@nowagwirth.de')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const extras = Array.isArray(extra) ? extra : (extra ? [extra] : []);
+  const exclude = new Set((Array.isArray(excludeTo) ? excludeTo : [excludeTo]).filter(Boolean).map(s => s.toLowerCase()));
+  const merged = [...fromEnv, ...extras.filter(Boolean)];
+  const seen = new Set();
+  const out = [];
+  for (const addr of merged) {
+    const l = addr.toLowerCase();
+    if (seen.has(l) || exclude.has(l)) continue;
+    seen.add(l); out.push(addr);
+  }
+  return out;
+}
+
 function escape(s = '') {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -70,6 +94,7 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
     body: JSON.stringify({
       from: getMailFrom(brand),
       to,
+      bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
       subject: 'Wir brauchen noch Logo und Fotos für eure Kampagne',
       html,
@@ -123,6 +148,7 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
     body: JSON.stringify({
       from: getMailFrom(brand),
       to,
+      bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
       subject: 'Kurzes Briefing-Formular für eure Recruiting-Kampagne',
       html, text,
@@ -471,6 +497,7 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
     body: JSON.stringify({
       from: getMailFrom(brand),
       to: recipients,
+      bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
       subject: `Rechnung Werbebudget — ${stelle}`,
       html, text,
@@ -555,6 +582,7 @@ export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFile
     body: JSON.stringify({
       from: getMailFrom(brand),
       to: recipients,
+      bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
       subject: `Rechnung ${rechnungsNr} — ${firma}`,
       html, text,
@@ -637,9 +665,70 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
     body: JSON.stringify({
       from: getMailFrom(brand),
       to: recipients,
-      cc: ['info@nowagwirth.de'],
+      bcc: getInternalBcc([], recipients),
       reply_to: replyTo || getMailReplyTo(brand),
       subject: `Frische KI-Werbeanzeigen für ${stelle} — reaktivieren?`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
+/* ════════════════════ Kampagne-Live-Mail ════════════════════ */
+
+export async function sendKampagneLiveMail({ to, kunde, job, ansprechpartner, customText, bewerbungenUrl }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const grußname = ansprechpartner || kunde?.ansprechpartner || 'zusammen';
+  const stelle = job?.stelle || 'deine offene Stelle';
+
+  const introText = (customText || '').trim() || `Hallo ${grußname},
+
+gute Neuigkeiten — deine Recruiting-Kampagne für ${stelle} ist ab jetzt online! 🚀
+
+Ab sofort erreichen wir potenzielle Bewerber mit deinen Anzeigen. Die ersten Bewerbungen können in den nächsten Tagen reinkommen — du wirst pro Bewerbung automatisch per Mail benachrichtigt.
+
+Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`;
+
+  const introHtml = introText
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const bewerbungenButton = bewerbungenUrl ? `
+    <tr><td align="center" style="padding:18px 32px 8px;">
+      <a href="${escape(bewerbungenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">📋 Zur Bewerberliste</a>
+      <p style="font-size:11px;color:#9a9994;margin:10px 0 0;">Der Link ist persönlich und für ${escape(kunde?.firmenname || 'euch')} gültig.</p>
+    </td></tr>` : '';
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🚀 Kampagne ist live · ${escape(brand.name)}</p>
+      ${introHtml}
+    </td></tr>
+    ${bewerbungenButton}
+    <tr><td style="padding:14px 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten — wir sind für dich da.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>Euer ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${introText}\n\n${bewerbungenUrl ? `Zur Bewerberliste: ${bewerbungenUrl}\n\n` : ''}Viel Erfolg!\nEuer ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getMailReplyTo(brand),
+      subject: '🚀 Deine Kampagne ist live!',
       html, text,
     }),
   });

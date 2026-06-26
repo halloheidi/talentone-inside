@@ -288,8 +288,9 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
   const funnel = data?.funnel;
   const allCreativesSelected = creatives.length > 0 && selectedCreatives.size === creatives.length;
 
-  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung') || versand[0];
+  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung' && v.typ !== 'kampagne_live') || versand[0];
   const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
+  const letzteKampagneLive = versand.find(v => v.typ === 'kampagne_live');
   const kommentarEntries = review?.kommentare && typeof review.kommentare === 'object'
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
@@ -499,6 +500,40 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         </button>
       </div>
       {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
+
+      {/* ─────── Kampagne ist Live melden ─────── */}
+      <fieldset className="formular-section" style={{ marginTop: 22 }}>
+        <legend>Kampagne live melden</legend>
+        {letzteKampagneLive ? (
+          <div className="versand-status" style={{ marginBottom: 10 }}>
+            <span>🚀 „Kampagne ist live"-Mail gesendet am <strong>{new Date(letzteKampagneLive.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzteKampagneLive.empfaenger}</strong> · <em>Bereits gemeldet — erneut senden überschreibt diesen Hinweis</em></span>
+          </div>
+        ) : (
+          <p className="pane-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+            Sobald die Kampagne tatsächlich online ist, dem Kunden Bescheid geben — er bekommt eine kurze Mail mit Link zur Bewerberliste. Das Projekt wird automatisch auf Status <strong>Live</strong> gesetzt.
+          </p>
+        )}
+        <button
+          className={letzteKampagneLive ? 'btn-ghost' : 'btn-primary'}
+          onClick={async () => {
+            const confirmText = letzteKampagneLive
+              ? `Bereits am ${new Date(letzteKampagneLive.created_at).toLocaleDateString('de-DE')} gemeldet — wirklich nochmal senden?`
+              : `„🚀 Deine Kampagne ist live!"-Mail an ${kunde?.email} senden und das Projekt auf Status „Live" setzen?`;
+            if (!confirm(confirmText)) return;
+            try {
+              await api(`/jobs/${job.id}/export/kampagne-live`, { method: 'POST', body: { to: kunde?.email } });
+              api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+              alert('Mail verschickt + Projekt auf Live gesetzt.');
+            } catch (err) {
+              alert(`Senden fehlgeschlagen: ${err.message}`);
+            }
+          }}
+          disabled={!kunde?.email}
+        >
+          🚀 Kampagne als Live melden
+        </button>
+        {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
+      </fieldset>
 
       {/* ─────── Kunden-Reaktivierung ─────── */}
       <fieldset className="formular-section" style={{ marginTop: 22 }}>
