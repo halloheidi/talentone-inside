@@ -2679,6 +2679,33 @@ button { font-family: inherit; }
 }
 @media (max-width: 1100px) { .adcopy-grid { grid-template-columns: 1fr; } }
 
+/* Headlines / Überschriften */
+.headline-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.headline-num {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-3, #999790);
+  text-align: center;
+}
+.headline-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1.5px solid var(--line, #e2e0dc);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-1, #0a0a0a);
+  outline: none;
+}
+.headline-input:focus { border-color: var(--ink-1, #0a0a0a); }
+
 .adcopy-card {
   display: flex;
   flex-direction: column;

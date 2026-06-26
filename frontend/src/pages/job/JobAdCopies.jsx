@@ -57,6 +57,55 @@ export default function JobAdCopies() {
     return () => { cancelled = true; };
   }, [job.id]);
 
+  /* ───── Headlines / Überschriften ───── */
+  const [headlines, setHeadlines] = useState([]);
+  const [headlinesBusy, setHeadlinesBusy] = useState(false);
+  const [headlinesCopiedIdx, setHeadlinesCopiedIdx] = useState(null);
+  const [headlinesDirty, setHeadlinesDirty] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api(`/adcopies/headlines?job_id=${job.id}`)
+      .then(res => { if (!cancelled) setHeadlines(res.headlines || []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [job.id]);
+
+  async function generateHeadlines() {
+    setHeadlinesBusy(true);
+    try {
+      const res = await api('/adcopies/headlines/generate', { method: 'POST', body: { job_id: job.id } });
+      setHeadlines(res.headlines || []);
+      setHeadlinesDirty(false);
+    } catch (err) {
+      alert(`Headlines: ${err.message}`);
+    } finally {
+      setHeadlinesBusy(false);
+    }
+  }
+
+  async function saveHeadlines() {
+    try {
+      await api('/adcopies/headlines', { method: 'PATCH', body: { job_id: job.id, headlines } });
+      setHeadlinesDirty(false);
+    } catch (err) {
+      alert(`Speichern: ${err.message}`);
+    }
+  }
+
+  function setHeadlineAt(idx, val) {
+    setHeadlines(prev => prev.map((h, i) => i === idx ? val : h));
+    setHeadlinesDirty(true);
+  }
+
+  async function copyHeadline(idx) {
+    try {
+      await navigator.clipboard.writeText(headlines[idx] || '');
+      setHeadlinesCopiedIdx(idx);
+      setTimeout(() => setHeadlinesCopiedIdx(null), 1200);
+    } catch (e) {}
+  }
+
   async function updateLinks() {
     setUpdateLinksBusy(true);
     try {
@@ -193,6 +242,63 @@ export default function JobAdCopies() {
           ⚠️ Noch kein Bewerbungslink vorhanden — bitte zuerst im Tab „Funnel" einen Funnel anlegen und veröffentlichen oder einen externen Link eintragen. Solange erscheint im Text nur ein Platzhalter.
         </div>
       )}
+
+      {/* ─────── Headlines / Überschriften ─────── */}
+      <section className="card-form" style={{ marginBottom: 18 }}>
+        <div className="adcopy-head" style={{ marginBottom: 0 }}>
+          <div>
+            <div className="form-section-title" style={{ marginBottom: 4 }}>Überschriften (Headlines)</div>
+            <div className="motiv-sub">
+              5 kurze Headlines mit Emoji — für Meta-Anzeigen-Texte oder als Variante in den Funnel-Screens. Editierbar.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {headlinesDirty && (
+              <button className="btn-ghost btn-sm" onClick={saveHeadlines}>💾 Speichern</button>
+            )}
+            <button className="btn-ghost btn-sm" onClick={generateHeadlines} disabled={headlinesBusy}>
+              {headlinesBusy ? 'Generiere…' : (headlines.length ? '🔄 Neu generieren' : '✨ Headlines generieren')}
+            </button>
+          </div>
+        </div>
+
+        {headlinesBusy && headlines.length === 0 && (
+          <div className="motiv-skeleton" style={{ marginTop: 12 }}><div /><div /><div /><div /><div /></div>
+        )}
+
+        {headlines.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {headlines.map((h, i) => (
+              <div key={i} className="headline-row">
+                <span className="headline-num">{i + 1}</span>
+                <input
+                  type="text"
+                  value={h}
+                  onChange={e => setHeadlineAt(i, e.target.value)}
+                  onBlur={() => headlinesDirty && saveHeadlines()}
+                  maxLength={80}
+                  className="headline-input"
+                />
+                <button
+                  type="button"
+                  className="btn-ghost btn-sm"
+                  onClick={() => copyHeadline(i)}
+                  title="In Zwischenablage kopieren"
+                >{headlinesCopiedIdx === i ? '✓ Kopiert' : 'Kopieren'}</button>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+              Tipp: Pro Headline max. 40 Zeichen für Meta-Anzeigen. Änderungen werden beim Verlassen des Felds automatisch gespeichert.
+            </div>
+          </div>
+        )}
+
+        {!headlinesBusy && headlines.length === 0 && (
+          <p className="motiv-sub" style={{ marginTop: 12, marginBottom: 0 }}>
+            Noch keine Headlines generiert — Klick oben rechts auf „Headlines generieren".
+          </p>
+        )}
+      </section>
 
       {error && <div className="alert alert-error" style={{ marginBottom: 14 }}>{error}</div>}
 

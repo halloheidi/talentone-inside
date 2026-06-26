@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { generateAdCopy, ensureLinkInText, isValidStyle, STYLES } from '../adcopies.js';
+import { generateAdCopy, ensureLinkInText, isValidStyle, STYLES, generateHeadlines } from '../adcopies.js';
 import { getPublicBaseUrl } from '../branding.js';
 
 const router = Router();
@@ -173,6 +173,71 @@ router.post('/update-links', async (req, res) => {
     res.json({ updated, skipped, funnel_url: funnelUrl });
   } catch (err) {
     console.error('[update-links]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ───────────────────── Headlines / Überschriften ─────────────────────
+   Werden in talentone_jobs.formdata_komplett.headlines persistiert
+   (kein Schema-Change nötig). */
+
+/* GET /api/adcopies/headlines?job_id=… */
+router.get('/headlines', async (req, res) => {
+  const { job_id } = req.query || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  const { data: job, error } = await supabase
+    .from('talentone_jobs').select('formdata_komplett').eq('id', job_id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  const headlines = Array.isArray(job?.formdata_komplett?.headlines)
+    ? job.formdata_komplett.headlines
+    : [];
+  res.json({ headlines });
+});
+
+/* POST /api/adcopies/headlines/generate  body: { job_id }
+   Generiert 5 frische Headlines via Claude + persistiert sie. */
+router.post('/headlines/generate', async (req, res) => {
+  const { job_id } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  try {
+    const { data: job, error: jE } = await supabase
+      .from('talentone_jobs').select('*').eq('id', job_id).single();
+    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase
+      .from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+    const headlines = await generateHeadlines({ job, kunde });
+
+    // In formdata_komplett.headlines speichern
+    const merged = { ...(job.formdata_komplett || {}), headlines };
+    await supabase.from('talentone_jobs')
+      .update({ formdata_komplett: merged })
+      .eq('id', job_id);
+
+    res.json({ headlines });
+  } catch (err) {
+    console.error('[adcopies/headlines]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* PATCH /api/adcopies/headlines  body: { job_id, headlines: [...] }
+   Speichert manuell editierte Headlines. */
+router.patch('/headlines', async (req, res) => {
+  const { job_id, headlines } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  if (!Array.isArray(headlines)) return res.status(400).json({ error: 'headlines muss ein Array sein.' });
+  const clean = headlines.map(h => String(h || '').slice(0, 80)).slice(0, 10);
+  try {
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('formdata_komplett').eq('id', job_id).maybeSingle();
+    const merged = { ...(job?.formdata_komplett || {}), headlines: clean };
+    const { error } = await supabase.from('talentone_jobs')
+      .update({ formdata_komplett: merged })
+      .eq('id', job_id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ headlines: clean });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

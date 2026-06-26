@@ -163,6 +163,48 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 { "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>" }`;
 }
 
+/* ───────────────────── Headlines / Überschriften ─────────────────────
+   5 starke Recruiting-Headlines pro Kampagne, jede mit passendem Emoji
+   davor. Werden im Meta-Ads-Composer als Headline-Set verwendet
+   (Multi-Variant-Test) bzw. in unseren eigenen Funnel-/Anzeigen-Texten.  */
+
+export async function generateHeadlines({ job, kunde }) {
+  const stelle = job?.stelle || 'Mitarbeiter:in';
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const region = cleanOrt(job?.region) || '';
+  const benefits = Array.isArray(job?.benefits) ? job.benefits.filter(Boolean).slice(0, 5) : [];
+
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Meta/Instagram). Schlage 5 unterschiedliche deutsche HEADLINES (Überschriften) für die Stelle "${stelle}"${branche ? ` (${branche})` : ''}${region ? `, ${region}` : ''}${benefits.length ? `, Benefits: ${benefits.join(', ')}` : ''} vor.
+
+ANFORDERUNGEN an JEDE Headline:
+- Max. 40 Zeichen (Meta-Anzeige-Limit) — wirklich kurz halten
+- Beginnt mit einem PASSENDEN Emoji (ein einzelnes, kein Set), das zur Stelle/Branche/Aussage passt
+- Sprich Kandidaten direkt an (Du-Form okay) oder mache eine starke Aussage
+- KEIN "Wir suchen dich"-Klischee, KEIN reines Stellentitel-Wiederholen
+- Verschiedene Hooks/Tonalitäten — Curiosity, Benefit, Frage, Pain Point, Anerkennung
+
+Beispiele (zur Inspiration, nicht 1:1 kopieren):
+- "🔧 Endlich Werkzeug das was kann"
+- "💰 Mehr als 3.500€ — verdient."
+- "🚀 Karriere ohne BWL-Floskeln"
+- "❤️ Pflege, die nicht ausbrennt"
+- "📍 5 Min von dir — Wechsel?"
+
+Liefere genau 5 Headlines, JEDE mit einem unterschiedlichen Emoji am Anfang. Verschiedene Emojis je nach Tonalität: ein Werkzeug-Emoji wenn handwerklich, ❤️ für Pflege, 💰 für Gehalt, ⏰ für Zeit, 🚀 für Karriere, 📍 für Standort, 🔥 für „hot job", ✋ für Stop-Scroll, 🎯 für treffsicher, usw.
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+
+{ "headlines": ["Headline 1 mit Emoji", "Headline 2 mit Emoji", "Headline 3 mit Emoji", "Headline 4 mit Emoji", "Headline 5 mit Emoji"] }`;
+
+  const data = await callClaudeWithRetry({
+    model: CLAUDE_MODEL,
+    max_tokens: 700,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const parsed = parseJsonContent(data);
+  return Array.isArray(parsed.headlines) ? parsed.headlines.slice(0, 5) : [];
+}
+
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
 export async function generateAdCopy({ job, kunde, style, funnelUrl }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
