@@ -199,6 +199,34 @@ function stelleDisplay(stelle) {
   return `${stelle.trim()} (m/w/d)`;
 }
 
+// Stellenname OHNE (m/w/d) — für den großen Hauptbalken
+function stelleClean(stelle) {
+  if (!stelle) return 'Mitarbeiter:in';
+  return stelle.replace(/\s*\([mwfd][\/\\mwfd\s\-]+\)\s*$/i, '').trim();
+}
+
+// Vollzeit/Teilzeit-Label aus job.formdata_komplett.anstellungsart oder job.anstellungsart
+function arbeitszeitLabel(job) {
+  const raw = String(job?.formdata_komplett?.anstellungsart || job?.anstellungsart || '').toLowerCase().trim();
+  if (raw === 'vollzeit' || raw === 'full' || raw === 'fulltime' || raw === 'voll') return 'Vollzeit';
+  if (raw === 'teilzeit' || raw === 'part' || raw === 'parttime' || raw === 'teil') return 'Teilzeit';
+  if (raw === 'beide' || raw === 'beides' || raw === 'voll/teil' || raw === 'both') return 'Vollzeit/Teilzeit';
+  if (raw === 'ausbildung' || raw === 'azubi') return 'Ausbildung';
+  if (raw === 'minijob' || raw === '450€' || raw === 'geringfügig') return 'Minijob';
+  return null; // unbekannt/leer → Meta-Leiste ohne Arbeitszeit
+}
+
+// Baut den Inhalt der Meta-Leiste: 📍 Ort | Arbeitszeit | (m/w/d)
+function buildMetaLeiste(job) {
+  const ort = cleanOrt(job?.region);
+  const az = arbeitszeitLabel(job);
+  const parts = [];
+  if (ort) parts.push(`📍 ${ort}`);
+  if (az)  parts.push(az);
+  parts.push('(m/w/d)');
+  return parts.join(' | ');
+}
+
 // Nur der reine Ort — entfernt Umkreis-Suffixe wie "+30km", "(30km Umkreis)" etc.
 function cleanOrt(region) {
   if (!region) return '';
@@ -208,6 +236,37 @@ function cleanOrt(region) {
     .replace(/\s*\(\s*umkreis\s*\)/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Baut den FESTEN unteren Job-Block — gleiches Layout bei jedem Creative,
+ * unser Wiedererkennungsmerkmal. Wird in beide Prompts (KI + Foto) eingesetzt.
+ */
+function buildFixerJobBlock({ stelleGross, metaLeiste, farben, slogan }) {
+  return `═══════════════════════════════════════════════════════════════
+FESTER UNTERER JOB-BLOCK (PFLICHT — IMMER GLEICHER AUFBAU, ca. unteres Drittel der Bildhöhe):
+═══════════════════════════════════════════════════════════════
+
+Der untere Bereich ist FEST strukturiert und MUSS in JEDEM Creative klar abgegrenzt sein. Aufbau von oben nach unten:
+
+1. META-LEISTE (Pflicht, direkt über der Stellenbezeichnung):
+   Eine abgerundete Box/Banner mit ${farben ? 'der Markenfarbe als Hintergrund (Pillenform, kontrastreich zum Bild)' : 'dunklem Hintergrund (#0a0a0a, Pillenform)'}.
+   Inhalt EXAKT: "${metaLeiste}"
+   — Pipe-Zeichen "|" als Trenner zwischen Ort, Arbeitszeit und (m/w/d). Gut lesbar, mittig oder linksbündig, weiße Schrift, mittlere Schriftgröße.
+
+2. STELLENBEZEICHNUNG (Pflicht, eigener visueller Bereich GANZ UNTEN):
+   "${stelleGross}" — das GRÖSSTE Text-Element im gesamten Creative.
+   Layout-Optionen (du wählst eine):
+   ${farben
+     ? '(a) Vollbreite-Balken in Markenfarbe als Hintergrund mit weißer/kontrastreicher Schrift, ODER (b) heller/weißer Vollbreite-Balken mit Markenfarben-Schrift.'
+     : '(a) Vollbreite-Balken in einer kräftigen Akzentfarbe (lime, orange, türkis) mit dunkler Schrift, ODER (b) heller/weißer Vollbreite-Balken mit dunkler Schrift und farbiger Akzent-Linie.'}
+   Die Berufsbezeichnung in GROSSBUCHSTABEN, FETT, formatfüllend (so groß wie möglich, dass sie noch in die Breite passt).
+   Mehrwortige Bezeichnungen ggf. mit Bindestrich umbrochen (z.B. "MALER-\\nUND LACKIERER").${slogan ? `
+
+3. SLOGAN klein darunter im selben Bereich:
+   "${slogan}" — kleinere, dünnere Schrift; EIN Wort darin in Markenfarbe hervorgehoben.` : ''}
+
+Der untere Job-Block ist optisch klar vom oberen Bild abgegrenzt (entweder durch farbigen Balken, abgesetzte Kante, oder hellem Vollbreite-Block — KEIN nahtloser Übergang).`;
 }
 
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
@@ -234,7 +293,11 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
     refHinweis.push(`MITGELIEFERTES BILD = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. Übernimm Gesichtszüge, Hauttyp, Haarfarbe, Frisur und Statur und stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben.`);
   }
 
-  return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im modernen Instagram/Facebook Stil.
+  const stelleGross = stelleClean(job.stelle).toUpperCase();
+  const metaLeiste = buildMetaLeiste(job);
+  const fbJobBlock = buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben });
+
+  return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur (Pinselstrich-/Spritzer-Elemente in Markenfarbe als gestalterisches Mittel).
 
 ${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
 ${motiv}
@@ -242,24 +305,38 @@ ${motiv}
 - Branche: ${branche}
 - Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
 
-TEXT-ELEMENTE (in dieser Reihenfolge von oben nach unten, sauber lesbar):
-1. ${hasLogo
-    ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
-    : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
-2. HAUPTSPRUCH zentral: ${spruch?.trim()
-    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". GROSS, fett, sofort fesselnd. Erfinde KEINEN eigenen Spruch — nutze GENAU diese Wörter, ggf. mit Zeilenumbruch (2-3 Wörter pro Zeile).`
-    : 'ein emotionaler, kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile bei mehrzeiligem Umbruch), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.'}
-3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80% der Größe), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche klar hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" am Ende MUSS lesbar dargestellt werden — entweder direkt im selben Textblock oder als kleiner Untertitel.
-${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung, gleiche Schriftart. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte, abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
-   Benefits kompakt halten — kurze Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub", keine Sätze
-${ort ? '6' : '5'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent, gerne mit Pfeil
+═══════════════════════════════════════════════════════════════
+WICHTIG: DAS LAYOUT BESTEHT AUS 2 BEREICHEN — FESTER UNTERER BEREICH (Job-Block) + FLEXIBLER OBERER BEREICH
+═══════════════════════════════════════════════════════════════
+
+${fbJobBlock}
+
+═══════════════════════════════════════════════════════════════
+FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung darfst du variieren):
+═══════════════════════════════════════════════════════════════
+
+• HOOK / HAUPTSPRUCH (Position frei — irgendwo im oberen/mittleren Bereich):
+  ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden — nutze GENAU diese Wörter. GROSS, fett, sofort fesselnd; gerne auf einem PINSELSTRICH-Banner in Markenfarbe gesetzt (ungleichmäßige Kanten, organischer Look). Mehrzeilig OK (2-3 Wörter pro Zeile).`
+    : 'Kurzer, emotionaler Recruiting-Spruch (max. 5-6 Wörter, 2-3 Wörter pro Zeile). Setze ihn gerne auf einen PINSELSTRICH-Banner in Markenfarbe (ungleichmäßige Kanten, organischer Look). KEIN "Wir suchen dich"-Klischee.'}
+
+• BENEFIT-BADGES (Position frei — z.B. seitlich, in der oberen Hälfte oder neben der Person):
+  3-4 RUNDE Icon-Badges (Kreise, ca. 60-90px Durchmesser) mit jeweils einem Icon + kurzer Beschriftung darunter: ${benefitListe}
+  Kompakte Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub" — keine Sätze. Anordnung frei (z.B. vertikal links, horizontal oben, etc.)
+
+• ${hasLogo
+    ? `LOGO dezent platziert (oben oder bei den Benefits — du wählst): klein (ca. 8-12% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text — das Logo allein.`
+    : `FIRMENNAME-SCHRIFTZUG dezent oben oder im Header-Bereich: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element.`}
+
+• Person/Hauptmotiv-Anordnung frei (links, rechts, mittig, ggf. freigestellt)
+• Pinselstrich- oder Farbspritzer-Elemente in Markenfarbe als gestalterische Akzente (organisch, nicht überladen)
 
 DESIGN-REGELN:
-- HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast-Hintergrund/Linie) > Benefits (klein) > Firmenname & CTA (sehr klein)
-- Dunkler, halbtransparenter Verlauf hinter den Texten für Lesbarkeit, ohne das Hintergrundbild zu zerstören
-- Schrift modern, sehr lesbar; Hauptspruch UND Stellenbezeichnung beide Bold
-- ${farben ? 'Markenfarben konsequent für Text + Akzent-Linien + Box hinter der Stellenbezeichnung (so wird die CI getragen).' : 'Verwende eine kräftige Akzentfarbe (z.B. lime, orange, türkis) für die Stellenbezeichnungs-Box, damit sie aus dem Bild heraussticht.'}
+- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
+- ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot) und nutze sie für Pinselstriche, Meta-Leiste und Stellen-Bereich.'}
+- Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine QR-Codes, keine Rahmen ums ganze Bild
+- Stil: hochwertige Recruiting-Agentur-Anzeige (nicht Stock-Foto-Klischee)
 - Muss auf dem Handy sofort ins Auge springen und Scroll-Stop erzeugen`;
 }
 
@@ -279,31 +356,48 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
 [BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
     : `MITGELIEFERTES BILD = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
 
-  return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im modernen Instagram/Facebook Stil.
+  const stelleGross = stelleClean(job.stelle).toUpperCase();
+  const metaLeiste = buildMetaLeiste(job);
+  const fbJobBlock = buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben });
+
+  return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im Stil einer hochwertigen Recruiting-Agentur (Pinselstrich-/Spritzer-Elemente in Markenfarbe als gestalterisches Mittel).
 
 ${refLines}
 
 ${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
-OVERLAY-ELEMENTE (zusätzlich zum unveränderten Foto, in dieser Reihenfolge von oben nach unten):
-1. ${hasLogo
-    ? `LOGO oben rechts: dezent, klein (max. 10% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text neben oder unter dem Logo — das Logo allein dient der Markenidentifikation.`
-    : `FIRMENNAME-SCHRIFTZUG oben rechts (oder oben mittig): "${firmenname}" als sauberer, dezenter Text-Schriftzug in einer modernen Schrift (max. 12% Bildhöhe). Das ist der Markenanker — kein zusätzliches Logo-Element.`}
-2. HAUPTSPRUCH zentral oder im oberen Drittel: ${spruch?.trim()
-    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". GROSS, fett, sofort fesselnd. Erfinde KEINEN eigenen Spruch — nutze GENAU diese Wörter, ggf. mit Zeilenumbruch (2-3 Wörter pro Zeile).`
-    : 'kurzer Recruiting-Spruch (max. 5-6 Wörter, idealerweise 2-3 Wörter pro Zeile), passend zur Stelle — GROSS, fett, sofort fesselnd. KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben" hier oben.'}
-3. STELLENBEZEICHNUNG direkt unter dem Hauptspruch — ALS EIGENSTÄNDIGES, GROSSES ELEMENT: "${stelle}". Fast so groß wie der Hauptspruch (ca. 70-80%), in einer KONTRASTFARBE oder mit einer farbigen Linie/Box/Hintergrundfläche hervorgehoben. Ein Scroller muss in einer Sekunde erkennen welche Stelle angeboten wird. WICHTIG: das "(m/w/d)" MUSS lesbar dargestellt werden.
-${ort ? `4. STANDORT direkt unter der Stellenbezeichnung: "📍 ${ort}" — dezent, ca. 40% der Höhe der Stellenbezeichnung. Nur der Ort, KEIN Umkreis/Radius.\n5` : '4'}. BENEFIT-TAGS unten: 3-4 kompakte abgerundete Pill-Boxen mit Icons nebeneinander: ${benefitListe}
-${ort ? '6' : '5'}. CALL-TO-ACTION ganz unten: "Jetzt bewerben" — klein, dezent
+═══════════════════════════════════════════════════════════════
+WICHTIG: DAS OVERLAY HAT 2 BEREICHE — FESTER UNTERER BEREICH (Job-Block) + FLEXIBLER OBERER BEREICH
+═══════════════════════════════════════════════════════════════
+
+${fbJobBlock}
+
+═══════════════════════════════════════════════════════════════
+FLEXIBLER BEREICH OBEN (ca. obere 65% — du wählst Stil & Anordnung der Overlay-Elemente):
+═══════════════════════════════════════════════════════════════
+
+• HOOK / HAUPTSPRUCH (Position frei — z.B. im oberen Drittel oder mittig):
+  ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden — nutze GENAU diese Wörter. GROSS, fett, sofort fesselnd; gerne auf einem PINSELSTRICH-Banner in Markenfarbe gesetzt (ungleichmäßige Kanten).`
+    : 'Kurzer Recruiting-Spruch (max. 5-6 Wörter, 2-3 Wörter pro Zeile). Setze ihn gerne auf einen PINSELSTRICH-Banner in Markenfarbe. KEIN "Wir suchen dich"-Klischee.'}
+
+• BENEFIT-BADGES (Position frei): 3-4 RUNDE Icon-Badges (Kreise, ca. 60-90px Durchmesser) mit Icon + kurzer Beschriftung: ${benefitListe}
+  Kompakte Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub". Anordnung frei.
+
+• ${hasLogo
+    ? `LOGO dezent platziert (oben oder bei den Benefits): klein (ca. 8-12% Bildbreite). KEIN zusätzlicher Firmenname-Text.`
+    : `FIRMENNAME-SCHRIFTZUG dezent oben: "${firmenname}" als sauberer Text-Schriftzug, klein. KEIN Logo-Element.`}
+
+• Pinselstrich- oder Farbspritzer-Akzente in Markenfarbe (organisch, nicht überladen)
 
 DESIGN-REGELN:
-- HIERARCHIE der Größen: Hauptspruch (groß) > Stellenbezeichnung (fast genauso groß, mit Kontrast) > Benefits (klein) > Firmenname & CTA (sehr klein)
-- Dunkler, halbtransparenter Verlauf (Gradient) hinter den Texten — sorgt für Lesbarkeit ohne das Foto zu zerstören
-- Schrift modern, sehr lesbar; Hauptspruch UND Stellenbezeichnung beide Bold
-- ${farben ? 'Markenfarben konsequent für Text + Akzent-Linien + Stellen-Box.' : 'Kräftige Akzentfarbe (lime, orange, türkis o.ä.) für die Stellen-Box, damit sie aus dem Foto heraussticht.'}
-- Keine zusätzlichen Filter aufs Foto, keine Verfremdung, keine Stilisierung
+- HIERARCHIE der Größen: STELLENBEZEICHNUNG (formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
+- Dunkler halbtransparenter Gradient/Schatten hinter Overlay-Texten falls nötig für Lesbarkeit — das Foto bleibt der Held
+- ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (orange/türkis/rot) für Pinselstriche und Stellen-Bereich.'}
+- Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
+- Keine zusätzlichen Filter aufs Foto, keine Verfremdung
 - Keine QR-Codes, keine Rahmen ums ganze Bild
-- Wirkung: das echte Foto bleibt der Held, Text-Overlay (besonders Spruch + Stellenbezeichnung) erzeugt Scroll-Stop`;
+- Wirkung: echtes Foto = Held, Overlay-Job-Block macht klar "hier wird XY gesucht in der Region"`;
 }
 
 // Wrapper — wählt den passenden Prompt anhand des Modus.
