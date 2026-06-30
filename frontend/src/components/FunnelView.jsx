@@ -149,7 +149,7 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
       <header className={`funnel-header ${headerCompact ? 'funnel-header-mini' : ''}`}>
         {kunde?.logo_url
           ? <img className={headerCompact ? 'funnel-logo-mini' : 'funnel-logo'} src={kunde.logo_url} alt="" />
-          : <span className="funnel-logo-fallback">{(kunde?.firmenname || '?').slice(0, 1)}</span>}
+          : <span className={`funnel-logo-fallback ${headerCompact ? 'funnel-logo-fallback-mini' : ''}`}>{(kunde?.firmenname || '?').slice(0, 1)}</span>}
         <span className={headerCompact ? 'funnel-firma-mini' : 'funnel-firma'}>{kunde?.firmenname || ''}</span>
       </header>
 
@@ -171,7 +171,7 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
         </div>
       )}
 
-      <div className="funnel-body">
+      <div className="funnel-body" key={`screen-${step}`}>
         {/* INTRO — neue Reihenfolge: Headline → 2 Buttons → Body → Großer CTA */}
         {screen.type === 'intro' && (
           <>
@@ -205,12 +205,12 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
                 ? screen.benefits
                 : (Array.isArray(job?.benefits) ? job.benefits : [])
               ).map((b, i) => (
-                <li key={i} className="funnel-benefit-row">
+                <li key={i} className="funnel-benefit-row" style={{ '--i': i }}>
                   <span className="funnel-benefit-badge">{benefitEmoji(b)}</span>
                   <span className="funnel-benefit-text">{b}</span>
                 </li>
               ))}
-              <li className="funnel-benefit-row funnel-benefit-row-more">
+              <li className="funnel-benefit-row funnel-benefit-row-more" style={{ '--i': 99 }}>
                 <span className="funnel-benefit-badge">➕</span>
                 <span className="funnel-benefit-text">u.v.m.</span>
               </li>
@@ -242,8 +242,9 @@ export default function FunnelView({ funnel, job, kunde, onSubmit, frame, readon
             <h2 className="funnel-q">{screen.text || ''}</h2>
             <div className="funnel-options">
               {normalizeOptions(screen.options).map((opt, i) => (
-                <button key={i} type="button" className="funnel-option" onClick={() => pickOption(opt)}>
-                  {opt.text}
+                <button key={i} type="button" className="funnel-option" style={{ '--i': i }} onClick={() => pickOption(opt)}>
+                  <span className="funnel-option-text">{opt.text}</span>
+                  <span className="funnel-option-arrow" aria-hidden="true">→</span>
                 </button>
               ))}
             </div>
