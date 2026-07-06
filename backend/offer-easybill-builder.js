@@ -23,6 +23,20 @@ const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (monatlich im Voraus)';
 const AD_BUDGET_DESCRIPTION =
   'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen. Kampagnenstart nach Zahlungseingang.';
 
+// easybill: single_price_net erwartet Cent, obwohl der Typ float ist
+// (siehe Spec: "150 = 1.50€"). Wir speichern Euro in der DB und wandeln
+// hier einmalig zentral um.
+function euroToCents(euro) {
+  return Math.round(Number(euro || 0) * 100);
+}
+
+// Fallback-Labels, falls in talentone_offer_templates kein passender
+// Key gepflegt ist. Bevorzugt wird der Template-Key (siehe unten).
+const DEFAULT_GUARANTEE_LABEL_BY_BRAND = {
+  talentone:   'Bewerbungsgarantie',
+  nowag_wirth: 'Erfolgsgarantie',
+};
+
 /**
  * @param {object} input
  * @param {'talentone'|'nowag_wirth'} input.brand
@@ -106,9 +120,12 @@ export function buildEasybillOfferPayload({
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)
-  const guarantee    = findTemplate(templates, 'guarantee');
-  const paymentTerms = findTemplate(templates, 'payment_terms');
-  if (guarantee) items.push(makeTextPosition({ pos: pos++, title: 'Bewerbungsgarantie', body: guarantee }));
+  const guarantee      = findTemplate(templates, 'guarantee');
+  const guaranteeLabel = findTemplate(templates, 'guarantee_label')
+                       || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand]
+                       || 'Garantie';
+  const paymentTerms   = findTemplate(templates, 'payment_terms');
+  if (guarantee)    items.push(makeTextPosition({ pos: pos++, title: guaranteeLabel,      body: guarantee }));
   if (paymentTerms) items.push(makeTextPosition({ pos: pos++, title: 'Zahlungsbedingungen', body: paymentTerms }));
 
   return { items, text: null, totals };
@@ -143,7 +160,8 @@ function makePosition({ pos, titleWithSuffix, description, quantity, unit_price,
     description: desc,
     quantity: Number(quantity) || 1,
     unit: 'Stk.',
-    single_price_net: round2(Number(unit_price) || 0),
+    // easybill erwartet Cent — unit_price kommt aus der DB in Euro.
+    single_price_net: euroToCents(unit_price),
     vat_percent: Number(vat_percent) || 19,
   };
 }
@@ -161,6 +179,3 @@ function makeTextPosition({ pos, title, body }) {
   };
 }
 
-function round2(n) {
-  return Math.round(Number(n) * 100) / 100;
-}

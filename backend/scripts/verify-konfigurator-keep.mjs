@@ -4,8 +4,13 @@
 
 import { supabase } from '../supabase.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
+import { calculateOfferTotals } from '../offer-calc.js';
 import { createOffer, getDocument } from '../easybill.js';
 import { getPdfTemplate } from '../easybill-templates.js';
+
+const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+const centsToEuros = c => Math.round(Number(c || 0)) / 100;
+const eur = v => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v);
 
 const TEST_CUSTOMERS = {
   talentone:   { easybill_id: 2638685285, company_name: 'Neufend GmbH & Co. KG' },
@@ -75,7 +80,41 @@ for (const brand of ['talentone', 'nowag_wirth']) {
   const full = await getDocument(document.id);
   console.log('  easybill doc-id:', document.id, '· pdf_template:', full.pdf_template,
     full.pdf_template === expectedTpl ? '✓ MATCH' : '✗ MISMATCH');
-  console.log('  → PDF im Tool: https://inside.talent-one.de/angebote (📄-Button)');
+
+  // Cross-Check: was easybill zurückgibt vs. was calculateOfferTotals sagt.
+  const expected = calculateOfferTotals({
+    products: products || [],
+    selected,
+    additional_positions_count: 0,
+    ad_budget_monthly: draft.ad_budget_monthly,
+    vat_rate: 19,
+    extra_job_sku: EXTRA_JOB_SKU_BY_BRAND[brand] || null,
+  });
+
+  // easybill legt bei OFFER üblicherweise Summen-Felder ans Document — je nach
+  // Schema als amount, amount_net, sum_net, sum_gross usw. Wir prüfen die
+  // Positions-Summe (aus items[]) und optional die aggregierte Summe im Doc.
+  const posSumCents = Array.isArray(full.items)
+    ? full.items
+        .filter(p => p.type !== 'TEXT')
+        .reduce((s, p) => s + Math.round((Number(p.single_price_net) || 0) * (Number(p.quantity) || 1)), 0)
+    : null;
+  const expectedFirstMonthCents = Math.round(expected.first_month_total * 100);
+
+  console.log('  Berechnung (calc):',
+    'setup=' + eur(expected.setup_total),
+    '· monthly=' + eur(expected.monthly_total),
+    '· first_month=' + eur(expected.first_month_total),
+    '(brutto ' + eur(expected.gross.first_month_gross) + ')');
+  if (posSumCents != null) {
+    console.log('  Summe aus easybill-items[]:', eur(centsToEuros(posSumCents)),
+      posSumCents === expectedFirstMonthCents ? '✓ MATCH' : '✗ MISMATCH');
+  }
+  // Doc-Summen-Felder (readOnly, easybill-berechnet)
+  for (const k of ['amount_net', 'sum_net', 'total_net', 'amount', 'sum']) {
+    if (full[k] != null) console.log('  easybill doc.' + k + ':', full[k], '(Cent) =', eur(centsToEuros(full[k])));
+  }
   console.log('  → PDF direkt in easybill: Doc-ID ' + document.id);
+  console.log('  → PDF im Tool: https://inside.talent-one.de/angebote (📄-Button)');
 }
 process.exit(0);

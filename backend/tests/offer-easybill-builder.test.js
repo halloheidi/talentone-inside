@@ -20,14 +20,18 @@ test('Standard-Payload: Setup → Monatlich → Werbebudget → Garantie → Zah
     products: TO_PRODUCTS,
     selected: [{ product_id: 'p-onb' }, { product_id: 'p-crv' }, { product_id: 'p-mon' }],
     ad_budget_monthly: 800,
-    templates: TEMPLATES,
+    templates: [
+      ...TEMPLATES,
+      { key: 'guarantee_label', text: 'Bewerbungsgarantie' },
+    ],
   });
   // Reihenfolge
   assert.equal(items[0].description.startsWith('Onboarding\n\n'), true);
   assert.equal(items[1].description.startsWith('Creatives\n\n'), true);
   assert.equal(items[2].description.startsWith('Kampagne (monatlich)\n\n'), true);
   assert.equal(items[3].description.startsWith('Werbebudget-Abwicklung (monatlich im Voraus)\n\n'), true);
-  assert.equal(items[3].single_price_net, 800);
+  // easybill erwartet Cent → 800 € → 80000
+  assert.equal(items[3].single_price_net, 80000);
   assert.equal(items[4].type, 'TEXT');
   assert.match(items[4].description, /Bewerbungsgarantie/);
   assert.equal(items[5].type, 'TEXT');
@@ -50,17 +54,18 @@ test('N&W: kein Werbebudget-Posten, aber Schlusstexte weiterhin da', () => {
     templates: TEMPLATES,
   });
   const descriptions = items.map(i => i.description.split('\n')[0]);
+  // N&W → 'Erfolgsgarantie' via Default-Label (kein guarantee_label-Template gepflegt)
   assert.deepEqual(descriptions, [
     'Analyse',
     'Monatlich (monatlich)',
-    'Bewerbungsgarantie',
+    'Erfolgsgarantie',
     'Zahlungsbedingungen',
   ]);
   const anyBudget = items.some(i => i.description.includes('Werbebudget'));
   assert.equal(anyBudget, false);
 });
 
-test('Extra-Job mit additional_positions_count=3 setzt quantity und line_total korrekt', () => {
+test('Extra-Job mit additional_positions_count=3 setzt quantity und Einzelpreis korrekt', () => {
   const { items } = buildEasybillOfferPayload({
     brand: 'talentone',
     products: TO_PRODUCTS,
@@ -70,7 +75,8 @@ test('Extra-Job mit additional_positions_count=3 setzt quantity und line_total k
   });
   const extra = items.find(i => i.description.startsWith('Extra Job'));
   assert.equal(extra.quantity, 3);
-  assert.equal(extra.single_price_net, 490); // Einzelpreis pro Stelle
+  // 490 € Einzelpreis pro Stelle → 49000 Cent; easybill × 3 = 147000
+  assert.equal(extra.single_price_net, 49000);
 });
 
 test('Positionstext ist mehrsätzig und wird komplett übernommen', () => {
@@ -90,4 +96,83 @@ test('Ohne Schlusstexte werden auch keine TEXT-Positionen erzeugt', () => {
   });
   const anyText = items.some(i => i.type === 'TEXT');
   assert.equal(anyText, false);
+});
+
+test('easybill single_price_net wird in Cent übergeben (Euro × 100)', () => {
+  // easybill-Spec: "Price in cents, despite being of type float (150 = 1.50€)".
+  // 490 € muss als 49000 rüber, 1490 € als 149000, 800 € als 80000.
+  const { items } = buildEasybillOfferPayload({
+    brand: 'talentone',
+    products: TO_PRODUCTS,
+    selected: [{ product_id: 'p-onb' }, { product_id: 'p-crv' }, { product_id: 'p-mon' }],
+    ad_budget_monthly: 800,
+    templates: TEMPLATES,
+  });
+  const onb    = items.find(i => i.description.startsWith('Onboarding'));
+  const crv    = items.find(i => i.description.startsWith('Creatives'));
+  const mon    = items.find(i => i.description.startsWith('Kampagne'));
+  const budget = items.find(i => i.description.startsWith('Werbebudget'));
+  assert.equal(onb.single_price_net,    49000);
+  assert.equal(crv.single_price_net,    50000);
+  assert.equal(mon.single_price_net,   149000);
+  assert.equal(budget.single_price_net, 80000);
+  // vat_percent bleibt in Prozent (nicht in Basispunkten)
+  assert.equal(onb.vat_percent, 19);
+});
+
+test('Cent-Konvertierung rundet fair (kein Float-Drift)', () => {
+  const products = [{ id: 'p', sku: 'X', brand: 'talentone', category: 'setup', title: 'X', description: '', unit_price: 12.345, sort_order: 10, active: true }];
+  const { items } = buildEasybillOfferPayload({
+    brand: 'talentone', products, selected: [{ product_id: 'p' }], templates: [],
+  });
+  // 12.345 € × 100 = 1234.5 → runden auf 1235 (halfround up)
+  assert.equal(items[0].single_price_net, 1235);
+});
+
+test('Garantie-Label wird markenabhängig gewählt (TalentOne = Bewerbungsgarantie)', () => {
+  const { items } = buildEasybillOfferPayload({
+    brand: 'talentone',
+    products: TO_PRODUCTS,
+    selected: [{ product_id: 'p-onb' }],
+    templates: [
+      { key: 'guarantee',       text: 'Text der Garantie.' },
+      { key: 'guarantee_label', text: 'Bewerbungsgarantie' },
+    ],
+  });
+  const g = items.find(i => i.type === 'TEXT');
+  assert.match(g.description, /^Bewerbungsgarantie\n\nText der Garantie\./);
+});
+
+test('Garantie-Label wird markenabhängig gewählt (N&W = Erfolgsgarantie)', () => {
+  const products = [{ id: 'nw-a', sku: 'NW-SETUP-ANALYSIS', brand: 'nowag_wirth', category: 'setup', title: 'Analyse', description: '', unit_price: 400, sort_order: 10, active: true }];
+  const { items } = buildEasybillOfferPayload({
+    brand: 'nowag_wirth',
+    products,
+    selected: [{ product_id: 'nw-a' }],
+    templates: [
+      { key: 'guarantee',       text: 'Text der Erfolgsgarantie.' },
+      { key: 'guarantee_label', text: 'Erfolgsgarantie' },
+    ],
+  });
+  const g = items.find(i => i.type === 'TEXT');
+  assert.match(g.description, /^Erfolgsgarantie\n\nText der Erfolgsgarantie\./);
+});
+
+test('Fällt zurück auf Default-Label wenn guarantee_label-Template fehlt', () => {
+  // TalentOne ohne guarantee_label → Fallback aus DEFAULT_GUARANTEE_LABEL_BY_BRAND
+  const { items: itemsTO } = buildEasybillOfferPayload({
+    brand: 'talentone', products: TO_PRODUCTS,
+    selected: [{ product_id: 'p-onb' }],
+    templates: [{ key: 'guarantee', text: 'G-Text' }],
+  });
+  assert.match(itemsTO.find(i => i.type === 'TEXT').description, /^Bewerbungsgarantie\n/);
+
+  // N&W ohne guarantee_label → Fallback
+  const nwProducts = [{ id: 'nw-a', sku: 'NW-SETUP-ANALYSIS', brand: 'nowag_wirth', category: 'setup', title: 'Analyse', description: '', unit_price: 400, sort_order: 10, active: true }];
+  const { items: itemsNW } = buildEasybillOfferPayload({
+    brand: 'nowag_wirth', products: nwProducts,
+    selected: [{ product_id: 'nw-a' }],
+    templates: [{ key: 'guarantee', text: 'G-Text' }],
+  });
+  assert.match(itemsNW.find(i => i.type === 'TEXT').description, /^Erfolgsgarantie\n/);
 });
