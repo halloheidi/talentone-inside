@@ -6,32 +6,31 @@ import { supabase } from '../supabase.js';
 import { calculateOfferTotals } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
+import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 
 const router = Router();
 
 const BRANDS = new Set(['talentone', 'nowag_wirth']);
 const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
 
-// White-Label: pdf_template-ID je Marke aus Env — null = easybill-Default.
-// Bekanntmachung im Team via /api/offers/config-check.
-const OFFER_PDF_TEMPLATE_BY_BRAND = {
-  talentone:   process.env.EASYBILL_OFFER_TEMPLATE_TALENTONE   || null,
-  nowag_wirth: process.env.EASYBILL_OFFER_TEMPLATE_NOWAG_WIRTH || null,
-};
-
-/* GET /api/offers/config-check — zeigt konfigurierte pdf_template-IDs +
- * die live von easybill verfügbaren OFFER-Templates. Hilft bei White-Label-Setup. */
+/* GET /api/offers/config-check — zeigt konfigurierte pdf_template-IDs je
+ * (brand, doc-type) und die live von easybill verfügbaren Templates für alle
+ * drei relevanten Doc-Typen. Hilft bei White-Label-Setup. */
 router.get('/config-check', async (req, res) => {
   try {
-    const available = await listPdfTemplates('OFFER');
+    const [offer, invoice, orderConfirm] = await Promise.all([
+      listPdfTemplates('OFFER'),
+      listPdfTemplates('INVOICE'),
+      listPdfTemplates('CHARGE_CONFIRM'),
+    ]);
+    const mapTpl = t => ({ id: t.id, name: t.name, pdf_template: t.pdf_template });
     res.json({
-      configured: OFFER_PDF_TEMPLATE_BY_BRAND,
-      available_offer_templates: available.map(t => ({
-        id:            t.id,
-        name:          t.name,
-        pdf_template:  t.pdf_template,
-        document_type: t.document_type,
-      })),
+      configured: getPdfTemplateConfig(),
+      available: {
+        OFFER:          offer.map(mapTpl),
+        INVOICE:        invoice.map(mapTpl),
+        CHARGE_CONFIRM: orderConfirm.map(mapTpl),
+      },
     });
   } catch (err) {
     res.status(502).json({ error: `easybill: ${err.message}` });
@@ -252,7 +251,7 @@ router.post('/:id/create-easybill', async (req, res) => {
         customerId:  Number(offer.easybill_customer_id),
         title,
         items,
-        pdfTemplate: OFFER_PDF_TEMPLATE_BY_BRAND[offer.brand] || null,
+        pdfTemplate: getPdfTemplate(offer.brand, 'OFFER'),
         externalId:  offer.id, // Rücksync-Anker für Phase 4
       });
     } catch (err) {
