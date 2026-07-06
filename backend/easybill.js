@@ -214,3 +214,22 @@ export async function listPdfTemplates(type = 'OFFER') {
   const data = await easybill(`/pdf-templates?${qs}`);
   return Array.isArray(data?.items) ? data.items : [];
 }
+
+/**
+ * Findet alle Dokumente, deren ref_id auf ein gegebenes Vorgänger-Dokument
+ * zeigt. Nutzt den ref_id-Query-Filter der GET /documents-Route.
+ *
+ * @param {object} opts
+ * @param {number|string} opts.refId — die easybill_document_id des Vorgängers
+ *                                     (in unserem Fall unser Angebot)
+ * @param {string[]} [opts.types] — Doc-Typen zum Filtern (komma-separiert an easybill)
+ * @param {number} [opts.limit=50]
+ */
+export async function listDocumentsByRefId({ refId, types = [], limit = 50 } = {}) {
+  if (!refId) throw new Error('refId ist Pflicht.');
+  const params = { ref_id: String(refId), limit: String(limit) };
+  if (types.length) params.type = types.join(',');
+  const qs = new URLSearchParams(params).toString();
+  const data = await easybill(`/documents?${qs}`);
+  return Array.isArray(data?.items) ? data.items : [];
+}

@@ -7,11 +7,36 @@ import { calculateOfferTotals } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
+import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
 
 const router = Router();
 
 const BRANDS = new Set(['talentone', 'nowag_wirth']);
 const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+
+/* GET /api/offers/sync/status — für UI/Debug. */
+router.get('/sync/status', (req, res) => res.json(getOfferSyncStatus()));
+
+/* POST /api/offers/sync — Bulk-Trigger für alle offenen Angebote. */
+router.post('/sync', async (req, res) => {
+  try {
+    const result = await syncOpenOffers();
+    res.json({ ok: true, result });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+/* POST /api/offers/:id/resync-easybill — manueller Rücksync-Trigger für ein
+   einzelnes Angebot. Idempotent (basiert auf applyAcceptedTransition). */
+router.post('/:id/resync-easybill', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    const result = await syncOne(offer);
+    res.json({ ok: true, result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 /* GET /api/offers/config-check — zeigt konfigurierte pdf_template-IDs je
  * (brand, doc-type) und die live von easybill verfügbaren Templates für alle

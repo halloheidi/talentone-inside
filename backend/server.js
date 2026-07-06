@@ -18,7 +18,9 @@ import analyseFunnelRouter from './routes/analyse-funnel.js';
 import offerCatalogRouter from './routes/offer-catalog.js';
 import easybillCustomersRouter from './routes/easybill-customers.js';
 import offersRouter from './routes/offers.js';
+import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
+import { startOfferSyncScheduler } from './offer-sync.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +38,10 @@ app.use(cors({
   },
   credentials: true,
 }));
+// easybill-Webhook MUSS vor express.json() gemountet werden — der Handler
+// braucht den Raw-Body für die HMAC-Signatur-Verifikation.
+app.use('/api/webhooks/easybill', easybillWebhookRouter);
+
 app.use(express.json({ limit: '20mb' })); // PDFs als base64 → bis ~15 MB Datei
 
 app.get('/api/health', (req, res) => {
@@ -81,4 +87,5 @@ app.use((err, req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`✅ TalentOne Inside Backend läuft auf Port ${PORT}`);
   startEasybillCustomerSyncScheduler();
+  startOfferSyncScheduler();
 });

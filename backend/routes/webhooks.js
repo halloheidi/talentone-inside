@@ -1,4 +1,7 @@
 // Webhook-Endpoints — KEIN Login. Optional Secret-Validierung über ?secret=.
+// easybill-Webhook läuft in einem separaten Router (routes/easybill-webhook.js),
+// damit er den Raw-Body für HMAC-Signatur-Verifikation vor dem globalen
+// express.json() erhält.
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
