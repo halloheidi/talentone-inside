@@ -74,9 +74,12 @@ export default function ZahlungenOverview() {
   return (
     <div className="bew-overview">
       <header className="bew-overview-head">
-        <h1>Zahlungen</h1>
+        <h1>Zahlungen <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 100, background: '#fff2d4', color: '#a34e00', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Alt — bitte künftig über Angebots-Abrechnung</span></h1>
         <button className="btn-ghost" onClick={refreshAll}>↻ Alle offenen aktualisieren</button>
       </header>
+      <div style={{ padding: 12, background: 'var(--gray-50)', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 14, fontSize: 13, color: 'var(--ink-2)' }}>
+        Dies ist die alte PayPal-Direktrechnungs-Ansicht. Neue Rechnungen (Setup + monatlich) laufen über den <strong>Angebots-Konfigurator</strong> → dort werden alle Rechnungen in easybill geführt und PayPal ist optional pro Kunde/Rechnung wählbar.
+      </div>
 
       <section className="stats-grid">
         <div className="stat-card"><div className="stat-num">{fmtEur(summen.offen)}</div><div className="stat-label">Offen gesamt</div></div>

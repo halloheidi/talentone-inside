@@ -29,7 +29,11 @@ const BRAND_META = {
     ],
   },
 };
-const EXTRA_JOB_SKU = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+// Extra-Job-Positionen je Marke: Setup + Monthly werden gemeinsam über den
+// Counter gesteuert (nicht einzeln wählbar). Muss in offer-easybill-builder.js
+// synchron bleiben.
+const EXTRA_JOB_MONTHLY_SKU = { talentone: 'TO-OPT-EXTRA-JOB',       nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+const EXTRA_JOB_SETUP_SKU   = { talentone: 'TO-OPT-EXTRA-JOB-SETUP', nowag_wirth: 'NW-OPT-EXTRA-JOB-SETUP' };
 
 export default function OfferWizard() {
   const navigate = useNavigate();
@@ -71,9 +75,12 @@ export default function OfferWizard() {
       const list = pRes.products || [];
       setProducts(list);
       setTemplates(tRes.templates || []);
-      // Pflicht + Default-Optionen vorbelegen
+      // Pflicht + Default-Optionen vorbelegen. Extra-Job-Positionen sind
+      // ausdrücklich NICHT default und werden erst über den Counter aktiviert.
+      const extraSkus = new Set([EXTRA_JOB_SETUP_SKU[brand], EXTRA_JOB_MONTHLY_SKU[brand]]);
       const initial = new Set();
       for (const p of list) {
+        if (extraSkus.has(p.sku)) continue;
         if (p.category === 'setup' || p.category === 'monthly') initial.add(p.id);
         else if (p.is_default) initial.add(p.id);
       }
@@ -175,7 +182,25 @@ export default function OfferWizard() {
               const n = new Set(cur); n.has(id) ? n.delete(id) : n.add(id); return n;
             })}
             additionalPositionsCount={additionalPositionsCount}
-            setAdditionalPositionsCount={setAdditionalPositionsCount}
+            setAdditionalPositionsCount={n => {
+              // Kopplung: Counter steuert BEIDE Extra-Job-Positionen (Setup + Monthly)
+              const setupSku   = EXTRA_JOB_SETUP_SKU[brand];
+              const monthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
+              const setupId   = products.find(p => p.sku === setupSku)?.id;
+              const monthlyId = products.find(p => p.sku === monthlySku)?.id;
+              setAdditionalPositionsCount(n);
+              setSelectedIds(cur => {
+                const next = new Set(cur);
+                if (n > 0) {
+                  if (setupId)   next.add(setupId);
+                  if (monthlyId) next.add(monthlyId);
+                } else {
+                  if (setupId)   next.delete(setupId);
+                  if (monthlyId) next.delete(monthlyId);
+                }
+                return next;
+              });
+            }}
             adBudget={adBudget} setAdBudget={setAdBudget}
           />
         )}
@@ -587,8 +612,13 @@ function Step2Brand({ brand, onSelect }) {
 function Step3Config({ brand, products, selectedIds, onToggle, additionalPositionsCount, setAdditionalPositionsCount, adBudget, setAdBudget }) {
   const setups   = products.filter(p => p.category === 'setup');
   const monthlys = products.filter(p => p.category === 'monthly');
-  const options  = products.filter(p => p.category === 'option_setup' || p.category === 'option_monthly');
-  const extraSku = EXTRA_JOB_SKU[brand];
+  const extraMonthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
+  const extraSetupSku   = EXTRA_JOB_SETUP_SKU[brand];
+  // Extra-Job-Setup nicht separat anzeigen — läuft über den Counter am Monthly.
+  const options  = products
+    .filter(p => p.category === 'option_setup' || p.category === 'option_monthly')
+    .filter(p => p.sku !== extraSetupSku);
+  const extraSetupPrice = products.find(p => p.sku === extraSetupSku)?.unit_price;
 
   return (
     <div>
@@ -608,7 +638,7 @@ function Step3Config({ brand, products, selectedIds, onToggle, additionalPositio
       <section style={{ marginBottom: 22 }}>
         <SectionHead label="Optionen" />
         {options.map(p => {
-          const isExtra = p.sku === extraSku;
+          const isExtra = p.sku === extraMonthlySku;
           return (
             <PositionRow
               key={p.id} p={p}
@@ -616,6 +646,7 @@ function Step3Config({ brand, products, selectedIds, onToggle, additionalPositio
               onToggle={() => onToggle(p.id)}
               extraCount={isExtra ? additionalPositionsCount : null}
               onExtraCount={isExtra ? setAdditionalPositionsCount : null}
+              coupledSetupPrice={isExtra ? extraSetupPrice : null}
             />
           );
         })}
@@ -653,7 +684,7 @@ function SectionHead({ label }) {
   return <h3 style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', margin: '0 0 8px' }}>{label}</h3>;
 }
 
-function PositionRow({ p, selected, onToggle, readonly, required, extraCount, onExtraCount }) {
+function PositionRow({ p, selected, onToggle, readonly, required, extraCount, onExtraCount, coupledSetupPrice }) {
   return (
     <div style={{
       display: 'flex', gap: 12, alignItems: 'center',
@@ -673,13 +704,21 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
           {p.category.endsWith('monthly') && <span style={{ marginLeft: 8, fontSize: 10, padding: '2px 7px', background: '#e0f5ff', borderRadius: 100, color: '#0068a3', fontWeight: 600 }}>monatlich</span>}
         </div>
         {extraCount != null && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Zusätzliche parallele Stellen:</span>
-            <input
-              type="number" min="0" max="5" value={extraCount}
-              onChange={e => onExtraCount(Math.max(0, Math.min(5, parseInt(e.target.value, 10) || 0)))}
-              style={{ width: 60, padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 6, textAlign: 'center', fontSize: 13 }}
-            />
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Zusätzliche parallele Stellen:</span>
+              <input
+                type="number" min="0" max="5" value={extraCount}
+                onChange={e => onExtraCount(Math.max(0, Math.min(5, parseInt(e.target.value, 10) || 0)))}
+                style={{ width: 60, padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 6, textAlign: 'center', fontSize: 13 }}
+              />
+            </div>
+            {coupledSetupPrice != null && (
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.4 }}>
+                Erzeugt pro zusätzlicher Stelle automatisch auch die einmalige Einrichtung
+                (<strong>{eur.format(Number(coupledSetupPrice))}</strong> je Stelle).
+              </div>
+            )}
           </div>
         )}
       </div>

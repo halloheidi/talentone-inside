@@ -17,7 +17,12 @@ import { calculateOfferTotals } from './offer-calc.js';
 
 const SETUP_CATS   = new Set(['setup', 'option_setup']);
 const MONTHLY_CATS = new Set(['monthly', 'option_monthly']);
-const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+// Extra-Job-Positionen je Marke: Setup + Monthly werden über EIN
+// additional_positions_count gemeinsam gesteuert (quantity gekoppelt).
+const EXTRA_JOB_SKUS_BY_BRAND = {
+  talentone:   ['TO-OPT-EXTRA-JOB-SETUP', 'TO-OPT-EXTRA-JOB'],
+  nowag_wirth: ['NW-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB'],
+};
 
 const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (monatlich im Voraus)';
 const AD_BUDGET_DESCRIPTION =
@@ -57,7 +62,7 @@ export function buildEasybillOfferPayload({
   vat_rate = 19,
   templates = [],
 } = {}) {
-  const extraSku = EXTRA_JOB_SKU_BY_BRAND[brand] || null;
+  const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
 
   // Erst: durch den Rechner laufen lassen, damit wir konsistente
   // Mengen/Beträge haben — genau die Zahlen, die auf dem PDF stehen sollen.
@@ -66,7 +71,7 @@ export function buildEasybillOfferPayload({
     additional_positions_count,
     ad_budget_monthly,
     vat_rate,
-    extra_job_sku: extraSku,
+    extra_job_skus: extraSkus,
   });
 
   const productById = new Map(products.map(p => [p.id, p]));

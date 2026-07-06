@@ -42,7 +42,17 @@ router.post('/', async (req, res) => {
         return;
       }
 
-      // Zugehörige Zahlung in unserer DB finden
+      // NEU (Phase 5): erst gegen talentone_invoices matchen (Angebots-System)
+      const { data: newInvoice } = await supabase
+        .from('talentone_invoices')
+        .select('*')
+        .eq('paypal_reference', invoiceId)
+        .maybeSingle();
+      if (newInvoice) {
+        return await handlePhase5InvoicePayment({ event, resource, invoiceId, eventType, invoice: newInvoice });
+      }
+
+      // ALT (talentone_zahlungen): bestehendes Direkt-PayPal-System
       const { data: zahlung, error: findErr } = await supabase
         .from('talentone_zahlungen')
         .select('*')
@@ -100,5 +110,62 @@ router.post('/', async (req, res) => {
     }
   })().catch(err => console.error('[PayPal-Webhook] uncaught:', err.message));
 });
+
+/* Phase-5-Zahlungshandler: PayPal-Zahlung für talentone_invoices verbuchen +
+   in easybill als Zahlung eintragen (damit easybill die Rechnung als bezahlt
+   markiert und die Buchhaltung führend bleibt). Idempotent — bei
+   Doppel-Events wird nur last_synced_at aktualisiert. */
+async function handlePhase5InvoicePayment({ event, resource, invoiceId, eventType, invoice }) {
+  const isPaid = eventType === 'INVOICING.INVOICE.PAID';
+  const nowIso = new Date().toISOString();
+
+  // Idempotenz-Kern
+  if (invoice.status === 'paid' && invoice.paid_at) {
+    await supabase.from('talentone_invoices')
+      .update({ last_synced_at: nowIso }).eq('id', invoice.id);
+    return;
+  }
+
+  if (!isPaid) {
+    // Andere Events nur Status abbilden (partial/cancelled)
+    let newStatus = invoice.status;
+    if (eventType === 'INVOICING.INVOICE.CANCELLED') newStatus = 'cancelled';
+    else if (eventType === 'INVOICING.INVOICE.REFUNDED') newStatus = 'cancelled';
+    await supabase.from('talentone_invoices')
+      .update({ status: newStatus, last_synced_at: nowIso }).eq('id', invoice.id);
+    return;
+  }
+
+  // PAID: PayPal-Zahlung in easybill buchen
+  const paymentDate = resource.payments?.transactions?.[0]?.payment_date
+    ? String(resource.payments.transactions[0].payment_date).slice(0, 10)
+    : nowIso.slice(0, 10);
+  const paypalTxRef = resource.payments?.transactions?.[0]?.payment_id
+    || resource.id || invoiceId;
+
+  try {
+    if (invoice.easybill_document_id) {
+      const { bookDocumentPayment } = await import('../easybill.js');
+      await bookDocumentPayment({
+        documentId: invoice.easybill_document_id,
+        amountCents: Math.round(Number(invoice.amount_gross || 0) * 100),
+        provider: 'PayPal',
+        reference: paypalTxRef,
+        paymentAt: paymentDate,
+        markPaid: true,
+      });
+      console.log(`[PayPal-Webhook] easybill payment gebucht für invoice ${invoice.id.slice(0,8)}`);
+    }
+  } catch (err) {
+    console.warn(`[PayPal-Webhook] easybill payment fehlgeschlagen für ${invoice.id.slice(0,8)}: ${err.message}`);
+  }
+
+  await supabase.from('talentone_invoices').update({
+    status: 'paid',
+    paid_at: new Date(paymentDate).toISOString(),
+    last_synced_at: nowIso,
+  }).eq('id', invoice.id);
+  console.log(`[PayPal-Webhook] talentone_invoices ${invoice.id.slice(0,8)} → paid`);
+}
 
 export default router;

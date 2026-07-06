@@ -155,7 +155,7 @@ test('Werbebudget = 0 oder null ergibt ad_budget_monthly = 0', () => {
   assert.equal(r3.ad_budget_monthly, 0);
 });
 
-test('additional_positions_count nur bei Extra-Job-SKU aktiv, andere Positions bleiben 1×', () => {
+test('additional_positions_count nur bei Extra-Job-SKUs aktiv, andere Positions bleiben 1×', () => {
   const r = calculateOfferTotals({
     products: TO_PRODUCTS,
     selected: [
@@ -163,8 +163,52 @@ test('additional_positions_count nur bei Extra-Job-SKU aktiv, andere Positions b
       { product_id: 'p-to-vorq' },
     ],
     additional_positions_count: 5,
-    extra_job_sku: 'TO-OPT-EXTRA-JOB',
+    extra_job_skus: ['TO-OPT-EXTRA-JOB-SETUP', 'TO-OPT-EXTRA-JOB'],
   });
   const onb = r.positions.find(l => l.sku === 'TO-SETUP-ONBOARDING');
   assert.equal(onb.quantity, 1); // quantity>1 ist nur bei Extra-Job erlaubt (siehe Wizard-Kontrakt)
+});
+
+test('Extra-Job Kopplung (n=2): Setup + Monthly beide mit quantity=2', () => {
+  // Simuliert Wizard-Verhalten: Counter=2 aktiviert Extra-Job-SETUP + -MONTHLY
+  // gemeinsam. calc muss beide mit derselben quantity abbilden.
+  const products = [
+    ...TO_PRODUCTS,
+    { id: 'p-to-extra-setup', sku: 'TO-OPT-EXTRA-JOB-SETUP', brand: 'talentone',
+      category: 'option_setup', unit_price: 290, active: true },
+  ];
+  const r = calculateOfferTotals({
+    products,
+    selected: [
+      { product_id: 'p-to-onb' }, { product_id: 'p-to-crv' }, { product_id: 'p-to-mon' },
+      { product_id: 'p-to-extra-setup' },
+      { product_id: 'p-to-extra' },
+    ],
+    additional_positions_count: 2,
+    extra_job_skus: ['TO-OPT-EXTRA-JOB-SETUP', 'TO-OPT-EXTRA-JOB'],
+  });
+  const setup   = r.positions.find(l => l.sku === 'TO-OPT-EXTRA-JOB-SETUP');
+  const monthly = r.positions.find(l => l.sku === 'TO-OPT-EXTRA-JOB');
+  assert.equal(setup.quantity, 2);
+  assert.equal(monthly.quantity, 2);
+  assert.equal(setup.line_total,   580);   // 290 × 2
+  assert.equal(monthly.line_total, 980);   // 490 × 2
+
+  // Setup-Total: Basis-Setup (990) + Extra-Setup-Total (580) = 1570
+  assert.equal(r.setup_total,   990 + 580);
+  // Monthly-Total: Basis-Monthly (1490) + Extra-Monthly-Total (980) = 2470
+  assert.equal(r.monthly_total, 1490 + 980);
+  // Merge-Tag {{monat_1}} = first_month_total inkl. beider Extra-Job-Rows
+  assert.equal(r.first_month_total, (990 + 580) + (1490 + 980));
+});
+
+test('Backwards-Compat: alter extra_job_sku-Parameter wirkt weiter', () => {
+  const r = calculateOfferTotals({
+    products: TO_PRODUCTS,
+    selected: [{ product_id: 'p-to-mon' }, { product_id: 'p-to-extra' }],
+    additional_positions_count: 3,
+    extra_job_sku: 'TO-OPT-EXTRA-JOB',
+  });
+  const extra = r.positions.find(l => l.sku === 'TO-OPT-EXTRA-JOB');
+  assert.equal(extra.quantity, 3);
 });

@@ -14,7 +14,13 @@ import { addNote as closeAddNote } from '../close.js';
 const router = Router();
 
 const BRANDS = new Set(['talentone', 'nowag_wirth']);
-const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+// Extra-Job-Positionen je Marke: Setup + Monthly werden gekoppelt gesteuert
+// über additional_positions_count. Muss in offer-easybill-builder.js
+// synchron bleiben.
+const EXTRA_JOB_SKUS_BY_BRAND = {
+  talentone:   ['TO-OPT-EXTRA-JOB-SETUP', 'TO-OPT-EXTRA-JOB'],
+  nowag_wirth: ['NW-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB'],
+};
 
 // Deutsche Zahlenformatierung wie im Frontend
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
@@ -202,7 +208,7 @@ router.post('/calculate', async (req, res) => {
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
       ad_budget_monthly: b.ad_budget_monthly ?? null,
       vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
-      extra_job_sku: EXTRA_JOB_SKU_BY_BRAND[b.brand] || null,
+      extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
     });
     res.json({ brand: b.brand, totals });
   } catch (err) {
@@ -257,7 +263,7 @@ router.post('/', async (req, res) => {
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
       ad_budget_monthly: b.ad_budget_monthly ?? null,
       vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
-      extra_job_sku: EXTRA_JOB_SKU_BY_BRAND[b.brand] || null,
+      extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
     });
 
     const row = {
@@ -311,7 +317,7 @@ router.patch('/:id', async (req, res) => {
       additional_positions_count: addCount,
       ad_budget_monthly: adBudget,
       vat_rate: vatRate,
-      extra_job_sku: EXTRA_JOB_SKU_BY_BRAND[brand] || null,
+      extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[brand] || [],
     });
 
     const patch = {

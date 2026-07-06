@@ -28,6 +28,7 @@ export default function OffersList() {
   const [busyId, setBusyId] = useState(null);
   const [rowError, setRowError] = useState({}); // { [offerId]: msg }
   const [sendModal, setSendModal] = useState(null); // { offerId, subject, body, to, firma, already_sent }
+  const [billingOffer, setBillingOffer] = useState(null); // Angebot fürs Abrechnungs-Modal
 
   async function pdfHref(offerId) {
     // Auth-Header ist Pflicht — Standard-Link würde 401 werfen.
@@ -188,6 +189,13 @@ export default function OffersList() {
                           onClick={() => openSendModal(o)}
                         >{isBusy ? '⏳' : (o.status === 'sent' ? '✉︎ Erneut senden' : '✉︎ An Kunden senden')}</button>
                       )}
+                      {o.status === 'accepted' && (
+                        <button
+                          className="btn-primary btn-sm"
+                          title="Abrechnung: Setup-Rechnung, monatliches Abo, Werbebudget"
+                          onClick={() => setBillingOffer(o)}
+                        >📊 Abrechnung</button>
+                      )}
                       {err && <span style={{ fontSize: 11, color: '#b91c1c' }}>⚠ {err}</span>}
                     </td>
                   </tr>
@@ -202,6 +210,12 @@ export default function OffersList() {
         preview={sendModal}
         onClose={() => setSendModal(null)}
         onSent={() => { setSendModal(null); load(); }}
+      />
+
+      <BillingModal
+        offer={billingOffer}
+        onClose={() => setBillingOffer(null)}
+        onChanged={() => { setBillingOffer(null); load(); }}
       />
     </div>
   );
@@ -281,6 +295,135 @@ function SendOfferModal({ preview, onClose, onSent }) {
             style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
         </label>
       </div>
+    </Modal>
+  );
+}
+
+function BillingModal({ offer, onClose, onChanged }) {
+  const [dup, setDup] = useState(null);          // Duplikats-Check
+  const [invoices, setInvoices] = useState([]);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [adBudget, setAdBudget] = useState('');
+
+  useEffect(() => {
+    if (!offer) return;
+    setErr(''); setDup(null); setInvoices([]);
+    setAdBudget(offer.ad_budget_monthly ? String(offer.ad_budget_monthly) : '0');
+    Promise.all([
+      api(`/invoices/offer/${offer.id}/dup-check`).catch(() => ({ duplicate: false })),
+      api(`/invoices?offer_id=${offer.id}`).catch(() => ({ invoices: [] })),
+    ]).then(([d, list]) => {
+      setDup(d);
+      setInvoices(list.invoices || []);
+    });
+  }, [offer?.id]);
+
+  if (!offer) return null;
+
+  const setupInv = invoices.find(i => i.invoice_type === 'setup' && i.status !== 'cancelled');
+  const hasRecurring = !!offer.easybill_recurring_document_id;
+  const billingEnded = !!offer.billing_ended_at;
+  const isTalentOne = offer.brand === 'talentone';
+
+  async function runSetup() {
+    setErr(''); setBusy('setup');
+    try {
+      await api('/invoices/setup', { method: 'POST', body: { offer_id: offer.id } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runActivateMonthly() {
+    setErr(''); setBusy('monthly');
+    try {
+      await api('/invoices/monthly/activate', { method: 'POST', body: { offer_id: offer.id } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runStopMonthly() {
+    if (!confirm('Monatliche Abrechnung wirklich stoppen? Die easybill-Wiederholung wird gestoppt.')) return;
+    setErr(''); setBusy('stop');
+    try {
+      await api('/invoices/monthly/stop', { method: 'POST', body: { offer_id: offer.id } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runUpdateBudget() {
+    const n = parseFloat(adBudget);
+    if (!Number.isFinite(n) || n < 0) return setErr('Betrag ungültig.');
+    setErr(''); setBusy('budget');
+    try {
+      await api('/invoices/ad-budget', { method: 'POST', body: { offer_id: offer.id, new_amount: n } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+
+  return (
+    <Modal open={!!offer} onClose={onClose} title={`Abrechnung — ${offer.customer_snapshot?.company_name || '—'}`}>
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+      <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 14 }}>
+        Marke: <strong>{offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne'}</strong> ·
+        Monat 1: <strong>{eur.format(Number(offer.first_month_total || 0))}</strong> ·
+        Monatlich: <strong>{eur.format(Number(offer.monthly_total || 0))}</strong>
+      </p>
+
+      {/* Setup-Rechnung */}
+      <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>1. Setup-Rechnung</div>
+        {setupInv ? (
+          <div style={{ fontSize: 13 }}>
+            ✓ Bereits erstellt: <strong>{eur.format(Number(setupInv.amount_gross))}</strong> · Status: <strong>{setupInv.status}</strong>
+            {setupInv.easybill_document_id && <> · <a href={`/api/invoices/${setupInv.id}/pdf`} target="_blank" rel="noreferrer">📄 PDF</a></>}
+          </div>
+        ) : dup?.duplicate ? (
+          <div style={{ fontSize: 13, color: '#a34e00' }}>
+            ⚠ In easybill existiert bereits eine Rechnung mit ref_id auf dieses Angebot
+            {dup.source === 'easybill' && dup.doc?.number && <> (Nr. {dup.doc.number})</>}. Der Button wird deaktiviert — bitte in easybill oder in der Liste weiter verwalten.
+            <button className="btn-primary btn-sm" disabled style={{ display: 'block', marginTop: 8 }}>Setup-Rechnung erstellen</button>
+          </div>
+        ) : (
+          <button className="btn-primary btn-sm" onClick={runSetup} disabled={busy === 'setup'}>
+            {busy === 'setup' ? 'Erstelle…' : 'Setup-Rechnung erstellen'}
+          </button>
+        )}
+      </section>
+
+      {/* Monatliches Abo */}
+      <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>2. Monatliches Abo</div>
+        {billingEnded ? (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+            Beendet am {new Date(offer.billing_ended_at).toLocaleDateString('de-DE')}.
+          </div>
+        ) : hasRecurring ? (
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ fontSize: 13, color: '#0a8043' }}>✓ Aktiv — easybill-Recurring läuft</div>
+            <button className="btn-ghost btn-sm" onClick={runStopMonthly} disabled={busy === 'stop'}>
+              {busy === 'stop' ? 'Stoppe…' : 'Beenden'}
+            </button>
+          </div>
+        ) : (
+          <button className="btn-primary btn-sm" onClick={runActivateMonthly} disabled={busy === 'monthly'}>
+            {busy === 'monthly' ? 'Aktiviere…' : 'Monatliche Abrechnung aktivieren'}
+          </button>
+        )}
+      </section>
+
+      {/* Werbebudget — nur TalentOne */}
+      {isTalentOne && (
+        <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>3. Werbebudget</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="number" step="10" min="0" value={adBudget} onChange={e => setAdBudget(e.target.value)}
+              style={{ width: 120, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
+            <span style={{ fontSize: 13 }}>€ / Monat</span>
+            <button className="btn-primary btn-sm" onClick={runUpdateBudget} disabled={busy === 'budget'}>
+              {busy === 'budget' ? 'Speichere…' : 'Ändern'}
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0 0' }}>Änderung wirkt ab der nächsten monatlichen Rechnung. Historie wird geführt.</p>
+        </section>
+      )}
     </Modal>
   );
 }

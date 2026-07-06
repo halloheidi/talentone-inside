@@ -41,8 +41,16 @@ export function calculateOfferTotals({
   additional_positions_count = 0,
   ad_budget_monthly = null,
   vat_rate = 19,
-  extra_job_sku = null,
+  extra_job_sku = null,           // Legacy: einzelne SKU (behalten für Backwards-Compat)
+  extra_job_skus = null,          // Neuer Kontrakt: Menge > 1 zulässig für ALLE SKUs in diesem Set
 } = {}) {
+  // Vereinheitlicht in ein Set. Legacy-Wert wird beigemischt, damit alte
+  // Aufrufer weiter funktionieren.
+  const extraSet = new Set(
+    (Array.isArray(extra_job_skus) ? extra_job_skus : [])
+      .concat(extra_job_sku ? [extra_job_sku] : [])
+      .filter(Boolean)
+  );
   const priceOf = p => Number(p.unit_price) || 0;
   const byId = new Map(products.map(p => [p.id, p]));
 
@@ -58,10 +66,11 @@ export function calculateOfferTotals({
     if (!p) continue;
     if (p.active === false) continue;
 
-    // Kontrakt: quantity>1 ist AUSSCHLIESSLICH für die Extra-Job-Option erlaubt.
-    // Für alle anderen Positionen fixieren wir quantity=1, damit Manipulationen
-    // im Frontend die Summen nicht verzerren.
-    const isExtraJob = extra_job_sku && p.sku === extra_job_sku;
+    // Kontrakt: quantity>1 ist ausschließlich für die Extra-Job-Positionen
+    // erlaubt (Extra-Job-Setup + Extra-Job-Monthly, gekoppelt an
+    // additional_positions_count). Für alle anderen Positionen fixieren wir
+    // quantity=1, damit Manipulationen im Frontend die Summen nicht verzerren.
+    const isExtraJob = extraSet.has(p.sku);
     let quantity = 1;
     if (isExtraJob) {
       if (additional_positions_count > 0) {

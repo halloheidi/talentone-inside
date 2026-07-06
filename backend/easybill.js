@@ -215,6 +215,69 @@ export async function listPdfTemplates(type = 'OFFER') {
   return Array.isArray(data?.items) ? data.items : [];
 }
 
+/** Aktualisiert ein bestehendes Dokument (z.B. Positionen im RECURRING). */
+export async function updateDocument(documentId, patch) {
+  return easybill(`/documents/${encodeURIComponent(documentId)}`, {
+    method: 'PUT', body: patch,
+  });
+}
+
+/**
+ * Erstellt eine Rechnung (INVOICE) direkt oder eine wiederkehrende
+ * Vorlage (RECURRING). Nutzt dieselbe Position-Struktur wie createOffer.
+ *
+ * @param {object} opts
+ * @param {'INVOICE'|'RECURRING'} opts.type
+ * @param {number} opts.customerId
+ * @param {string} [opts.title]
+ * @param {Array}  opts.items
+ * @param {string|null} [opts.pdfTemplate]
+ * @param {string} [opts.externalId]
+ * @param {object} [opts.recurringOptions] — Pflicht bei type=RECURRING
+ *   { next_date: 'YYYY-MM-DD', frequency: 'MONTHLY', interval: 1, status: 'RUNNING'|'WAITING' }
+ * @param {string} [opts.text] — Freitext unter den Positionen
+ * @param {boolean} [opts.paymentLinkEnabled] — easybill-Payment-Link am Doc einblenden
+ */
+export async function createInvoiceDocument({
+  type = 'INVOICE', customerId, title, items = [], text = null,
+  pdfTemplate = null, externalId = null,
+  recurringOptions = null, paymentLinkEnabled = false,
+}) {
+  const body = {
+    type, customer_id: customerId, title: title || null, items,
+  };
+  if (text !== null && text !== '')       body.text = text;
+  if (pdfTemplate)                         body.pdf_template = pdfTemplate;
+  if (externalId)                          body.external_id  = externalId;
+  if (paymentLinkEnabled)                  body.payment_link_enabled = true;
+  if (type === 'RECURRING') {
+    if (!recurringOptions?.next_date) throw new Error('recurringOptions.next_date ist Pflicht bei RECURRING.');
+    body.recurring_options = { frequency: 'MONTHLY', interval: 1, status: 'RUNNING', ...recurringOptions };
+  }
+  return easybill('/documents', { method: 'POST', body });
+}
+
+/**
+ * Bucht eine Zahlung auf einem easybill-Dokument (Rücksync aus PayPal etc.).
+ * amount in Cent. Mit ?paid=true markiert easybill die Rechnung als bezahlt.
+ */
+export async function bookDocumentPayment({
+  documentId, amountCents, provider = 'PayPal', reference = null,
+  paymentAt = new Date().toISOString().slice(0, 10), markPaid = true,
+}) {
+  const qs = markPaid ? '?paid=true' : '';
+  return easybill(`/document-payments${qs}`, {
+    method: 'POST',
+    body: {
+      document_id: Number(documentId),
+      amount:      Math.round(Number(amountCents) || 0),
+      payment_at:  paymentAt,
+      provider,
+      reference:   reference ? String(reference).slice(0, 250) : '',
+    },
+  });
+}
+
 /**
  * Findet alle Dokumente, deren ref_id auf ein gegebenes Vorgänger-Dokument
  * zeigt. Nutzt den ref_id-Query-Filter der GET /documents-Route.

@@ -18,9 +18,11 @@ import analyseFunnelRouter from './routes/analyse-funnel.js';
 import offerCatalogRouter from './routes/offer-catalog.js';
 import easybillCustomersRouter from './routes/easybill-customers.js';
 import offersRouter from './routes/offers.js';
+import invoicesRouter from './routes/invoices.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 import { startOfferSyncScheduler } from './offer-sync.js';
+import { startInvoiceSyncScheduler } from './invoice-sync.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -68,6 +70,7 @@ app.use('/api/analyse-funnel', requireAuth, analyseFunnelRouter);
 app.use('/api/offer-catalog', requireAuth, offerCatalogRouter);
 app.use('/api/easybill-customers', requireAuth, easybillCustomersRouter);
 app.use('/api/offers', requireAuth, offersRouter);
+app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
@@ -88,4 +91,5 @@ app.listen(PORT, () => {
   console.log(`✅ TalentOne Inside Backend läuft auf Port ${PORT}`);
   startEasybillCustomerSyncScheduler();
   startOfferSyncScheduler();
+  startInvoiceSyncScheduler();
 });
