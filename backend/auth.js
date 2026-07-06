@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { isAdminEmail } from './team.js';
 
 // Middleware: prüft Supabase Access Token im Authorization Header
 // Frontend schickt: Authorization: Bearer <access_token>
@@ -15,5 +16,15 @@ export async function requireAuth(req, res, next) {
   }
 
   req.user = data.user;
+  next();
+}
+
+// Middleware: setzt requireAuth voraus und prüft zusätzlich Admin-Rolle
+// (Whitelist über team.js). Für Preisverwaltung, Katalog-CRUD etc.
+export function requireAdmin(req, res, next) {
+  const email = req.user?.email;
+  if (!email || !isAdminEmail(email)) {
+    return res.status(403).json({ error: 'Admin-Rechte erforderlich.' });
+  }
   next();
 }

@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 
-function GlobalNav() {
+function GlobalNav({ isAdmin }) {
   return (
     <nav className="nav">
       <NavLink to="/kunden" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
@@ -27,6 +27,15 @@ function GlobalNav() {
         <Icon name="users" />
         <span>Analyse-Funnel</span>
       </NavLink>
+      {isAdmin && (
+        <>
+          <div className="nav-section">Admin</div>
+          <NavLink to="/admin/angebots-katalog" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+            <Icon name="users" />
+            <span>Angebots-Katalog</span>
+          </NavLink>
+        </>
+      )}
     </nav>
   );
 }
@@ -81,7 +90,7 @@ function KundeNav({ kundeId }) {
 }
 
 export default function DashboardLayout() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const kundeMatch = useMatch('/kunden/:kundeId/*');
   const kundeId = kundeMatch?.params?.kundeId;
 
@@ -93,7 +102,7 @@ export default function DashboardLayout() {
           <span className="brand-accent">One</span>
           <span className="brand-sub">Inside</span>
         </Link>
-        {kundeId ? <KundeNav kundeId={kundeId} /> : <GlobalNav />}
+        {kundeId ? <KundeNav kundeId={kundeId} /> : <GlobalNav isAdmin={isAdmin} />}
         <div className="sidebar-foot">v0.2 · intern</div>
       </aside>
       <main className="main">
@@ -103,7 +112,7 @@ export default function DashboardLayout() {
             <div className="avatar">{(user?.email || '?').slice(0, 1).toUpperCase()}</div>
             <div className="user-meta">
               <div className="user-email">{user?.email}</div>
-              <div className="user-role">Mitarbeiter</div>
+              <div className="user-role">{isAdmin ? 'Admin' : 'Mitarbeiter'}</div>
             </div>
             <button className="btn-ghost" onClick={signOut} title="Abmelden">
               <Icon name="logout" />

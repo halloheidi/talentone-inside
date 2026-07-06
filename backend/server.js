@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { requireAuth } from './auth.js';
+import { isAdminEmail } from './team.js';
 import kundenRouter from './routes/kunden.js';
 import jobsRouter from './routes/jobs.js';
 import creativesRouter from './routes/creatives.js';
@@ -14,6 +15,7 @@ import zahlungenRouter from './routes/zahlungen.js';
 import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
 import projekteRouter from './routes/projekte.js';
 import analyseFunnelRouter from './routes/analyse-funnel.js';
+import offerCatalogRouter from './routes/offer-catalog.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,7 +56,17 @@ app.use('/api/zahlungen/webhook', zahlungenWebhookRouter);
 app.use('/api/zahlungen', requireAuth, zahlungenRouter);
 app.use('/api/projekte', requireAuth, projekteRouter);
 app.use('/api/analyse-funnel', requireAuth, analyseFunnelRouter);
+app.use('/api/offer-catalog', requireAuth, offerCatalogRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
+
+// Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
+app.get('/api/me', requireAuth, (req, res) => {
+  const email = req.user?.email || null;
+  res.json({
+    email,
+    is_admin: !!(email && isAdminEmail(email)),
+  });
+});
 
 app.use((err, req, res, _next) => {
   console.error('[Inside] Fehler:', err.message);

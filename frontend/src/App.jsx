@@ -19,11 +19,19 @@ import JobCreatives from './pages/job/JobCreatives.jsx';
 import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
+import OfferKatalog from './pages/admin/OfferKatalog.jsx';
 
 function Protected({ children }) {
   const { session, loading } = useAuth();
   if (loading) return <div className="full-loading">Lade…</div>;
   if (!session) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function AdminOnly({ children }) {
+  const { me, isAdmin } = useAuth();
+  if (!me) return <div className="full-loading">Lade…</div>;
+  if (!isAdmin) return <Navigate to="/kunden" replace />;
   return children;
 }
 
@@ -50,6 +58,7 @@ export default function App() {
         <Route path="zahlungen" element={<ZahlungenOverview />} />
         <Route path="projekte" element={<ProjekteOverview />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
+        <Route path="admin/angebots-katalog" element={<AdminOnly><OfferKatalog /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />
