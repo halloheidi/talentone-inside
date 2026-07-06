@@ -20,6 +20,7 @@ import {
 } from './easybill.js';
 import { getPdfTemplate } from './easybill-templates.js';
 import { createInvoice as paypalCreateInvoice } from './paypal.js';
+import { evaluateMonthlyBilling } from './billing-rules.js';
 
 const EUR_VAT_DEFAULT = 19;
 
@@ -322,18 +323,19 @@ function nextMonthFirst(from = new Date()) {
 }
 
 /**
- * Aktiviert das monatliche Abo — legt in easybill ein RECURRING-Doc an
- * (frequency MONTHLY, next_date = übergebenes Datum oder 1. des Folgemonats).
+ * Aktiviert die monatliche Abrechnung — setzt campaign_started_at (den Anker
+ * der Garantie-Frist). KEIN easybill-RECURRING mehr — der eigene Cron
+ * evaluiert monatlich die Abrechnungsregel und erzeugt Einzel-INVOICEs.
+ *
+ * @param {string} offerId
+ * @param {object} [opts]
+ * @param {string} [opts.startDate]  YYYY-MM-DD (default heute)
  */
-export async function activateMonthlyRecurring(offerId, { startDate = null } = {}) {
+export async function activateMonthlyBilling(offerId, { startDate = null } = {}) {
   const offer = await fetchOffer(offerId);
   if (offer.status !== 'accepted') throw new Error('Nur angenommene Angebote können abgerechnet werden.');
-  if (offer.easybill_recurring_document_id) {
-    throw new Error('Monatliches Abo ist bereits aktiv.');
-  }
-  if (offer.billing_ended_at) {
-    throw new Error('Monatliches Abo wurde bereits beendet — neu aufsetzen erforderlich.');
-  }
+  if (offer.campaign_started_at)   throw new Error('Monatliche Abrechnung ist bereits aktiviert.');
+  if (offer.billing_ended_at)      throw new Error('Monatliche Abrechnung wurde bereits beendet — neu aufsetzen erforderlich.');
 
   const products = await fetchCatalog(offer.brand);
   const items = buildRecurringItems({
@@ -344,47 +346,47 @@ export async function activateMonthlyRecurring(offerId, { startDate = null } = {
   });
   if (!items.length) throw new Error('Keine monatlichen Positionen im Angebot.');
 
-  const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
-  const nextDate = startDate || nextMonthFirst();
-
-  const doc = await createInvoiceDocument({
-    type: 'RECURRING',
-    customerId: Number(offer.easybill_customer_id),
-    title: `Monatliches Abo — ${brandLabel}`,
-    items,
-    pdfTemplate: getPdfTemplate(offer.brand, 'INVOICE'),
-    externalId: offer.id,
-    recurringOptions: {
-      next_date: nextDate, frequency: 'MONTHLY', interval: 1, status: 'RUNNING',
-      target_type: 'INVOICE', send_as: 'EMAIL',
-    },
-    text: 'Ihre monatliche Servicepauschale — vielen Dank für die Zusammenarbeit.',
-  });
-
+  const startIso = startDate || isoDate();
   const { data: updated, error } = await supabase.from('talentone_offers')
-    .update({ easybill_recurring_document_id: String(doc.id), last_synced_at: new Date().toISOString() })
+    .update({ campaign_started_at: startIso, last_synced_at: new Date().toISOString() })
     .eq('id', offerId).select().single();
   if (error) throw new Error(error.message);
-  return { offer: updated, recurringDocId: doc.id, nextDate };
+  return { offer: updated, campaignStartedAt: startIso };
 }
 
-/** Beendet das monatliche Abo — Status STOP in easybill + billing_ended_at. */
-export async function stopMonthlyRecurring(offerId) {
+/** Beendet die monatliche Abrechnung — auch während der servicefreien Phase. */
+export async function stopMonthlyBilling(offerId) {
   const offer = await fetchOffer(offerId);
-  if (!offer.easybill_recurring_document_id) throw new Error('Kein aktives Abo.');
-  await updateDocument(offer.easybill_recurring_document_id, {
-    recurring_options: { status: 'STOP', next_date: nextMonthFirst() },
-  });
+  if (!offer.campaign_started_at) throw new Error('Monatliche Abrechnung war nicht aktiv.');
+  if (offer.billing_ended_at)     throw new Error('Bereits beendet.');
   const { data, error } = await supabase.from('talentone_offers')
-    .update({ billing_ended_at: new Date().toISOString(), last_synced_at: new Date().toISOString() })
+    .update({
+      billing_ended_at: new Date().toISOString(),
+      billing_paused_at: null,
+      billing_pause_reason: null,
+    })
     .eq('id', offerId).select().single();
   if (error) throw new Error(error.message);
   return { offer: data };
 }
 
 /**
- * Ändert das Werbebudget — schreibt History, patched RECURRING-Doc,
- * Angebot.ad_budget_monthly aktualisiert.
+ * Reaktivierung nach TalentOne max-servicefrei-Monat (manuelle Team-Entscheidung).
+ * Nur der User kann das anstoßen — kein Automatismus.
+ */
+export async function reactivateMonthlyBilling(offerId, { note = null } = {}) {
+  const offer = await fetchOffer(offerId);
+  if (!offer.billing_paused_at) throw new Error('Abo ist nicht pausiert.');
+  const { data, error } = await supabase.from('talentone_offers')
+    .update({ billing_paused_at: null, billing_pause_reason: null })
+    .eq('id', offerId).select().single();
+  if (error) throw new Error(error.message);
+  return { offer: data, note };
+}
+
+/**
+ * Ändert das Werbebudget — schreibt History, Angebot.ad_budget_monthly wird
+ * aktualisiert. Wirkt automatisch ab der nächsten Cron-Rechnung.
  */
 export async function updateAdBudget(offerId, newAmount, { changedBy = null, reason = null } = {}) {
   const offer = await fetchOffer(offerId);
@@ -393,30 +395,232 @@ export async function updateAdBudget(offerId, newAmount, { changedBy = null, rea
   const cleanNew  = Number(newAmount) || 0;
   if (cleanNew < 0) throw new Error('Betrag muss ≥ 0 sein.');
 
-  // History anlegen
   await supabase.from('talentone_ad_budget_history').insert({
     offer_id: offerId, old_amount: oldAmount, new_amount: cleanNew,
     effective_from: nextMonthFirst(), changed_by: changedBy, reason,
   });
 
-  // Angebot aktualisieren (calculateOfferTotals arbeitet für Live-Ansichten
-  // — die Historie stützt nur die Kampagne)
   await supabase.from('talentone_offers')
     .update({ ad_budget_monthly: cleanNew })
     .eq('id', offerId);
 
-  // RECURRING-Doc-Positionen frisch aufbauen und in easybill patchen
-  if (offer.easybill_recurring_document_id) {
-    const products = await fetchCatalog(offer.brand);
-    const items = buildRecurringItems({
-      brand: offer.brand,
-      products,
-      selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
-      adBudget: cleanNew,
-    });
-    await updateDocument(offer.easybill_recurring_document_id, { items });
-  }
-
   const { data } = await supabase.from('talentone_offers').select('*').eq('id', offerId).maybeSingle();
   return { offer: data, oldAmount, newAmount: cleanNew };
 }
+
+// ─────────────────────── Monatlicher Lauf pro Angebot ───────────────────────
+
+function endOfMonth(dateIso) {
+  const d = new Date(dateIso); d.setMonth(d.getMonth() + 1); d.setDate(0);
+  return isoDate(d);
+}
+function firstOfMonth(dateIso) {
+  const d = new Date(dateIso); d.setDate(1);
+  return isoDate(d);
+}
+function formatMonthDE(dateIso) {
+  const d = new Date(dateIso);
+  return d.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+}
+
+/**
+ * Zählt bereits protokollierte servicefreie Monate für dieses Angebot
+ * (Basis für die TalentOne-max-1-Grenze).
+ */
+async function countServiceFreeMonths(offerId) {
+  const { data } = await supabase
+    .from('talentone_billing_skip_log')
+    .select('id', { count: 'exact', head: false })
+    .eq('offer_id', offerId)
+    .in('reason', ['guarantee_no_hire']);
+  return (data || []).length;
+}
+
+/**
+ * Erzeugt (oder überspringt) den monatlichen Lauf für ein einzelnes Angebot.
+ * Idempotent per UNIQUE(offer_id, period_start) im Skip-Log und talentone_invoices-
+ * Row-Prüfung.
+ *
+ * @param {string} offerId
+ * @param {object} [opts]
+ * @param {Date}   [opts.today]        Rechnungslauf-Tag (default now)
+ * @param {string} [opts.periodStart]  Serviceperiode (YYYY-MM-DD, default 1. Folgemonat)
+ * @returns {Promise<{ action:string, invoice?:object, skipLog?:object }>}
+ */
+export async function runMonthlyBillingForOffer(offerId, { today = null, periodStart = null } = {}) {
+  const offer = await fetchOffer(offerId);
+  const runToday = today || new Date();
+  const startIso = periodStart || nextMonthFirst(runToday);
+  const endIso   = endOfMonth(startIso);
+
+  // Duplikats-Guard: gibt es bereits einen Lauf für diese Periode?
+  const { data: existingInv } = await supabase
+    .from('talentone_invoices')
+    .select('id, status')
+    .eq('offer_id', offerId)
+    .eq('period_start', startIso)
+    .neq('status', 'cancelled')
+    .maybeSingle();
+  if (existingInv) return { action: 'already_billed', invoice: existingInv };
+
+  const { data: existingSkip } = await supabase
+    .from('talentone_billing_skip_log')
+    .select('id')
+    .eq('offer_id', offerId).eq('period_start', startIso).maybeSingle();
+  if (existingSkip) return { action: 'already_logged', skipLog: existingSkip };
+
+  const { count: hireCount } = await supabase
+    .from('talentone_hires').select('id', { count: 'exact', head: true }).eq('offer_id', offerId);
+  const hasHire = (hireCount || 0) > 0;
+  const serviceFreeMonthsUsed = await countServiceFreeMonths(offerId);
+
+  const decision = evaluateMonthlyBilling(offer, {
+    today: runToday, hasHire, serviceFreeMonthsUsed,
+  });
+
+  const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+  const products = await fetchCatalog(offer.brand);
+  const monthLabel = formatMonthDE(startIso);
+
+  const buildFullItems = () => buildRecurringItems({
+    brand: offer.brand, products,
+    selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+    adBudget: Number(offer.ad_budget_monthly) || 0,
+  });
+  const buildBudgetOnlyItems = () => {
+    const items = [];
+    if (Number(offer.ad_budget_monthly) > 0) {
+      items.push(makePosition({
+        pos: 1,
+        titleWithSuffix: `Werbebudget ${monthLabel} (Vorauszahlung)`,
+        description: `Vollständige Abwicklung Ihres Werbebudgets über TalentOne für ${monthLabel}. Servicepauschale entfällt in diesem Monat gemäß Bewerbungsgarantie.`,
+        quantity: 1, unitPriceEur: Number(offer.ad_budget_monthly), vatPercent: EUR_VAT_DEFAULT,
+      }));
+    }
+    return items;
+  };
+  const waivedServiceAmount = Number(offer.monthly_total) || 0;
+
+  // ─── Skip-Fälle ───
+  if (decision.action.startsWith('skip_')) {
+    // Bei TalentOne max_month_reached zusätzlich das Abo pausieren
+    if (decision.action === 'skip_manual_reactivation') {
+      await supabase.from('talentone_offers')
+        .update({ billing_paused_at: new Date().toISOString(),
+                  billing_pause_reason: 'talentone_max_month_reached' })
+        .eq('id', offer.id);
+    }
+    const reasonMap = {
+      skip_and_wait_first_hire:  'guarantee_no_hire',
+      skip_manual_reactivation:  'talentone_max_month_reached',
+      skip_service_waived:       'service_waived_override',
+      skip_campaign_ended:       'campaign_ended',
+      skip_billing_paused:       'talentone_max_month_reached',
+    };
+    const { data: skipLog } = await supabase.from('talentone_billing_skip_log').insert({
+      offer_id: offer.id, brand: offer.brand,
+      period_start: startIso, period_end: endIso,
+      reason: reasonMap[decision.action] || 'other',
+      waived_service_amount: waivedServiceAmount,
+      budget_invoiced: false,
+      note: decision.meta?.pause_reason || null,
+    }).select().single();
+    return { action: decision.action, skipLog };
+  }
+
+  // ─── bill_budget_only (TalentOne, servicefreier Monat mit Budget) ───
+  if (decision.action === 'bill_budget_only') {
+    const items = buildBudgetOnlyItems();
+    if (!items.length) {
+      // Kein Budget → nichts zu berechnen; Log als servicefrei + kein Budget
+      const { data: skipLog } = await supabase.from('talentone_billing_skip_log').insert({
+        offer_id: offer.id, brand: offer.brand,
+        period_start: startIso, period_end: endIso,
+        reason: 'guarantee_no_hire',
+        waived_service_amount: waivedServiceAmount,
+        budget_invoiced: false,
+      }).select().single();
+      return { action: 'skip_no_budget', skipLog };
+    }
+    const { invoice, doc } = await createMonthlyInvoiceInEasybill({
+      offer, items, brandLabel, monthLabel,
+      title: `Monatliche Rechnung ${monthLabel} — Werbebudget (servicefrei)`,
+      documentText: `Ihre Werbebudget-Vorauszahlung für ${monthLabel}. Servicepauschale entfällt in diesem Monat gemäß Bewerbungsgarantie.`,
+      invoiceType: 'ad_budget',
+      periodStart: startIso, periodEnd: endIso,
+    });
+    await supabase.from('talentone_billing_skip_log').insert({
+      offer_id: offer.id, brand: offer.brand,
+      period_start: startIso, period_end: endIso,
+      reason: 'guarantee_no_hire',
+      waived_service_amount: waivedServiceAmount,
+      budget_invoiced: true,
+      invoice_id: invoice.id,
+    });
+    return { action: 'bill_budget_only', invoice, doc };
+  }
+
+  // ─── bill_full ───
+  const items = buildFullItems();
+  if (!items.length) return { action: 'skip_no_positions' };
+  const { invoice, doc } = await createMonthlyInvoiceInEasybill({
+    offer, items, brandLabel, monthLabel,
+    title: `Monatliche Rechnung ${monthLabel} — ${brandLabel}`,
+    documentText: `Ihre monatliche Betreuung für ${monthLabel}. Vielen Dank für die Zusammenarbeit.`,
+    invoiceType: offer.brand === 'talentone' && Number(offer.ad_budget_monthly) > 0
+      ? 'monthly_combined' : 'monthly_service',
+    periodStart: startIso, periodEnd: endIso,
+  });
+  return { action: 'bill_full', invoice, doc };
+}
+
+/** Erzeugt eine talentone_invoices-Row + easybill-INVOICE. Nutzt keine
+ *  Recurring-Vorlage — jede Rechnung ist ein eigenständiges Dokument. */
+async function createMonthlyInvoiceInEasybill({
+  offer, items, brandLabel, monthLabel, title, documentText,
+  invoiceType, periodStart, periodEnd,
+}) {
+  const totalNet = round2(
+    items.reduce((sum, it) => sum + ((Number(it.single_price_net) / 100) * (Number(it.quantity) || 1)), 0)
+  );
+  const totalGross = round2(totalNet * (1 + EUR_VAT_DEFAULT / 100));
+
+  const { data: draft, error } = await supabase.from('talentone_invoices').insert({
+    offer_id: offer.id,
+    customer_id: offer.customer_id,
+    easybill_customer_id: offer.easybill_customer_id,
+    brand: offer.brand,
+    invoice_type: invoiceType,
+    period_start: periodStart, period_end: periodEnd,
+    amount_net: totalNet, amount_gross: totalGross, vat_rate: EUR_VAT_DEFAULT,
+    payment_method: 'bank_transfer',
+    status: 'draft',
+    due_date: addDays(7),
+  }).select().single();
+  if (error) throw new Error(`talentone_invoices insert: ${error.message}`);
+
+  const doc = await createInvoiceDocument({
+    type: 'INVOICE',
+    customerId: Number(offer.easybill_customer_id),
+    title, items, text: documentText,
+    pdfTemplate: getPdfTemplate(offer.brand, 'INVOICE'),
+    externalId: draft.id,
+  });
+
+  const { data: updated } = await supabase.from('talentone_invoices').update({
+    easybill_document_id: String(doc.id),
+    easybill_pdf_url: `/api/invoices/${draft.id}/pdf`,
+    status: 'sent',
+    last_synced_at: new Date().toISOString(),
+  }).eq('id', draft.id).select().single();
+
+  return { invoice: updated, doc };
+}
+
+// ─────────────────────── Backwards-Compat (Alt-Namen) ───────────────────────
+// Die frühere API (Phase 5 pre-Nachtrag) nutzte activateMonthlyRecurring /
+// stopMonthlyRecurring. Wir re-exportieren die neuen Funktionen unter den
+// alten Namen für Wire-Kompatibilität. Diese sollten nicht mehr genutzt
+// werden — nutzt stattdessen activateMonthlyBilling / stopMonthlyBilling.
+export const activateMonthlyRecurring = activateMonthlyBilling;
+export const stopMonthlyRecurring     = stopMonthlyBilling;

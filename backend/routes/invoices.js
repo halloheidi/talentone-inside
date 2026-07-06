@@ -6,11 +6,14 @@ import { supabase } from '../supabase.js';
 import { getDocumentPdf } from '../easybill.js';
 import {
   createSetupInvoice,
-  activateMonthlyRecurring,
-  stopMonthlyRecurring,
+  activateMonthlyBilling,
+  stopMonthlyBilling,
+  reactivateMonthlyBilling,
   updateAdBudget,
   findExistingInvoiceForOffer,
+  runMonthlyBillingForOffer,
 } from '../invoice-service.js';
+import { runMonthlyBillingRound, getBillingCronStatus } from '../billing-scheduler.js';
 import {
   syncOpenInvoices, evaluateCampaignPaymentStatus, getInvoiceSyncStatus,
 } from '../invoice-sync.js';
@@ -92,12 +95,13 @@ router.post('/setup', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* POST /api/invoices/monthly/activate  body: { offer_id, start_date? } */
+/* POST /api/invoices/monthly/activate  body: { offer_id, start_date? }
+   Setzt campaign_started_at — der Cron übernimmt ab Trigger-Tag. */
 router.post('/monthly/activate', async (req, res) => {
   const { offer_id, start_date } = req.body || {};
   if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
   try {
-    const result = await activateMonthlyRecurring(offer_id, { startDate: start_date || null });
+    const result = await activateMonthlyBilling(offer_id, { startDate: start_date || null });
     res.status(201).json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -107,9 +111,74 @@ router.post('/monthly/stop', async (req, res) => {
   const { offer_id } = req.body || {};
   if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
   try {
-    const result = await stopMonthlyRecurring(offer_id);
+    const result = await stopMonthlyBilling(offer_id);
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/monthly/reactivate  body: { offer_id, note? }
+   Manuelle Team-Entscheidung nach TalentOne max-servicefrei. */
+router.post('/monthly/reactivate', async (req, res) => {
+  const { offer_id, note } = req.body || {};
+  if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
+  try {
+    const result = await reactivateMonthlyBilling(offer_id, { note });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/monthly/waive-override  body: { offer_id, active:bool, note? }
+   Kulanz-Schalter (Servicefrei trotz laufender Frist). Note ist Pflicht wenn active=true. */
+router.post('/monthly/waive-override', async (req, res) => {
+  const { offer_id, active, note } = req.body || {};
+  if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
+  if (active && !String(note || '').trim()) {
+    return res.status(400).json({ error: 'Bei Aktivierung ist eine Notiz Pflicht.' });
+  }
+  try {
+    const { data, error } = await supabase.from('talentone_offers').update({
+      service_waived_override: !!active,
+      service_waived_note: active ? (note || '') : null,
+    }).eq('id', offer_id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ offer: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/monthly/run-now  body: { offer_id, period_start? }
+   Manueller Trigger für einzelnes Angebot — z.B. für Tests oder Ad-hoc-Läufe. */
+router.post('/monthly/run-now', async (req, res) => {
+  const { offer_id, period_start } = req.body || {};
+  if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
+  try {
+    const result = await runMonthlyBillingForOffer(offer_id, {
+      today: new Date(), periodStart: period_start || null,
+    });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/monthly/run-cron — Bulk-Trigger, führt eine komplette
+   Cron-Runde aus (respektiert BILLING_TRIGGER_DAY). */
+router.post('/monthly/run-cron', async (req, res) => {
+  try {
+    const result = await runMonthlyBillingRound({ today: new Date() });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/invoices/monthly/cron-status */
+router.get('/monthly/cron-status', (req, res) => res.json(getBillingCronStatus()));
+
+/* GET /api/invoices/skip-log?offer_id=... */
+router.get('/skip-log', async (req, res) => {
+  const { offer_id, brand } = req.query || {};
+  let q = supabase.from('talentone_billing_skip_log').select('*').order('period_start', { ascending: false });
+  if (offer_id) q = q.eq('offer_id', offer_id);
+  if (brand)    q = q.eq('brand', brand);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ skips: data || [] });
 });
 
 /* POST /api/invoices/ad-budget  body: { offer_id, new_amount, reason? } */

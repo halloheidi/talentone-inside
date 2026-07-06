@@ -300,31 +300,57 @@ function SendOfferModal({ preview, onClose, onSent }) {
 }
 
 function BillingModal({ offer, onClose, onChanged }) {
-  const [dup, setDup] = useState(null);          // Duplikats-Check
+  const [dup, setDup] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [hires, setHires] = useState([]);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [adBudget, setAdBudget] = useState('');
+  const [hireModal, setHireModal] = useState(null); // { hire, preview } für Erfassungs-Modal
+  const [waiveOverride, setWaiveOverride] = useState(false);
+  const [waiveNote, setWaiveNote] = useState('');
 
   useEffect(() => {
     if (!offer) return;
-    setErr(''); setDup(null); setInvoices([]);
+    setErr(''); setDup(null); setInvoices([]); setHires([]);
     setAdBudget(offer.ad_budget_monthly ? String(offer.ad_budget_monthly) : '0');
+    setWaiveOverride(!!offer.service_waived_override);
+    setWaiveNote(offer.service_waived_note || '');
     Promise.all([
       api(`/invoices/offer/${offer.id}/dup-check`).catch(() => ({ duplicate: false })),
       api(`/invoices?offer_id=${offer.id}`).catch(() => ({ invoices: [] })),
-    ]).then(([d, list]) => {
+      api(`/hires?offer_id=${offer.id}`).catch(() => ({ hires: [] })),
+    ]).then(([d, list, h]) => {
       setDup(d);
       setInvoices(list.invoices || []);
+      setHires(h.hires || []);
     });
   }, [offer?.id]);
 
   if (!offer) return null;
 
   const setupInv = invoices.find(i => i.invoice_type === 'setup' && i.status !== 'cancelled');
-  const hasRecurring = !!offer.easybill_recurring_document_id;
-  const billingEnded = !!offer.billing_ended_at;
-  const isTalentOne = offer.brand === 'talentone';
+  const billingActive = !!offer.campaign_started_at;
+  const billingEnded  = !!offer.billing_ended_at;
+  const billingPaused = !!offer.billing_paused_at;
+  const isTalentOne   = offer.brand === 'talentone';
+
+  // Garantie-Phase & Countdown
+  const guaranteeDays = Number(offer.guarantee_period_days || 30);
+  const start = offer.campaign_started_at ? new Date(offer.campaign_started_at) : null;
+  const cutoff = start ? new Date(start.getTime() + guaranteeDays * 86400000) : null;
+  const now = new Date();
+  const withinGuarantee = start && now <= cutoff;
+  const daysSinceStart = start ? Math.floor((now - start) / 86400000) + 1 : null;
+  const hasHire = hires.length > 0;
+
+  let phaseBanner = null;
+  if (billingEnded)               phaseBanner = { label: `Abrechnung beendet am ${new Date(offer.billing_ended_at).toLocaleDateString('de-DE')}`, color: '#5a5955', bg: 'var(--gray-100)' };
+  else if (!billingActive)        phaseBanner = { label: 'Monatliche Abrechnung noch nicht aktiviert', color: '#5a5955', bg: 'var(--gray-100)' };
+  else if (hasHire)               phaseBanner = { label: `Einstellung(en) erfasst — reguläre Abrechnung`, color: '#0a8043', bg: '#e0f5df' };
+  else if (billingPaused)         phaseBanner = { label: `Servicefrei-Monat aufgebraucht — Team muss manuell reaktivieren`, color: '#b91c1c', bg: '#fde0e0' };
+  else if (withinGuarantee)       phaseBanner = { label: `Garantiefrist läuft (Tag ${daysSinceStart} von ${guaranteeDays})`, color: '#0068a3', bg: '#e0f5ff' };
+  else                            phaseBanner = { label: `Garantiefrist erreicht — ab dem nächsten Lauf servicefrei`, color: '#a34e00', bg: '#fff2d4' };
 
   async function runSetup() {
     setErr(''); setBusy('setup');
@@ -341,12 +367,59 @@ function BillingModal({ offer, onClose, onChanged }) {
     } catch (e) { setErr(e.message); setBusy(''); }
   }
   async function runStopMonthly() {
-    if (!confirm('Monatliche Abrechnung wirklich stoppen? Die easybill-Wiederholung wird gestoppt.')) return;
+    if (!window.confirm('Monatliche Abrechnung wirklich stoppen? Auch die servicefreie Nachleistung endet.')) return;
     setErr(''); setBusy('stop');
     try {
       await api('/invoices/monthly/stop', { method: 'POST', body: { offer_id: offer.id } });
       onChanged();
     } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runReactivate() {
+    setErr(''); setBusy('reactivate');
+    try {
+      await api('/invoices/monthly/reactivate', { method: 'POST', body: { offer_id: offer.id } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function toggleWaiveOverride(active) {
+    if (active) {
+      const n = window.prompt('Notiz zur Kulanz (Pflicht):', '');
+      if (!n || !n.trim()) return;
+      setErr(''); setBusy('waive');
+      try {
+        await api('/invoices/monthly/waive-override', {
+          method: 'POST', body: { offer_id: offer.id, active: true, note: n.trim() },
+        });
+        onChanged();
+      } catch (e) { setErr(e.message); setBusy(''); }
+    } else {
+      setErr(''); setBusy('waive');
+      try {
+        await api('/invoices/monthly/waive-override', {
+          method: 'POST', body: { offer_id: offer.id, active: false },
+        });
+        onChanged();
+      } catch (e) { setErr(e.message); setBusy(''); }
+    }
+  }
+  async function openHireModal(hiredAtDefault = null) {
+    setBusy('hire-open');
+    try {
+      const q = new URLSearchParams({ offer_id: offer.id });
+      if (hiredAtDefault) q.set('hired_at', hiredAtDefault);
+      const preview = await api(`/hires/preview?${q.toString()}`);
+      setHireModal({ offer_id: offer.id, preview, hired_at: hiredAtDefault || new Date().toISOString().slice(0, 10) });
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(''); }
+  }
+  async function deleteHire(id) {
+    if (!window.confirm('Diese Einstellung wirklich löschen? Wenn es die letzte ist, kann die servicefreie Logik wieder greifen.')) return;
+    setErr('');
+    try {
+      await api(`/hires/${id}`, { method: 'DELETE' });
+      const h = await api(`/hires?offer_id=${offer.id}`);
+      setHires(h.hires || []);
+    } catch (e) { setErr(e.message); }
   }
   async function runUpdateBudget() {
     const n = parseFloat(adBudget);
@@ -388,31 +461,98 @@ function BillingModal({ offer, onClose, onChanged }) {
         )}
       </section>
 
-      {/* Monatliches Abo */}
+      {/* Phasen-Banner */}
+      {phaseBanner && (
+        <div style={{ padding: '10px 14px', background: phaseBanner.bg, color: phaseBanner.color, borderRadius: 10, marginBottom: 12, fontSize: 13, fontWeight: 600 }}>
+          {phaseBanner.label}
+        </div>
+      )}
+
+      {/* Monatliche Abrechnung */}
       <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>2. Monatliches Abo</div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>2. Monatliche Abrechnung</div>
         {billingEnded ? (
           <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
             Beendet am {new Date(offer.billing_ended_at).toLocaleDateString('de-DE')}.
           </div>
-        ) : hasRecurring ? (
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <div style={{ fontSize: 13, color: '#0a8043' }}>✓ Aktiv — easybill-Recurring läuft</div>
+        ) : !billingActive ? (
+          <button className="btn-primary btn-sm" onClick={runActivateMonthly} disabled={busy === 'monthly'}>
+            {busy === 'monthly' ? 'Aktiviere…' : 'Monatliche Abrechnung aktivieren'}
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+              Aktiv seit {new Date(offer.campaign_started_at).toLocaleDateString('de-DE')} · Garantie {guaranteeDays}d
+            </div>
+            {billingPaused && (
+              <button className="btn-primary btn-sm" onClick={runReactivate} disabled={busy === 'reactivate'}>
+                {busy === 'reactivate' ? 'Reaktiviere…' : '▶ Servicepauschale wieder aktivieren'}
+              </button>
+            )}
             <button className="btn-ghost btn-sm" onClick={runStopMonthly} disabled={busy === 'stop'}>
               {busy === 'stop' ? 'Stoppe…' : 'Beenden'}
             </button>
           </div>
-        ) : (
-          <button className="btn-primary btn-sm" onClick={runActivateMonthly} disabled={busy === 'monthly'}>
-            {busy === 'monthly' ? 'Aktiviere…' : 'Monatliche Abrechnung aktivieren'}
-          </button>
         )}
       </section>
+
+      {/* Einstellungen */}
+      {billingActive && (
+        <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10, marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>
+              3. Einstellungen · <strong style={{ color: 'var(--ink)' }}>{hires.length} von {offer.hires_target || 1}</strong>
+            </div>
+            <button className="btn-primary btn-sm" onClick={() => openHireModal()} disabled={busy === 'hire-open'}>
+              {busy === 'hire-open' ? 'Lade…' : '+ Einstellung erfassen'}
+            </button>
+          </div>
+          {hires.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>Noch keine Einstellung erfasst.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 6 }}>
+              {hires.map(h => (
+                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#fff', borderRadius: 8, fontSize: 13 }}>
+                  <div>
+                    <strong>{h.position || '—'}</strong>
+                    <span style={{ marginLeft: 8, color: 'var(--ink-3)' }}>{new Date(h.hired_at).toLocaleDateString('de-DE')}</span>
+                    {h.mail_sent_at ? (
+                      <span style={{ marginLeft: 8, fontSize: 11, color: '#0a8043' }}>✓ Mail an {h.mail_sent_to}</span>
+                    ) : (
+                      <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--ink-4)' }}>keine Mail</span>
+                    )}
+                  </div>
+                  <button className="btn-ghost btn-sm" onClick={() => deleteHire(h.id)}>Löschen</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Kulanz-Schalter */}
+      {billingActive && (
+        <section style={{ padding: 14, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 10, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#a34e00', marginBottom: 6 }}>
+            ⚠ Ausnahme: Kulanz-Schalter
+          </div>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="checkbox" checked={waiveOverride} disabled={busy === 'waive'}
+              onChange={e => toggleWaiveOverride(e.target.checked)} />
+            <span style={{ fontSize: 13 }}>Servicefrei trotz laufender Garantiefrist</span>
+          </label>
+          {offer.service_waived_note && (
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
+              Notiz: „{offer.service_waived_note}"
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Werbebudget — nur TalentOne */}
       {isTalentOne && (
         <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>3. Werbebudget</div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>4. Werbebudget</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="number" step="10" min="0" value={adBudget} onChange={e => setAdBudget(e.target.value)}
               style={{ width: 120, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
@@ -424,6 +564,122 @@ function BillingModal({ offer, onClose, onChanged }) {
           <p style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0 0' }}>Änderung wirkt ab der nächsten monatlichen Rechnung. Historie wird geführt.</p>
         </section>
       )}
+
+      <HireModal
+        state={hireModal}
+        onClose={() => setHireModal(null)}
+        onSaved={() => {
+          setHireModal(null);
+          api(`/hires?offer_id=${offer.id}`).then(h => setHires(h.hires || []));
+          onChanged();
+        }}
+      />
+    </Modal>
+  );
+}
+
+function HireModal({ state, onClose, onSaved }) {
+  const [hiredAt, setHiredAt] = useState('');
+  const [position, setPosition] = useState('');
+  const [note, setNote] = useState('');
+  const [sendMail, setSendMail] = useState(true);
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!state) return;
+    setHiredAt(state.hired_at || new Date().toISOString().slice(0, 10));
+    setPosition('');
+    setNote('');
+    setSendMail(true);
+    setTo(state.preview?.default_to || '');
+    setSubject(state.preview?.subject || '');
+    setBody(state.preview?.body || '');
+    setErr('');
+  }, [state?.hired_at, state?.preview?.body_key]);
+
+  if (!state) return null;
+
+  async function save() {
+    setErr('');
+    if (!hiredAt) return setErr('Datum ist Pflicht.');
+    if (sendMail) {
+      if (!to || !/.+@.+\..+/.test(to)) return setErr('Empfänger-E-Mail ungültig.');
+      if (!subject.trim()) return setErr('Betreff fehlt.');
+      if (!body.trim())    return setErr('Text fehlt.');
+    }
+    setBusy(true);
+    try {
+      await api('/hires/record-and-mail', {
+        method: 'POST',
+        body: {
+          offer_id: state.offer_id,
+          position, hired_at: hiredAt, note,
+          send_mail: sendMail, to, subject, body,
+        },
+      });
+      onSaved();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!state} onClose={onClose}
+      title="Einstellung erfassen"
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={save} disabled={busy}>
+          {busy ? 'Speichere…' : sendMail ? '✉︎ Speichern & senden' : 'Speichern'}
+        </button>
+      </>}
+    >
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+      <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 10 }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Datum</span>
+            <input type="date" value={hiredAt} onChange={e => setHiredAt(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Position</span>
+            <input type="text" value={position} onChange={e => setPosition(e.target.value)}
+              placeholder="z.B. Servicetechniker"
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+          </label>
+        </div>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Notiz (optional)</span>
+          <input type="text" value={note} onChange={e => setNote(e.target.value)}
+            style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+        </label>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 10px', background: 'var(--gray-50)', borderRadius: 8 }}>
+          <input type="checkbox" checked={sendMail} onChange={e => setSendMail(e.target.checked)} />
+          <span style={{ fontSize: 13 }}>Bestätigungs-Mail an Kunden senden <span style={{ color: 'var(--ink-4)' }}>(Absender: angebote@…)</span></span>
+        </label>
+        {sendMail && (
+          <>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Empfänger</span>
+              <input type="email" value={to} onChange={e => setTo(e.target.value)}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Betreff</span>
+              <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Nachricht (Merge-Tags bereits aufgelöst)</span>
+              <textarea rows={12} value={body} onChange={e => setBody(e.target.value)}
+                style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 13, lineHeight: 1.55, fontFamily: 'inherit' }} />
+            </label>
+          </>
+        )}
+      </div>
     </Modal>
   );
 }

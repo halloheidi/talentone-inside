@@ -266,6 +266,15 @@ router.post('/', async (req, res) => {
       extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
     });
 
+    // Garantie: TalentOne fix 30, N&W wählbar 30/60/90
+    const rawGuarantee = Number(b.guarantee_period_days);
+    const guarantee = b.brand === 'talentone'
+      ? 30
+      : ([30, 60, 90].includes(rawGuarantee) ? rawGuarantee : 30);
+    const hiresTarget = Number.isFinite(+b.hires_target)
+      ? Math.max(1, Math.min(10, Math.round(+b.hires_target)))
+      : 1;
+
     const row = {
       brand:                       b.brand,
       customer_id:                 b.customer_id || null,
@@ -279,7 +288,9 @@ router.post('/', async (req, res) => {
       monthly_total:               totals.monthly_total,
       first_month_total:           totals.first_month_total,
       vat_rate:                    totals.vat_rate,
-      status:                      b.status === 'draft' ? 'draft' : 'draft',   // Phase 2: nur Draft
+      status:                      b.status === 'draft' ? 'draft' : 'draft',
+      guarantee_period_days:       guarantee,
+      hires_target:                hiresTarget,
       created_by:                  req.user?.email || null,
     };
 
@@ -334,6 +345,14 @@ router.patch('/:id', async (req, res) => {
     if (b.easybill_customer_id !== undefined) patch.easybill_customer_id = String(b.easybill_customer_id);
     if (b.customer_snapshot !== undefined)    patch.customer_snapshot = b.customer_snapshot;
     if (b.close_lead_id !== undefined)        patch.close_lead_id = b.close_lead_id || null;
+    if (b.guarantee_period_days !== undefined) {
+      const raw = Number(b.guarantee_period_days);
+      patch.guarantee_period_days = brand === 'talentone' ? 30 : ([30, 60, 90].includes(raw) ? raw : 30);
+    }
+    if (b.hires_target !== undefined) {
+      const raw = Number(b.hires_target);
+      patch.hires_target = Number.isFinite(raw) ? Math.max(1, Math.min(10, Math.round(raw))) : 1;
+    }
 
     const { data, error } = await supabase
       .from('talentone_offers')

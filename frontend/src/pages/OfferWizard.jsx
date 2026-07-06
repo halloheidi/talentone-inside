@@ -49,6 +49,9 @@ export default function OfferWizard() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [additionalPositionsCount, setAdditionalPositionsCount] = useState(0);
   const [adBudget, setAdBudget] = useState('800');
+  // Garantie + Einstellungen-Ziel (Phase 5 Nachtrag)
+  const [guaranteePeriodDays, setGuaranteePeriodDays] = useState(30);
+  const [hiresTarget, setHiresTarget] = useState(1);
   // Schritt 4
   const [totals, setTotals] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -62,6 +65,11 @@ export default function OfferWizard() {
     if (step === 3) return products.length > 0;
     return false;
   }, [step, customer, brand, products.length]);
+
+  // Marken-Default für Garantie: TalentOne 30 fix, N&W 30 (wählbar)
+  useEffect(() => {
+    if (brand === 'talentone') setGuaranteePeriodDays(30);
+  }, [brand]);
 
   // Wenn Marke wechselt: Katalog + Textbausteine laden, Default-Optionen wählen
   useEffect(() => {
@@ -124,6 +132,8 @@ export default function OfferWizard() {
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
       additional_positions_count: additionalPositionsCount,
       ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+      guarantee_period_days: brand === 'talentone' ? 30 : guaranteePeriodDays,
+      hires_target: hiresTarget,
     };
   }
 
@@ -202,6 +212,10 @@ export default function OfferWizard() {
               });
             }}
             adBudget={adBudget} setAdBudget={setAdBudget}
+            guaranteePeriodDays={guaranteePeriodDays}
+            setGuaranteePeriodDays={setGuaranteePeriodDays}
+            hiresTarget={hiresTarget}
+            setHiresTarget={setHiresTarget}
           />
         )}
         {step === 4 && (
@@ -609,7 +623,13 @@ function Step2Brand({ brand, onSelect }) {
 }
 
 // ─────────────────────── Step 3 ───────────────────────
-function Step3Config({ brand, products, selectedIds, onToggle, additionalPositionsCount, setAdditionalPositionsCount, adBudget, setAdBudget }) {
+function Step3Config({
+  brand, products, selectedIds, onToggle,
+  additionalPositionsCount, setAdditionalPositionsCount,
+  adBudget, setAdBudget,
+  guaranteePeriodDays, setGuaranteePeriodDays,
+  hiresTarget, setHiresTarget,
+}) {
   const setups   = products.filter(p => p.category === 'setup');
   const monthlys = products.filter(p => p.category === 'monthly');
   const extraMonthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
@@ -650,6 +670,40 @@ function Step3Config({ brand, products, selectedIds, onToggle, additionalPositio
             />
           );
         })}
+      </section>
+
+      <section style={{ marginBottom: 22, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
+        <SectionHead label="Garantie & Einstellungsziel" />
+        <div style={{ display: 'grid', gridTemplateColumns: brand === 'nowag_wirth' ? '1fr 1fr' : '1fr', gap: 14 }}>
+          {brand === 'nowag_wirth' && (
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>
+                Erfolgsgarantie: Einstellung innerhalb von
+              </span>
+              <select value={guaranteePeriodDays} onChange={e => setGuaranteePeriodDays(Number(e.target.value))}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
+                <option value={30}>30 Tagen</option>
+                <option value={60}>60 Tagen</option>
+                <option value={90}>90 Tagen</option>
+              </select>
+              <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>je nach Schwierigkeit des Stellenprofils</span>
+            </label>
+          )}
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>
+              Gewünschte Einstellungen für diese Stelle
+            </span>
+            <input type="number" min="1" max="10" value={hiresTarget}
+              onChange={e => setHiresTarget(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, width: 100, textAlign: 'right' }} />
+            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>1–10 · Basis für die Fortschrittsanzeige und Einstellungs-Mails</span>
+          </label>
+        </div>
+        {brand === 'talentone' && (
+          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '10px 0 0' }}>
+            TalentOne-Bewerbungsgarantie: <strong>30 Tage</strong> fix. Bei ausbleibender Einstellung entfällt maximal einmal die Servicepauschale.
+          </p>
+        )}
       </section>
 
       {brand === 'talentone' && (
