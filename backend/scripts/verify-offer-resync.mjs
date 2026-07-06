@@ -8,7 +8,7 @@
 
 import { supabase } from '../supabase.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
-import { createOffer, getDocument } from '../easybill.js';
+import { createOffer, getDocument, finalizeInvoice } from '../easybill.js';
 import { getPdfTemplate } from '../easybill-templates.js';
 import { syncOne } from '../offer-sync.js';
 
@@ -45,6 +45,7 @@ console.log('══════════════════════�
 let draft = null;
 let offerDocId = null;
 let abDocId = null;
+let caughtError = null;
 
 try {
   // 1. Angebot in DB + easybill anlegen
@@ -91,7 +92,11 @@ try {
   const baseline = await syncOne(preOffer);
   console.log('2. Sync vor Umwandlung: changed=' + baseline.changed + ', checked=' + baseline.checked);
 
-  // 3. In easybill in eine CHARGE_CONFIRM umwandeln
+  // 3a. Finalisieren (raus aus dem Entwurfsmodus — sonst blockt easybill den Convert)
+  await finalizeInvoice(offerDocId);
+  console.log('3a. OFFER finalisiert (raus aus Entwurfsmodus)');
+
+  // 3b. In easybill in eine CHARGE_CONFIRM umwandeln
   const ab = await convertToAb(offerDocId);
   abDocId = ab.id;
   console.log('3. Auftragsbestätigung erzeugt: ' + abDocId + ' (ref_id → ' + ab.ref_id + ')');
@@ -126,6 +131,10 @@ try {
   console.log('════════════════════════════════════════════════════');
   console.log('  ZUSAMMENFASSUNG:', (acceptedOk && idempotent) ? '✓ Phase 4 verhält sich korrekt' : '✗ Fehler siehe oben');
   console.log('════════════════════════════════════════════════════');
+} catch (err) {
+  caughtError = err;
+  console.log('\n✗ FEHLER:', err.message);
+  console.log(err.stack);
 } finally {
   // Cleanup
   console.log('\nCleanup:');
@@ -135,5 +144,5 @@ try {
     const { error } = await supabase.from('talentone_offers').delete().eq('id', draft.id);
     console.log('  ' + (error ? '·' : '✓') + ' DB-Draft ' + draft.id + (error ? ' Fehler: ' + error.message : ' gelöscht'));
   }
-  process.exit(0);
+  process.exit(caughtError ? 1 : 0);
 }
