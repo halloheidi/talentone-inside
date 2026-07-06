@@ -16,6 +16,9 @@ import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
 import projekteRouter from './routes/projekte.js';
 import analyseFunnelRouter from './routes/analyse-funnel.js';
 import offerCatalogRouter from './routes/offer-catalog.js';
+import easybillCustomersRouter from './routes/easybill-customers.js';
+import offersRouter from './routes/offers.js';
+import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -57,6 +60,8 @@ app.use('/api/zahlungen', requireAuth, zahlungenRouter);
 app.use('/api/projekte', requireAuth, projekteRouter);
 app.use('/api/analyse-funnel', requireAuth, analyseFunnelRouter);
 app.use('/api/offer-catalog', requireAuth, offerCatalogRouter);
+app.use('/api/easybill-customers', requireAuth, easybillCustomersRouter);
+app.use('/api/offers', requireAuth, offersRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
@@ -75,4 +80,5 @@ app.use((err, req, res, _next) => {
 
 app.listen(PORT, () => {
   console.log(`✅ TalentOne Inside Backend läuft auf Port ${PORT}`);
+  startEasybillCustomerSyncScheduler();
 });

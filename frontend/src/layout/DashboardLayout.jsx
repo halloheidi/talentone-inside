@@ -23,6 +23,10 @@ function GlobalNav({ isAdmin }) {
         <Icon name="users" />
         <span>Projekte</span>
       </NavLink>
+      <NavLink to="/angebote" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>Angebote</span>
+      </NavLink>
       <NavLink to="/analyse-funnel" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
         <Icon name="users" />
         <span>Analyse-Funnel</span>

@@ -20,6 +20,8 @@ import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
 import OfferKatalog from './pages/admin/OfferKatalog.jsx';
+import OfferWizard from './pages/OfferWizard.jsx';
+import OffersList from './pages/OffersList.jsx';
 
 function Protected({ children }) {
   const { session, loading } = useAuth();
@@ -58,6 +60,8 @@ export default function App() {
         <Route path="zahlungen" element={<ZahlungenOverview />} />
         <Route path="projekte" element={<ProjekteOverview />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
+        <Route path="angebote" element={<OffersList />} />
+        <Route path="angebote/neu" element={<OfferWizard />} />
         <Route path="admin/angebots-katalog" element={<AdminOnly><OfferKatalog /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>

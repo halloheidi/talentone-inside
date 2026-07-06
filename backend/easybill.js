@@ -44,6 +44,40 @@ export async function findCustomer({ firmenname }) {
 }
 
 /**
+ * Listet Kunden mit Pagination (für den Bulk-Sync in den lokalen Cache).
+ * @param {object} opts
+ * @param {number} [opts.page=1]
+ * @param {number} [opts.limit=1000]  Max 1000 laut easybill-Doku.
+ * @returns {Promise<{ page:number, pages:number, limit:number, total:number, items:Array }>}
+ */
+export async function listCustomers({ page = 1, limit = 1000 } = {}) {
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) }).toString();
+  const data = await easybill(`/customers?${qs}`);
+  return {
+    page:  Number(data?.page || page),
+    pages: Number(data?.pages || 1),
+    limit: Number(data?.limit || limit),
+    total: Number(data?.total || 0),
+    items: Array.isArray(data?.items) ? data.items : [],
+  };
+}
+
+/** Holt einen einzelnen Kunden per ID. */
+export async function getCustomer(id) {
+  if (!id) throw new Error('customer id fehlt.');
+  return easybill(`/customers/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Aktualisiert einen Kunden in easybill (führendes System).
+ * Erwartet die easybill-Property-Namen (company_name, first_name, …).
+ */
+export async function updateCustomer(id, patch) {
+  if (!id) throw new Error('customer id fehlt.');
+  return easybill(`/customers/${encodeURIComponent(id)}`, { method: 'PUT', body: patch });
+}
+
+/**
  * Legt einen neuen Kunden an.
  * @param {object} opts { firmenname, ansprechpartner, email, telefon, strasse, plz, ort, land, ust_id }
  */
