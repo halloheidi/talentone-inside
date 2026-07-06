@@ -4,11 +4,39 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { calculateOfferTotals } from '../offer-calc.js';
+import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
+import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 
 const router = Router();
 
 const BRANDS = new Set(['talentone', 'nowag_wirth']);
 const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+
+// White-Label: pdf_template-ID je Marke aus Env — null = easybill-Default.
+// Bekanntmachung im Team via /api/offers/config-check.
+const OFFER_PDF_TEMPLATE_BY_BRAND = {
+  talentone:   process.env.EASYBILL_OFFER_TEMPLATE_TALENTONE   || null,
+  nowag_wirth: process.env.EASYBILL_OFFER_TEMPLATE_NOWAG_WIRTH || null,
+};
+
+/* GET /api/offers/config-check — zeigt konfigurierte pdf_template-IDs +
+ * die live von easybill verfügbaren OFFER-Templates. Hilft bei White-Label-Setup. */
+router.get('/config-check', async (req, res) => {
+  try {
+    const available = await listPdfTemplates('OFFER');
+    res.json({
+      configured: OFFER_PDF_TEMPLATE_BY_BRAND,
+      available_offer_templates: available.map(t => ({
+        id:            t.id,
+        name:          t.name,
+        pdf_template:  t.pdf_template,
+        document_type: t.document_type,
+      })),
+    });
+  } catch (err) {
+    res.status(502).json({ error: `easybill: ${err.message}` });
+  }
+});
 
 /* Lädt aktive Katalog-Positionen einer Marke aus der DB. */
 async function loadProductsForBrand(brand) {
@@ -172,6 +200,106 @@ router.patch('/:id', async (req, res) => {
     res.json({ offer: data, totals });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/offers/:id/create-easybill
+   Nimmt einen Draft, baut das easybill-Payload deterministisch (serverseitige
+   Neuberechnung — Frontend kann Summen nicht manipulieren), sendet an
+   POST /documents, speichert doc_id + pdf_url + status='created'.
+   Draft bleibt bei Fehler unverändert (Status draft).
+*/
+router.post('/:id/create-easybill', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (offer.status !== 'draft') {
+      return res.status(409).json({ error: `Nur Drafts können erzeugt werden (aktuell: ${offer.status}).` });
+    }
+    if (!offer.easybill_customer_id) {
+      return res.status(400).json({ error: 'Kunde ohne easybill_customer_id — Draft ist inkonsistent.' });
+    }
+
+    // Katalog + Textbausteine der Marke laden
+    const [{ data: products }, { data: templates }] = await Promise.all([
+      supabase.from('talentone_offer_products').select('*').eq('brand', offer.brand).eq('active', true),
+      supabase.from('talentone_offer_templates').select('key, text').eq('brand', offer.brand),
+    ]);
+
+    // Payload deterministisch bauen — Summen recomputed, kein Trust auf DB-Werte
+    const { items } = buildEasybillOfferPayload({
+      brand: offer.brand,
+      products: products || [],
+      selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+      additional_positions_count: offer.additional_positions_count || 0,
+      ad_budget_monthly: offer.ad_budget_monthly,
+      vat_rate: Number(offer.vat_rate) || 19,
+      templates: templates || [],
+    });
+
+    if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
+
+    // easybill Kundenname aus Snapshot für den Titel
+    const snap = offer.customer_snapshot || {};
+    const kundenname = snap.company_name || 'Angebot';
+    const title = `Angebot für ${kundenname}`.slice(0, 200);
+
+    let document;
+    try {
+      document = await createOffer({
+        customerId:  Number(offer.easybill_customer_id),
+        title,
+        items,
+        pdfTemplate: OFFER_PDF_TEMPLATE_BY_BRAND[offer.brand] || null,
+        externalId:  offer.id, // Rücksync-Anker für Phase 4
+      });
+    } catch (err) {
+      // easybill-Fehler → Draft bleibt bestehen, sauber ins UI zurück
+      return res.status(502).json({ error: `easybill: ${err.message}` });
+    }
+
+    // Erfolg: doc-id + pdf-url speichern, Status auf 'created'
+    const pdfUrl = `/api/offers/${offer.id}/pdf`; // interner Proxy — extern nicht direkt easybill
+    const { data: updated, error: updErr } = await supabase
+      .from('talentone_offers')
+      .update({
+        status: 'created',
+        easybill_document_id: String(document.id),
+        easybill_pdf_url: pdfUrl,
+        last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', offer.id).select().single();
+    if (updErr) return res.status(500).json({ error: updErr.message, easybill_document_id: document.id });
+
+    res.status(201).json({ offer: updated, easybill: { id: document.id, number: document.number } });
+  } catch (err) {
+    console.error('[offers/create-easybill]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* GET /api/offers/:id/pdf — Proxy für PDF-Download von easybill.
+   Der Bearer-API-Key bleibt serverseitig, das PDF wird durchgereicht. */
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('easybill_document_id, customer_snapshot, brand, id')
+      .eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (!offer.easybill_document_id) {
+      return res.status(409).json({ error: 'Angebot wurde noch nicht in easybill erzeugt.' });
+    }
+    const pdf = await getDocumentPdf(offer.easybill_document_id);
+    const firma = (offer.customer_snapshot?.company_name || 'Angebot').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Angebot';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${firma}_Angebot.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error('[offers/pdf]', err.message);
+    res.status(502).json({ error: `easybill: ${err.message}` });
   }
 });
 

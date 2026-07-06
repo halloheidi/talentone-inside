@@ -165,3 +165,52 @@ export async function getInvoicePdf(documentId) {
 export async function getInvoice(documentId) {
   return easybill(`/documents/${encodeURIComponent(documentId)}`);
 }
+
+/** Alias für Klarheit — der PDF-Endpunkt /documents/{id}/pdf gilt für alle
+ *  Dokumenttypen (Rechnung, Angebot, ...). */
+export const getDocumentPdf = getInvoicePdf;
+
+/** Holt Metadaten eines beliebigen Dokuments. */
+export async function getDocument(documentId) {
+  return easybill(`/documents/${encodeURIComponent(documentId)}`);
+}
+
+/**
+ * Erstellt ein Angebot (type: OFFER) in easybill.
+ *
+ * @param {object} opts
+ * @param {number} opts.customerId       easybill-customer_id
+ * @param {string} [opts.title]          Dokumenttitel (default 'Angebot')
+ * @param {Array}  opts.items            DocumentPosition-Array (siehe offer-easybill-builder.js)
+ * @param {string} [opts.text]           Freitext am Dokument-Ende (optional; wir nutzen TEXT-Positionen)
+ * @param {string|null} [opts.pdfTemplate] pdf_template-ID (null = Default 'DE')
+ * @param {string} [opts.externalId]     Referenz für den easybill_document_id-Rücksync
+ * @param {number} [opts.vatPercent]     19 (bereits pro Position gesetzt — hier ungenutzt)
+ * @returns {Promise<object>}            Das erzeugte Document-Objekt inkl. id
+ */
+export async function createOffer({
+  customerId, title = 'Angebot', items = [], text = null,
+  pdfTemplate = null, externalId = null,
+}) {
+  const body = {
+    type: 'OFFER',
+    customer_id: customerId,
+    title,
+    items,
+  };
+  if (text !== null && text !== '') body.text = text;
+  if (pdfTemplate)                   body.pdf_template = pdfTemplate;
+  if (externalId)                    body.external_id = externalId;
+  return easybill('/documents', { method: 'POST', body });
+}
+
+/**
+ * Listet PDF-Templates aus easybill — hilft der Admin-UI bei der Wahl der
+ * marken-spezifischen Template-ID.
+ * @param {string} [type='OFFER'] — dokumenttyp-Filter.
+ */
+export async function listPdfTemplates(type = 'OFFER') {
+  const qs = new URLSearchParams({ type }).toString();
+  const data = await easybill(`/pdf-templates?${qs}`);
+  return Array.isArray(data?.items) ? data.items : [];
+}

@@ -49,6 +49,7 @@ export default function OfferWizard() {
   const [totals, setTotals] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [creatingOffer, setCreatingOffer] = useState(false);
   const [error, setError] = useState('');
 
   const canNext = useMemo(() => {
@@ -102,27 +103,53 @@ export default function OfferWizard() {
     return () => calcTimer.current && clearTimeout(calcTimer.current);
   }, [brand, products, selectedIds, additionalPositionsCount, adBudget]);
 
+  function buildPayload() {
+    return {
+      brand,
+      easybill_customer_id: String(customer.easybill_id),
+      customer_snapshot: {
+        company_name: customer.company_name, first_name: customer.first_name,
+        last_name: customer.last_name, email: customer.email,
+        street: customer.street, zip_code: customer.zip_code, city: customer.city,
+        country: customer.country, number: customer.number, phone_1: customer.phone_1,
+      },
+      customer_id: customer.tool_kunde_id || null,
+      selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
+      additional_positions_count: additionalPositionsCount,
+      ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+    };
+  }
+
   async function saveDraft() {
     setSavingDraft(true); setError('');
     try {
-      const payload = {
-        brand,
-        easybill_customer_id: String(customer.easybill_id),
-        customer_snapshot: {
-          company_name: customer.company_name, first_name: customer.first_name,
-          last_name: customer.last_name, email: customer.email,
-          street: customer.street, zip_code: customer.zip_code, city: customer.city,
-          country: customer.country, number: customer.number, phone_1: customer.phone_1,
-        },
-        customer_id: customer.tool_kunde_id || null,
-        selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
-        additional_positions_count: additionalPositionsCount,
-        ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
-      };
-      const res = await api('/offers', { method: 'POST', body: payload });
+      const res = await api('/offers', { method: 'POST', body: buildPayload() });
       navigate(`/angebote?draft=${res.offer.id}`);
     } catch (err) { setError(err.message); }
     finally { setSavingDraft(false); }
+  }
+
+  /* Draft speichern UND direkt easybill-Angebot erzeugen.
+     Fällt easybill um: Draft bleibt bestehen, User bekommt Fehler zurück
+     und kann später erneut aus der Liste erzeugen. */
+  async function createEasybillOffer() {
+    setCreatingOffer(true); setError('');
+    let draftId = null;
+    try {
+      const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
+      draftId = draftRes.offer.id;
+      const easyRes = await api(`/offers/${draftId}/create-easybill`, { method: 'POST' });
+      // easybill hat Angebotsnummer geliefert — direkt in die Liste, PDF ist im Row-Link
+      navigate(`/angebote?created=${easyRes.offer.id}`);
+    } catch (err) {
+      // Draft ist entstanden aber easybill schlug fehl → zurück in die Liste,
+      // damit der User später erneut versuchen kann.
+      if (draftId) {
+        setError(`easybill-Erzeugung fehlgeschlagen: ${err.message} — Der Entwurf wurde gespeichert. Du kannst ihn in der Angebotsliste erneut erzeugen.`);
+      } else {
+        setError(err.message);
+      }
+    } finally { setCreatingOffer(false); }
   }
 
   return (
@@ -158,6 +185,7 @@ export default function OfferWizard() {
             selectedIds={selectedIds} totals={totals} templates={templates}
             additionalPositionsCount={additionalPositionsCount}
             savingDraft={savingDraft} onSaveDraft={saveDraft}
+            creatingOffer={creatingOffer} onCreateEasybill={createEasybillOffer}
           />
         )}
       </div>
@@ -664,7 +692,7 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
 }
 
 // ─────────────────────── Step 4 ───────────────────────
-function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, savingDraft, onSaveDraft }) {
+function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill }) {
   const positionsWithText = (totals?.positions || []).map(l => ({
     ...l,
     description: products.find(p => p.id === l.product_id)?.description || '',
@@ -737,14 +765,21 @@ function Step4Preview({ brand, customer, products, selectedIds, totals, template
           <TotalsCard totals={totals} brand={brand} />
 
           <div style={{ marginTop: 14 }}>
-            <button className="btn-ghost" style={{ width: '100%', marginBottom: 8 }} onClick={onSaveDraft} disabled={savingDraft}>
-              {savingDraft ? 'Speichere…' : '💾 Als Entwurf speichern'}
+            <button
+              className="btn-primary" style={{ width: '100%', marginBottom: 8 }}
+              onClick={onCreateEasybill} disabled={creatingOffer || savingDraft}
+            >
+              {creatingOffer ? '⏳ Erzeuge in easybill…' : '📤 Angebot in easybill erzeugen'}
             </button>
-            <button className="btn-primary" style={{ width: '100%' }} disabled title="In Phase 3 verfügbar">
-              📤 Angebot in easybill erzeugen
+            <button
+              className="btn-ghost" style={{ width: '100%' }}
+              onClick={onSaveDraft} disabled={savingDraft || creatingOffer}
+              title="Speichert nur als Entwurf, sendet nichts an easybill"
+            >
+              {savingDraft ? 'Speichere…' : '💾 Nur als Entwurf speichern'}
             </button>
-            <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6, textAlign: 'center' }}>
-              easybill-Erzeugung folgt in Phase 3.
+            <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
+              Erzeugen speichert zuerst den Entwurf, ruft dann easybill und öffnet das PDF.
             </p>
           </div>
         </aside>
