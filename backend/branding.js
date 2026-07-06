@@ -94,4 +94,23 @@ export function getMailReplyTo(brand) {
   return brand.replyTo;
 }
 
+// Absender speziell für Angebote (Phase 4b): angebote@ statt noreply@.
+// User hat bestätigt, dass beide Domains in Resend verifiziert sind —
+// daher hier KEIN Fallback-Weg über TalentOne, sondern immer marken-native.
+// Reply-To für Angebote einheitlich: info@nowagwirth.com.
+export function getOfferMailFrom(brand) {
+  if (brand.key === 'nowagwirth') return 'Nowag & Wirth <angebote@nowagwirth.com>';
+  return 'TalentOne <angebote@talent-one.de>';
+}
+export function getOfferMailReplyTo(brand) {
+  return 'info@nowagwirth.com';
+}
+
+// Offer-Marken-Schlüssel (talentone | nowag_wirth) → Agentur-Schlüssel für
+// branding.js (talentone | nowagwirth). Wird von der Angebots-Mail-Route
+// gebraucht, weil offer.brand ein anderes Naming nutzt.
+export function agenturForOfferBrand(offerBrand) {
+  return offerBrand === 'nowag_wirth' ? 'nowagwirth' : 'talentone';
+}
+
 export { BRANDING };

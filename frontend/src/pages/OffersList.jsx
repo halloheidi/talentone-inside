@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { supabase } from '../lib/supabase.js';
+import Modal from '../components/Modal.jsx';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -26,6 +27,7 @@ export default function OffersList() {
   const newCreatedId = params.get('created');
   const [busyId, setBusyId] = useState(null);
   const [rowError, setRowError] = useState({}); // { [offerId]: msg }
+  const [sendModal, setSendModal] = useState(null); // { offerId, subject, body, to, firma, already_sent }
 
   async function pdfHref(offerId) {
     // Auth-Header ist Pflicht — Standard-Link würde 401 werfen.
@@ -44,6 +46,16 @@ export default function OffersList() {
     } catch (e) {
       setRowError(r => ({ ...r, [offerId]: e.message }));
     } finally { setBusyId(null); }
+  }
+
+  async function openSendModal(offer) {
+    setBusyId(offer.id);
+    setRowError(r => ({ ...r, [offer.id]: '' }));
+    try {
+      const preview = await api(`/offers/${offer.id}/email-preview`);
+      setSendModal({ offerId: offer.id, ...preview });
+    } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
+    finally { setBusyId(null); }
   }
 
   async function retryCreateEasybill(offerId) {
@@ -156,7 +168,7 @@ export default function OffersList() {
                       <span style={{ padding: '3px 10px', borderRadius: 100, background: st.bg, color: st.color, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--ink-3)' }}>{o.created_by || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <td style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       {hasPdf && (
                         <button className="btn-ghost btn-sm" title="PDF öffnen" disabled={isBusy}
                           onClick={() => pdfHref(o.id)}>📄 PDF</button>
@@ -168,6 +180,14 @@ export default function OffersList() {
                           {isBusy ? '⏳' : '📤 In easybill erzeugen'}
                         </button>
                       )}
+                      {hasPdf && (o.status === 'created' || o.status === 'sent') && (
+                        <button
+                          className={o.status === 'sent' ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'}
+                          title={o.status === 'sent' ? `Bereits versandt an ${o.sent_to || 'Kunde'} — erneut senden` : 'Angebot per E-Mail an Kunden senden'}
+                          disabled={isBusy}
+                          onClick={() => openSendModal(o)}
+                        >{isBusy ? '⏳' : (o.status === 'sent' ? '✉︎ Erneut senden' : '✉︎ An Kunden senden')}</button>
+                      )}
                       {err && <span style={{ fontSize: 11, color: '#b91c1c' }}>⚠ {err}</span>}
                     </td>
                   </tr>
@@ -177,6 +197,90 @@ export default function OffersList() {
           </table>
         </div>
       )}
+
+      <SendOfferModal
+        preview={sendModal}
+        onClose={() => setSendModal(null)}
+        onSent={() => { setSendModal(null); load(); }}
+      />
     </div>
+  );
+}
+
+function SendOfferModal({ preview, onClose, onSent }) {
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!preview) return;
+    setTo(preview.to || '');
+    setSubject(preview.subject || '');
+    setBody(preview.body || '');
+    setErr('');
+  }, [preview?.offerId]);
+
+  if (!preview) return null;
+
+  async function send() {
+    setErr('');
+    if (!to || !/.+@.+\..+/.test(to)) return setErr('Empfänger-E-Mail ungültig.');
+    if (!subject.trim())               return setErr('Betreff fehlt.');
+    if (!body.trim())                  return setErr('Text fehlt.');
+    setBusy(true);
+    try {
+      await api(`/offers/${preview.offerId}/send-email`, {
+        method: 'POST',
+        body: { to, subject, body },
+      });
+      onSent();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal
+      open={!!preview}
+      onClose={onClose}
+      title={`Angebot an ${preview.firma || 'Kunden'} senden`}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={send} disabled={busy}>
+          {busy ? 'Sende…' : '📤 Jetzt senden'}
+        </button>
+      </>}
+    >
+      <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.com. Das easybill-PDF wird automatisch als Anhang angefügt.
+      </p>
+
+      {preview.already_sent && (
+        <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+          Dieses Angebot wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
+        </div>
+      )}
+
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Empfänger</span>
+          <input type="email" value={to} onChange={e => setTo(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Betreff</span>
+          <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Nachricht</span>
+          <textarea rows={14} value={body} onChange={e => setBody(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
+        </label>
+      </div>
+    </Modal>
   );
 }

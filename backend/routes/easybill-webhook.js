@@ -28,17 +28,18 @@ router.post('/', express.raw({ type: '*/*', limit: '2mb' }), async (req, res) =>
   const querySecret = (req.query || {}).secret;
   const sigHeader = req.headers['x-easybill-signature'];
 
-  if (secret) {
-    let ok = false;
-    if (querySecret && timingSafeEq(String(querySecret), secret)) ok = true;
-    if (!ok && sigHeader) {
-      const computed = crypto.createHmac('sha256', secret).update(rawBuf).digest('hex');
-      if (timingSafeEq(String(sigHeader), computed)) ok = true;
-    }
-    if (!ok) return res.status(401).json({ error: 'invalid secret/signature' });
-  } else {
-    console.warn('[easybill-webhook] EASYBILL_WEBHOOK_SECRET nicht gesetzt — akzeptiere ungeprüft.');
+  // Ohne konfiguriertes Secret ist der Endpoint komplett zu.
+  // Wir wollen niemals ungeprüft verarbeiten (auch nicht "nur mit WARN").
+  if (!secret) {
+    return res.status(403).json({ error: 'webhook not configured' });
   }
+  let ok = false;
+  if (querySecret && timingSafeEq(String(querySecret), secret)) ok = true;
+  if (!ok && sigHeader) {
+    const computed = crypto.createHmac('sha256', secret).update(rawBuf).digest('hex');
+    if (timingSafeEq(String(sigHeader), computed)) ok = true;
+  }
+  if (!ok) return res.status(401).json({ error: 'invalid secret/signature' });
 
   let payload;
   try { payload = JSON.parse(rawBuf.toString('utf8') || '{}'); }

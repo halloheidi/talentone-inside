@@ -1,7 +1,7 @@
 // Mail-Versand via Resend für TalentOne Inside.
 // Branding pro Agentur via getBranding() / getMailFrom() / getMailReplyTo().
 
-import { getBranding, getMailFrom, getMailReplyTo } from './branding.js';
+import { getBranding, getMailFrom, getMailReplyTo, getOfferMailFrom, getOfferMailReplyTo, agenturForOfferBrand } from './branding.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 
@@ -735,6 +735,58 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
+/* ════════════════════ Angebots-Mail (Phase 4b) ════════════════════
+   Absender: angebote@talent-one.de bzw. angebote@nowagwirth.com — siehe
+   getOfferMailFrom. Reply-To einheitlich: info@nowagwirth.com.
+   BCC ans Team wie bei allen Kundenmails. Angebot als PDF im Anhang. */
+export async function sendAngebotMail({
+  to, offerBrand, subject, body, pdfBuffer, pdfFilename,
+}) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agenturForOfferBrand(offerBrand));
+  const recipients = Array.isArray(to) ? to : [to];
+
+  const bodyHtml = String(body || '')
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📄 Angebot · ${escape(brand.name)}</p>
+      ${bodyHtml}
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten.</p>
+    </td></tr>`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = String(body || '');
+
+  const attachments = pdfBuffer ? [{
+    filename: pdfFilename || 'Angebot.pdf',
+    content: Buffer.isBuffer(pdfBuffer) ? pdfBuffer.toString('base64') : pdfBuffer,
+  }] : [];
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getOfferMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getOfferMailReplyTo(brand),
+      subject: subject || 'Ihr Angebot',
+      html, text,
+      attachments,
+    }),
+  });
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Resend ${response.status}: ${errBody.slice(0, 300)}`);
   }
   return await response.json();
 }

@@ -8,11 +8,125 @@ import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
+import { sendAngebotMail } from '../mail.js';
+import { addNote as closeAddNote } from '../close.js';
 
 const router = Router();
 
 const BRANDS = new Set(['talentone', 'nowag_wirth']);
 const EXTRA_JOB_SKU_BY_BRAND = { talentone: 'TO-OPT-EXTRA-JOB', nowag_wirth: 'NW-OPT-EXTRA-JOB' };
+
+// Deutsche Zahlenformatierung wie im Frontend
+const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+
+/* Ersetzt {{keys}} im E-Mail-Body durch die Angebotsdaten. */
+function fillMergeTags(text, ctx) {
+  return String(text || '').replace(/\{\{(\w+)\}\}/g, (_, k) => {
+    const v = ctx[k];
+    return v == null ? '' : String(v);
+  });
+}
+
+function buildOfferMergeCtx(offer) {
+  const snap = offer.customer_snapshot || {};
+  return {
+    ansprechpartner: [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim() || 'zusammen',
+    firma:           snap.company_name || '',
+    setup:           eur.format(Number(offer.setup_total || 0)),
+    monatlich:       eur.format(Number(offer.monthly_total || 0)),
+    monat_1:         eur.format(Number(offer.first_month_total || 0)),
+    werbebudget:     offer.ad_budget_monthly ? eur.format(Number(offer.ad_budget_monthly)) : '',
+  };
+}
+
+async function loadOfferEmailTemplate(brand) {
+  const { data } = await supabase
+    .from('talentone_offer_templates').select('key, text').eq('brand', brand)
+    .in('key', ['offer_email_subject', 'offer_email_body']);
+  const map = Object.fromEntries((data || []).map(t => [t.key, t.text]));
+  return {
+    subject: map.offer_email_subject || 'Ihr Angebot',
+    body:    map.offer_email_body    || '',
+  };
+}
+
+/* GET /api/offers/:id/email-preview — liefert Template + aufgelöste
+   Merge-Tags fürs Send-Modal. Default-Empfänger = customer_snapshot.email. */
+router.get('/:id/email-preview', async (req, res) => {
+  const { data: offer, error } = await supabase
+    .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+
+  const tpl = await loadOfferEmailTemplate(offer.brand);
+  const ctx = buildOfferMergeCtx(offer);
+  const subject = fillMergeTags(tpl.subject, ctx);
+  const body    = fillMergeTags(tpl.body, ctx);
+
+  const defaultTo = offer.customer_snapshot?.email || null;
+
+  res.json({
+    subject, body,
+    to: defaultTo,
+    firma: ctx.firma,
+    already_sent: !!offer.sent_at,
+    sent_to: offer.sent_to,
+    sent_at: offer.sent_at,
+  });
+});
+
+/* POST /api/offers/:id/send-email  body: { to, subject, body }
+   Zieht PDF aus easybill, versendet, speichert status/sent_at/sent_to,
+   hängt (falls close_lead_id) eine Notiz an den Close-Lead. */
+router.post('/:id/send-email', async (req, res) => {
+  const { to, subject, body } = req.body || {};
+  if (!to || !/.+@.+\..+/.test(String(to))) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt oder ungültig.' });
+  if (!subject || !String(subject).trim())  return res.status(400).json({ error: 'Betreff fehlt.' });
+  if (!body || !String(body).trim())        return res.status(400).json({ error: 'Text fehlt.' });
+
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (!offer.easybill_document_id) {
+      return res.status(409).json({ error: 'Angebot wurde noch nicht in easybill erzeugt.' });
+    }
+
+    const pdfBuffer = await getDocumentPdf(offer.easybill_document_id);
+    const firma = (offer.customer_snapshot?.company_name || 'Angebot').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Angebot';
+    const pdfFilename = `${firma}_Angebot.pdf`;
+
+    await sendAngebotMail({
+      to, offerBrand: offer.brand, subject, body, pdfBuffer, pdfFilename,
+    });
+
+    // Status + Metadaten setzen (draft/created → sent, doppelter Versand
+    // bleibt erlaubt und aktualisiert nur sent_at/sent_to)
+    const nowIso = new Date().toISOString();
+    const nextStatus = offer.status === 'accepted' ? 'accepted' : 'sent';
+    const { data: updated, error: upErr } = await supabase
+      .from('talentone_offers')
+      .update({ status: nextStatus, sent_at: nowIso, sent_to: to })
+      .eq('id', offer.id).select().single();
+    if (upErr) return res.status(500).json({ error: upErr.message });
+
+    // Close-Notiz best-effort
+    if (offer.close_lead_id) {
+      const monat1 = eur.format(Number(offer.first_month_total || 0));
+      const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+      closeAddNote({
+        leadId: offer.close_lead_id,
+        note: `📧 Angebot per E-Mail versendet: ${brandLabel} — Monat 1: ${monat1} — an ${to}`,
+      }).catch(err => console.warn('[offers/send-email close]', err.message));
+    }
+
+    res.json({ ok: true, offer: updated });
+  } catch (err) {
+    console.error('[offers/send-email]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* GET /api/offers/sync/status — für UI/Debug. */
 router.get('/sync/status', (req, res) => res.json(getOfferSyncStatus()));
