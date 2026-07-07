@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { fileToBase64 } from '../lib/files.js';
@@ -6,6 +6,28 @@ import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
+import { AdBudgetChips } from './OfferWizard.jsx';
+
+const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+
+const INVOICE_TYPE_LABEL = {
+  setup:              'Setup',
+  monthly_service:    'Monatlich',
+  monthly_combined:   'Monatlich (kombiniert)',
+  ad_budget:          'Werbebudget',
+};
+function invoiceTypeLabel(inv) {
+  const base = INVOICE_TYPE_LABEL[inv.invoice_type] || inv.invoice_type;
+  return inv.source === 'standalone' ? `${base} — freistehend` : base;
+}
+const INVOICE_STATUS_META = {
+  draft:           { label: 'Draft',      bg: '#eeece7', color: '#5a5955' },
+  sent:            { label: 'Offen',      bg: '#fff2d4', color: '#a34e00' },
+  paid:            { label: 'Bezahlt',    bg: '#e0f5df', color: '#0a8043' },
+  partially_paid:  { label: 'Teilzahlung', bg: '#fff2d4', color: '#a34e00' },
+  overdue:         { label: 'Überfällig', bg: '#fde0e0', color: '#b91c1c' },
+  cancelled:       { label: 'Storniert',  bg: '#eeece7', color: '#5a5955' },
+};
 
 const DEFAULT_ANFRAGE = `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
 
@@ -23,6 +45,13 @@ export default function KundeDetail() {
   const [anfrageMsg, setAnfrageMsg] = useState('');
 
   const [referenzbilder, setReferenzbilder] = useState([]);
+
+  // Rechnungen (alle talentone_invoices dieses Kunden)
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesBusy, setInvoicesBusy] = useState(false);
+  const [invoicesSyncing, setInvoicesSyncing] = useState(false);
+  const [showAdBudgetModal, setShowAdBudgetModal] = useState(false);
+  const [sendInvoiceModal, setSendInvoiceModal] = useState(null);
 
   // Farben (lokaler Edit-State, mit Speichern-Button)
   const [farben, setFarben] = useState({ primaer: '', sekundaer: '', akzent: '' });
@@ -133,6 +162,26 @@ export default function KundeDetail() {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+  }
+
+  function loadInvoices() {
+    setInvoicesBusy(true);
+    api(`/invoices?customer_id=${kundeId}`)
+      .then(res => setInvoices(res.invoices || []))
+      .catch(() => setInvoices([]))
+      .finally(() => setInvoicesBusy(false));
+  }
+
+  async function syncInvoicesNow() {
+    setInvoicesSyncing(true);
+    try {
+      await api('/invoices/sync', { method: 'POST' });
+      loadInvoices();
+      // Ampel-Status am Kunden refreshen
+      const k = await api(`/kunden/${kundeId}`);
+      setKunde(k.kunde);
+    } catch (e) { alert('Sync fehlgeschlagen: ' + e.message); }
+    finally { setInvoicesSyncing(false); }
   }
 
   async function saveWebsiteUrl() {
@@ -255,7 +304,7 @@ export default function KundeDetail() {
     }
   }
 
-  useEffect(() => { load(); }, [kundeId]);
+  useEffect(() => { load(); loadInvoices(); }, [kundeId]);
 
   useEffect(() => {
     api(`/kunden/${kundeId}/referenzbilder`)
@@ -576,6 +625,33 @@ export default function KundeDetail() {
         </div>
       )}
 
+      <InvoicesSection
+        kunde={kunde}
+        invoices={invoices}
+        busy={invoicesBusy}
+        syncing={invoicesSyncing}
+        onSync={syncInvoicesNow}
+        onCreateAdBudget={() => setShowAdBudgetModal(true)}
+        onSendInvoice={inv => setSendInvoiceModal(inv)}
+      />
+
+      <StandaloneAdBudgetModal
+        open={showAdBudgetModal}
+        kunde={kunde}
+        onClose={() => setShowAdBudgetModal(false)}
+        onCreated={inv => {
+          setShowAdBudgetModal(false);
+          setInvoices(prev => [inv, ...prev]);
+          setSendInvoiceModal(inv); // sofort Versand-Option anbieten
+        }}
+      />
+
+      <SendInvoiceMailModal
+        invoice={sendInvoiceModal}
+        onClose={() => setSendInvoiceModal(null)}
+        onSent={() => { setSendInvoiceModal(null); loadInvoices(); }}
+      />
+
       <Modal
         open={showAnfrage}
         onClose={() => !anfrageBusy && setShowAnfrage(false)}
@@ -627,6 +703,337 @@ function PaypalToggle({ kunde, onChanged }) {
         onChange={e => toggle(e.target.checked)} />
       <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{kunde.paypal_enabled ? 'aktiv' : 'aus'}</span>
     </label>
+  );
+}
+
+function InvoicesSection({ kunde, invoices, busy, syncing, onSync, onCreateAdBudget, onSendInvoice }) {
+  const openTotal = useMemo(() => invoices
+    .filter(i => ['sent', 'partially_paid', 'overdue'].includes(i.status))
+    .reduce((sum, i) => sum + (Number(i.amount_gross) || 0), 0), [invoices]);
+
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <h2 className="section-title">Rechnungen</h2>
+          <p className="section-sub">Alle Rechnungen dieses Kunden — Setup, Monatlich, Werbebudget und freistehende Werbekosten-Rechnungen.</p>
+        </div>
+        <button className="btn-primary" onClick={onCreateAdBudget}>
+          <Icon name="plus" /> Werbekosten-Rechnung erstellen
+        </button>
+      </div>
+
+      {busy && invoices.length === 0 ? (
+        <div className="card empty"><h2>Lade Rechnungen…</h2></div>
+      ) : invoices.length === 0 ? (
+        <div className="card empty">
+          <h2>Noch keine Rechnungen</h2>
+          <p>Sobald ein Angebot angenommen ist oder eine freistehende Werbekosten-Rechnung erstellt wird, taucht sie hier auf.</p>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ margin: 0, width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th>Typ</th>
+                  <th style={{ textAlign: 'right' }}>Brutto</th>
+                  <th>Status</th>
+                  <th>Zahlung</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map(inv => {
+                  const stMeta = INVOICE_STATUS_META[inv.status] || { label: inv.status, bg: 'var(--gray-100)', color: 'var(--ink)' };
+                  return (
+                    <tr key={inv.id}>
+                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                        {new Date(inv.created_at).toLocaleDateString('de-DE')}
+                      </td>
+                      <td>
+                        <strong>{invoiceTypeLabel(inv)}</strong>
+                        {inv.label && <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{inv.label}</div>}
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                        {eur.format(Number(inv.amount_gross) || 0)}
+                      </td>
+                      <td>
+                        <span style={{ padding: '2px 8px', borderRadius: 100, background: stMeta.bg, color: stMeta.color, fontSize: 11, fontWeight: 700 }}>
+                          {stMeta.label}
+                        </span>
+                        {inv.status === 'paid' && inv.paid_at && (
+                          <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>{new Date(inv.paid_at).toLocaleDateString('de-DE')}</div>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {inv.payment_method === 'paypal' ? '💳 PayPal' : '🏦 Überweisung'}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {inv.easybill_document_id && (
+                          <>
+                            <a href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">📄 PDF</a>{' '}
+                            <button className="btn-ghost btn-sm" onClick={() => onSendInvoice(inv)} title="Rechnung per E-Mail versenden">
+                              ✉︎ Mail
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={2} style={{ fontSize: 12, color: 'var(--ink-3)' }}>Offene Forderungen gesamt</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 14 }}>{eur.format(openTotal)}</td>
+                  <td colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8, fontSize: 12, color: 'var(--ink-3)' }}>
+        <span>Zahlungsstatus wird alle 15 Minuten mit easybill abgeglichen.</span>
+        <button className="btn-ghost btn-sm" onClick={onSync} disabled={syncing}>
+          {syncing ? '⏳ Gleiche ab…' : '↻ Jetzt abgleichen'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function StandaloneAdBudgetModal({ open, kunde, onClose, onCreated }) {
+  const [easybillQuery, setEasybillQuery] = useState('');
+  const [easybillResults, setEasybillResults] = useState([]);
+  const [easybillCustomer, setEasybillCustomer] = useState(null);
+  const [brand, setBrand] = useState('talentone');
+  const [amount, setAmount] = useState('800');
+  const [label, setLabel] = useState('');
+  const [usePaypal, setUsePaypal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    // Suche mit Firmenname vorbelegen
+    setEasybillQuery(kunde?.firmenname || '');
+    setEasybillCustomer(null);
+    setBrand(kunde?.agentur === 'nowagwirth' ? 'nowag_wirth' : 'talentone');
+    setUsePaypal(!!kunde?.paypal_enabled);
+    setAmount('800');
+    setLabel('');
+    setErr('');
+  }, [open, kunde?.id]);
+
+  useEffect(() => {
+    if (!open || easybillCustomer) return;
+    const t = setTimeout(() => {
+      api(`/easybill-customers/search?q=${encodeURIComponent(easybillQuery)}&limit=10`)
+        .then(res => setEasybillResults(res.customers || []))
+        .catch(() => setEasybillResults([]));
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, easybillQuery, easybillCustomer]);
+
+  if (!open) return null;
+
+  const num = Number(String(amount ?? '').trim());
+  const amountValid = Number.isFinite(num) && num >= 300 && num <= 5000 && num % 50 === 0;
+  const brutto = amountValid ? num * 1.19 : 0;
+
+  async function create() {
+    setErr('');
+    if (!easybillCustomer) return setErr('easybill-Kunde auswählen.');
+    if (!amountValid)      return setErr('Betrag ungültig (300–5.000 €, 50-€-Schritte).');
+    if (!label.trim())     return setErr('Bezeichnung ist Pflicht (z. B. „Juli 2026" oder Kampagnenname).');
+    setBusy(true);
+    try {
+      const res = await api('/invoices/standalone-ad-budget', {
+        method: 'POST',
+        body: {
+          easybill_customer_id: String(easybillCustomer.easybill_id),
+          brand,
+          amount_net:   num,
+          period_label: label.trim(),
+          use_paypal:   usePaypal,
+          customer_id:  kunde?.id || null,
+        },
+      });
+      onCreated(res.invoice);
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Werbekosten-Rechnung — ${kunde?.firmenname || ''}`}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={create} disabled={busy || !easybillCustomer || !amountValid || !label.trim()}>
+          {busy ? 'Erzeuge…' : `📄 Rechnung erzeugen (${eur.format(brutto)} brutto)`}
+        </button>
+      </>}
+    >
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>easybill-Kunde</label>
+          {easybillCustomer ? (
+            <div style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, marginTop: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <strong>{easybillCustomer.company_name}</strong>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>easybill-ID {easybillCustomer.easybill_id}{easybillCustomer.email ? ` · ${easybillCustomer.email}` : ''}</div>
+              </div>
+              <button className="btn-ghost btn-sm" onClick={() => setEasybillCustomer(null)}>Anderen wählen</button>
+            </div>
+          ) : (
+            <>
+              <input type="text" value={easybillQuery} onChange={e => setEasybillQuery(e.target.value)}
+                placeholder="Firma oder E-Mail suchen…"
+                style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, marginTop: 4, width: '100%' }} />
+              {easybillResults.length > 0 && (
+                <div style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
+                  {easybillResults.map(c => (
+                    <button key={c.easybill_id} onClick={() => setEasybillCustomer(c)}
+                      style={{ display: 'block', textAlign: 'left', width: '100%', padding: '8px 12px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}>
+                      <strong>{c.company_name}</strong>
+                      <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>ID {c.easybill_id}{c.email ? ` · ${c.email}` : ''}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>Marke (bestimmt die Rechnungsvorlage)</span>
+          <select value={brand} onChange={e => setBrand(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }}>
+            <option value="talentone">TalentOne</option>
+            <option value="nowag_wirth">Nowag &amp; Wirth</option>
+          </select>
+        </label>
+
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>Betrag (netto)</label>
+          <div style={{ marginTop: 6 }}>
+            <AdBudgetChips value={amount} onChange={setAmount} />
+          </div>
+          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-4)' }}>
+            Brutto (19 % USt): <strong>{eur.format(brutto)}</strong>
+          </div>
+        </div>
+
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: '0.02em' }}>Bezeichnung (erscheint im Positionstitel)</span>
+          <input type="text" value={label} onChange={e => setLabel(e.target.value)}
+            placeholder='z. B. "Juli 2026" oder "Kampagne Servicetechniker"'
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+        </label>
+
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 12px', background: 'var(--gray-50)', borderRadius: 8 }}>
+          <input type="checkbox" checked={usePaypal} onChange={e => setUsePaypal(e.target.checked)} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>PayPal-Zahllink beilegen</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+              {kunde?.paypal_enabled ? 'PayPal ist am Kunden aktiv' : 'PayPal ist am Kunden nicht aktiv — Checkbox überschreibt für diese Rechnung.'}
+            </div>
+          </div>
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
+function SendInvoiceMailModal({ invoice, onClose, onSent }) {
+  const [preview, setPreview] = useState(null);
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!invoice) { setPreview(null); return; }
+    setErr('');
+    api(`/invoices/${invoice.id}/email-preview`)
+      .then(p => {
+        setPreview(p);
+        setTo(p.to || '');
+        setSubject(p.subject || '');
+        setBody(p.body || '');
+      })
+      .catch(e => setErr(e.message));
+  }, [invoice?.id]);
+
+  if (!invoice) return null;
+
+  async function send() {
+    setErr('');
+    if (!to || !/.+@.+\..+/.test(to)) return setErr('Empfänger-E-Mail ungültig.');
+    if (!subject.trim())               return setErr('Betreff fehlt.');
+    if (!body.trim())                  return setErr('Text fehlt.');
+    setBusy(true);
+    try {
+      await api(`/invoices/${invoice.id}/send-email`, { method: 'POST', body: { to, subject, body } });
+      onSent();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal
+      open={!!invoice}
+      onClose={onClose}
+      title={`Rechnung an ${preview?.firma || 'Kunden'} senden`}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={send} disabled={busy || !preview}>
+          {busy ? 'Sende…' : '📄 Jetzt senden'}
+        </button>
+      </>}
+    >
+      <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+        Absender richtet sich nach der Marke der Rechnung. Reply-To geht an info@nowagwirth.com. Die Rechnung als PDF wird automatisch aus easybill angefügt.
+      </p>
+
+      {preview?.already_sent && (
+        <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+          Diese Rechnung wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
+        </div>
+      )}
+
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+      {!preview && !err && <div>Lade Vorschau…</div>}
+
+      {preview && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Empfänger</span>
+            <input type="email" value={to} onChange={e => setTo(e.target.value)}
+              style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Betreff</span>
+            <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+              style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Nachricht</span>
+            <textarea rows={10} value={body} onChange={e => setBody(e.target.value)}
+              style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
+          </label>
+        </div>
+      )}
+    </Modal>
   );
 }
 

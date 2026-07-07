@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { getDocumentPdf } from '../easybill.js';
 import {
   createSetupInvoice,
+  createStandaloneAdBudgetInvoice,
   activateMonthlyBilling,
   stopMonthlyBilling,
   reactivateMonthlyBilling,
@@ -13,6 +14,8 @@ import {
   findExistingInvoiceForOffer,
   runMonthlyBillingForOffer,
 } from '../invoice-service.js';
+import { sendRechnungMail } from '../mail.js';
+import { addNote as closeAddNote } from '../close.js';
 import { runMonthlyBillingRound, getBillingCronStatus } from '../billing-scheduler.js';
 import { runReminderRound, getReminderStatus } from '../billing-reminder.js';
 import {
@@ -203,7 +206,132 @@ router.post('/ad-budget', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* POST /api/invoices/sync — Bulk-Trigger für den Rechnungs-Sync. */
+/* POST /api/invoices/standalone-ad-budget
+   Body: { easybill_customer_id, brand, amount_net, period_label,
+           use_paypal?, customer_id? }
+   Erzeugt eine Werbekosten-Rechnung ohne Angebots-Bezug. Läuft danach im
+   normalen invoice-sync mit — kein Sonderweg für Ampel/Erinnerungen nötig. */
+router.post('/standalone-ad-budget', async (req, res) => {
+  const { easybill_customer_id, brand, amount_net, period_label,
+          use_paypal, customer_id } = req.body || {};
+  try {
+    const result = await createStandaloneAdBudgetInvoice({
+      easybill_customer_id, brand,
+      amount_net:   Number(amount_net),
+      period_label: String(period_label || '').trim(),
+      use_paypal:   !!use_paypal,
+      customer_id:  customer_id || null,
+      createdBy:    req.user?.email || null,
+    });
+    res.status(201).json(result);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+/* GET /api/invoices/:id/email-preview — Template + Merge-Tags fürs Send-Modal.
+   Nur Rechnungen mit gesetztem easybill_document_id. */
+router.get('/:id/email-preview', async (req, res) => {
+  try {
+    const { data: inv, error } = await supabase
+      .from('talentone_invoices').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!inv)  return res.status(404).json({ error: 'Rechnung nicht gefunden.' });
+    if (!inv.easybill_document_id) {
+      return res.status(409).json({ error: 'Rechnung wurde noch nicht in easybill erzeugt.' });
+    }
+
+    // Empfänger + Ansprechpartner aus talentone_kunden ziehen
+    let kunde = null;
+    if (inv.customer_id) {
+      const { data } = await supabase.from('talentone_kunden')
+        .select('firmenname, ansprechpartner, email').eq('id', inv.customer_id).maybeSingle();
+      kunde = data || null;
+    }
+
+    const { data: templates } = await supabase.from('talentone_offer_templates')
+      .select('key, text').eq('brand', inv.brand)
+      .in('key', ['invoice_email_subject', 'invoice_email_body']);
+    const tplMap = Object.fromEntries((templates || []).map(t => [t.key, t.text]));
+
+    const ctx = {
+      ansprechpartner: kunde?.ansprechpartner || 'zusammen',
+      firma:           kunde?.firmenname || '',
+      period_label:    inv.label || 'Ihre Kampagne',
+      betrag_brutto:   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(inv.amount_gross) || 0),
+    };
+    const fill = t => String(t || '').replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] ?? '');
+
+    res.json({
+      subject: fill(tplMap.invoice_email_subject || 'Ihre Rechnung — {{period_label}}'),
+      body:    fill(tplMap.invoice_email_body    || `Hallo ${ctx.ansprechpartner},\n\nanbei erhalten Sie unsere Rechnung als PDF-Anhang.\n\nHerzliche Grüße`),
+      to:      kunde?.email || null,
+      firma:   ctx.firma,
+      already_sent: !!inv.sent_at,
+      sent_to: inv.sent_to,
+      sent_at: inv.sent_at,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/:id/send-email  body: { to, subject, body } */
+router.post('/:id/send-email', async (req, res) => {
+  const { to, subject, body } = req.body || {};
+  if (!to || !/.+@.+\..+/.test(String(to))) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt oder ungültig.' });
+  if (!subject || !String(subject).trim())  return res.status(400).json({ error: 'Betreff fehlt.' });
+  if (!body || !String(body).trim())        return res.status(400).json({ error: 'Text fehlt.' });
+
+  try {
+    const { data: inv, error } = await supabase
+      .from('talentone_invoices').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!inv)  return res.status(404).json({ error: 'Rechnung nicht gefunden.' });
+    if (!inv.easybill_document_id) return res.status(409).json({ error: 'Rechnung wurde noch nicht in easybill erzeugt.' });
+
+    const pdfBuffer = await getDocumentPdf(inv.easybill_document_id);
+    let firmaSlug = 'Kunde';
+    if (inv.customer_id) {
+      const { data: k } = await supabase.from('talentone_kunden')
+        .select('firmenname').eq('id', inv.customer_id).maybeSingle();
+      firmaSlug = (k?.firmenname || 'Kunde').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Kunde';
+    }
+    const pdfFilename = `${firmaSlug}_Rechnung.pdf`;
+
+    await sendRechnungMail({
+      to, offerBrand: inv.brand, subject, body, pdfBuffer, pdfFilename,
+    });
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: upErr } = await supabase
+      .from('talentone_invoices')
+      .update({ sent_at: nowIso, sent_to: to })
+      .eq('id', inv.id).select().single();
+    if (upErr) return res.status(500).json({ error: upErr.message });
+
+    // Close-Notiz best-effort: Lead-Anker liegt bei den Angeboten. Wenn die
+    // Rechnung standalone ist, gibt es keinen. Deshalb hier nur, wenn wir per
+    // offer_id auf einen Lead kommen können.
+    if (inv.offer_id) {
+      const { data: offer } = await supabase.from('talentone_offers')
+        .select('close_lead_id').eq('id', inv.offer_id).maybeSingle();
+      if (offer?.close_lead_id) {
+        const brandLabel = inv.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+        closeAddNote({
+          leadId: offer.close_lead_id,
+          note: `📄 Rechnung per E-Mail versendet: ${brandLabel} — an ${to}`,
+        }).catch(err => console.warn('[invoices/send-email close]', err.message));
+      }
+    }
+
+    res.json({ ok: true, invoice: updated });
+  } catch (err) {
+    console.error('[invoices/send-email]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/invoices/sync — Bulk-Trigger für den Rechnungs-Sync.
+   Optional { customer_id }: dann läuft nur der Sync und die Ampel-Auswertung
+   im vollen Rahmen — Rechnungen werden global aktualisiert, aber der Client
+   ruft den Endpoint kontextabhängig auf, um seine eigene Sicht zu refreshen. */
 router.post('/sync', async (req, res) => {
   try {
     const result = await syncOpenInvoices();

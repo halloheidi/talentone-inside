@@ -8,7 +8,44 @@
 import { supabase } from './supabase.js';
 import { getDocument } from './easybill.js';
 
-const OPEN_STATUSES = ['sent', 'partially_paid', 'overdue'];
+export const OPEN_STATUSES = ['sent', 'partially_paid', 'overdue'];
+
+/**
+ * Reine Predicate: qualifiziert eine Row für den Bulk-Sync?
+ * Bewusst OHNE Filter auf `source`, `invoice_type` oder `offer_id`
+ * — Standalone-Rechnungen und Setup-/Monats-/AB-Rechnungen laufen alle
+ * über denselben Sync.
+ */
+export function isInSyncScope(invoice) {
+  return !!invoice
+    && OPEN_STATUSES.includes(invoice.status)
+    && invoice.easybill_document_id != null;
+}
+
+/**
+ * Reine Ampel-Berechnung für die Rechnungen EINES Kunden.
+ * Berücksichtigt sowohl die durchs Abo entstehenden ad_budget-Rechnungen
+ * als auch freistehende Standalone-Rows — Kriterium ist `invoice_type`,
+ * nicht `source`.
+ *
+ * @param {Array} invoices — Rows für EINEN Kunden
+ * @param {Date}  now
+ * @returns {'ok'|'pending'|'blocked'}
+ */
+export function evaluateAmpelStatus(invoices = [], now = new Date()) {
+  const relevant = invoices.filter(i =>
+    i && ['ad_budget', 'monthly_combined'].includes(i.invoice_type)
+      && OPEN_STATUSES.includes(i.status)
+  );
+  let target = 'ok';
+  for (const inv of relevant) {
+    if (!inv.due_date) continue;
+    const overdueDays = Math.floor((now - new Date(inv.due_date)) / 86400000);
+    if (overdueDays > 7)      return 'blocked';
+    else if (overdueDays > 0) target = 'pending';
+  }
+  return target;
+}
 
 let running = false;
 let lastRunAt = null;
@@ -112,14 +149,8 @@ export async function evaluateCampaignPaymentStatus() {
       .select('id, due_date, status, invoice_type')
       .eq('customer_id', k.id)
       .in('invoice_type', ['ad_budget', 'monthly_combined'])
-      .in('status', ['sent', 'partially_paid', 'overdue']);
-    let target = 'ok';
-    for (const inv of invs || []) {
-      if (!inv.due_date) continue;
-      const overdueDays = Math.floor((now - new Date(inv.due_date)) / 86400000);
-      if (overdueDays > 7)      { target = 'blocked'; break; }
-      else if (overdueDays > 0) { target = 'pending'; }
-    }
+      .in('status', OPEN_STATUSES);
+    const target = evaluateAmpelStatus(invs || [], now);
     if (target !== k.campaign_payment_status) {
       await supabase.from('talentone_kunden')
         .update({ campaign_payment_status: target }).eq('id', k.id);

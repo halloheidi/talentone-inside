@@ -21,7 +21,8 @@ import {
 import { getPdfTemplate } from './easybill-templates.js';
 import { createInvoice as paypalCreateInvoice } from './paypal.js';
 import { evaluateMonthlyBilling } from './billing-rules.js';
-import { getEffectiveAdBudget } from './offer-calc.js';
+import { getEffectiveAdBudget, validateAdBudget } from './offer-calc.js';
+import { AD_BUDGET_DESCRIPTION } from './offer-easybill-builder.js';
 
 const EUR_VAT_DEFAULT = 19;
 
@@ -350,6 +351,149 @@ async function loadAdBudgetHistory(offerId) {
     .select('new_amount, effective_from')
     .eq('offer_id', offerId);
   return data || [];
+}
+
+/**
+ * Standalone-Werbebudget-Rechnung — ohne Angebots-Bezug.
+ *
+ * Für Kunden, die kein aktives Abo bei uns haben oder für zusätzliche
+ * Werbebudget-Kampagnen außerhalb der monatlichen Abrechnung. Struktur
+ * spiegelt createSetupInvoice:
+ *   1. Draft in talentone_invoices (source='standalone', invoice_type='ad_budget')
+ *   2. Optional PayPal-Zahllink
+ *   3. easybill-INVOICE erzeugen (markengerechte pdf_template)
+ *   4. Row fertigstellen (status='sent', easybill_document_id, PDF-URL)
+ *
+ * Landet damit automatisch im invoice-sync (kein Filter auf source/offer_id)
+ * und in evaluateCampaignPaymentStatus (invoice_type='ad_budget' + customer_id).
+ *
+ * @param {object} params
+ * @param {string} params.easybill_customer_id
+ * @param {'talentone'|'nowag_wirth'} params.brand
+ * @param {number} params.amount_net    — Werbebudget netto in Euro
+ * @param {string} params.period_label  — Freitext für den Positionstitel
+ *                                        ("Juli 2026", "Kampagne Servicetechniker")
+ * @param {boolean} [params.use_paypal=false]
+ * @param {string|null} [params.customer_id]  — talentone_kunden.id (Pflicht für die Ampel)
+ * @param {string|null} [params.createdBy]
+ * @returns {Promise<{invoice, doc, paypalPayLink}>}
+ */
+export async function createStandaloneAdBudgetInvoice({
+  easybill_customer_id,
+  brand,
+  amount_net,
+  period_label,
+  use_paypal = false,
+  customer_id = null,
+  createdBy = null,
+} = {}) {
+  if (!easybill_customer_id) throw new Error('easybill_customer_id ist Pflicht.');
+  if (!['talentone', 'nowag_wirth'].includes(brand)) throw new Error('brand ungültig.');
+  const label = String(period_label || '').trim();
+  if (!label) throw new Error('period_label ist Pflicht.');
+
+  const budgetVal = validateAdBudget(amount_net);
+  if (!budgetVal.ok) throw new Error(budgetVal.error);
+  const netto = Number(amount_net) || 0;
+  if (netto <= 0) throw new Error('Betrag muss > 0 sein.');
+
+  const brandLabel = brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+  const totalNet   = round2(netto);
+  const totalGross = round2(totalNet * (1 + EUR_VAT_DEFAULT / 100));
+  const dueDate    = addDays(7);
+
+  const kunde = await fetchKunde(customer_id);
+  const paypalEnabled = use_paypal === true || (use_paypal === null && !!kunde?.paypal_enabled);
+
+  // 1. Draft-Row
+  const invoiceRefBase = `ADB-${easybill_customer_id}-${Date.now().toString(36)}`;
+  const { data: draft, error: draftErr } = await supabase.from('talentone_invoices').insert({
+    offer_id:              null,
+    customer_id:           customer_id,
+    easybill_customer_id:  String(easybill_customer_id),
+    brand,
+    invoice_type:          'ad_budget',
+    source:                'standalone',
+    label:                 label,
+    amount_net:            totalNet,
+    amount_gross:          totalGross,
+    vat_rate:              EUR_VAT_DEFAULT,
+    payment_method:        paypalEnabled ? 'paypal' : 'bank_transfer',
+    status:                'draft',
+    due_date:              dueDate,
+    paypal_reference:      invoiceRefBase,
+  }).select().single();
+  if (draftErr) throw new Error(`talentone_invoices insert: ${draftErr.message}`);
+
+  // 2. PayPal-Zahllink (best-effort)
+  let paypalPayLink = null;
+  if (paypalEnabled) {
+    try {
+      const pp = await paypalCreateInvoice({
+        amountCent:      Math.round(totalGross * 100),
+        description:     `Werbebudget ${brandLabel} — ${label}`,
+        invoiceNumber:   draft.id.slice(0, 24),
+        faelligkeit:     dueDate,
+        customerEmail:   kunde?.email || null,
+        customerName:    kunde?.firmenname || null,
+        noteToRecipient: `Werbebudget-Rechnung ${brandLabel}`,
+      });
+      paypalPayLink = pp.pay_link;
+      await supabase.from('talentone_invoices')
+        .update({ paypal_pay_link: paypalPayLink, paypal_reference: pp.id })
+        .eq('id', draft.id);
+    } catch (err) {
+      console.warn('[invoice-service standalone paypal]', err.message);
+      await supabase.from('talentone_invoices')
+        .update({ payment_method: 'bank_transfer' })
+        .eq('id', draft.id);
+    }
+  }
+
+  // 3. easybill-INVOICE erzeugen
+  const positionTitle = `Werbebudget-Abwicklung — ${label} (Vorauszahlung)`;
+  const items = [makePosition({
+    pos: 1,
+    titleWithSuffix: positionTitle,
+    description: AD_BUDGET_DESCRIPTION,
+    quantity: 1,
+    unitPriceEur: totalNet,
+    vatPercent: EUR_VAT_DEFAULT,
+  })];
+
+  const paymentBlock = paypalPayLink
+    ? `\n\nBequem online per PayPal zahlen: ${paypalPayLink}\n\nOder per Überweisung auf die unten angegebene Bankverbindung.`
+    : '';
+  const documentText = `Rechnung über Ihr Werbebudget — Fälligkeit: 7 Tage nach Rechnungsstellung.${paymentBlock}`;
+
+  let doc;
+  try {
+    doc = await createInvoiceDocument({
+      type:        'INVOICE',
+      customerId:  Number(easybill_customer_id),
+      title:       `Werbebudget — ${brandLabel} — ${label}`.slice(0, 200),
+      items,
+      text:        documentText,
+      pdfTemplate: getPdfTemplate(brand, 'INVOICE'),
+      externalId:  draft.id,
+    });
+  } catch (err) {
+    throw new Error(`easybill: ${err.message}`);
+  }
+
+  // 4. Fertigstellen
+  const { data: updated, error: upErr } = await supabase
+    .from('talentone_invoices')
+    .update({
+      easybill_document_id: String(doc.id),
+      easybill_pdf_url:     `/api/invoices/${draft.id}/pdf`,
+      status:               'sent',
+      last_synced_at:       new Date().toISOString(),
+    })
+    .eq('id', draft.id).select().single();
+  if (upErr) throw new Error(upErr.message);
+
+  return { invoice: updated, doc, paypalPayLink };
 }
 
 /**

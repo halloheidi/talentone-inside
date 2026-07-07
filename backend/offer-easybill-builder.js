@@ -24,8 +24,8 @@ const EXTRA_JOB_SKUS_BY_BRAND = {
   nowag_wirth: ['NW-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB'],
 };
 
-const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (Vorauszahlung)';
-const AD_BUDGET_DESCRIPTION =
+export const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (Vorauszahlung)';
+export const AD_BUDGET_DESCRIPTION =
   'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen. Kampagnenstart nach Zahlungseingang.';
 
 // easybill: single_price_net erwartet Cent, obwohl der Typ float ist
