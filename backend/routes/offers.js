@@ -5,10 +5,10 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { calculateOfferTotals, validateOfferSelection, validateAdBudget } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
-import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
+import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
-import { sendAngebotMail } from '../mail.js';
+import { sendAngebotMail, sendAuftragMail } from '../mail.js';
 import { addNote as closeAddNote } from '../close.js';
 
 const router = Router();
@@ -53,6 +53,17 @@ async function loadOfferEmailTemplate(brand) {
   return {
     subject: map.offer_email_subject || 'Ihr Angebot',
     body:    map.offer_email_body    || '',
+  };
+}
+
+async function loadOrderEmailTemplate(brand) {
+  const { data } = await supabase
+    .from('talentone_offer_templates').select('key, text').eq('brand', brand)
+    .in('key', ['order_email_subject', 'order_email_body']);
+  const map = Object.fromEntries((data || []).map(t => [t.key, t.text]));
+  return {
+    subject: map.order_email_subject || 'Ihre Auftragsbestätigung',
+    body:    map.order_email_body    || '',
   };
 }
 
@@ -170,6 +181,134 @@ router.post('/:id/send-email', async (req, res) => {
   }
 });
 
+/* GET /api/offers/:id/order-email-preview — Template + Merge-Tags fürs AB-Send-Modal.
+   Verfügbar für ALLE Angebote mit gesetztem easybill_order_document_id
+   (also sowohl Direkt-ABs als auch die klassisch aus Angebot→AB entstandenen). */
+router.get('/:id/order-email-preview', async (req, res) => {
+  const { data: offer, error } = await supabase
+    .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+  if (!offer.easybill_order_document_id) {
+    return res.status(409).json({ error: 'Für dieses Angebot existiert noch keine Auftragsbestätigung in easybill.' });
+  }
+
+  const tpl = await loadOrderEmailTemplate(offer.brand);
+  const ctx = buildOfferMergeCtx(offer);
+  const subject = fillMergeTags(tpl.subject, ctx);
+  const body    = fillMergeTags(tpl.body, ctx);
+
+  const [{ data: asset }, { data: flyerTpl }] = await Promise.all([
+    supabase.from('talentone_brand_assets')
+      .select('filename').eq('brand', offer.brand).eq('asset_key', 'offer_flyer').maybeSingle(),
+    supabase.from('talentone_offer_templates')
+      .select('text').eq('brand', offer.brand).eq('key', 'offer_email_flyer_paragraph').maybeSingle(),
+  ]);
+  const flyer_paragraph = fillMergeTags(flyerTpl?.text || '', ctx);
+
+  res.json({
+    subject, body,
+    to: offer.customer_snapshot?.email || null,
+    firma: ctx.firma,
+    already_sent: !!offer.order_sent_at,
+    sent_to: offer.order_sent_to,
+    sent_at: offer.order_sent_at,
+    flyer_available: !!asset,
+    flyer_filename:  asset?.filename || null,
+    flyer_paragraph,
+  });
+});
+
+/* POST /api/offers/:id/send-order-email — verschickt die AB per E-Mail.
+   PDF wird direkt aus easybill (easybill_order_document_id) gezogen. */
+router.post('/:id/send-order-email', async (req, res) => {
+  const { to, subject, body, attach_flyer = false } = req.body || {};
+  if (!to || !/.+@.+\..+/.test(String(to))) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt oder ungültig.' });
+  if (!subject || !String(subject).trim())  return res.status(400).json({ error: 'Betreff fehlt.' });
+  if (!body || !String(body).trim())        return res.status(400).json({ error: 'Text fehlt.' });
+
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (!offer.easybill_order_document_id) {
+      return res.status(409).json({ error: 'Auftragsbestätigung existiert noch nicht in easybill.' });
+    }
+
+    const pdfBuffer = await getDocumentPdf(offer.easybill_order_document_id);
+    const firma = (offer.customer_snapshot?.company_name || 'Auftrag').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Auftrag';
+    const pdfFilename = `${firma}_Auftragsbestaetigung.pdf`;
+
+    let flyerBuffer = null, flyerFilename = null, flyerWarn = null;
+    if (attach_flyer) {
+      try {
+        const { data: asset } = await supabase.from('talentone_brand_assets')
+          .select('*').eq('brand', offer.brand).eq('asset_key', 'offer_flyer').maybeSingle();
+        if (asset) {
+          const { downloadFromBucket } = await import('../storage.js');
+          flyerBuffer = await downloadFromBucket({ bucket: 'brand-assets', path: asset.storage_path });
+          flyerFilename = asset.filename;
+        } else {
+          flyerWarn = 'Kein Flyer hinterlegt.';
+        }
+      } catch (err) {
+        console.warn('[offers/send-order-email flyer]', err.message);
+        flyerWarn = `Flyer nicht ladbar: ${err.message}`;
+      }
+    }
+    const flyerAttached = !!flyerBuffer;
+
+    await sendAuftragMail({
+      to, offerBrand: offer.brand, subject, body, pdfBuffer, pdfFilename,
+      extraAttachments: flyerAttached ? [{ filename: flyerFilename, content: flyerBuffer }] : [],
+    });
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: upErr } = await supabase
+      .from('talentone_offers')
+      .update({ order_sent_at: nowIso, order_sent_to: to })
+      .eq('id', offer.id).select().single();
+    if (upErr) return res.status(500).json({ error: upErr.message });
+
+    if (offer.close_lead_id) {
+      const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+      closeAddNote({
+        leadId: offer.close_lead_id,
+        note: `📋 Auftragsbestätigung per E-Mail versendet${flyerAttached ? ' (mit Flyer)' : ''}: ${brandLabel} — an ${to}`,
+      }).catch(err => console.warn('[offers/send-order-email close]', err.message));
+    }
+
+    res.json({ ok: true, offer: updated, flyer_attached: flyerAttached, flyer_warn: flyerWarn });
+  } catch (err) {
+    console.error('[offers/send-order-email]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* GET /api/offers/:id/order-pdf — Proxy für AB-PDF-Download. */
+router.get('/:id/order-pdf', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers')
+      .select('easybill_order_document_id, customer_snapshot, brand, id')
+      .eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (!offer.easybill_order_document_id) {
+      return res.status(404).json({ error: 'Keine Auftragsbestätigung vorhanden.' });
+    }
+    const pdf = await getDocumentPdf(offer.easybill_order_document_id);
+    const firma = (offer.customer_snapshot?.company_name || 'Auftrag').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Auftrag';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${firma}_Auftragsbestaetigung.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error('[offers/order-pdf]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* GET /api/offers/sync/status — für UI/Debug. */
 router.get('/sync/status', (req, res) => res.json(getOfferSyncStatus()));
 
@@ -263,7 +402,7 @@ router.post('/calculate', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_period_days, hires_target, service_waived_override, decline_note, declined_at')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_period_days, hires_target, service_waived_override, decline_note, declined_at')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
@@ -536,6 +675,90 @@ router.post('/:id/create-easybill', async (req, res) => {
     res.status(201).json({ offer: updated, easybill: { id: document.id, number: document.number } });
   } catch (err) {
     console.error('[offers/create-easybill]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/offers/:id/create-easybill-order
+   Direkt-Auftragsbestätigung — für den Fall, dass der Auftrag im Gespräch
+   mündlich abgeschlossen wurde. Es wird KEIN Angebot erzeugt, sondern
+   sofort ein CHARGE_CONFIRM in easybill. Offer.status = 'accepted',
+   easybill_order_document_id gesetzt, easybill_document_id bleibt NULL.
+   Der Rücksync ignoriert Rows ohne easybill_document_id ohnehin.
+*/
+router.post('/:id/create-easybill-order', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (offer.status !== 'draft') {
+      return res.status(409).json({ error: `Nur Drafts können direkt in eine AB überführt werden (aktuell: ${offer.status}).` });
+    }
+    if (!offer.easybill_customer_id) {
+      return res.status(400).json({ error: 'Kunde ohne easybill_customer_id — Draft ist inkonsistent.' });
+    }
+
+    const [{ data: products }, { data: templates }] = await Promise.all([
+      supabase.from('talentone_offer_products').select('*').eq('brand', offer.brand).eq('active', true),
+      supabase.from('talentone_offer_templates').select('key, text').eq('brand', offer.brand),
+    ]);
+
+    const { items } = buildEasybillOfferPayload({
+      brand: offer.brand,
+      products: products || [],
+      selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+      additional_positions_count: offer.additional_positions_count || 0,
+      ad_budget_monthly: offer.ad_budget_monthly,
+      vat_rate: Number(offer.vat_rate) || 19,
+      templates: templates || [],
+    });
+    if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
+
+    const snap = offer.customer_snapshot || {};
+    const kundenname = snap.company_name || 'Auftrag';
+    const title = `Auftragsbestätigung für ${kundenname}`.slice(0, 200);
+
+    let document;
+    try {
+      document = await createChargeConfirm({
+        customerId:  Number(offer.easybill_customer_id),
+        title,
+        items,
+        pdfTemplate: getPdfTemplate(offer.brand, 'CHARGE_CONFIRM'),
+        externalId:  offer.id,
+      });
+    } catch (err) {
+      return res.status(502).json({ error: `easybill: ${err.message}` });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabase
+      .from('talentone_offers')
+      .update({
+        status: 'accepted',
+        accepted_at: nowIso,
+        easybill_order_document_id: String(document.id),
+        // easybill_document_id BLEIBT NULL — Marker für den Direkt-AB-Fall
+        last_synced_at: nowIso,
+      })
+      .eq('id', offer.id).select().single();
+    if (updErr) return res.status(500).json({ error: updErr.message, easybill_order_document_id: document.id });
+
+    // Close-Notiz best-effort — nie den Endpoint blockieren.
+    if (updated.close_lead_id) {
+      const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+      const monat1 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
+        .format(Number(offer.first_month_total) || 0);
+      const abNumber = document.number ? `AB ${document.number}` : `Doc ${document.id}`;
+      const note = `✅ Direktauftrag angenommen: ${brandLabel} — ${abNumber} — Monat 1: ${monat1}`;
+      closeAddNote({ leadId: updated.close_lead_id, note })
+        .catch(err => console.warn('[offers/create-easybill-order close-note]', err.message));
+    }
+
+    res.status(201).json({ offer: updated, easybill: { id: document.id, number: document.number } });
+  } catch (err) {
+    console.error('[offers/create-easybill-order]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -205,6 +205,27 @@ export async function createOffer({
 }
 
 /**
+ * Erstellt eine Auftragsbestätigung (CHARGE_CONFIRM) direkt — für den
+ * "im Gespräch abgeschlossen"-Fall, in dem kein Angebot verschickt wird.
+ * Struktur identisch zu createOffer, nur type='CHARGE_CONFIRM'.
+ */
+export async function createChargeConfirm({
+  customerId, title = 'Auftragsbestätigung', items = [], text = null,
+  pdfTemplate = null, externalId = null,
+}) {
+  const body = {
+    type: 'CHARGE_CONFIRM',
+    customer_id: customerId,
+    title,
+    items,
+  };
+  if (text !== null && text !== '') body.text = text;
+  if (pdfTemplate)                   body.pdf_template = pdfTemplate;
+  if (externalId)                    body.external_id = externalId;
+  return easybill('/documents', { method: 'POST', body });
+}
+
+/**
  * Listet PDF-Templates aus easybill — hilft der Admin-UI bei der Wahl der
  * marken-spezifischen Template-ID.
  * @param {string} [type='OFFER'] — dokumenttyp-Filter.

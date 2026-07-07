@@ -39,6 +39,7 @@ export default function OffersList() {
   const [busyId, setBusyId] = useState(null);
   const [rowError, setRowError] = useState({}); // { [offerId]: msg }
   const [sendModal, setSendModal] = useState(null); // { offerId, subject, body, to, firma, already_sent }
+  const [sendOrderModal, setSendOrderModal] = useState(null); // dgl. für AB-Versand
   const [billingOffer, setBillingOffer] = useState(null); // Angebot fürs Abrechnungs-Modal
   const [declineOffer, setDeclineOffer] = useState(null); // Angebot fürs Decline-Modal
 
@@ -67,6 +68,16 @@ export default function OffersList() {
     try {
       const preview = await api(`/offers/${offer.id}/email-preview`);
       setSendModal({ offerId: offer.id, ...preview });
+    } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
+    finally { setBusyId(null); }
+  }
+
+  async function openSendOrderModal(offer) {
+    setBusyId(offer.id);
+    setRowError(r => ({ ...r, [offer.id]: '' }));
+    try {
+      const preview = await api(`/offers/${offer.id}/order-email-preview`);
+      setSendOrderModal({ offerId: offer.id, ...preview });
     } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
     finally { setBusyId(null); }
   }
@@ -184,6 +195,12 @@ export default function OffersList() {
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>{eur.format(o.first_month_total)}</td>
                     <td>
                       <span style={{ padding: '3px 10px', borderRadius: 100, background: st.bg, color: st.color, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
+                      {o.status === 'accepted' && !o.easybill_document_id && (
+                        <span
+                          title="Auftragsbestätigung wurde direkt aus dem Wizard erzeugt — kein Angebot vorausgegangen."
+                          style={{ marginLeft: 6, padding: '2px 8px', borderRadius: 100, background: '#fff7ed', color: '#9a3412', fontSize: 10, fontWeight: 700, border: '1px dashed #fdba74' }}
+                        >Direktauftrag</span>
+                      )}
                       {o.status === 'accepted' && o.billing_phase && PHASE_META[o.billing_phase] && (
                         <div style={{ marginTop: 4 }}>
                           <span
@@ -232,6 +249,14 @@ export default function OffersList() {
                           onClick={() => setBillingOffer(o)}
                         >📊 Abrechnung</button>
                       )}
+                      {o.easybill_order_document_id && (
+                        <button
+                          className={o.order_sent_at ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'}
+                          title={o.order_sent_at ? `AB bereits versandt an ${o.order_sent_to || 'Kunde'} — erneut senden` : 'Auftragsbestätigung per E-Mail an Kunden senden'}
+                          disabled={isBusy}
+                          onClick={() => openSendOrderModal(o)}
+                        >{isBusy ? '⏳' : (o.order_sent_at ? '📋 AB erneut senden' : '📋 AB senden')}</button>
+                      )}
                       {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
                         <button
                           className="btn-ghost btn-sm"
@@ -253,6 +278,12 @@ export default function OffersList() {
         preview={sendModal}
         onClose={() => setSendModal(null)}
         onSent={() => { setSendModal(null); load(); }}
+      />
+
+      <SendOrderModal
+        preview={sendOrderModal}
+        onClose={() => setSendOrderModal(null)}
+        onSent={() => { setSendOrderModal(null); load(); }}
       />
 
       <BillingModal
@@ -362,6 +393,118 @@ function SendOfferModal({ preview, onClose, onSent }) {
       {preview.already_sent && (
         <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
           Dieses Angebot wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
+        </div>
+      )}
+
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Empfänger</span>
+          <input type="email" value={to} onChange={e => setTo(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Betreff</span>
+          <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Nachricht</span>
+          <textarea rows={14} value={body} onChange={e => setBody(e.target.value)}
+            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
+function SendOrderModal({ preview, onClose, onSent }) {
+  const [to, setTo] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [attachFlyer, setAttachFlyer] = useState(false);
+  const [flyerParagraph, setFlyerParagraph] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [okNote, setOkNote] = useState('');
+
+  useEffect(() => {
+    if (!preview) return;
+    setTo(preview.to || '');
+    setSubject(preview.subject || '');
+    setErr(''); setOkNote('');
+    setFlyerParagraph(preview.flyer_paragraph || '');
+    const flyerOnByDefault = !!preview.flyer_available;
+    setAttachFlyer(flyerOnByDefault);
+    setBody(composeBody(preview.body || '', preview.flyer_paragraph || '', flyerOnByDefault));
+  }, [preview?.offerId]);
+
+  function onToggleFlyer(next) {
+    if (!preview) return;
+    const oldBody = body;
+    const withFlyer = next;
+    const newBody = composeBody(preview.body || '', flyerParagraph, withFlyer);
+    if (oldBody !== preview.body && oldBody !== composeBody(preview.body || '', flyerParagraph, !withFlyer)) {
+      if (!window.confirm('Der Text wird beim Umschalten neu aufgebaut. Deine Änderungen im Body gehen verloren. Fortfahren?')) return;
+    }
+    setAttachFlyer(withFlyer);
+    setBody(newBody);
+  }
+
+  if (!preview) return null;
+
+  async function send() {
+    setErr(''); setOkNote('');
+    if (!to || !/.+@.+\..+/.test(to)) return setErr('Empfänger-E-Mail ungültig.');
+    if (!subject.trim())               return setErr('Betreff fehlt.');
+    if (!body.trim())                  return setErr('Text fehlt.');
+    setBusy(true);
+    try {
+      const res = await api(`/offers/${preview.offerId}/send-order-email`, {
+        method: 'POST',
+        body: { to, subject, body, attach_flyer: attachFlyer },
+      });
+      if (attachFlyer && !res.flyer_attached) {
+        setOkNote(`Versandt — ${res.flyer_warn || 'ohne Flyer'}`);
+        setTimeout(onSent, 1500);
+      } else {
+        onSent();
+      }
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal
+      open={!!preview}
+      onClose={onClose}
+      title={`Auftragsbestätigung an ${preview.firma || 'Kunden'} senden`}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={send} disabled={busy}>
+          {busy ? 'Sende…' : '📋 Jetzt senden'}
+        </button>
+      </>}
+    >
+      <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
+        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.com. Die AB als PDF wird automatisch aus easybill angefügt.
+      </p>
+
+      {preview.flyer_available && (
+        <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input id="order-flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
+          <label htmlFor="order-flyer-toggle" style={{ fontSize: 13, cursor: 'pointer' }}>
+            📎 <strong>Flyer anhängen</strong> — <code style={{ fontSize: 11 }}>{preview.flyer_filename}</code>
+          </label>
+        </div>
+      )}
+
+      {okNote && <div className="alert" style={{ background: '#fff8d4', color: '#a34e00', border: '1px solid #f0d878', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12 }}>{okNote}</div>}
+
+      {preview.already_sent && (
+        <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+          Diese AB wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
         </div>
       )}
 

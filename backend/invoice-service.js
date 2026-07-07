@@ -77,17 +77,34 @@ function makePosition({ pos, titleWithSuffix, description, quantity, unitPriceEu
  *
  * @returns {Promise<{ easybillDocId, doc } | null>}
  */
+/**
+ * Reine Helper-Funktion: welche ref_ids soll der Setup-Rechnungs-Dup-Check in
+ * easybill abfragen? Beide Wege müssen greifen — Angebots-Doc-ID (klassisch)
+ * und AB-Doc-ID (Direkt-AB, wenn kein Angebot existiert).
+ */
+export function collectSetupDupRefIds(offer) {
+  return [offer?.easybill_document_id, offer?.easybill_order_document_id]
+    .filter(Boolean);
+}
+
 export async function findExistingInvoiceForOffer(offer) {
-  if (!offer?.easybill_document_id) return null;
-  const invoices = await listDocumentsByRefId({
-    refId: offer.easybill_document_id,
-    types: ['INVOICE'],
-    limit: 20,
-  }).catch(() => []);
-  if (!invoices.length) return null;
-  // Nimm die erste — wenn easybill mehrere angelegt hat, ist die älteste die
-  // "eigentliche" Setup-Rechnung.
-  const doc = invoices.sort((a, b) => Number(a.id) - Number(b.id))[0];
+  // Zwei Fälle:
+  //   a) Klassisch: Angebot → INVOICE (ref_id = Angebots-Doc-ID)
+  //   b) Direkt-AB: Auftragsbestätigung → INVOICE (ref_id = AB-Doc-ID)
+  // In beiden Fällen darf keine zweite Setup-Rechnung angelegt werden.
+  const refIds = collectSetupDupRefIds(offer);
+  if (refIds.length === 0) return null;
+
+  const all = [];
+  for (const refId of refIds) {
+    const invoices = await listDocumentsByRefId({
+      refId, types: ['INVOICE'], limit: 20,
+    }).catch(() => []);
+    all.push(...invoices);
+  }
+  if (!all.length) return null;
+
+  const doc = all.sort((a, b) => Number(a.id) - Number(b.id))[0];
   return { easybillDocId: String(doc.id), doc };
 }
 

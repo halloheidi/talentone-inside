@@ -196,6 +196,34 @@ export default function OfferWizard() {
     } finally { setCreatingOffer(false); }
   }
 
+  /* Direkt-Auftragsbestätigung — im Gespräch abgeschlossen.
+     Es wird KEIN Angebot erzeugt; sofort ein CHARGE_CONFIRM in easybill,
+     Angebot geht direkt auf status='accepted'. Selbe Recovery-Logik wie
+     bei createEasybillOffer. */
+  async function createEasybillOrder() {
+    const ok = window.confirm(
+      'Es wird KEIN Angebot erstellt, sondern direkt eine verbindliche ' +
+      'Auftragsbestätigung.\n\nDer Vorgang lässt sich in easybill nur ' +
+      'durch Storno rückgängig machen.\n\nFortfahren?'
+    );
+    if (!ok) return;
+
+    setCreatingOffer(true); setError('');
+    let draftId = null;
+    try {
+      const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
+      draftId = draftRes.offer.id;
+      const easyRes = await api(`/offers/${draftId}/create-easybill-order`, { method: 'POST' });
+      navigate(`/angebote?accepted=${easyRes.offer.id}`);
+    } catch (err) {
+      if (draftId) {
+        setError(`Direkt-AB fehlgeschlagen: ${err.message} — Der Entwurf wurde gespeichert. Du kannst ihn in der Angebotsliste bearbeiten oder als Angebot senden.`);
+      } else {
+        setError(err.message);
+      }
+    } finally { setCreatingOffer(false); }
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -251,7 +279,9 @@ export default function OfferWizard() {
             selectedIds={selectedIds} totals={totals} templates={templates}
             additionalPositionsCount={additionalPositionsCount}
             savingDraft={savingDraft} onSaveDraft={saveDraft}
-            creatingOffer={creatingOffer} onCreateEasybill={createEasybillOffer}
+            creatingOffer={creatingOffer}
+            onCreateEasybill={createEasybillOffer}
+            onCreateEasybillOrder={createEasybillOrder}
           />
         )}
       </div>
@@ -926,7 +956,7 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
 }
 
 // ─────────────────────── Step 4 ───────────────────────
-function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill }) {
+function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
   const positionsWithText = (totals?.positions || []).map(l => ({
     ...l,
     description: products.find(p => p.id === l.product_id)?.description || '',
@@ -1015,6 +1045,30 @@ function Step4Preview({ brand, customer, products, selectedIds, totals, template
             <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 8, textAlign: 'center', lineHeight: 1.4 }}>
               Erzeugen speichert zuerst den Entwurf, ruft dann easybill und öffnet das PDF.
             </p>
+
+            {/* Direktauftrag — visuell abgesetzt, damit er nicht mit
+                dem Angebots-Standardweg verwechselt wird. */}
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px dashed var(--line)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>
+                Auftrag im Gespräch abgeschlossen?
+              </div>
+              <button
+                style={{
+                  width: '100%', padding: '10px 12px', fontSize: 13, fontWeight: 600,
+                  color: '#9a3412', background: '#fff7ed', border: '1px dashed #fdba74',
+                  borderRadius: 8, cursor: (creatingOffer || savingDraft) ? 'not-allowed' : 'pointer',
+                  opacity: (creatingOffer || savingDraft) ? 0.5 : 1,
+                }}
+                onClick={onCreateEasybillOrder} disabled={creatingOffer || savingDraft}
+                title="Erzeugt sofort eine verbindliche Auftragsbestätigung, ohne vorher ein Angebot zu versenden."
+              >
+                📋 Direkt Auftragsbestätigung erzeugen
+              </button>
+              <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6, textAlign: 'center', lineHeight: 1.4 }}>
+                Wenn der Auftrag bereits mündlich erteilt wurde — springt direkt auf
+                „angenommen" und legt eine AB in easybill an.
+              </p>
+            </div>
           </div>
         </aside>
       </div>
