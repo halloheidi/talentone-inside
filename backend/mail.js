@@ -745,6 +745,7 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
    BCC ans Team wie bei allen Kundenmails. Angebot als PDF im Anhang. */
 export async function sendAngebotMail({
   to, offerBrand, subject, body, pdfBuffer, pdfFilename,
+  extraAttachments = [],   // [{ filename, content: Buffer|string(base64) }, ...]
 }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agenturForOfferBrand(offerBrand));
@@ -766,10 +767,18 @@ export async function sendAngebotMail({
   const html = brandedShell({ brand, contentHtml: content });
   const text = String(body || '');
 
-  const attachments = pdfBuffer ? [{
+  const attachments = [];
+  if (pdfBuffer) attachments.push({
     filename: pdfFilename || 'Angebot.pdf',
     content: Buffer.isBuffer(pdfBuffer) ? pdfBuffer.toString('base64') : pdfBuffer,
-  }] : [];
+  });
+  for (const att of (extraAttachments || [])) {
+    if (!att?.filename || !att?.content) continue;
+    attachments.push({
+      filename: att.filename,
+      content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
+    });
+  }
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

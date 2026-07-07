@@ -273,31 +273,60 @@ function SendOfferModal({ preview, onClose, onSent }) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [attachFlyer, setAttachFlyer] = useState(false);
+  const [flyerParagraph, setFlyerParagraph] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [okNote, setOkNote] = useState('');
 
   useEffect(() => {
     if (!preview) return;
     setTo(preview.to || '');
     setSubject(preview.subject || '');
-    setBody(preview.body || '');
-    setErr('');
+    setErr(''); setOkNote('');
+    setFlyerParagraph(preview.flyer_paragraph || '');
+    const flyerOnByDefault = !!preview.flyer_available;
+    setAttachFlyer(flyerOnByDefault);
+    // Body mit oder ohne Flyer-Absatz vorab füllen. Der Flyer-Absatz landet
+    // VOR der Grußformel — als eigener Absatz zwischen dem Angebots-PDF-
+    // Absatz und dem letzten Absatz.
+    setBody(composeBody(preview.body || '', preview.flyer_paragraph || '', flyerOnByDefault));
   }, [preview?.offerId]);
+
+  // Wenn User Checkbox toggled: Body neu zusammensetzen (überschreibt Edits!)
+  function onToggleFlyer(next) {
+    if (!preview) return;
+    const oldBody = body;
+    const withFlyer = next;
+    const newBody = composeBody(preview.body || '', flyerParagraph, withFlyer);
+    if (oldBody !== preview.body && oldBody !== composeBody(preview.body || '', flyerParagraph, !withFlyer)) {
+      // User hat editiert
+      if (!window.confirm('Der Text wird beim Umschalten neu aufgebaut. Deine Änderungen im Body gehen verloren. Fortfahren?')) return;
+    }
+    setAttachFlyer(withFlyer);
+    setBody(newBody);
+  }
 
   if (!preview) return null;
 
   async function send() {
-    setErr('');
+    setErr(''); setOkNote('');
     if (!to || !/.+@.+\..+/.test(to)) return setErr('Empfänger-E-Mail ungültig.');
     if (!subject.trim())               return setErr('Betreff fehlt.');
     if (!body.trim())                  return setErr('Text fehlt.');
     setBusy(true);
     try {
-      await api(`/offers/${preview.offerId}/send-email`, {
+      const res = await api(`/offers/${preview.offerId}/send-email`, {
         method: 'POST',
-        body: { to, subject, body },
+        body: { to, subject, body, attach_flyer: attachFlyer },
       });
-      onSent();
+      if (attachFlyer && !res.flyer_attached) {
+        // Best-effort: Mail ging raus, aber ohne Flyer
+        setOkNote(`Versandt — ${res.flyer_warn || 'ohne Flyer'}`);
+        setTimeout(onSent, 1500);
+      } else {
+        onSent();
+      }
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
@@ -317,6 +346,17 @@ function SendOfferModal({ preview, onClose, onSent }) {
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
         Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.com. Das easybill-PDF wird automatisch als Anhang angefügt.
       </p>
+
+      {preview.flyer_available && (
+        <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input id="flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
+          <label htmlFor="flyer-toggle" style={{ fontSize: 13, cursor: 'pointer' }}>
+            📎 <strong>Flyer anhängen</strong> — <code style={{ fontSize: 11 }}>{preview.flyer_filename}</code>
+          </label>
+        </div>
+      )}
+
+      {okNote && <div className="alert" style={{ background: '#fff8d4', color: '#a34e00', border: '1px solid #f0d878', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12 }}>{okNote}</div>}
 
       {preview.already_sent && (
         <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
@@ -772,4 +812,16 @@ function DeclineModal({ offer, onClose, onDeclined }) {
       </label>
     </Modal>
   );
+}
+
+// Baut den Body zusammen — Flyer-Absatz wird vor die letzte Absatzeinheit
+// (in der Regel die Grußformel) eingefügt.
+function composeBody(baseBody, flyerParagraph, withFlyer) {
+  const clean = String(baseBody || '').trim();
+  if (!withFlyer || !flyerParagraph?.trim()) return clean;
+  const paragraphs = clean.split(/\n\s*\n/);
+  if (paragraphs.length < 2) return clean + '\n\n' + flyerParagraph.trim();
+  // vor dem letzten Absatz einfügen
+  const last = paragraphs.pop();
+  return paragraphs.join('\n\n') + '\n\n' + flyerParagraph.trim() + '\n\n' + last;
 }

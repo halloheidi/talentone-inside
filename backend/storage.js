@@ -1,6 +1,44 @@
 // Helpers für Supabase Storage (Upload, Delete, URL-Parsing).
 // Backend uploaded mit Service Role Key → bypasst RLS.
 
+/** Legt einen (privaten) Bucket an, falls er noch nicht existiert. Idempotent. */
+export async function ensureBucket(name, { isPublic = false } = {}) {
+  const list = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket`, {
+    headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
+  });
+  if (list.ok) {
+    const existing = await list.json();
+    if (Array.isArray(existing) && existing.some(b => b.name === name || b.id === name)) return;
+  }
+  const create = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ id: name, name, public: !!isPublic }),
+  });
+  if (!create.ok) {
+    const body = await create.text();
+    if (!body.includes('already exists')) {
+      console.warn(`[Storage] Bucket-Create ${name} ${create.status}: ${body.slice(0, 200)}`);
+    }
+  }
+}
+
+/** Lädt eine Datei aus einem privaten Bucket als Buffer. */
+export async function downloadFromBucket({ bucket, path }) {
+  const res = await fetch(
+    `${process.env.SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,
+    { headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` } },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Storage ${res.status}: ${body.slice(0, 300)}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export async function uploadBuffer({ bucket, path, buffer, contentType, upsert = true }) {
   const url = `${process.env.SUPABASE_URL}/storage/v1/object/${bucket}/${path}`;
   const res = await fetch(url, {

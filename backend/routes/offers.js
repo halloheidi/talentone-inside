@@ -71,6 +71,15 @@ router.get('/:id/email-preview', async (req, res) => {
 
   const defaultTo = offer.customer_snapshot?.email || null;
 
+  // Flyer je Marke — Metadata + Absatz-Baustein
+  const [{ data: asset }, { data: flyerTpl }] = await Promise.all([
+    supabase.from('talentone_brand_assets')
+      .select('filename').eq('brand', offer.brand).eq('asset_key', 'offer_flyer').maybeSingle(),
+    supabase.from('talentone_offer_templates')
+      .select('text').eq('brand', offer.brand).eq('key', 'offer_email_flyer_paragraph').maybeSingle(),
+  ]);
+  const flyer_paragraph = fillMergeTags(flyerTpl?.text || '', ctx);
+
   res.json({
     subject, body,
     to: defaultTo,
@@ -78,6 +87,9 @@ router.get('/:id/email-preview', async (req, res) => {
     already_sent: !!offer.sent_at,
     sent_to: offer.sent_to,
     sent_at: offer.sent_at,
+    flyer_available: !!asset,
+    flyer_filename:  asset?.filename || null,
+    flyer_paragraph,
   });
 });
 
@@ -85,7 +97,7 @@ router.get('/:id/email-preview', async (req, res) => {
    Zieht PDF aus easybill, versendet, speichert status/sent_at/sent_to,
    hängt (falls close_lead_id) eine Notiz an den Close-Lead. */
 router.post('/:id/send-email', async (req, res) => {
-  const { to, subject, body } = req.body || {};
+  const { to, subject, body, attach_flyer = false } = req.body || {};
   if (!to || !/.+@.+\..+/.test(String(to))) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt oder ungültig.' });
   if (!subject || !String(subject).trim())  return res.status(400).json({ error: 'Betreff fehlt.' });
   if (!body || !String(body).trim())        return res.status(400).json({ error: 'Text fehlt.' });
@@ -103,12 +115,37 @@ router.post('/:id/send-email', async (req, res) => {
     const firma = (offer.customer_snapshot?.company_name || 'Angebot').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Angebot';
     const pdfFilename = `${firma}_Angebot.pdf`;
 
+    // Optional: Flyer als 2. Anhang (best-effort — bei Fehler ohne Flyer senden)
+    let flyerBuffer = null, flyerFilename = null, flyerWarn = null;
+    if (attach_flyer) {
+      try {
+        const { data: asset } = await supabase.from('talentone_brand_assets')
+          .select('*').eq('brand', offer.brand).eq('asset_key', 'offer_flyer').maybeSingle();
+        if (asset) {
+          const { downloadFromBucket } = await import('../storage.js');
+          flyerBuffer = await downloadFromBucket({ bucket: 'brand-assets', path: asset.storage_path });
+          flyerFilename = asset.filename;
+        } else {
+          flyerWarn = 'Kein Flyer hinterlegt.';
+        }
+      } catch (err) {
+        console.warn('[offers/send-email flyer]', err.message);
+        flyerWarn = `Flyer nicht ladbar: ${err.message}`;
+      }
+    }
+
+    // Wenn Flyer nicht ladbar: den Flyer-Absatz aus dem Body entfernen, damit
+    // der Empfänger nicht ratlos nach dem Anhang sucht. Der Absatz ist der
+    // Text, den das Modal aus flyer_paragraph eingesetzt hat — wir erkennen ihn
+    // nicht sicher, deshalb entfernt der Aufrufer ihn selbst wenn er den
+    // Warnhinweis zurückbekommt. Hier senden wir den Body unverändert.
+    const flyerAttached = !!flyerBuffer;
+
     await sendAngebotMail({
       to, offerBrand: offer.brand, subject, body, pdfBuffer, pdfFilename,
+      extraAttachments: flyerAttached ? [{ filename: flyerFilename, content: flyerBuffer }] : [],
     });
 
-    // Status + Metadaten setzen (draft/created → sent, doppelter Versand
-    // bleibt erlaubt und aktualisiert nur sent_at/sent_to)
     const nowIso = new Date().toISOString();
     const nextStatus = offer.status === 'accepted' ? 'accepted' : 'sent';
     const { data: updated, error: upErr } = await supabase
@@ -117,17 +154,16 @@ router.post('/:id/send-email', async (req, res) => {
       .eq('id', offer.id).select().single();
     if (upErr) return res.status(500).json({ error: upErr.message });
 
-    // Close-Notiz best-effort
     if (offer.close_lead_id) {
       const monat1 = eur.format(Number(offer.first_month_total || 0));
       const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
       closeAddNote({
         leadId: offer.close_lead_id,
-        note: `📧 Angebot per E-Mail versendet: ${brandLabel} — Monat 1: ${monat1} — an ${to}`,
+        note: `📧 Angebot per E-Mail versendet${flyerAttached ? ' (mit Flyer)' : ''}: ${brandLabel} — Monat 1: ${monat1} — an ${to}`,
       }).catch(err => console.warn('[offers/send-email close]', err.message));
     }
 
-    res.json({ ok: true, offer: updated });
+    res.json({ ok: true, offer: updated, flyer_attached: flyerAttached, flyer_warn: flyerWarn });
   } catch (err) {
     console.error('[offers/send-email]', err.message);
     res.status(500).json({ error: err.message });

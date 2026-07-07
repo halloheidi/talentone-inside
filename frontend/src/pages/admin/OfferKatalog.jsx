@@ -18,7 +18,7 @@ const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' 
 
 export default function OfferKatalog() {
   const { isAdmin, me } = useAuth();
-  const [tab, setTab] = useState('products'); // 'products' | 'templates'
+  const [tab, setTab] = useState('products'); // 'products' | 'templates' | 'assets'
   const [brand, setBrand] = useState('talentone');
 
   // Ohne Admin-Rechte: nur Info anzeigen.
@@ -54,9 +54,12 @@ export default function OfferKatalog() {
       <div className="proj-view-toggle" style={{ marginBottom: 16 }}>
         <button className={`pub-filter ${tab === 'products' ? 'is-active' : ''}`} onClick={() => setTab('products')}>Positionen</button>
         <button className={`pub-filter ${tab === 'templates' ? 'is-active' : ''}`} onClick={() => setTab('templates')}>Textbausteine</button>
+        <button className={`pub-filter ${tab === 'assets' ? 'is-active' : ''}`} onClick={() => setTab('assets')}>Anhänge</button>
       </div>
 
-      {tab === 'products' ? <ProductsTab brand={brand} /> : <TemplatesTab brand={brand} />}
+      {tab === 'products'  && <ProductsTab brand={brand} />}
+      {tab === 'templates' && <TemplatesTab brand={brand} />}
+      {tab === 'assets'    && <AssetsTab brand={brand} />}
     </div>
   );
 }
@@ -411,6 +414,89 @@ function TemplatesTab({ brand }) {
           })}
           {templates.length === 0 && (
             <div className="card empty">Keine Textbausteine für diese Marke.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────── Anhänge (Flyer) ──────────────────────────
+function AssetsTab({ brand }) {
+  const [asset, setAsset] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+
+  function load() {
+    setLoading(true); setErr('');
+    api(`/offer-catalog/brand-assets?brand=${brand}&asset_key=offer_flyer`)
+      .then(r => setAsset((r.assets || [])[0] || null))
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
+  }
+  useEffect(() => { load(); }, [brand]);
+
+  async function upload(file) {
+    setErr('');
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name)) return setErr('Nur PDF-Dateien erlaubt.');
+    if (file.size > 8 * 1024 * 1024) return setErr('Datei > 8 MB.');
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      const fileData = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      await api('/offer-catalog/brand-assets', {
+        method: 'POST',
+        body: { brand, filename: file.name, fileData, size_bytes: file.size },
+      });
+      load();
+    } catch (e) { setErr(e.message); }
+    finally { setUploading(false); }
+  }
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10, marginBottom: 14, fontSize: 13, color: 'var(--ink-2)' }}>
+        Der Flyer ist ein optionaler zweiter Anhang beim Angebotsversand. Nur PDF, <strong>max. 8 MB</strong>.
+        Achte darauf, dass Angebots-PDF + Flyer zusammen klein bleiben — sonst landet die Mail im Spam-Filter.
+      </div>
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+      {loading ? <div className="card empty">Lade…</div> : (
+        <div className="card" style={{ padding: 18 }}>
+          <h3 style={{ fontSize: 15, margin: '0 0 8px' }}>Angebots-Flyer — {brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne'}</h3>
+          {asset ? (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 6, fontSize: 13 }}>
+                <div style={{ color: 'var(--ink-3)' }}>Dateiname:</div>
+                <div><code style={{ fontSize: 12 }}>{asset.filename}</code></div>
+                <div style={{ color: 'var(--ink-3)' }}>Größe:</div>
+                <div>{Math.round(asset.size_bytes / 1024)} KB</div>
+                <div style={{ color: 'var(--ink-3)' }}>Hochgeladen:</div>
+                <div>{new Date(asset.uploaded_at).toLocaleString('de-DE')} {asset.uploaded_by ? `von ${asset.uploaded_by}` : ''}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <a href={`/api/offer-catalog/brand-assets/${brand}/preview`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">📄 Vorschau</a>
+                <label className="btn-primary btn-sm" style={{ cursor: uploading ? 'wait' : 'pointer' }}>
+                  {uploading ? '⏳ Lade…' : '↻ Ersetzen'}
+                  <input type="file" accept="application/pdf" style={{ display: 'none' }}
+                    onChange={e => upload(e.target.files?.[0])} disabled={uploading} />
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 12 }}>Noch kein Flyer hinterlegt.</p>
+              <label className="btn-primary btn-sm" style={{ cursor: uploading ? 'wait' : 'pointer' }}>
+                {uploading ? '⏳ Lade…' : '+ Flyer hochladen'}
+                <input type="file" accept="application/pdf" style={{ display: 'none' }}
+                  onChange={e => upload(e.target.files?.[0])} disabled={uploading} />
+              </label>
+            </div>
           )}
         </div>
       )}
