@@ -3,13 +3,15 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { calculateOfferTotals, validateOfferSelection, validateAdBudget } from '../offer-calc.js';
+import { calculateOfferTotals, validateAdBudget } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
 import { sendAngebotMail, sendAuftragMail } from '../mail.js';
 import { addNote as closeAddNote } from '../close.js';
+import { buildEckdatenBlock } from '../mail-eckdaten.js';
+import { ensureProjektForOffer } from '../auftrag-automation.js';
 
 const router = Router();
 
@@ -45,6 +47,31 @@ function buildOfferMergeCtx(offer) {
   };
 }
 
+/**
+ * Rendert den {{eckdaten}}-Block für dieses Angebot durch serverseitige
+ * Neuberechnung. Nutzt denselben Positions-Contract wie easybill —
+ * einzige Wahrheit, damit die Zeilensumme immer den Gesamtbetrag ergibt.
+ */
+async function buildEckdatenForOffer(offer) {
+  const { data: products } = await supabase
+    .from('talentone_offer_products').select('*').eq('brand', offer.brand).eq('active', true);
+  const totals = calculateOfferTotals({
+    products:                   products || [],
+    selected:                   Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+    additional_positions_count: offer.additional_positions_count || 0,
+    ad_budget_monthly:          offer.ad_budget_monthly,
+    vat_rate:                   Number(offer.vat_rate) || 19,
+    extra_job_skus:             EXTRA_JOB_SKUS_BY_BRAND[offer.brand] || [],
+  });
+  return buildEckdatenBlock({
+    brand:              offer.brand,
+    positions:          totals.positions,
+    setup_total:        totals.setup_total,
+    ad_budget_monthly:  totals.ad_budget_monthly,
+    first_month_total:  totals.first_month_total,
+  });
+}
+
 async function loadOfferEmailTemplate(brand) {
   const { data } = await supabase
     .from('talentone_offer_templates').select('key, text').eq('brand', brand)
@@ -77,6 +104,7 @@ router.get('/:id/email-preview', async (req, res) => {
 
   const tpl = await loadOfferEmailTemplate(offer.brand);
   const ctx = buildOfferMergeCtx(offer);
+  ctx.eckdaten = await buildEckdatenForOffer(offer);
   const subject = fillMergeTags(tpl.subject, ctx);
   const body    = fillMergeTags(tpl.body, ctx);
 
@@ -195,14 +223,17 @@ router.get('/:id/order-email-preview', async (req, res) => {
 
   const tpl = await loadOrderEmailTemplate(offer.brand);
   const ctx = buildOfferMergeCtx(offer);
+  ctx.eckdaten = await buildEckdatenForOffer(offer);
   const subject = fillMergeTags(tpl.subject, ctx);
   const body    = fillMergeTags(tpl.body, ctx);
 
-  const [{ data: asset }, { data: flyerTpl }] = await Promise.all([
+  const [{ data: asset }, { data: flyerTpl }, { data: formTpl }] = await Promise.all([
     supabase.from('talentone_brand_assets')
       .select('filename').eq('brand', offer.brand).eq('asset_key', 'offer_flyer').maybeSingle(),
     supabase.from('talentone_offer_templates')
       .select('text').eq('brand', offer.brand).eq('key', 'offer_email_flyer_paragraph').maybeSingle(),
+    supabase.from('talentone_offer_templates')
+      .select('text').eq('brand', offer.brand).eq('key', 'onboarding_form_url').maybeSingle(),
   ]);
   const flyer_paragraph = fillMergeTags(flyerTpl?.text || '', ctx);
 
@@ -216,6 +247,7 @@ router.get('/:id/order-email-preview', async (req, res) => {
     flyer_available: !!asset,
     flyer_filename:  asset?.filename || null,
     flyer_paragraph,
+    onboarding_form_url: (formTpl?.text || '').trim() || null,
   });
 });
 
@@ -378,9 +410,6 @@ router.post('/calculate', async (req, res) => {
   try {
     const products = await loadProductsForBrand(b.brand);
     const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
-    // Business-Regel-Validation (Werbemittel-Quelle bei N&W)
-    const val = validateOfferSelection({ brand: b.brand, products, selected });
-    if (!val.ok) return res.status(400).json({ error: val.error });
     // Werbebudget-Validierung — 300..5000 in 50-€-Schritten (nur TalentOne)
     const budgetVal = validateAdBudget(b.ad_budget_monthly);
     if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
@@ -485,8 +514,6 @@ router.post('/', async (req, res) => {
   try {
     const products = await loadProductsForBrand(b.brand);
     const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
-    const val = validateOfferSelection({ brand: b.brand, products, selected });
-    if (!val.ok) return res.status(400).json({ error: val.error });
     const budgetVal = validateAdBudget(b.ad_budget_monthly);
     if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
 
@@ -554,8 +581,6 @@ router.patch('/:id', async (req, res) => {
     const vatRate  = Number.isFinite(+b.vat_rate) ? +b.vat_rate : Number(cur.vat_rate);
 
     const products = await loadProductsForBrand(brand);
-    const val = validateOfferSelection({ brand, products, selected });
-    if (!val.ok) return res.status(400).json({ error: val.error });
     const budgetVal = validateAdBudget(adBudget);
     if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
 
@@ -755,6 +780,11 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       closeAddNote({ leadId: updated.close_lead_id, note })
         .catch(err => console.warn('[offers/create-easybill-order close-note]', err.message));
     }
+
+    // Projekt-Card auto-anlegen (idempotent)
+    ensureProjektForOffer(updated)
+      .then(res => { if (res.created) console.log(`[offers/create-easybill-order] Projekt ${res.projekt.id} angelegt`); })
+      .catch(err => console.warn('[offers/create-easybill-order projekt-automation]', err.message));
 
     res.status(201).json({ offer: updated, easybill: { id: document.id, number: document.number } });
   } catch (err) {

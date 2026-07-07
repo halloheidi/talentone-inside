@@ -212,6 +212,104 @@ router.get('/:id', async (req, res) => {
   res.json({ kunde: data });
 });
 
+/* GET /api/kunden/:id/activity — chronologische Timeline aus vorhandenen
+   Zeitstempeln (Angebote, Rechnungen, Einstellungen, Skip-Log, Budget-
+   Historie). Read-only, neueste zuerst. Muss mit Direkt-AB-Rows
+   (easybill_document_id=NULL) und Standalone-Rechnungen (offer_id=NULL)
+   fehlerfrei umgehen. */
+router.get('/:id/activity', async (req, res) => {
+  const kundeId = req.params.id;
+  try {
+    const [offersRes, invoicesRes, hiresRes, skipRes, budgetRes] = await Promise.all([
+      supabase.from('talentone_offers')
+        .select('id, brand, status, easybill_document_id, easybill_order_document_id, created_at, sent_at, sent_to, accepted_at, declined_at, decline_note, order_sent_at, order_sent_to, first_month_total, monthly_total, campaign_started_at, billing_ended_at')
+        .eq('customer_id', kundeId),
+      supabase.from('talentone_invoices')
+        .select('id, offer_id, invoice_type, source, brand, status, amount_gross, created_at, paid_at, due_date, sent_at, sent_to, label')
+        .eq('customer_id', kundeId),
+      supabase.from('talentone_hires')
+        .select('id, offer_id, hired_at, position, created_at')
+        .in('offer_id', (await supabase.from('talentone_offers').select('id').eq('customer_id', kundeId)).data?.map(o => o.id) || ['00000000-0000-0000-0000-000000000000']),
+      supabase.from('talentone_billing_skip_log')
+        .select('id, offer_id, period_start, reason, created_at')
+        .in('offer_id', (await supabase.from('talentone_offers').select('id').eq('customer_id', kundeId)).data?.map(o => o.id) || ['00000000-0000-0000-0000-000000000000']),
+      supabase.from('talentone_ad_budget_history')
+        .select('id, offer_id, old_amount, new_amount, effective_from, created_at, reason')
+        .in('offer_id', (await supabase.from('talentone_offers').select('id').eq('customer_id', kundeId)).data?.map(o => o.id) || ['00000000-0000-0000-0000-000000000000']),
+    ]);
+
+    const events = [];
+    const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+    const brandLabel = b => b === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+
+    for (const o of offersRes.data || []) {
+      const bl = brandLabel(o.brand);
+      const isDirect = !o.easybill_document_id && !!o.easybill_order_document_id;
+      events.push({ ts: o.created_at, icon: '📝', kind: 'offer_created',
+        title: isDirect ? `Direktauftrag angelegt — ${bl}` : `Angebot angelegt — ${bl}`,
+        detail: `Monat 1: ${eur.format(Number(o.first_month_total) || 0)}`, offer_id: o.id });
+      if (o.sent_at) events.push({ ts: o.sent_at, icon: '📧', kind: 'offer_sent',
+        title: `Angebot versandt — ${bl}`, detail: `an ${o.sent_to || '—'}`, offer_id: o.id });
+      if (o.accepted_at) events.push({ ts: o.accepted_at, icon: '✅', kind: 'offer_accepted',
+        title: isDirect ? `Direktauftrag angenommen — ${bl}` : `Angebot angenommen — ${bl}`, offer_id: o.id });
+      if (o.declined_at) events.push({ ts: o.declined_at, icon: '❌', kind: 'offer_declined',
+        title: `Angebot abgelehnt — ${bl}`, detail: o.decline_note || null, offer_id: o.id });
+      if (o.order_sent_at) events.push({ ts: o.order_sent_at, icon: '📋', kind: 'order_sent',
+        title: `Auftragsbestätigung versandt — ${bl}`, detail: `an ${o.order_sent_to || '—'}`, offer_id: o.id });
+      if (o.campaign_started_at) events.push({ ts: o.campaign_started_at, icon: '🚀', kind: 'campaign_started',
+        title: `Kampagne gestartet — ${bl}`, offer_id: o.id });
+      if (o.billing_ended_at) events.push({ ts: o.billing_ended_at, icon: '🏁', kind: 'billing_ended',
+        title: `Abrechnung beendet — ${bl}`, offer_id: o.id });
+    }
+
+    for (const inv of invoicesRes.data || []) {
+      const bl = brandLabel(inv.brand);
+      const typLabel = inv.invoice_type === 'ad_budget' && inv.source === 'standalone'
+        ? 'Werbekosten-Rechnung (freistehend)'
+        : ({ setup: 'Setup-Rechnung', monthly_service: 'Monatsrechnung',
+             monthly_combined: 'Monatsrechnung', ad_budget: 'Werbekosten-Rechnung' }[inv.invoice_type] || 'Rechnung');
+      events.push({ ts: inv.created_at, icon: '📄', kind: 'invoice_created',
+        title: `${typLabel} erzeugt — ${bl}`, detail: `${eur.format(Number(inv.amount_gross) || 0)}${inv.label ? ` · ${inv.label}` : ''}`,
+        offer_id: inv.offer_id || null, invoice_id: inv.id });
+      if (inv.sent_at) events.push({ ts: inv.sent_at, icon: '📧', kind: 'invoice_sent',
+        title: `${typLabel} per Mail versandt`, detail: `an ${inv.sent_to || '—'}`,
+        offer_id: inv.offer_id || null, invoice_id: inv.id });
+      if (inv.paid_at) events.push({ ts: inv.paid_at, icon: '💰', kind: 'invoice_paid',
+        title: `${typLabel} bezahlt`, detail: eur.format(Number(inv.amount_gross) || 0),
+        offer_id: inv.offer_id || null, invoice_id: inv.id });
+      if (inv.status === 'overdue') events.push({ ts: inv.due_date || inv.created_at, icon: '⚠', kind: 'invoice_overdue',
+        title: `${typLabel} überfällig`, detail: `Fällig ${inv.due_date || '—'}`,
+        offer_id: inv.offer_id || null, invoice_id: inv.id });
+    }
+
+    for (const h of hiresRes.data || []) {
+      events.push({ ts: h.hired_at || h.created_at, icon: '🎯', kind: 'hire',
+        title: 'Einstellung erfasst', detail: h.position || null, offer_id: h.offer_id });
+    }
+    for (const s of skipRes.data || []) {
+      events.push({ ts: s.created_at, icon: '⏭', kind: 'billing_skip',
+        title: 'Servicefreier Monat', detail: `Periode ${s.period_start} · ${s.reason}`, offer_id: s.offer_id });
+    }
+    for (const b of budgetRes.data || []) {
+      events.push({ ts: b.created_at, icon: '💸', kind: 'budget_change',
+        title: 'Werbebudget geändert',
+        detail: `${eur.format(Number(b.old_amount) || 0)} → ${eur.format(Number(b.new_amount) || 0)} (wirksam ${b.effective_from})${b.reason ? ' · ' + b.reason : ''}`,
+        offer_id: b.offer_id });
+    }
+
+    // Sortieren neueste zuerst; Ereignisse ohne ts (defensiv) hinten anstellen
+    events.sort((a, b) => {
+      const ta = a.ts ? new Date(a.ts).getTime() : 0;
+      const tb = b.ts ? new Date(b.ts).getTime() : 0;
+      return tb - ta;
+    });
+
+    res.json({ activity: events });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   const { firmenname, ansprechpartner, email, telefon, logo_url, branche, notizen } = req.body || {};
   if (!firmenname) return res.status(400).json({ error: 'firmenname ist Pflicht.' });

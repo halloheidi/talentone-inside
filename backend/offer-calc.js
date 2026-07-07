@@ -22,23 +22,6 @@
 const SETUP_CATEGORIES   = new Set(['setup', 'option_setup']);
 const MONTHLY_CATEGORIES = new Set(['monthly', 'option_monthly']);
 
-// Bei N&W ist die Werbemittel-Quelle wählbar (KI-Veredelung ODER Fototag
-// ODER beides). Mind. eine muss gewählt sein — sonst hätte das Angebot
-// keine Werbemittel-Positionen. TalentOne unverändert (TO-SETUP-CREATIVES
-// ist weiter Pflichtposition der Kategorie 'setup').
-const NW_CREATIVE_SOURCE_SKUS = ['NW-SETUP-CREATIVES', 'NW-OPT-PHOTO'];
-
-/**
- * Prüft die Auswahl gegen brand-spezifische Business-Regeln.
- * Rein-funktional, wird sowohl im /calculate- als auch im POST-Endpoint
- * gespiegelt (kein Trust auf Frontend).
- *
- * @param {object} input
- * @param {'talentone'|'nowag_wirth'} input.brand
- * @param {Array} input.products    — aktive Katalog-Positionen
- * @param {Array} input.selected    — [{ product_id, quantity? }]
- * @returns {{ ok:boolean, error:string|null }}
- */
 /**
  * Werbebudget-Regel (nur TalentOne): min 300, max 5000, 50-€-Schritte.
  * Null / 0 sind explizit erlaubt (Kunde wählt Werbebudget später).
@@ -52,21 +35,6 @@ export function validateAdBudget(amount) {
   if (n > 5000) return { ok: false, error: 'Werbebudget darf höchstens 5.000 € betragen.' };
   if (n % 50 !== 0) return { ok: false, error: 'Werbebudget muss ein Vielfaches von 50 € sein.' };
   return { ok: true };
-}
-
-export function validateOfferSelection({ brand, products = [], selected = [] } = {}) {
-  if (brand === 'nowag_wirth') {
-    const skuById = new Map(products.map(p => [p.id, p.sku]));
-    const chosen = new Set();
-    for (const item of selected) {
-      const sku = skuById.get(item?.product_id);
-      if (sku && NW_CREATIVE_SOURCE_SKUS.includes(sku)) chosen.add(sku);
-    }
-    if (chosen.size === 0) {
-      return { ok: false, error: 'Bitte mindestens eine Werbemittel-Quelle wählen (KI-Veredelung oder Fototag).' };
-    }
-  }
-  return { ok: true, error: null };
 }
 
 /**

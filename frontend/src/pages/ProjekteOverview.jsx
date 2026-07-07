@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
+import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
 
 /* ─── Konstanten ─── */
 const STATUS_LABELS = {
@@ -409,6 +410,7 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                     {paymentStatusById[p.kunde_id] === 'blocked' && (
                       <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}>⛔ Kampagne blockiert — Zahlung überfällig</span>
                     )}
+                    <AuftragBadge offerSnapshot={p.offer_snapshot} />
                     <div className="kanban-card-firma">{p.kunde || '—'}</div>
                     {p.gesuchte_positionen && <div className="kanban-card-pos">{p.gesuchte_positionen}{p.standorte ? ` · ${p.standorte}` : ''}</div>}
                     <div className="kanban-card-meta">
@@ -1006,5 +1008,49 @@ function MergeProjekteModal({ projekte, onCancel, onConfirm }) {
         ⚠ <strong>Kann nicht rückgängig gemacht werden.</strong> Verknüpfte TalentOne-Kunden (Creatives, Funnels, …) bleiben unberührt.
       </p>
     </Modal>
+  );
+}
+
+/**
+ * Zeigt den Zustand des verlinkten Angebots (Kampagnenstart + Garantiefrist)
+ * live auf der Kanban-Card. Liest ausschließlich aus dem offer_snapshot vom
+ * Backend — Korrekturen an campaign_started_at spiegeln sich beim nächsten
+ * Reload direkt.
+ */
+function AuftragBadge({ offerSnapshot }) {
+  if (!offerSnapshot) return null;
+
+  const start = offerSnapshot.campaign_started_at;
+  if (!start) {
+    return (
+      <span
+        className="kanban-card-status-pill"
+        style={{ background: 'var(--gray-100)', color: '#5a5955' }}
+        title="Kampagnenstart wurde noch nicht gesetzt — Abrechnung nicht aktiv."
+      >📅 In Vorbereitung — Start noch nicht gesetzt</span>
+    );
+  }
+
+  const phase = computeBillingPhaseClient(offerSnapshot);
+  const meta = PHASE_META[phase];
+  const startDate = new Date(start);
+  const guaranteeDays = Number(offerSnapshot.guarantee_period_days) || 30;
+  const guaranteeEnd = new Date(startDate.getTime() + guaranteeDays * 86400000);
+  const startLabel = startDate.toLocaleDateString('de-DE');
+  const endLabel   = guaranteeEnd.toLocaleDateString('de-DE');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {meta && (
+        <span
+          className="kanban-card-status-pill"
+          style={{ background: meta.bg, color: meta.color }}
+          title={`Phase des verlinkten Angebots`}
+        >{meta.label}</span>
+      )}
+      <span style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 500 }}>
+        Kampagnenstart: <strong>{startLabel}</strong> · Garantie bis: <strong>{endLabel}</strong> ({guaranteeDays} Tage)
+      </span>
+    </div>
   );
 }

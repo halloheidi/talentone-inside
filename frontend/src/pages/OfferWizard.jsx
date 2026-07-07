@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import Icon from '../components/Icon.jsx';
@@ -35,20 +35,43 @@ const BRAND_META = {
 const EXTRA_JOB_MONTHLY_SKU = { talentone: 'TO-OPT-EXTRA-JOB',       nowag_wirth: 'NW-OPT-EXTRA-JOB' };
 const EXTRA_JOB_SETUP_SKU   = { talentone: 'TO-OPT-EXTRA-JOB-SETUP', nowag_wirth: 'NW-OPT-EXTRA-JOB-SETUP' };
 
-// N&W: Werbemittel-Quelle. Mind. eine muss gewählt sein — Weiter blockiert
-// sonst und /calculate/POST spiegelt die Regel serverseitig.
-const NW_CREATIVE_SOURCE_SKUS = ['NW-SETUP-CREATIVES', 'NW-OPT-PHOTO'];
-
 // TalentOne-Werbebudget-Chips (nur die Auswahl-Werte; "Individuell" = Freitext)
 const AD_BUDGET_CHIPS = [600, 800, 1000, 1200];
 
 export default function OfferWizard() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const preselectKundeId = params.get('kunde_id') || null;
   const [step, setStep] = useState(1);
 
   // Schritt 1
   const [customer, setCustomer] = useState(null); // Cache-Row: { id, easybill_id, company_name, ... }
   const [alsoInTool, setAlsoInTool] = useState(true);
+
+  // Vorauswahl aus KundeDetail: sucht den easybill-Kunden zum talentone_kunde
+  // (Match über E-Mail — kein direkter Fremdschlüssel im Cache). Wenn nur ein
+  // Treffer, wird er automatisch übernommen und Schritt 1 ist erledigt.
+  useEffect(() => {
+    if (!preselectKundeId || customer) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const kres = await api(`/kunden/${preselectKundeId}`);
+        const kunde = kres.kunde;
+        if (!kunde?.email) return;
+        const sres = await api(`/easybill-customers/search?q=${encodeURIComponent(kunde.email)}&limit=5`);
+        const hit = (sres.customers || []).find(c =>
+          (c.email || '').toLowerCase() === kunde.email.toLowerCase()
+        ) || (sres.customers || [])[0];
+        if (hit && !cancel) {
+          setCustomer({ ...hit, tool_kunde_id: kunde.id });
+          setStep(2);
+        }
+      } catch { /* still auf Schritt 1 – User pickt manuell */ }
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line
+  }, [preselectKundeId]);
   // Schritt 2
   const [brand, setBrand] = useState(null);
   // Schritt 3
@@ -68,11 +91,6 @@ export default function OfferWizard() {
 
   const step3Error = useMemo(() => {
     if (step !== 3 || !products.length) return null;
-    if (brand === 'nowag_wirth') {
-      const skusById = new Map(products.map(p => [p.id, p.sku]));
-      const hasSource = [...selectedIds].some(id => NW_CREATIVE_SOURCE_SKUS.includes(skusById.get(id)));
-      if (!hasSource) return 'Bitte mindestens eine Werbemittel-Quelle wählen (KI-Veredelung oder Fototag).';
-    }
     if (brand === 'talentone') {
       const raw = String(adBudget ?? '').trim();
       if (raw !== '') {
@@ -84,7 +102,7 @@ export default function OfferWizard() {
       }
     }
     return null;
-  }, [step, products, brand, selectedIds, adBudget]);
+  }, [step, products, brand, adBudget]);
 
   const canNext = useMemo(() => {
     if (step === 1) return !!customer;
@@ -701,17 +719,9 @@ function Step3Config({
   const extraMonthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
   const extraSetupSku   = EXTRA_JOB_SETUP_SKU[brand];
   // Extra-Job-Setup nicht separat anzeigen — läuft über den Counter am Monthly.
-  // N&W: die zwei Werbemittel-Quellen laufen in eine eigene Gruppe.
-  const isNW = brand === 'nowag_wirth';
-  const isCreativeSource = p => isNW && NW_CREATIVE_SOURCE_SKUS.includes(p.sku);
   const options  = products
     .filter(p => p.category === 'option_setup' || p.category === 'option_monthly')
-    .filter(p => p.sku !== extraSetupSku)
-    .filter(p => !isCreativeSource(p));
-  const creativeSources = isNW
-    ? NW_CREATIVE_SOURCE_SKUS.map(sku => products.find(p => p.sku === sku)).filter(Boolean)
-    : [];
-  const chosenCreativeCount = creativeSources.filter(p => selectedIds.has(p.id)).length;
+    .filter(p => p.sku !== extraSetupSku);
   const extraSetupPrice = products.find(p => p.sku === extraSetupSku)?.unit_price;
 
   return (
@@ -728,32 +738,6 @@ function Step3Config({
         <SectionHead label="Monatlich" />
         {monthlys.map(p => <PositionRow key={p.id} p={p} selected={true} readonly required />)}
       </section>
-
-      {isNW && creativeSources.length > 0 && (
-        <section style={{ marginBottom: 22 }}>
-          <SectionHead label="Werbemittel-Quelle" />
-          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-            Mindestens eine Quelle wählen — beide zusammen sind möglich.
-          </p>
-          {creativeSources.map(p => (
-            <PositionRow
-              key={p.id} p={p}
-              selected={selectedIds.has(p.id)}
-              onToggle={() => onToggle(p.id)}
-            />
-          ))}
-          {chosenCreativeCount === 2 && (
-            <div style={{ padding: '8px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: 12, color: '#1e3a8a' }}>
-              Hinweis: Sie kombinieren KI-Veredelung und Fototag. Beide Setup-Positionen werden im Angebot berechnet.
-            </div>
-          )}
-          {chosenCreativeCount === 0 && (
-            <div style={{ padding: '8px 12px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#9a3412' }}>
-              Bitte mindestens eine Werbemittel-Quelle wählen.
-            </div>
-          )}
-        </section>
-      )}
 
       <section style={{ marginBottom: 22 }}>
         <SectionHead label="Optionen" />

@@ -40,7 +40,10 @@ function pickFields(body) {
   return out;
 }
 
-/* GET /api/projekte — Liste aller Projekte mit Kommentar-Count */
+/* GET /api/projekte — Liste aller Projekte mit Kommentar-Count.
+   Enrich: bei Cards mit offer_id werden campaign_started_at,
+   guarantee_period_days, brand und billing_phase des Angebots
+   mitgeliefert — Frontend zeigt sie live (kein Kopieren). */
 router.get('/', async (req, res) => {
   const { data, error } = await supabase
     .from('talentone_projekte')
@@ -57,7 +60,34 @@ router.get('/', async (req, res) => {
     countMap[c.projekt_id] = (countMap[c.projekt_id] || 0) + 1;
   }
 
-  const enriched = (data || []).map(p => ({ ...p, kommentar_count: countMap[p.id] || 0 }));
+  // Live-Anreicherung mit den Kampagnen-Daten aus talentone_offers — nur die
+  // Cards mit offer_id abfragen (kein N+1: eine einzige IN-Query).
+  const offerIds = [...new Set((data || []).map(p => p.offer_id).filter(Boolean))];
+  const offerById = new Map();
+  if (offerIds.length > 0) {
+    const { data: offers } = await supabase
+      .from('talentone_offers')
+      .select('id, brand, campaign_started_at, guarantee_period_days, billing_ended_at, billing_paused_at, monthly_total, hires_target')
+      .in('id', offerIds);
+    for (const o of offers || []) offerById.set(o.id, o);
+  }
+
+  const enriched = (data || []).map(p => {
+    const offer = p.offer_id ? offerById.get(p.offer_id) : null;
+    return {
+      ...p,
+      kommentar_count: countMap[p.id] || 0,
+      offer_snapshot: offer ? {
+        brand:                offer.brand,
+        campaign_started_at:  offer.campaign_started_at,
+        guarantee_period_days: offer.guarantee_period_days,
+        billing_ended_at:     offer.billing_ended_at,
+        billing_paused_at:    offer.billing_paused_at,
+        monthly_total:        offer.monthly_total,
+        hires_target:         offer.hires_target,
+      } : null,
+    };
+  });
   res.json({ projekte: enriched });
 });
 

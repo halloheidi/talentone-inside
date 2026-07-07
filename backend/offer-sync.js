@@ -20,6 +20,7 @@
 import { supabase } from './supabase.js';
 import { listDocumentsByRefId } from './easybill.js';
 import { addNote as closeAddNote } from './close.js';
+import { ensureProjektForOffer } from './auftrag-automation.js';
 
 const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const BRAND_LABEL = { talentone: 'TalentOne', nowag_wirth: 'Nowag & Wirth' };
@@ -101,6 +102,13 @@ export async function applyAcceptedTransition(offer, successor) {
       closeAddNote({ leadId: offer.close_lead_id, note })
         .catch(err => console.warn(`[offer-sync close-note]`, err.message));
     }
+
+    // Projekt-Card auto-anlegen — idempotent per UNIQUE(offer_id), Fehler
+    // brechen den Sync nicht ab.
+    ensureProjektForOffer(data)
+      .then(res => { if (res.created) console.log(`[offer-sync] Projekt ${res.projekt.id} angelegt für Angebot ${offer.id}`); })
+      .catch(err => console.warn(`[offer-sync projekt-automation]`, err.message));
+
     return { changed: true, offer: data };
   } else {
     // Kein select() nötig — wir wollen nur last_synced_at fortschreiben

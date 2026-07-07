@@ -18,7 +18,7 @@ const STATUS_LABEL = {
 const BRAND_LABEL = { talentone: 'TalentOne', nowag_wirth: 'Nowag & Wirth' };
 
 // Phasen-Badges — gleiche Farb-Codierung wie im BillingModal
-const PHASE_META = {
+export const PHASE_META = {
   guarantee:         { label: 'Garantiefrist läuft',      color: '#0068a3', bg: '#e0f5ff' }, // blau
   active:            { label: 'Reguläre Abrechnung',      color: '#0a8043', bg: '#e0f5df' }, // grün
   guarantee_expired: { label: 'Servicefrei (Frist erreicht)', color: '#a34e00', bg: '#fff2d4' }, // orange
@@ -26,6 +26,19 @@ const PHASE_META = {
   ended:             { label: 'Abrechnung beendet',       color: '#5a5955', bg: 'var(--gray-100)' },
   inactive:          { label: 'Abrechnung nicht aktiv',   color: '#5a5955', bg: 'var(--gray-100)' },
 };
+
+/** Reine Client-Version von computeBillingPhase — spiegelt die Backend-Logik. */
+export function computeBillingPhaseClient(offerSnap) {
+  if (!offerSnap) return 'inactive';
+  if (offerSnap.billing_ended_at)   return 'ended';
+  if (offerSnap.billing_paused_at)  return 'paused';
+  if (!offerSnap.campaign_started_at) return 'inactive';
+  const now = Date.now();
+  const start = new Date(offerSnap.campaign_started_at).getTime();
+  const guaranteeMs = (Number(offerSnap.guarantee_period_days) || 30) * 86400000;
+  if (now <= start + guaranteeMs) return 'guarantee';
+  return 'active'; // Backend unterscheidet zusätzlich guarantee_expired via hires — Vereinfachung im Client.
+}
 
 export default function OffersList() {
   const [offers, setOffers] = useState([]);
@@ -301,7 +314,7 @@ export default function OffersList() {
   );
 }
 
-function SendOfferModal({ preview, onClose, onSent }) {
+export function SendOfferModal({ preview, onClose, onSent }) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -419,15 +432,27 @@ function SendOfferModal({ preview, onClose, onSent }) {
   );
 }
 
-function SendOrderModal({ preview, onClose, onSent }) {
+export function SendOrderModal({ preview, onClose, onSent }) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [attachFlyer, setAttachFlyer] = useState(false);
   const [flyerParagraph, setFlyerParagraph] = useState('');
+  const [terminSet, setTerminSet] = useState(false);
+  const [terminIso, setTerminIso] = useState('');
+  const [formularOption, setFormularOption] = useState('none'); // 'none' | 'link' | 'separat'
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [okNote, setOkNote] = useState('');
+
+  function buildBody(withFlyer, tSet, tIso, fOpt) {
+    const base = composeBody(preview?.body || '', preview?.flyer_paragraph || '', withFlyer);
+    return composeOrderBody(base, {
+      terminSet: tSet, terminIso: tIso,
+      formularOption: fOpt,
+      formularLink: preview?.onboarding_form_url || null,
+    });
+  }
 
   useEffect(() => {
     if (!preview) return;
@@ -437,20 +462,35 @@ function SendOrderModal({ preview, onClose, onSent }) {
     setFlyerParagraph(preview.flyer_paragraph || '');
     const flyerOnByDefault = !!preview.flyer_available;
     setAttachFlyer(flyerOnByDefault);
-    setBody(composeBody(preview.body || '', preview.flyer_paragraph || '', flyerOnByDefault));
+    setTerminSet(false); setTerminIso(''); setFormularOption('none');
+    setBody(buildBody(flyerOnByDefault, false, '', 'none'));
+    // eslint-disable-next-line
   }, [preview?.offerId]);
 
-  function onToggleFlyer(next) {
+  function reflow(next) {
     if (!preview) return;
-    const oldBody = body;
-    const withFlyer = next;
-    const newBody = composeBody(preview.body || '', flyerParagraph, withFlyer);
-    if (oldBody !== preview.body && oldBody !== composeBody(preview.body || '', flyerParagraph, !withFlyer)) {
+    const params = {
+      withFlyer:      next.withFlyer      ?? attachFlyer,
+      terminSet:      next.terminSet      ?? terminSet,
+      terminIso:      next.terminIso      ?? terminIso,
+      formularOption: next.formularOption ?? formularOption,
+    };
+    const rebuilt = buildBody(params.withFlyer, params.terminSet, params.terminIso, params.formularOption);
+    const previousRebuild = buildBody(attachFlyer, terminSet, terminIso, formularOption);
+    if (body !== previousRebuild) {
       if (!window.confirm('Der Text wird beim Umschalten neu aufgebaut. Deine Änderungen im Body gehen verloren. Fortfahren?')) return;
     }
-    setAttachFlyer(withFlyer);
-    setBody(newBody);
+    if (next.withFlyer !== undefined)      setAttachFlyer(next.withFlyer);
+    if (next.terminSet !== undefined)      setTerminSet(next.terminSet);
+    if (next.terminIso !== undefined)      setTerminIso(next.terminIso);
+    if (next.formularOption !== undefined) setFormularOption(next.formularOption);
+    setBody(rebuilt);
   }
+
+  function onToggleFlyer(v)      { reflow({ withFlyer: v }); }
+  function onToggleTermin(v)     { reflow({ terminSet: v }); }
+  function onChangeTermin(v)     { reflow({ terminSet: terminSet || !!v, terminIso: v }); }
+  function onChangeFormular(v)   { reflow({ formularOption: v }); }
 
   if (!preview) return null;
 
@@ -492,13 +532,44 @@ function SendOrderModal({ preview, onClose, onSent }) {
       </p>
 
       {preview.flyer_available && (
-        <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
           <input id="order-flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
           <label htmlFor="order-flyer-toggle" style={{ fontSize: 13, cursor: 'pointer' }}>
             📎 <strong>Flyer anhängen</strong> — <code style={{ fontSize: 11 }}>{preview.flyer_filename}</code>
           </label>
         </div>
       )}
+
+      <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={terminSet} onChange={e => onToggleTermin(e.target.checked)} />
+          <strong>Onboarding-Termin bereits vereinbart</strong>
+        </label>
+        {terminSet && (
+          <input type="datetime-local" value={terminIso} onChange={e => onChangeTermin(e.target.value)}
+            style={{ padding: '6px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 13 }} />
+        )}
+      </div>
+
+      <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Onboarding-Formular:</span>
+        <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <input type="radio" name="form-opt" checked={formularOption === 'none'} onChange={() => onChangeFormular('none')} />
+          nicht erwähnen
+        </label>
+        <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 13, cursor: preview.onboarding_form_url ? 'pointer' : 'not-allowed', opacity: preview.onboarding_form_url ? 1 : 0.5 }}
+          title={preview.onboarding_form_url ? preview.onboarding_form_url : 'Keine URL im Katalog hinterlegt (Admin → Angebots-Katalog)'}
+        >
+          <input type="radio" name="form-opt"
+            disabled={!preview.onboarding_form_url}
+            checked={formularOption === 'link'} onChange={() => onChangeFormular('link')} />
+          Link in dieser Mail
+        </label>
+        <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <input type="radio" name="form-opt" checked={formularOption === 'separat'} onChange={() => onChangeFormular('separat')} />
+          wird separat geschickt
+        </label>
+      </div>
 
       {okNote && <div className="alert" style={{ background: '#fff8d4', color: '#a34e00', border: '1px solid #f0d878', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12 }}>{okNote}</div>}
 
@@ -531,7 +602,7 @@ function SendOrderModal({ preview, onClose, onSent }) {
   );
 }
 
-function BillingModal({ offer, onClose, onChanged }) {
+export function BillingModal({ offer, onClose, onChanged }) {
   const [dup, setDup] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [hires, setHires] = useState([]);
@@ -920,7 +991,7 @@ function HireModal({ state, onClose, onSaved }) {
   );
 }
 
-function DeclineModal({ offer, onClose, onDeclined }) {
+export function DeclineModal({ offer, onClose, onDeclined }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -972,4 +1043,45 @@ function composeBody(baseBody, flyerParagraph, withFlyer) {
   // vor dem letzten Absatz einfügen
   const last = paragraphs.pop();
   return paragraphs.join('\n\n') + '\n\n' + flyerParagraph.trim() + '\n\n' + last;
+}
+
+// Manipuliert im AB-Body den „So geht es weiter"-Absatz und schiebt optional
+// einen Formular-Absatz vor „Die Setup-Rechnung..." bzw. „Die Setup-Rechnung
+// folgt separat.". Die Sätze zur Setup-Rechnung/Zahlungseingang bleiben
+// unverändert, ebenso die Grußformel.
+export function composeOrderBody(baseBody, { terminSet, terminIso, formularOption, formularLink }) {
+  let text = String(baseBody || '').trim();
+  const paragraphs = text.split(/\n\s*\n/);
+
+  // Absatz mit „So geht es weiter" finden und ggf. ersetzen
+  const naechsteIdx = paragraphs.findIndex(p => /^So geht es weiter/i.test(p.trim()));
+  if (naechsteIdx >= 0 && terminSet && terminIso) {
+    paragraphs[naechsteIdx] = `Ihr Onboarding-Termin steht bereits: ${formatDeDateTime(terminIso)}. Bis dahin schalten wir Sie im Kunden-Portal frei.`;
+  }
+
+  // Formular-Absatz
+  let formSatz = null;
+  if (formularOption === 'link' && formularLink) {
+    formSatz = `Um direkt zu starten, füllen Sie gern vorab unser Onboarding-Formular aus: ${formularLink}`;
+  } else if (formularOption === 'separat') {
+    formSatz = 'Unser Onboarding-Formular erhalten Sie in einer separaten E-Mail.';
+  }
+  if (formSatz) {
+    // Vor „Die Setup-Rechnung..." einfügen; sonst vor letztem Absatz.
+    const setupIdx = paragraphs.findIndex(p => /^Die Setup-Rechnung/i.test(p.trim()));
+    const insertAt = setupIdx >= 0 ? setupIdx : Math.max(0, paragraphs.length - 1);
+    paragraphs.splice(insertAt, 0, formSatz);
+  }
+
+  return paragraphs.join('\n\n');
+}
+
+function formatDeDateTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const hasTime = iso.length > 10;
+  return d.toLocaleDateString('de-DE', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    ...(hasTime ? { hour: '2-digit', minute: '2-digit' } : {}),
+  }) + (hasTime ? ' Uhr' : '');
 }

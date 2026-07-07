@@ -7,6 +7,7 @@ import Modal from '../components/Modal.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
+import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -52,6 +53,14 @@ export default function KundeDetail() {
   const [invoicesSyncing, setInvoicesSyncing] = useState(false);
   const [showAdBudgetModal, setShowAdBudgetModal] = useState(false);
   const [sendInvoiceModal, setSendInvoiceModal] = useState(null);
+
+  // Angebote & Aufträge des Kunden + Aktivitäten-Timeline
+  const [offers, setOffers] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [sendOfferPreview, setSendOfferPreview] = useState(null);
+  const [sendOrderPreview, setSendOrderPreview] = useState(null);
+  const [billingOffer, setBillingOffer] = useState(null);
+  const [declineOffer, setDeclineOffer] = useState(null);
 
   // Farben (lokaler Edit-State, mit Speichern-Button)
   const [farben, setFarben] = useState({ primaer: '', sekundaer: '', akzent: '' });
@@ -170,6 +179,17 @@ export default function KundeDetail() {
       .then(res => setInvoices(res.invoices || []))
       .catch(() => setInvoices([]))
       .finally(() => setInvoicesBusy(false));
+  }
+
+  function loadOffers() {
+    api(`/offers?customer_id=${kundeId}`)
+      .then(res => setOffers(res.offers || []))
+      .catch(() => setOffers([]));
+  }
+  function loadActivity() {
+    api(`/kunden/${kundeId}/activity`)
+      .then(res => setActivity(res.activity || []))
+      .catch(() => setActivity([]));
   }
 
   async function syncInvoicesNow() {
@@ -304,7 +324,7 @@ export default function KundeDetail() {
     }
   }
 
-  useEffect(() => { load(); loadInvoices(); }, [kundeId]);
+  useEffect(() => { load(); loadInvoices(); loadOffers(); loadActivity(); }, [kundeId]);
 
   useEffect(() => {
     api(`/kunden/${kundeId}/referenzbilder`)
@@ -625,6 +645,25 @@ export default function KundeDetail() {
         </div>
       )}
 
+      <OffersSection
+        kundeId={kundeId}
+        offers={offers}
+        onOpenBilling={setBillingOffer}
+        onOpenDecline={setDeclineOffer}
+        onSendOffer={async offer => {
+          try {
+            const p = await api(`/offers/${offer.id}/email-preview`);
+            setSendOfferPreview({ offerId: offer.id, ...p });
+          } catch (e) { alert(e.message); }
+        }}
+        onSendOrder={async offer => {
+          try {
+            const p = await api(`/offers/${offer.id}/order-email-preview`);
+            setSendOrderPreview({ offerId: offer.id, ...p });
+          } catch (e) { alert(e.message); }
+        }}
+      />
+
       <InvoicesSection
         kunde={kunde}
         invoices={invoices}
@@ -634,6 +673,8 @@ export default function KundeDetail() {
         onCreateAdBudget={() => setShowAdBudgetModal(true)}
         onSendInvoice={inv => setSendInvoiceModal(inv)}
       />
+
+      <ActivitySection activity={activity} />
 
       <StandaloneAdBudgetModal
         open={showAdBudgetModal}
@@ -649,7 +690,28 @@ export default function KundeDetail() {
       <SendInvoiceMailModal
         invoice={sendInvoiceModal}
         onClose={() => setSendInvoiceModal(null)}
-        onSent={() => { setSendInvoiceModal(null); loadInvoices(); }}
+        onSent={() => { setSendInvoiceModal(null); loadInvoices(); loadActivity(); }}
+      />
+
+      <SendOfferModal
+        preview={sendOfferPreview}
+        onClose={() => setSendOfferPreview(null)}
+        onSent={() => { setSendOfferPreview(null); loadOffers(); loadActivity(); }}
+      />
+      <SendOrderModal
+        preview={sendOrderPreview}
+        onClose={() => setSendOrderPreview(null)}
+        onSent={() => { setSendOrderPreview(null); loadOffers(); loadActivity(); }}
+      />
+      <BillingModal
+        offer={billingOffer}
+        onClose={() => setBillingOffer(null)}
+        onChanged={() => { setBillingOffer(null); loadOffers(); loadInvoices(); loadActivity(); }}
+      />
+      <DeclineModal
+        offer={declineOffer}
+        onClose={() => setDeclineOffer(null)}
+        onDeclined={() => { setDeclineOffer(null); loadOffers(); loadActivity(); }}
       />
 
       <Modal
@@ -1051,5 +1113,145 @@ function CampaignPaymentBanner({ status, kundeId }) {
       <div style={{ fontWeight: 700, marginBottom: 2 }}>{meta.title}</div>
       <div>{meta.detail}</div>
     </div>
+  );
+}
+
+/* ═════════════════════ Angebote & Aufträge ═════════════════════ */
+
+const STATUS_META = {
+  draft:     { label: 'Draft',    bg: '#eeece7', color: '#5a5955' },
+  created:   { label: 'Erstellt', bg: '#e0eaf7', color: '#1f3a72' },
+  sent:      { label: 'Versandt', bg: '#e0f5ff', color: '#0068a3' },
+  accepted:  { label: 'Angenommen', bg: '#e0f5df', color: '#0a8043' },
+  declined:  { label: 'Abgelehnt', bg: '#fde0e0', color: '#b91c1c' },
+};
+
+function OffersSection({ kundeId, offers, onOpenBilling, onOpenDecline, onSendOffer, onSendOrder }) {
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <h2 className="section-title">Angebote &amp; Aufträge</h2>
+          <p className="section-sub">Alle Angebote und Direktaufträge für diesen Kunden.</p>
+        </div>
+        <Link to={`/angebote/neu?kunde_id=${kundeId}`} className="btn-primary">
+          <Icon name="plus" /> Neues Angebot für diesen Kunden
+        </Link>
+      </div>
+
+      {offers.length === 0 ? (
+        <div className="card empty">
+          <h2>Noch keine Angebote</h2>
+          <p>Über den Button oben ein Angebot für diesen Kunden anlegen.</p>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ margin: 0, width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>Datum</th>
+                  <th>Marke</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Monat 1</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {offers.map(o => {
+                  const st = STATUS_META[o.status] || { label: o.status, bg: 'var(--gray-100)', color: 'var(--ink)' };
+                  const isDirect = o.status === 'accepted' && !o.easybill_document_id;
+                  const phase = o.billing_phase && PHASE_META[o.billing_phase];
+                  return (
+                    <tr key={o.id}>
+                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                        {new Date(o.created_at).toLocaleDateString('de-DE')}
+                      </td>
+                      <td>{o.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne'}</td>
+                      <td>
+                        <span style={{ padding: '2px 8px', borderRadius: 100, background: st.bg, color: st.color, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
+                        {isDirect && <span style={{ marginLeft: 6, padding: '2px 8px', borderRadius: 100, background: '#fff7ed', color: '#9a3412', fontSize: 10, fontWeight: 700, border: '1px dashed #fdba74' }}>Direktauftrag</span>}
+                        {phase && (
+                          <div style={{ marginTop: 4 }}>
+                            <span style={{ padding: '2px 8px', borderRadius: 100, background: phase.bg, color: phase.color, fontSize: 10, fontWeight: 700 }}>{phase.label}</span>
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                        {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(o.first_month_total) || 0)}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {o.easybill_document_id && (
+                          <a href={`/api/offers/${o.id}/pdf`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">📄 PDF</a>
+                        )}
+                        {o.easybill_document_id && (o.status === 'created' || o.status === 'sent') && (
+                          <button className="btn-ghost btn-sm" onClick={() => onSendOffer(o)}>✉︎ Angebot senden</button>
+                        )}
+                        {o.easybill_order_document_id && (
+                          <button className="btn-ghost btn-sm" onClick={() => onSendOrder(o)}>📋 AB senden</button>
+                        )}
+                        {o.status === 'accepted' && (
+                          <button className="btn-primary btn-sm" onClick={() => onOpenBilling(o)}>📊 Abrechnung</button>
+                        )}
+                        {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
+                          <button className="btn-ghost btn-sm" onClick={() => onOpenDecline(o)}>❌ Ablehnen</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ═════════════════════ Aktivitäten-Timeline ═════════════════════ */
+
+function ActivitySection({ activity }) {
+  if (!activity?.length) {
+    return (
+      <>
+        <div className="section-head">
+          <div>
+            <h2 className="section-title">Aktivitäten</h2>
+            <p className="section-sub">Chronologie aller Vorgänge — neueste zuerst.</p>
+          </div>
+        </div>
+        <div className="card empty">
+          <h2>Keine Aktivitäten</h2>
+          <p>Sobald Angebote, Rechnungen oder Einstellungen entstehen, tauchen sie hier auf.</p>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <h2 className="section-title">Aktivitäten</h2>
+          <p className="section-sub">{activity.length} Ereignisse · neueste zuerst</p>
+        </div>
+      </div>
+      <div className="card" style={{ padding: '16px 18px' }}>
+        <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 12 }}>
+          {activity.map((ev, i) => (
+            <li key={i} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto', gap: 10, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 18 }}>{ev.icon || '·'}</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{ev.title}</div>
+                {ev.detail && <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{ev.detail}</div>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
+                {ev.ts ? new Date(ev.ts).toLocaleString('de-DE') : ''}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </>
   );
 }

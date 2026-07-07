@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateOfferTotals, validateOfferSelection, validateAdBudget } from '../offer-calc.js';
+import { calculateOfferTotals, validateAdBudget } from '../offer-calc.js';
 
-// Referenzkatalog wie im Seed nach Migration 011.
-//   - NW-SETUP-CREATIVES ist option_setup (default TRUE) — Werbemittel-Quelle
-//   - NW-OPT-PHOTO ist option_setup (default FALSE) — Fototag als Alternative
+// Referenzkatalog wie im Seed nach Migration 014 (Rückbau der Werbemittel-Wahl).
+//   - NW-SETUP-CREATIVES ist wieder Pflicht (category 'setup'), immer inklusive
+//   - NW-OPT-PHOTO ist option_setup (default FALSE) — Zusatzoption Fototag
 //   - NW-MONTHLY-CAMPAIGN 1490 (Betreuung ohne Vorqual)
 //   - NW-OPT-PREQUALIFY 500 (option_monthly, default TRUE)
 const TO_PRODUCTS = [
@@ -18,15 +18,15 @@ const NW_PRODUCTS = [
   { id: 'p-nw-ana',      sku: 'NW-SETUP-ANALYSIS',    brand: 'nowag_wirth', category: 'setup',           unit_price: 400,  active: true },
   { id: 'p-nw-kick',     sku: 'NW-SETUP-KICKOFF',     brand: 'nowag_wirth', category: 'setup',           unit_price: 300,  active: true },
   { id: 'p-nw-tech',     sku: 'NW-SETUP-TECH',        brand: 'nowag_wirth', category: 'setup',           unit_price: 1600, active: true },
-  { id: 'p-nw-crv',      sku: 'NW-SETUP-CREATIVES',   brand: 'nowag_wirth', category: 'option_setup',    unit_price: 600,  active: true },
+  { id: 'p-nw-crv',      sku: 'NW-SETUP-CREATIVES',   brand: 'nowag_wirth', category: 'setup',           unit_price: 600,  active: true },
   { id: 'p-nw-photo',    sku: 'NW-OPT-PHOTO',         brand: 'nowag_wirth', category: 'option_setup',    unit_price: 690,  active: true },
   { id: 'p-nw-mon',      sku: 'NW-MONTHLY-CAMPAIGN',  brand: 'nowag_wirth', category: 'monthly',         unit_price: 1490, active: true },
   { id: 'p-nw-prequal',  sku: 'NW-OPT-PREQUALIFY',    brand: 'nowag_wirth', category: 'option_monthly',  unit_price: 500,  active: true },
   { id: 'p-nw-extra',    sku: 'NW-OPT-EXTRA-JOB',     brand: 'nowag_wirth', category: 'option_monthly',  unit_price: 690,  active: true },
 ];
 
-// Standardkonfiguration N&W (Wizard-Defaults): alle Setup-Pflicht + KI-Veredelung
-// + Betreuung + Vorqualifizierung.
+// Standardkonfiguration N&W (Wizard-Defaults): alle Setup-Pflicht (inkl.
+// KI-Veredelung) + Betreuung + Vorqualifizierung.
 const NW_STANDARD_IDS = [
   { product_id: 'p-nw-ana' }, { product_id: 'p-nw-kick' }, { product_id: 'p-nw-tech' },
   { product_id: 'p-nw-crv' }, { product_id: 'p-nw-mon' }, { product_id: 'p-nw-prequal' },
@@ -93,31 +93,18 @@ test('Nowag & Wirth — Standardkonfig (Anker 1.990 €/Monat: 1.490 Betreuung +
   assert.equal(r.first_month_total, 2900 + 1990);    // 4890
 });
 
-test('N&W — nur Fototag als Werbemittel-Quelle → Setup 2.990 €', () => {
+test('N&W — Standard (KI-Veredelung Pflicht) + Fototag als Zusatz → Setup 3.590 €', () => {
   const r = calculateOfferTotals({
     products: NW_PRODUCTS,
     selected: [
       { product_id: 'p-nw-ana' }, { product_id: 'p-nw-kick' }, { product_id: 'p-nw-tech' },
-      { product_id: 'p-nw-photo' },                 // Fototag statt KI-Veredelung
-      { product_id: 'p-nw-mon' },  { product_id: 'p-nw-prequal' },
-    ],
-    extra_job_skus: ['NW-OPT-EXTRA-JOB'],
-  });
-  // Setup: 400 + 300 + 1600 + 690 (Fototag) = 2990
-  assert.equal(r.setup_total, 2990);
-});
-
-test('N&W — beide Werbemittel-Quellen kombiniert → Setup 3.590 €', () => {
-  const r = calculateOfferTotals({
-    products: NW_PRODUCTS,
-    selected: [
-      { product_id: 'p-nw-ana' }, { product_id: 'p-nw-kick' }, { product_id: 'p-nw-tech' },
-      { product_id: 'p-nw-crv' }, { product_id: 'p-nw-photo' },   // KI + Fototag
+      { product_id: 'p-nw-crv' },                 // KI-Veredelung (Pflicht)
+      { product_id: 'p-nw-photo' },               // Fototag (Zusatz)
       { product_id: 'p-nw-mon' }, { product_id: 'p-nw-prequal' },
     ],
     extra_job_skus: ['NW-OPT-EXTRA-JOB'],
   });
-  // Setup: 400 + 300 + 1600 + 600 + 690 = 3590
+  // Setup: 400 + 300 + 1600 + 600 (KI) + 690 (Fototag) = 3590
   assert.equal(r.setup_total, 3590);
 });
 
@@ -135,58 +122,6 @@ test('N&W — mit Fototag-Option und extra Stelle', () => {
   });
   assert.equal(r.setup_total, 3590);                  // + Fototag on top
   assert.equal(r.monthly_total, 1490 + 500 + 690);    // Anker + 1 extra Stelle
-});
-
-// ─────────────────────── validateOfferSelection ───────────────────────
-
-test('N&W-Validierung: ohne Werbemittel-Quelle → Fehler', () => {
-  const val = validateOfferSelection({
-    brand: 'nowag_wirth', products: NW_PRODUCTS,
-    selected: [
-      { product_id: 'p-nw-ana' }, { product_id: 'p-nw-kick' }, { product_id: 'p-nw-tech' },
-      { product_id: 'p-nw-mon' }, { product_id: 'p-nw-prequal' },
-    ],
-  });
-  assert.equal(val.ok, false);
-  assert.match(val.error, /Werbemittel-Quelle/);
-});
-
-test('N&W-Validierung: nur KI-Veredelung → ok', () => {
-  const val = validateOfferSelection({
-    brand: 'nowag_wirth', products: NW_PRODUCTS,
-    selected: NW_STANDARD_IDS,
-  });
-  assert.equal(val.ok, true);
-});
-
-test('N&W-Validierung: nur Fototag → ok', () => {
-  const val = validateOfferSelection({
-    brand: 'nowag_wirth', products: NW_PRODUCTS,
-    selected: [
-      { product_id: 'p-nw-ana' }, { product_id: 'p-nw-photo' },
-      { product_id: 'p-nw-mon' }, { product_id: 'p-nw-prequal' },
-    ],
-  });
-  assert.equal(val.ok, true);
-});
-
-test('N&W-Validierung: beide zusammen → ok', () => {
-  const val = validateOfferSelection({
-    brand: 'nowag_wirth', products: NW_PRODUCTS,
-    selected: [
-      { product_id: 'p-nw-crv' }, { product_id: 'p-nw-photo' },
-      { product_id: 'p-nw-mon' },
-    ],
-  });
-  assert.equal(val.ok, true);
-});
-
-test('TalentOne-Validierung: Werbemittel-Regel greift NICHT', () => {
-  const val = validateOfferSelection({
-    brand: 'talentone', products: TO_PRODUCTS,
-    selected: [{ product_id: 'p-to-mon' }],
-  });
-  assert.equal(val.ok, true);
 });
 
 // ─────────────────────── validateAdBudget ───────────────────────
