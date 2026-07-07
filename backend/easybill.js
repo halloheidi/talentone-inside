@@ -149,6 +149,44 @@ export async function finalizeInvoice(documentId) {
   return easybill(`/documents/${encodeURIComponent(documentId)}/done`, { method: 'PUT' });
 }
 
+/**
+ * Idempotenter Finalisierungs-Wrapper: prüft zuerst den Doc-Status per
+ * getDocument, ruft finalizeInvoice nur dann, wenn das Doc noch DRAFT ist.
+ *
+ * easybill setzt bei Draft-Docs `document_type_editable=true` und `number=null`;
+ * finalisierte Docs haben eine `number` gesetzt. Wir nutzen beides als Guard,
+ * damit unser Code robust ist, egal wie easybill die Felder benennt.
+ *
+ * @param {string|number} documentId
+ * @returns {Promise<{doc:object, finalized:boolean, alreadyFinalized:boolean}>}
+ */
+export async function ensureFinalized(documentId) {
+  const before = await getDocument(documentId);
+  const isDraft = looksLikeDraft(before);
+  if (!isDraft) {
+    return { doc: before, finalized: false, alreadyFinalized: true };
+  }
+  const after = await finalizeInvoice(documentId);
+  return { doc: after, finalized: true, alreadyFinalized: false };
+}
+
+/**
+ * Reine Predicate: ist das Dokument noch im Entwurfsstatus?
+ * easybill-API kann je nach Vorlage/Kontext unterschiedliche Marker liefern —
+ * wir prüfen mehrere, damit ein Umbau der API-Response uns nicht überrascht.
+ */
+export function looksLikeDraft(doc) {
+  if (!doc) return false;
+  // Primär: `number` ist erst nach Finalisierung gesetzt.
+  if (doc.number == null || String(doc.number).trim() === '') return true;
+  // Sekundär: expliziter Draft-Marker (falls easybill den mitliefert).
+  if (doc.document_type === 'DRAFT' || doc.status === 'DRAFT') return true;
+  // Bei document_type_editable=true kann noch inhaltlich geändert werden —
+  // das ist bei Draft-Docs der Fall.
+  if (doc.document_type_editable === true && (doc.number == null || String(doc.number).trim() === '')) return true;
+  return false;
+}
+
 /** Liefert PDF einer Rechnung als Buffer. */
 export async function getInvoicePdf(documentId) {
   const res = await fetch(`${EASYBILL_BASE}/documents/${encodeURIComponent(documentId)}/pdf`, {

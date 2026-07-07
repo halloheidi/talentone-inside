@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { calculateOfferTotals, validateAdBudget } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
-import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
+import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
 import { sendAngebotMail, sendAuftragMail } from '../mail.js';
@@ -150,6 +150,15 @@ router.post('/:id/send-email', async (req, res) => {
       return res.status(409).json({ error: 'Angebot wurde noch nicht in easybill erzeugt.' });
     }
 
+    // Angebote sind bewusst Draft im Katalog — für den Versand aber
+    // finalisieren, damit der Kunde nie ein „Entwurf"-Wasserzeichen sieht.
+    // Idempotent: bereits finalisierte Docs bleiben unverändert.
+    try {
+      await ensureFinalized(offer.easybill_document_id);
+    } catch (err) {
+      return res.status(502).json({ error: `easybill finalize: ${err.message}` });
+    }
+
     const pdfBuffer = await getDocumentPdf(offer.easybill_document_id);
     const firma = (offer.customer_snapshot?.company_name || 'Angebot').replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 40) || 'Angebot';
     const pdfFilename = `${firma}_Angebot.pdf`;
@@ -266,6 +275,13 @@ router.post('/:id/send-order-email', async (req, res) => {
     if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
     if (!offer.easybill_order_document_id) {
       return res.status(409).json({ error: 'Auftragsbestätigung existiert noch nicht in easybill.' });
+    }
+
+    // AB muss finalisiert sein — der Kunde darf nie ein „Entwurf" bekommen.
+    try {
+      await ensureFinalized(offer.easybill_order_document_id);
+    } catch (err) {
+      return res.status(502).json({ error: `easybill finalize: ${err.message}` });
     }
 
     const pdfBuffer = await getDocumentPdf(offer.easybill_order_document_id);
@@ -755,6 +771,17 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       });
     } catch (err) {
       return res.status(502).json({ error: `easybill: ${err.message}` });
+    }
+
+    // AB finalisieren — sonst „Entwurf"-Wasserzeichen und keine Nummer.
+    try {
+      const { doc: finalDoc } = await ensureFinalized(document.id);
+      if (finalDoc) document = finalDoc;
+    } catch (err) {
+      return res.status(502).json({
+        error: `easybill finalize: ${err.message}`,
+        easybill_order_document_id: document.id,
+      });
     }
 
     const nowIso = new Date().toISOString();

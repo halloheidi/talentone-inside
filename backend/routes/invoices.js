@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { getDocumentPdf } from '../easybill.js';
+import { getDocumentPdf, ensureFinalized } from '../easybill.js';
 import {
   createSetupInvoice,
   createStandaloneAdBudgetInvoice,
@@ -285,6 +285,21 @@ router.post('/:id/send-email', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message });
     if (!inv)  return res.status(404).json({ error: 'Rechnung nicht gefunden.' });
     if (!inv.easybill_document_id) return res.status(409).json({ error: 'Rechnung wurde noch nicht in easybill erzeugt.' });
+
+    // Draft-Guard + Self-Heal: eine Rechnung darf NIE als Entwurf raus.
+    // Aktualisiert dabei auch talentone_invoices mit der finalen Nummer
+    // (falls das Bestandsdoc noch keine hatte).
+    try {
+      const { doc } = await ensureFinalized(inv.easybill_document_id);
+      if (doc?.number && doc.number !== inv.easybill_invoice_number) {
+        await supabase.from('talentone_invoices')
+          .update({ easybill_invoice_number: String(doc.number) })
+          .eq('id', inv.id);
+        inv.easybill_invoice_number = String(doc.number);
+      }
+    } catch (err) {
+      return res.status(502).json({ error: `easybill finalize: ${err.message}` });
+    }
 
     const pdfBuffer = await getDocumentPdf(inv.easybill_document_id);
     let firmaSlug = 'Kunde';

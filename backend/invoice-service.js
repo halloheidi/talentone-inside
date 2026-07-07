@@ -17,6 +17,7 @@
 import { supabase } from './supabase.js';
 import {
   createInvoiceDocument, listDocumentsByRefId, updateDocument, getDocument,
+  ensureFinalized,
 } from './easybill.js';
 import { getPdfTemplate } from './easybill-templates.js';
 import { createInvoice as paypalCreateInvoice } from './paypal.js';
@@ -265,18 +266,34 @@ export async function createSetupInvoice(offerId, { createdBy = null, usePaypal 
     throw new Error(`easybill: ${err.message}`);
   }
 
+  // 4c. easybill-Doc finalisieren — sonst bleibt es ein Entwurf mit
+  // Wasserzeichen und ohne Rechnungsnummer. Fehlschlag → Row auf 'draft'
+  // + easybill_document_id anhängen (für Retry), aber KEIN 'sent'.
+  let finalized;
+  try {
+    const res = await ensureFinalized(doc.id);
+    finalized = res.doc;
+  } catch (err) {
+    await supabase.from('talentone_invoices').update({
+      easybill_document_id: String(doc.id),
+      last_synced_at:       new Date().toISOString(),
+    }).eq('id', draft.id);
+    throw new Error(`easybill finalize: ${err.message}`);
+  }
+
   // 4d. Fertigstellen
   const { data: updated, error: upErr } = await supabase
     .from('talentone_invoices')
     .update({
-      easybill_document_id: String(doc.id),
-      easybill_pdf_url: `/api/invoices/${draft.id}/pdf`,
-      status: 'sent',
-      last_synced_at: new Date().toISOString(),
+      easybill_document_id:    String(doc.id),
+      easybill_invoice_number: finalized?.number ? String(finalized.number) : null,
+      easybill_pdf_url:        `/api/invoices/${draft.id}/pdf`,
+      status:                  'sent',
+      last_synced_at:          new Date().toISOString(),
     })
     .eq('id', draft.id).select().single();
   if (upErr) throw new Error(upErr.message);
-  return { alreadyExists: false, invoice: updated, doc };
+  return { alreadyExists: false, invoice: updated, doc: finalized };
 }
 
 /**
@@ -481,19 +498,34 @@ export async function createStandaloneAdBudgetInvoice({
     throw new Error(`easybill: ${err.message}`);
   }
 
+  // 3b. Finalisieren — sonst Entwurf-Wasserzeichen. Fehler: doc-id speichern
+  // für Retry, aber NICHT 'sent' setzen.
+  let finalized;
+  try {
+    const res = await ensureFinalized(doc.id);
+    finalized = res.doc;
+  } catch (err) {
+    await supabase.from('talentone_invoices').update({
+      easybill_document_id: String(doc.id),
+      last_synced_at:       new Date().toISOString(),
+    }).eq('id', draft.id);
+    throw new Error(`easybill finalize: ${err.message}`);
+  }
+
   // 4. Fertigstellen
   const { data: updated, error: upErr } = await supabase
     .from('talentone_invoices')
     .update({
-      easybill_document_id: String(doc.id),
-      easybill_pdf_url:     `/api/invoices/${draft.id}/pdf`,
-      status:               'sent',
-      last_synced_at:       new Date().toISOString(),
+      easybill_document_id:    String(doc.id),
+      easybill_invoice_number: finalized?.number ? String(finalized.number) : null,
+      easybill_pdf_url:        `/api/invoices/${draft.id}/pdf`,
+      status:                  'sent',
+      last_synced_at:          new Date().toISOString(),
     })
     .eq('id', draft.id).select().single();
   if (upErr) throw new Error(upErr.message);
 
-  return { invoice: updated, doc, paypalPayLink };
+  return { invoice: updated, doc: finalized, paypalPayLink };
 }
 
 /**
@@ -793,11 +825,26 @@ async function createMonthlyInvoiceInEasybill({
     externalId: draft.id,
   });
 
+  // Finalisieren — Monatslauf darf kein Entwurf zurücklassen. Fehler: doc-id
+  // speichern für Retry im nächsten Monatslauf, aber KEIN 'sent'.
+  let finalized;
+  try {
+    const res = await ensureFinalized(doc.id);
+    finalized = res.doc;
+  } catch (err) {
+    await supabase.from('talentone_invoices').update({
+      easybill_document_id: String(doc.id),
+      last_synced_at:       new Date().toISOString(),
+    }).eq('id', draft.id);
+    throw new Error(`easybill finalize: ${err.message}`);
+  }
+
   const { data: updated } = await supabase.from('talentone_invoices').update({
-    easybill_document_id: String(doc.id),
-    easybill_pdf_url: `/api/invoices/${draft.id}/pdf`,
-    status: 'sent',
-    last_synced_at: new Date().toISOString(),
+    easybill_document_id:    String(doc.id),
+    easybill_invoice_number: finalized?.number ? String(finalized.number) : null,
+    easybill_pdf_url:        `/api/invoices/${draft.id}/pdf`,
+    status:                  'sent',
+    last_synced_at:          new Date().toISOString(),
   }).eq('id', draft.id).select().single();
 
   return { invoice: updated, doc };
