@@ -9,7 +9,20 @@ const STATUS_OPTIONS = [
   { value: 'interessiert', label: 'Interessiert' },
   { value: 'abgesagt', label: 'Abgesagt' },
   { value: 'weitergeleitet', label: 'Weitergeleitet' },
+  { value: 'ungeeignet', label: 'Ungeeignet' },
 ];
+
+// Ausgeschieden = Bewerber, die für Standardanzeige uninteressant sind.
+// Werden nur eingeblendet, wenn der User im Status-Filter explizit einen dieser
+// Werte anklickt.
+const AUSGESCHIEDEN_STATI = new Set(['abgesagt', 'weitergeleitet', 'ungeeignet']);
+
+function hatKontaktdaten(b) {
+  const name    = (b.name    || '').trim();
+  const email   = (b.email   || '').trim();
+  const telefon = (b.telefon || '').trim();
+  return !!(name || email || telefon);
+}
 
 const FEEDBACK_LABELS = {
   neu: 'Neu',
@@ -119,6 +132,14 @@ export default function BewerbungenOverview() {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [quelleFilter, ohneKo, vonFilter, bisFilter]);
 
+  // Full-width-Layout — hebt .content max-width 1200px auf. Wiederverwendet
+  // die Regel body.proj-fullwidth aus styles.css, damit sich die Tabelle
+  // über die gesamte verfügbare Breite ausbreiten kann.
+  useEffect(() => {
+    document.body.classList.add('proj-fullwidth');
+    return () => document.body.classList.remove('proj-fullwidth');
+  }, []);
+
   // Kunden + Jobs aus den Bewerbungen extrahieren (für Dropdowns)
   const kundenMap = useMemo(() => {
     const map = new Map();
@@ -170,13 +191,21 @@ export default function BewerbungenOverview() {
   // Client-side Filter
   const filtered = useMemo(() => {
     let list = data.bewerbungen;
+    // (1) Bewerbungen ohne Kontaktdaten (Name/Tel/Mail alles leer) sind
+    // abgebrochene Funnel-Durchläufe — nie anzeigen.
+    list = list.filter(hatKontaktdaten);
     if (nurVorqual) list = list.filter(b => b.talentone_jobs?.vorqualifizierung);
     if (nurOffen) list = list.filter(b => !data.notizen[b.id]?.erledigt);
     if (kundeFilter) list = list.filter(b => b.talentone_jobs?.kunde_id === kundeFilter);
     if (jobFilter) list = list.filter(b => b.job_id === jobFilter);
     if (agenturFilter) list = list.filter(b => b.talentone_jobs?.talentone_kunden?.agentur === agenturFilter);
     if (statusFilter.length > 0) {
+      // Explizite Auswahl gewinnt — inkl. ausgeschiedener Status.
       list = list.filter(b => statusFilter.includes((data.notizen[b.id]?.status) || 'neu'));
+    } else {
+      // (2) Default: ausgeschiedene Bewerber (abgesagt/weitergeleitet/ungeeignet)
+      // ausblenden. Werden per Status-Chip wieder eingeblendet.
+      list = list.filter(b => !AUSGESCHIEDEN_STATI.has(data.notizen[b.id]?.status));
     }
     // Sort
     const dir = sortAsc ? 1 : -1;

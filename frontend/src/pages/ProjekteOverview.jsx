@@ -344,7 +344,7 @@ export default function ProjekteOverview() {
       {loading ? <div className="motiv-sub">Lade Projekte…</div>
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
-          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} />
+          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} />
           : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
                        selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} />
       }
@@ -371,7 +371,7 @@ export default function ProjekteOverview() {
 
 /* ═════════════════════ KANBAN-BOARD ═════════════════════ */
 
-function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone }) {
+function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {} }) {
   return (
     <div className="kanban">
       {KANBAN_COLUMNS.map(col => {

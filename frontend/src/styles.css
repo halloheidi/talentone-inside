@@ -4296,6 +4296,8 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .chip-abgesagt.is-on      { background: #80201f; color: #fff; border-color: #80201f; }
 .chip-weitergeleitet      { background: #f0e0f4; color: #5a1c70; }
 .chip-weitergeleitet.is-on{ background: #5a1c70; color: #fff; border-color: #5a1c70; }
+.chip-ungeeignet          { background: #ece8e0; color: #5a4a2a; }
+.chip-ungeeignet.is-on    { background: #5a4a2a; color: #fff; border-color: #5a4a2a; }
 
 /* ─── Toggle-Row (Vorqualifizierung) ─── */
 .toggle-row {
