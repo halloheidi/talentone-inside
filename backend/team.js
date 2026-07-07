@@ -5,6 +5,9 @@
 export const TEAM_MEMBERS = [
   { name: 'Andrea S.',    email: 'andrea.saltaleggio@nowagwirth.de', role: 'admin' },
   { name: 'Johannes W.',  email: 'johannes.wirth@nowagwirth.de',     role: 'admin' },
+  // Zweit-Account, mit dem Johannes ebenfalls in Supabase Auth registriert
+  // ist — beide Adressen führen zur selben Person, deshalb beide als Admin.
+  { name: 'Johannes W.',  email: 'johannes.wirth@me.com',            role: 'admin' },
   { name: 'Laura M.',     email: 'laura.mueller@nowagwirth.de',      role: 'team'  },
   { name: 'Daniel N.',    email: 'daniel.nowag@nowagwirth.de',       role: 'admin' },
 ];
