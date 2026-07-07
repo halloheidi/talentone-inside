@@ -14,6 +14,7 @@ import {
   runMonthlyBillingForOffer,
 } from '../invoice-service.js';
 import { runMonthlyBillingRound, getBillingCronStatus } from '../billing-scheduler.js';
+import { runReminderRound, getReminderStatus } from '../billing-reminder.js';
 import {
   syncOpenInvoices, evaluateCampaignPaymentStatus, getInvoiceSyncStatus,
 } from '../invoice-sync.js';
@@ -169,6 +170,14 @@ router.post('/monthly/run-cron', async (req, res) => {
 
 /* GET /api/invoices/monthly/cron-status */
 router.get('/monthly/cron-status', (req, res) => res.json(getBillingCronStatus()));
+
+/* POST /api/invoices/reminders/run — manuelle Erinnerungsrunde. */
+router.post('/reminders/run', async (req, res) => {
+  try { res.json(await runReminderRound()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+/* GET /api/invoices/reminders/status */
+router.get('/reminders/status', (req, res) => res.json(getReminderStatus()));
 
 /* GET /api/invoices/skip-log?offer_id=... */
 router.get('/skip-log', async (req, res) => {

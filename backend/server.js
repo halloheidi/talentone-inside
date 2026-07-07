@@ -25,6 +25,7 @@ import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 import { startOfferSyncScheduler } from './offer-sync.js';
 import { startInvoiceSyncScheduler } from './invoice-sync.js';
 import { startBillingScheduler } from './billing-scheduler.js';
+import { startReminderScheduler } from './billing-reminder.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -96,4 +97,5 @@ app.listen(PORT, () => {
   startOfferSyncScheduler();
   startInvoiceSyncScheduler();
   startBillingScheduler();
+  startReminderScheduler();
 });

@@ -289,6 +289,11 @@ export default function KundeDetail() {
         <span>{kunde.firmenname}</span>
       </div>
 
+      <CampaignPaymentBanner
+        status={kunde.campaign_payment_status}
+        kundeId={kunde.id}
+      />
+
       <div className="kunde-head">
         <button
           type="button"
@@ -321,6 +326,13 @@ export default function KundeDetail() {
                 {kunde.ansprechpartner && <span><strong>Ansprechpartner:</strong> {kunde.ansprechpartner}</span>}
                 {kunde.email && <span><strong>E-Mail:</strong> <a href={`mailto:${kunde.email}`}>{kunde.email}</a></span>}
                 {kunde.telefon && <span><strong>Telefon:</strong> {kunde.telefon}</span>}
+                <span>
+                  <strong>PayPal-Zahlung:</strong>
+                  <PaypalToggle
+                    kunde={kunde}
+                    onChanged={updated => setKunde(k => ({ ...k, paypal_enabled: updated.paypal_enabled }))}
+                  />
+                </span>
               </div>
               {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
               <div className="kunde-head-actions">
@@ -593,6 +605,44 @@ export default function KundeDetail() {
         kunde={kunde}
         onClose={() => setShowCreate(false)}
       />
+    </div>
+  );
+}
+
+function PaypalToggle({ kunde, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  async function toggle(next) {
+    setBusy(true);
+    try {
+      const res = await api(`/kunden/${kunde.id}`, {
+        method: 'PATCH', body: { paypal_enabled: !!next },
+      });
+      onChanged(res.kunde);
+    } catch (e) { alert(e.message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginLeft: 4, cursor: 'pointer' }}>
+      <input type="checkbox" checked={!!kunde.paypal_enabled} disabled={busy}
+        onChange={e => toggle(e.target.checked)} />
+      <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{kunde.paypal_enabled ? 'aktiv' : 'aus'}</span>
+    </label>
+  );
+}
+
+function CampaignPaymentBanner({ status, kundeId }) {
+  if (!status || status === 'ok') return null;
+  const meta = status === 'blocked'
+    ? { bg: '#fde0e0', color: '#b91c1c',
+        title: '⚠ Kampagne blockiert — Werbebudget-Rechnung überfällig',
+        detail: 'Der Kunde hat eine Werbebudget-Rechnung seit über 7 Tagen nicht bezahlt. Bitte prüfen: Kampagne pausieren oder Rücksprache halten.' }
+    : { bg: '#fff2d4', color: '#a34e00',
+        title: '⚠ Kampagne pending — Budget-Rechnung überfällig',
+        detail: 'Die aktuelle Budget-Rechnung ist überfällig. Wenn nicht innerhalb von 7 Tagen bezahlt: Status wechselt auf blocked.' };
+  return (
+    <div style={{ padding: 14, borderRadius: 10, background: meta.bg, color: meta.color, marginBottom: 14, fontSize: 13 }}>
+      <div style={{ fontWeight: 700, marginBottom: 2 }}>{meta.title}</div>
+      <div>{meta.detail}</div>
     </div>
   );
 }

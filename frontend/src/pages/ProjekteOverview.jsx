@@ -129,6 +129,14 @@ export default function ProjekteOverview() {
   const [selectedId, setSelectedId] = useState(null);
   const [team, setTeam] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [paymentStatusById, setPaymentStatusById] = useState({}); // { kunde_id: 'ok'|'pending'|'blocked' }
+  useEffect(() => {
+    api('/kunden').then(r => {
+      const map = {};
+      for (const k of (r.kunden || [])) if (k.campaign_payment_status && k.campaign_payment_status !== 'ok') map[k.id] = k.campaign_payment_status;
+      setPaymentStatusById(map);
+    }).catch(() => {});
+  }, []);
 
   function toggleSelect(id) {
     setSelectedIds(prev => {
@@ -394,6 +402,12 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                     )}
                     {p.status === 'go' && (
                       <span className="kanban-card-status-pill is-go">✅ Vom Kunden freigegeben</span>
+                    )}
+                    {paymentStatusById[p.kunde_id] === 'pending' && (
+                      <span className="kanban-card-status-pill" style={{ background: '#fff2d4', color: '#a34e00' }}>⚠ Zahlung überfällig</span>
+                    )}
+                    {paymentStatusById[p.kunde_id] === 'blocked' && (
+                      <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}>⛔ Kampagne blockiert — Zahlung überfällig</span>
                     )}
                     <div className="kanban-card-firma">{p.kunde || '—'}</div>
                     {p.gesuchte_positionen && <div className="kanban-card-pos">{p.gesuchte_positionen}{p.standorte ? ` · ${p.standorte}` : ''}</div>}

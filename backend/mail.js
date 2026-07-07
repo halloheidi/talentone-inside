@@ -834,3 +834,42 @@ export async function sendEinstellungsMail({
   }
   return await response.json();
 }
+
+/* ════════════════════ Rechnungs-Erinnerungsmail (Phase 5) ════════════════════
+   reminder_email-Template + Merge-Tags. Absender wie Angebote:
+   angebote@… mit info@nowagwirth.com als Reply-To + BCC ans Team. */
+export async function sendErinnerungsMail({
+  to, offerBrand, subject, body,
+}) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agenturForOfferBrand(offerBrand));
+  const recipients = Array.isArray(to) ? to : [to];
+  const bodyHtml = String(body || '')
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📩 Zahlungserinnerung · ${escape(brand.name)}</p>
+      ${bodyHtml}
+    </td></tr>`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = String(body || '');
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getOfferMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getOfferMailReplyTo(brand),
+      subject: subject || 'Erinnerung: offene Rechnung',
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Resend ${response.status}: ${errBody.slice(0, 300)}`);
+  }
+  return await response.json();
+}
