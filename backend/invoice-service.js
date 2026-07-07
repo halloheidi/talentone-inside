@@ -308,8 +308,8 @@ function buildRecurringItems({ brand, products, selected, adBudget }) {
   }
   if (brand === 'talentone' && adBudget > 0) {
     items.push(makePosition({
-      pos: pos++, titleWithSuffix: 'Werbebudget-Abwicklung (monatlich im Voraus)',
-      description: 'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen.',
+      pos: pos++, titleWithSuffix: 'Werbebudget-Abwicklung (Vorauszahlung)',
+      description: 'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen. Wird monatlich im Voraus abgerechnet.',
       quantity: 1, unitPriceEur: adBudget, vatPercent: EUR_VAT_DEFAULT,
     }));
   }

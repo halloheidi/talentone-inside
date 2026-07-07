@@ -29,7 +29,7 @@ test('Standard-Payload: Setup → Monatlich → Werbebudget → Garantie → Zah
   assert.equal(items[0].description.startsWith('Onboarding\n\n'), true);
   assert.equal(items[1].description.startsWith('Creatives\n\n'), true);
   assert.equal(items[2].description.startsWith('Kampagne (monatlich)\n\n'), true);
-  assert.equal(items[3].description.startsWith('Werbebudget-Abwicklung (monatlich im Voraus)\n\n'), true);
+  assert.equal(items[3].description.startsWith('Werbebudget-Abwicklung (Vorauszahlung)\n\n'), true);
   // easybill erwartet Cent → 800 € → 80000
   assert.equal(items[3].single_price_net, 80000);
   assert.equal(items[4].type, 'TEXT');

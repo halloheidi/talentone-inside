@@ -24,7 +24,7 @@ const EXTRA_JOB_SKUS_BY_BRAND = {
   nowag_wirth: ['NW-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB'],
 };
 
-const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (monatlich im Voraus)';
+const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (Vorauszahlung)';
 const AD_BUDGET_DESCRIPTION =
   'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen. Kampagnenstart nach Zahlungseingang.';
 
