@@ -21,6 +21,7 @@ import {
 import { getPdfTemplate } from './easybill-templates.js';
 import { createInvoice as paypalCreateInvoice } from './paypal.js';
 import { evaluateMonthlyBilling } from './billing-rules.js';
+import { getEffectiveAdBudget } from './offer-calc.js';
 
 const EUR_VAT_DEFAULT = 19;
 
@@ -322,6 +323,18 @@ function nextMonthFirst(from = new Date()) {
   return isoDate(d);
 }
 
+// getEffectiveAdBudget lebt in offer-calc.js (rein-funktional, ohne DB).
+// Re-Export für bestehende Aufrufer.
+export { getEffectiveAdBudget };
+
+async function loadAdBudgetHistory(offerId) {
+  const { data } = await supabase
+    .from('talentone_ad_budget_history')
+    .select('new_amount, effective_from')
+    .eq('offer_id', offerId);
+  return data || [];
+}
+
 /**
  * Aktiviert die monatliche Abrechnung — setzt campaign_started_at (den Anker
  * der Garantie-Frist). KEIN easybill-RECURRING mehr — der eigene Cron
@@ -385,27 +398,33 @@ export async function reactivateMonthlyBilling(offerId, { note = null } = {}) {
 }
 
 /**
- * Ändert das Werbebudget — schreibt History, Angebot.ad_budget_monthly wird
- * aktualisiert. Wirkt automatisch ab der nächsten Cron-Rechnung.
+ * Ändert das Werbebudget — schreibt History mit effective_from=nächster
+ * Monatserster. Die aktuelle laufende Rechnungsperiode bleibt unberührt.
+ *
+ * Wichtig: offer.ad_budget_monthly wird NICHT mehr mutiert — dieser Wert ist
+ * die "Kohorten-Baseline" (das ursprünglich vereinbarte Budget aus dem
+ * Angebot). Der aktuelle effektive Betrag ergibt sich aus getEffectiveAdBudget
+ * gegen die jeweilige Periode.
  */
 export async function updateAdBudget(offerId, newAmount, { changedBy = null, reason = null } = {}) {
   const offer = await fetchOffer(offerId);
   if (offer.brand !== 'talentone') throw new Error('Werbebudget-Änderung ist nur für TalentOne relevant.');
-  const oldAmount = Number(offer.ad_budget_monthly) || 0;
   const cleanNew  = Number(newAmount) || 0;
   if (cleanNew < 0) throw new Error('Betrag muss ≥ 0 sein.');
 
+  const history = await loadAdBudgetHistory(offerId);
+  // Für die Anzeige/History: der bis dahin aktuell effektive Betrag
+  const todayIso = isoDate();
+  const oldAmount = getEffectiveAdBudget(offer, history, todayIso);
+  const effFrom  = nextMonthFirst();
+
   await supabase.from('talentone_ad_budget_history').insert({
     offer_id: offerId, old_amount: oldAmount, new_amount: cleanNew,
-    effective_from: nextMonthFirst(), changed_by: changedBy, reason,
+    effective_from: effFrom, changed_by: changedBy, reason,
   });
 
-  await supabase.from('talentone_offers')
-    .update({ ad_budget_monthly: cleanNew })
-    .eq('id', offerId);
-
   const { data } = await supabase.from('talentone_offers').select('*').eq('id', offerId).maybeSingle();
-  return { offer: data, oldAmount, newAmount: cleanNew };
+  return { offer: data, oldAmount, newAmount: cleanNew, effective_from: effFrom };
 }
 
 // ─────────────────────── Monatlicher Lauf pro Angebot ───────────────────────
@@ -482,19 +501,25 @@ export async function runMonthlyBillingForOffer(offerId, { today = null, periodS
   const products = await fetchCatalog(offer.brand);
   const monthLabel = formatMonthDE(startIso);
 
+  // Werbebudget-Historie: aus der Sicht der Periode startIso — nicht "heute".
+  // Damit bekommt ein am 10. des Monats geänderter Betrag für die laufende
+  // Periode noch den alten Wert, für die Folgeperiode den neuen.
+  const budgetHistory = offer.brand === 'talentone' ? await loadAdBudgetHistory(offerId) : [];
+  const effectiveAdBudget = getEffectiveAdBudget(offer, budgetHistory, startIso);
+
   const buildFullItems = () => buildRecurringItems({
     brand: offer.brand, products,
     selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
-    adBudget: Number(offer.ad_budget_monthly) || 0,
+    adBudget: effectiveAdBudget,
   });
   const buildBudgetOnlyItems = () => {
     const items = [];
-    if (Number(offer.ad_budget_monthly) > 0) {
+    if (effectiveAdBudget > 0) {
       items.push(makePosition({
         pos: 1,
         titleWithSuffix: `Werbebudget ${monthLabel} (Vorauszahlung)`,
         description: `Vollständige Abwicklung Ihres Werbebudgets über TalentOne für ${monthLabel}. Servicepauschale entfällt in diesem Monat gemäß Bewerbungsgarantie.`,
-        quantity: 1, unitPriceEur: Number(offer.ad_budget_monthly), vatPercent: EUR_VAT_DEFAULT,
+        quantity: 1, unitPriceEur: effectiveAdBudget, vatPercent: EUR_VAT_DEFAULT,
       }));
     }
     return items;

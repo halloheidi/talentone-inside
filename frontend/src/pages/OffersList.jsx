@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { supabase } from '../lib/supabase.js';
 import Modal from '../components/Modal.jsx';
+import { AdBudgetChips } from './OfferWizard.jsx';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -510,8 +511,14 @@ function BillingModal({ offer, onClose, onChanged }) {
     } catch (e) { setErr(e.message); }
   }
   async function runUpdateBudget() {
-    const n = parseFloat(adBudget);
+    const raw = String(adBudget ?? '').trim();
+    const n = raw === '' ? 0 : Number(raw);
     if (!Number.isFinite(n) || n < 0) return setErr('Betrag ungültig.');
+    if (n !== 0) {
+      if (n < 300)     return setErr('Werbebudget muss mindestens 300 € betragen.');
+      if (n > 5000)    return setErr('Werbebudget darf höchstens 5.000 € betragen.');
+      if (n % 50 !== 0) return setErr('Werbebudget muss ein Vielfaches von 50 € sein.');
+    }
     setErr(''); setBusy('budget');
     try {
       await api('/invoices/ad-budget', { method: 'POST', body: { offer_id: offer.id, new_amount: n } });
@@ -641,15 +648,13 @@ function BillingModal({ offer, onClose, onChanged }) {
       {isTalentOne && (
         <section style={{ padding: 14, background: 'var(--gray-50)', borderRadius: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>4. Werbebudget</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="number" step="10" min="0" value={adBudget} onChange={e => setAdBudget(e.target.value)}
-              style={{ width: 120, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
-            <span style={{ fontSize: 13 }}>€ / Monat</span>
+          <AdBudgetChips value={adBudget} onChange={setAdBudget} />
+          <div style={{ marginTop: 10 }}>
             <button className="btn-primary btn-sm" onClick={runUpdateBudget} disabled={busy === 'budget'}>
               {busy === 'budget' ? 'Speichere…' : 'Ändern'}
             </button>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0 0' }}>Änderung wirkt ab der nächsten monatlichen Rechnung. Historie wird geführt.</p>
+          <p style={{ fontSize: 11, color: 'var(--ink-4)', margin: '6px 0 0' }}>Änderung wirkt ab der nächsten monatlichen Rechnung — die laufende Periode bleibt unberührt. Historie wird geführt.</p>
         </section>
       )}
 

@@ -23,8 +23,8 @@ const BRAND_META = {
     tagline: 'Premium — eigenes Werbekonto, Dateneigentum, Partnermanager',
     bullets: [
       'Eigenes Meta-Werbekonto, Kunde behält alle Assets & Zielgruppen',
-      'Telefonische Vorqualifizierung + persönlicher Partnermanager',
-      'Erfolgsgarantie und wöchentliche Optimierungs-Calls',
+      'Partnermanager & Erfolgsgarantie inklusive',
+      'Wöchentliche Optimierungs-Calls, tägliche Betreuung',
       'Für Betriebe, die langfristig eine eigene Recruiting-Marke aufbauen',
     ],
   },
@@ -34,6 +34,13 @@ const BRAND_META = {
 // synchron bleiben.
 const EXTRA_JOB_MONTHLY_SKU = { talentone: 'TO-OPT-EXTRA-JOB',       nowag_wirth: 'NW-OPT-EXTRA-JOB' };
 const EXTRA_JOB_SETUP_SKU   = { talentone: 'TO-OPT-EXTRA-JOB-SETUP', nowag_wirth: 'NW-OPT-EXTRA-JOB-SETUP' };
+
+// N&W: Werbemittel-Quelle. Mind. eine muss gewählt sein — Weiter blockiert
+// sonst und /calculate/POST spiegelt die Regel serverseitig.
+const NW_CREATIVE_SOURCE_SKUS = ['NW-SETUP-CREATIVES', 'NW-OPT-PHOTO'];
+
+// TalentOne-Werbebudget-Chips (nur die Auswahl-Werte; "Individuell" = Freitext)
+const AD_BUDGET_CHIPS = [600, 800, 1000, 1200];
 
 export default function OfferWizard() {
   const navigate = useNavigate();
@@ -59,12 +66,32 @@ export default function OfferWizard() {
   const [creatingOffer, setCreatingOffer] = useState(false);
   const [error, setError] = useState('');
 
+  const step3Error = useMemo(() => {
+    if (step !== 3 || !products.length) return null;
+    if (brand === 'nowag_wirth') {
+      const skusById = new Map(products.map(p => [p.id, p.sku]));
+      const hasSource = [...selectedIds].some(id => NW_CREATIVE_SOURCE_SKUS.includes(skusById.get(id)));
+      if (!hasSource) return 'Bitte mindestens eine Werbemittel-Quelle wählen (KI-Veredelung oder Fototag).';
+    }
+    if (brand === 'talentone') {
+      const raw = String(adBudget ?? '').trim();
+      if (raw !== '') {
+        const n = Number(raw);
+        if (!Number.isFinite(n))     return 'Werbebudget ist keine gültige Zahl.';
+        if (n !== 0 && n < 300)      return 'Werbebudget muss mindestens 300 € betragen.';
+        if (n > 5000)                return 'Werbebudget darf höchstens 5.000 € betragen.';
+        if (n !== 0 && n % 50 !== 0) return 'Werbebudget muss ein Vielfaches von 50 € sein.';
+      }
+    }
+    return null;
+  }, [step, products, brand, selectedIds, adBudget]);
+
   const canNext = useMemo(() => {
     if (step === 1) return !!customer;
     if (step === 2) return !!brand;
-    if (step === 3) return products.length > 0;
+    if (step === 3) return products.length > 0 && !step3Error;
     return false;
-  }, [step, customer, brand, products.length]);
+  }, [step, customer, brand, products.length, step3Error]);
 
   // Marken-Default für Garantie: TalentOne 30 fix, N&W 30 (wählbar)
   useEffect(() => {
@@ -228,6 +255,15 @@ export default function OfferWizard() {
           />
         )}
       </div>
+
+      {step3Error && step === 3 && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 10,
+          background: '#fff7ed', border: '1px solid #fdba74', color: '#9a3412', fontSize: 13,
+        }}>
+          {step3Error}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <button className="btn-ghost" disabled={step === 1} onClick={() => setStep(s => s - 1)}>← Zurück</button>
@@ -635,9 +671,17 @@ function Step3Config({
   const extraMonthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
   const extraSetupSku   = EXTRA_JOB_SETUP_SKU[brand];
   // Extra-Job-Setup nicht separat anzeigen — läuft über den Counter am Monthly.
+  // N&W: die zwei Werbemittel-Quellen laufen in eine eigene Gruppe.
+  const isNW = brand === 'nowag_wirth';
+  const isCreativeSource = p => isNW && NW_CREATIVE_SOURCE_SKUS.includes(p.sku);
   const options  = products
     .filter(p => p.category === 'option_setup' || p.category === 'option_monthly')
-    .filter(p => p.sku !== extraSetupSku);
+    .filter(p => p.sku !== extraSetupSku)
+    .filter(p => !isCreativeSource(p));
+  const creativeSources = isNW
+    ? NW_CREATIVE_SOURCE_SKUS.map(sku => products.find(p => p.sku === sku)).filter(Boolean)
+    : [];
+  const chosenCreativeCount = creativeSources.filter(p => selectedIds.has(p.id)).length;
   const extraSetupPrice = products.find(p => p.sku === extraSetupSku)?.unit_price;
 
   return (
@@ -654,6 +698,32 @@ function Step3Config({
         <SectionHead label="Monatlich" />
         {monthlys.map(p => <PositionRow key={p.id} p={p} selected={true} readonly required />)}
       </section>
+
+      {isNW && creativeSources.length > 0 && (
+        <section style={{ marginBottom: 22 }}>
+          <SectionHead label="Werbemittel-Quelle" />
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px' }}>
+            Mindestens eine Quelle wählen — beide zusammen sind möglich.
+          </p>
+          {creativeSources.map(p => (
+            <PositionRow
+              key={p.id} p={p}
+              selected={selectedIds.has(p.id)}
+              onToggle={() => onToggle(p.id)}
+            />
+          ))}
+          {chosenCreativeCount === 2 && (
+            <div style={{ padding: '8px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, fontSize: 12, color: '#1e3a8a' }}>
+              Hinweis: Sie kombinieren KI-Veredelung und Fototag. Beide Setup-Positionen werden im Angebot berechnet.
+            </div>
+          )}
+          {chosenCreativeCount === 0 && (
+            <div style={{ padding: '8px 12px', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: 8, fontSize: 12, color: '#9a3412' }}>
+              Bitte mindestens eine Werbemittel-Quelle wählen.
+            </div>
+          )}
+        </section>
+      )}
 
       <section style={{ marginBottom: 22 }}>
         <SectionHead label="Optionen" />
@@ -709,12 +779,7 @@ function Step3Config({
       {brand === 'talentone' && (
         <section style={{ marginBottom: 6, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
           <SectionHead label="Werbebudget (monatliche Durchleitung)" />
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <input type="number" step="10" min="0" value={adBudget} onChange={e => setAdBudget(e.target.value)}
-              style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 15, width: 160, textAlign: 'right' }} />
-            <span style={{ fontSize: 13 }}>€ / Monat</span>
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>· Empfehlung 600–1.200 €</span>
-          </div>
+          <AdBudgetChips value={adBudget} onChange={setAdBudget} />
           <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8 }}>
             Wird als durchlaufender Posten monatlich im Voraus berechnet. Kampagnenstart erfolgt nach Zahlungseingang.
           </p>
@@ -736,6 +801,82 @@ function Step3Config({
 
 function SectionHead({ label }) {
   return <h3 style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', margin: '0 0 8px' }}>{label}</h3>;
+}
+
+/**
+ * Werbebudget-Auswahl: Chips 600/800/1.000/1.200 + „Individuell" (Freitext).
+ * Ergebnis wird als String an setAdBudget zurückgegeben (bleibt zu den bereits
+ * bestehenden useState-Wert-Typen kompatibel — Input speichert Strings).
+ * Auch aus dem BillingModal wiederverwendbar (siehe Export).
+ */
+export function AdBudgetChips({ value, onChange }) {
+  const num = Number(String(value ?? '').trim());
+  const matchesChip = Number.isFinite(num) && AD_BUDGET_CHIPS.includes(num);
+  const [customMode, setCustomMode] = useState(!matchesChip && String(value ?? '').trim() !== '');
+  const err = (() => {
+    const raw = String(value ?? '').trim();
+    if (raw === '' || raw === '0') return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n))     return 'Bitte eine Zahl eingeben.';
+    if (n < 300)                 return 'Mindestens 300 €.';
+    if (n > 5000)                return 'Höchstens 5.000 €.';
+    if (n % 50 !== 0)            return 'Nur volle 50-€-Schritte.';
+    return null;
+  })();
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {AD_BUDGET_CHIPS.map(v => {
+          const active = !customMode && num === v;
+          return (
+            <button
+              key={v} type="button"
+              onClick={() => { setCustomMode(false); onChange(String(v)); }}
+              style={{
+                padding: '8px 14px', borderRadius: 999, fontSize: 13, fontWeight: 600,
+                background: active ? 'var(--ink)' : '#fff',
+                color: active ? '#fff' : 'var(--ink)',
+                border: '1px solid ' + (active ? 'var(--ink)' : 'var(--line)'),
+                cursor: 'pointer',
+              }}
+            >
+              {v.toLocaleString('de-DE')} €
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => { setCustomMode(true); }}
+          style={{
+            padding: '8px 14px', borderRadius: 999, fontSize: 13, fontWeight: 600,
+            background: customMode ? 'var(--ink)' : '#fff',
+            color: customMode ? '#fff' : 'var(--ink)',
+            border: '1px solid ' + (customMode ? 'var(--ink)' : 'var(--line)'),
+            cursor: 'pointer',
+          }}
+        >
+          Individuell
+        </button>
+      </div>
+      {customMode && (
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type="number" step="50" min="300" max="5000"
+            value={matchesChip ? '' : value ?? ''}
+            onChange={e => onChange(e.target.value)}
+            placeholder="z. B. 950"
+            style={{ padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, width: 140, textAlign: 'right' }}
+          />
+          <span style={{ fontSize: 13 }}>€ / Monat</span>
+          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>300–5.000 €, 50er-Schritte</span>
+        </div>
+      )}
+      {err && (
+        <div style={{ marginTop: 6, fontSize: 12, color: '#9a3412' }}>{err}</div>
+      )}
+    </div>
+  );
 }
 
 function PositionRow({ p, selected, onToggle, readonly, required, extraCount, onExtraCount, coupledSetupPrice }) {

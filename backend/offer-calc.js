@@ -22,6 +22,53 @@
 const SETUP_CATEGORIES   = new Set(['setup', 'option_setup']);
 const MONTHLY_CATEGORIES = new Set(['monthly', 'option_monthly']);
 
+// Bei N&W ist die Werbemittel-Quelle wählbar (KI-Veredelung ODER Fototag
+// ODER beides). Mind. eine muss gewählt sein — sonst hätte das Angebot
+// keine Werbemittel-Positionen. TalentOne unverändert (TO-SETUP-CREATIVES
+// ist weiter Pflichtposition der Kategorie 'setup').
+const NW_CREATIVE_SOURCE_SKUS = ['NW-SETUP-CREATIVES', 'NW-OPT-PHOTO'];
+
+/**
+ * Prüft die Auswahl gegen brand-spezifische Business-Regeln.
+ * Rein-funktional, wird sowohl im /calculate- als auch im POST-Endpoint
+ * gespiegelt (kein Trust auf Frontend).
+ *
+ * @param {object} input
+ * @param {'talentone'|'nowag_wirth'} input.brand
+ * @param {Array} input.products    — aktive Katalog-Positionen
+ * @param {Array} input.selected    — [{ product_id, quantity? }]
+ * @returns {{ ok:boolean, error:string|null }}
+ */
+/**
+ * Werbebudget-Regel (nur TalentOne): min 300, max 5000, 50-€-Schritte.
+ * Null / 0 sind explizit erlaubt (Kunde wählt Werbebudget später).
+ */
+export function validateAdBudget(amount) {
+  if (amount == null || amount === '') return { ok: true };
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return { ok: false, error: 'Werbebudget ist keine gültige Zahl.' };
+  if (n === 0) return { ok: true };
+  if (n < 300)  return { ok: false, error: 'Werbebudget muss mindestens 300 € betragen.' };
+  if (n > 5000) return { ok: false, error: 'Werbebudget darf höchstens 5.000 € betragen.' };
+  if (n % 50 !== 0) return { ok: false, error: 'Werbebudget muss ein Vielfaches von 50 € sein.' };
+  return { ok: true };
+}
+
+export function validateOfferSelection({ brand, products = [], selected = [] } = {}) {
+  if (brand === 'nowag_wirth') {
+    const skuById = new Map(products.map(p => [p.id, p.sku]));
+    const chosen = new Set();
+    for (const item of selected) {
+      const sku = skuById.get(item?.product_id);
+      if (sku && NW_CREATIVE_SOURCE_SKUS.includes(sku)) chosen.add(sku);
+    }
+    if (chosen.size === 0) {
+      return { ok: false, error: 'Bitte mindestens eine Werbemittel-Quelle wählen (KI-Veredelung oder Fototag).' };
+    }
+  }
+  return { ok: true, error: null };
+}
+
 /**
  * @typedef {{id:string, sku:string, title:string, category:'setup'|'monthly'|'option_setup'|'option_monthly', unit_price:number|string, active?:boolean}} Product
  * @typedef {{product_id:string, quantity?:number}} Selected
@@ -136,4 +183,28 @@ export function calculateOfferTotals({
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
+}
+
+/**
+ * Werbebudget-Historie: bestimmt den zur Periode gültigen Betrag.
+ *
+ * Regel: der zuletzt gültig gewordene History-Eintrag mit
+ *        effective_from ≤ periodStartIso gewinnt. Gibt es keinen,
+ *        fällt es auf offer.ad_budget_monthly zurück (Ausgangs-Betrag aus
+ *        dem Angebot).
+ *
+ * Pure Funktion — Historie wird vom Aufrufer geladen. Nutzt lexikografischen
+ * String-Vergleich, funktioniert also nur für ISO-Datums-Strings (YYYY-MM-DD).
+ *
+ * @param {{brand:string, ad_budget_monthly:number|string|null}} offer
+ * @param {Array<{new_amount:number|string, effective_from:string}>} historyRows
+ * @param {string} periodStartIso   YYYY-MM-DD
+ */
+export function getEffectiveAdBudget(offer, historyRows = [], periodStartIso) {
+  if (!offer || offer.brand !== 'talentone') return 0;
+  const relevant = (historyRows || [])
+    .filter(r => r.effective_from && r.effective_from <= periodStartIso)
+    .sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1));
+  if (relevant.length > 0) return Number(relevant[0].new_amount) || 0;
+  return Number(offer.ad_budget_monthly) || 0;
 }

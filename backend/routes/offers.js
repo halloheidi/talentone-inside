@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { calculateOfferTotals } from '../offer-calc.js';
+import { calculateOfferTotals, validateOfferSelection, validateAdBudget } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, getDocument, getDocumentPdf, listPdfTemplates } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
@@ -238,9 +238,16 @@ router.post('/calculate', async (req, res) => {
   if (!BRANDS.has(b.brand)) return res.status(400).json({ error: 'brand ungültig.' });
   try {
     const products = await loadProductsForBrand(b.brand);
+    const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
+    // Business-Regel-Validation (Werbemittel-Quelle bei N&W)
+    const val = validateOfferSelection({ brand: b.brand, products, selected });
+    if (!val.ok) return res.status(400).json({ error: val.error });
+    // Werbebudget-Validierung — 300..5000 in 50-€-Schritten (nur TalentOne)
+    const budgetVal = validateAdBudget(b.ad_budget_monthly);
+    if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
+
     const totals = calculateOfferTotals({
-      products,
-      selected: Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [],
+      products, selected,
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
       ad_budget_monthly: b.ad_budget_monthly ?? null,
       vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
@@ -338,9 +345,14 @@ router.post('/', async (req, res) => {
 
   try {
     const products = await loadProductsForBrand(b.brand);
+    const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
+    const val = validateOfferSelection({ brand: b.brand, products, selected });
+    if (!val.ok) return res.status(400).json({ error: val.error });
+    const budgetVal = validateAdBudget(b.ad_budget_monthly);
+    if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
+
     const totals = calculateOfferTotals({
-      products,
-      selected: Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [],
+      products, selected,
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
       ad_budget_monthly: b.ad_budget_monthly ?? null,
       vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
@@ -403,9 +415,13 @@ router.patch('/:id', async (req, res) => {
     const vatRate  = Number.isFinite(+b.vat_rate) ? +b.vat_rate : Number(cur.vat_rate);
 
     const products = await loadProductsForBrand(brand);
+    const val = validateOfferSelection({ brand, products, selected });
+    if (!val.ok) return res.status(400).json({ error: val.error });
+    const budgetVal = validateAdBudget(adBudget);
+    if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
+
     const totals = calculateOfferTotals({
-      products,
-      selected,
+      products, selected,
       additional_positions_count: addCount,
       ad_budget_monthly: adBudget,
       vat_rate: vatRate,
