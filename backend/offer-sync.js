@@ -19,6 +19,10 @@
 
 import { supabase } from './supabase.js';
 import { listDocumentsByRefId } from './easybill.js';
+import { addNote as closeAddNote } from './close.js';
+
+const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+const BRAND_LABEL = { talentone: 'TalentOne', nowag_wirth: 'Nowag & Wirth' };
 
 const OPEN_STATUSES     = ['created', 'sent'];  // die kandidieren fürs Polling
 const ACCEPTED_TRIGGERS = ['CHARGE_CONFIRM', 'INVOICE']; // Nachfolge-Docs
@@ -87,6 +91,16 @@ export async function applyAcceptedTransition(offer, successor) {
     const { data, error } = await query.select().single();
     if (error) throw new Error(`Supabase update: ${error.message}`);
     console.log(`[offer-sync] Angebot ${offer.id} → accepted (via ${successor.type} ${successor.id})`);
+
+    // Best-effort Close-Notiz — nie den Sync-Flow blockieren.
+    if (offer.close_lead_id) {
+      const brandLabel = BRAND_LABEL[offer.brand] || offer.brand;
+      const monat1     = EUR.format(Number(offer.first_month_total) || 0);
+      const abNumber   = successor.number ? `AB ${successor.number}` : `Doc ${successor.id}`;
+      const note = `✅ Angebot angenommen: ${brandLabel} — ${abNumber} — Monat 1: ${monat1}`;
+      closeAddNote({ leadId: offer.close_lead_id, note })
+        .catch(err => console.warn(`[offer-sync close-note]`, err.message));
+    }
     return { changed: true, offer: data };
   } else {
     // Kein select() nötig — wir wollen nur last_synced_at fortschreiben

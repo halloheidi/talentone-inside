@@ -220,13 +220,58 @@ router.post('/calculate', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_pdf_url, accepted_at, created_at, created_by')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_period_days, hires_target, service_waived_override, decline_note, declined_at')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ offers: data || [] });
+
+  // Anreichern: hire_count + billing_phase je Angebot.
+  const offers = data || [];
+  const acceptedIds = offers.filter(o => o.campaign_started_at).map(o => o.id);
+  const hireCounts = {};
+  if (acceptedIds.length) {
+    const { data: hires } = await supabase
+      .from('talentone_hires').select('offer_id')
+      .in('offer_id', acceptedIds);
+    for (const h of hires || []) hireCounts[h.offer_id] = (hireCounts[h.offer_id] || 0) + 1;
+  }
+  for (const o of offers) {
+    o.hire_count = hireCounts[o.id] || 0;
+    o.billing_phase = computeBillingPhase(o);
+  }
+  res.json({ offers });
+});
+
+/** Rein-funktional: bestimmt die Abrechnungs-/Garantie-Phase für die
+ *  Liste-UI. Gibt eines von: 'inactive'|'ended'|'paused'|'active'|'guarantee'|'guarantee_expired'
+ */
+function computeBillingPhase(offer) {
+  if (offer.billing_ended_at) return 'ended';
+  if (offer.billing_paused_at) return 'paused';
+  if (!offer.campaign_started_at) return 'inactive';
+  const hasHire = (offer.hire_count || 0) > 0;
+  if (hasHire) return 'active';
+  const start = new Date(offer.campaign_started_at);
+  const cutoff = new Date(start.getTime() + (Number(offer.guarantee_period_days) || 30) * 86400000);
+  return (new Date()) <= cutoff ? 'guarantee' : 'guarantee_expired';
+}
+
+/* POST /api/offers/:id/decline  body: { note: string }
+   Setzt Status auf 'declined' + speichert Pflicht-Notiz. Der einzige
+   manuelle Statuswechsel — accepted kommt aus dem Rücksync. */
+router.post('/:id/decline', async (req, res) => {
+  const note = (req.body?.note || '').trim();
+  if (!note) return res.status(400).json({ error: 'Notiz ist Pflicht.' });
+  const { data: cur } = await supabase.from('talentone_offers').select('status').eq('id', req.params.id).maybeSingle();
+  if (!cur) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+  if (cur.status === 'accepted') return res.status(409).json({ error: 'Angenommene Angebote können nicht abgelehnt werden.' });
+  const { data, error } = await supabase.from('talentone_offers').update({
+    status: 'declined', decline_note: note, declined_at: new Date().toISOString(),
+  }).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ offer: data });
 });
 
 /* GET /api/offers/:id — Einzelnes Angebot */

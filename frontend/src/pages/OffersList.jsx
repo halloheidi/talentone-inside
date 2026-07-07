@@ -16,6 +16,16 @@ const STATUS_LABEL = {
 
 const BRAND_LABEL = { talentone: 'TalentOne', nowag_wirth: 'Nowag & Wirth' };
 
+// Phasen-Badges — gleiche Farb-Codierung wie im BillingModal
+const PHASE_META = {
+  guarantee:         { label: 'Garantiefrist läuft',      color: '#0068a3', bg: '#e0f5ff' }, // blau
+  active:            { label: 'Reguläre Abrechnung',      color: '#0a8043', bg: '#e0f5df' }, // grün
+  guarantee_expired: { label: 'Servicefrei (Frist erreicht)', color: '#a34e00', bg: '#fff2d4' }, // orange
+  paused:            { label: 'Pausiert — manuell reaktivieren', color: '#b91c1c', bg: '#fde0e0' }, // rot
+  ended:             { label: 'Abrechnung beendet',       color: '#5a5955', bg: 'var(--gray-100)' },
+  inactive:          { label: 'Abrechnung nicht aktiv',   color: '#5a5955', bg: 'var(--gray-100)' },
+};
+
 export default function OffersList() {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +39,7 @@ export default function OffersList() {
   const [rowError, setRowError] = useState({}); // { [offerId]: msg }
   const [sendModal, setSendModal] = useState(null); // { offerId, subject, body, to, firma, already_sent }
   const [billingOffer, setBillingOffer] = useState(null); // Angebot fürs Abrechnungs-Modal
+  const [declineOffer, setDeclineOffer] = useState(null); // Angebot fürs Decline-Modal
 
   async function pdfHref(offerId) {
     // Auth-Header ist Pflicht — Standard-Link würde 401 werfen.
@@ -140,10 +151,10 @@ export default function OffersList() {
                 <th>Datum</th>
                 <th>Kunde</th>
                 <th>Marke</th>
-                <th style={{ textAlign: 'right' }}>Setup</th>
-                <th style={{ textAlign: 'right' }}>Monatlich</th>
-                <th style={{ textAlign: 'right' }}>Monat 1</th>
-                <th>Status</th>
+                <th style={{ textAlign: 'right' }} title="Einmalige Setup-Positionen">Setup</th>
+                <th style={{ textAlign: 'right' }} title="Wiederkehrende Servicepauschale (ohne Werbebudget)">Monatspauschale</th>
+                <th style={{ textAlign: 'right' }} title="Setup + 1. Monatspauschale + ggf. Werbebudget (Vorauszahlung)">Monat 1</th>
+                <th>Status &amp; Phase</th>
                 <th>Erstellt von</th>
                 <th>Aktion</th>
               </tr>
@@ -163,10 +174,34 @@ export default function OffersList() {
                     <td><strong>{snap.company_name || o.easybill_customer_id}</strong></td>
                     <td>{BRAND_LABEL[o.brand]}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{eur.format(o.setup_total)}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{eur.format(o.monthly_total)}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {eur.format(o.monthly_total)}
+                      {Number(o.ad_budget_monthly) > 0 && (
+                        <div style={{ fontSize: 10, color: 'var(--ink-4)' }}>+ {eur.format(o.ad_budget_monthly)} Werbebudget</div>
+                      )}
+                    </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>{eur.format(o.first_month_total)}</td>
                     <td>
                       <span style={{ padding: '3px 10px', borderRadius: 100, background: st.bg, color: st.color, fontSize: 11, fontWeight: 700 }}>{st.label}</span>
+                      {o.status === 'accepted' && o.billing_phase && PHASE_META[o.billing_phase] && (
+                        <div style={{ marginTop: 4 }}>
+                          <span
+                            title={o.billing_phase === 'guarantee' ? `Aktiv seit ${new Date(o.campaign_started_at).toLocaleDateString('de-DE')} · Garantie ${o.guarantee_period_days} Tage` :
+                                   o.billing_phase === 'active'    ? `${o.hire_count} von ${o.hires_target || 1} Einstellungen` :
+                                   o.billing_phase === 'guarantee_expired' ? 'Frist erreicht ohne Einstellung — ab nächstem Lauf servicefrei' :
+                                   o.billing_phase === 'paused'    ? 'TalentOne max servicefrei erreicht — bitte manuell reaktivieren' :
+                                   ''}
+                            style={{ padding: '2px 8px', borderRadius: 100, background: PHASE_META[o.billing_phase].bg, color: PHASE_META[o.billing_phase].color, fontSize: 10, fontWeight: 700 }}
+                          >{PHASE_META[o.billing_phase].label}
+                          {o.billing_phase === 'active' && ` · ${o.hire_count}/${o.hires_target || 1}`}
+                          </span>
+                        </div>
+                      )}
+                      {o.status === 'declined' && o.decline_note && (
+                        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-4)', fontStyle: 'italic' }} title={o.decline_note}>
+                          {o.decline_note.slice(0, 40)}{o.decline_note.length > 40 ? '…' : ''}
+                        </div>
+                      )}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--ink-3)' }}>{o.created_by || '—'}</td>
                     <td style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -196,6 +231,13 @@ export default function OffersList() {
                           onClick={() => setBillingOffer(o)}
                         >📊 Abrechnung</button>
                       )}
+                      {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          title="Angebot ablehnen (mit Notiz)"
+                          onClick={() => setDeclineOffer(o)}
+                        >❌ Ablehnen</button>
+                      )}
                       {err && <span style={{ fontSize: 11, color: '#b91c1c' }}>⚠ {err}</span>}
                     </td>
                   </tr>
@@ -216,6 +258,12 @@ export default function OffersList() {
         offer={billingOffer}
         onClose={() => setBillingOffer(null)}
         onChanged={() => { setBillingOffer(null); load(); }}
+      />
+
+      <DeclineModal
+        offer={declineOffer}
+        onClose={() => setDeclineOffer(null)}
+        onDeclined={() => { setDeclineOffer(null); load(); }}
       />
     </div>
   );
@@ -680,6 +728,48 @@ function HireModal({ state, onClose, onSaved }) {
           </>
         )}
       </div>
+    </Modal>
+  );
+}
+
+function DeclineModal({ offer, onClose, onDeclined }) {
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { if (offer) { setNote(''); setErr(''); } }, [offer?.id]);
+  if (!offer) return null;
+
+  async function submit() {
+    setErr('');
+    if (!note.trim()) return setErr('Notiz ist Pflicht.');
+    setBusy(true);
+    try {
+      await api(`/offers/${offer.id}/decline`, { method: 'POST', body: { note: note.trim() } });
+      onDeclined();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!offer} onClose={onClose}
+      title={`Angebot ablehnen — ${offer.customer_snapshot?.company_name || '—'}`}
+      footer={<>
+        <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
+        <button className="btn-primary" onClick={submit} disabled={busy}>
+          {busy ? 'Speichere…' : 'Als abgelehnt markieren'}
+        </button>
+      </>}
+    >
+      <p style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 12 }}>
+        Der Status wird auf <strong>declined</strong> gesetzt. Die Notiz ist Pflicht — sie erklärt, warum das Angebot nicht angenommen wurde (z.B. „Budget zu hoch", „Kunde entschied sich für Alternative").
+      </p>
+      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Grund der Ablehnung</span>
+        <textarea rows={5} value={note} onChange={e => setNote(e.target.value)}
+          placeholder="z.B. Kunde hat sich für einen Wettbewerber entschieden."
+          style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 6, fontFamily: 'inherit', fontSize: 13 }} />
+      </label>
     </Modal>
   );
 }
