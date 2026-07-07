@@ -20,6 +20,7 @@ import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
 import OfferKatalog from './pages/admin/OfferKatalog.jsx';
+import Controlling from './pages/admin/Controlling.jsx';
 import OfferWizard from './pages/OfferWizard.jsx';
 import OffersList from './pages/OffersList.jsx';
 
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="angebote" element={<OffersList />} />
         <Route path="angebote/neu" element={<OfferWizard />} />
         <Route path="admin/angebots-katalog" element={<AdminOnly><OfferKatalog /></AdminOnly>} />
+        <Route path="controlling" element={<AdminOnly><Controlling /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />

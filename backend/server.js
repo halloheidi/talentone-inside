@@ -20,6 +20,7 @@ import easybillCustomersRouter from './routes/easybill-customers.js';
 import offersRouter from './routes/offers.js';
 import invoicesRouter from './routes/invoices.js';
 import hiresRouter from './routes/hires.js';
+import controllingRouter from './routes/controlling.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 import { startOfferSyncScheduler } from './offer-sync.js';
@@ -75,6 +76,7 @@ app.use('/api/easybill-customers', requireAuth, easybillCustomersRouter);
 app.use('/api/offers', requireAuth, offersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/hires', requireAuth, hiresRouter);
+app.use('/api/controlling', requireAuth, controllingRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
