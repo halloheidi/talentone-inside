@@ -51,6 +51,10 @@ function reiseFromJob(job, fd) {
 
 export default function JobStelleninfos() {
   const { job, kunde, reload } = useJob();
+  // Weiche: bei Neukundengewinnung eigene Ansicht „Produkt & Zielgruppe".
+  if (job?.projekttyp === 'neukundengewinnung') {
+    return <NeukundenProduktTab job={job} kunde={kunde} reload={reload} />;
+  }
   const fd = job.formdata_komplett || {};
 
   const [form, setForm] = useState(() => ({
@@ -539,5 +543,151 @@ function AnalyseView({ analyse }) {
         <pre className="analyse-raw">{JSON.stringify(analyse, null, 2)}</pre>
       )}
     </div>
+  );
+}
+
+/* ═════════════════════ Neukunden-Produkt-Tab ═════════════════════
+   Ersetzt Stelleninfos bei projekttyp='neukundengewinnung'. Speichert alle
+   Text-Felder in job.neukunden_daten (jsonb), damit das Schema kompakt bleibt.
+   „stelle" wird auf `produkt` gespiegelt, damit bestehende Auswertungen
+   (Projekte-Liste, Kanban-Karten) mit einer sinnvollen Bezeichnung arbeiten. */
+
+function NeukundenProduktTab({ job, kunde, reload }) {
+  const nk = job.neukunden_daten || {};
+  const [form, setForm] = useState({
+    produkt:       nk.produkt || job.stelle || '',
+    kundenprofil:  nk.kundenprofil || '',
+    zielgruppe:    nk.zielgruppe || '',
+    vorteile:      Array.isArray(nk.vorteile) ? nk.vorteile.filter(Boolean) : [],
+    unterschied:   nk.unterschied || '',
+    preisrahmen:   nk.preisrahmen || '',
+    einzugsgebiet: nk.einzugsgebiet || job.region || '',
+    funnel_url:    nk.funnel_url || '',
+  });
+  const [newVorteil, setNewVorteil] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  function set(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
+  function addVorteil() {
+    const v = newVorteil.trim();
+    if (!v) return;
+    set('vorteile', [...form.vorteile, v]);
+    setNewVorteil('');
+  }
+  function removeVorteil(i) {
+    set('vorteile', form.vorteile.filter((_, idx) => idx !== i));
+  }
+
+  async function onSave(e) {
+    e?.preventDefault();
+    setBusy(true); setMsg('');
+    try {
+      const neukunden_daten = {
+        produkt: form.produkt.trim(),
+        kundenprofil: form.kundenprofil.trim(),
+        zielgruppe: form.zielgruppe.trim(),
+        vorteile: form.vorteile.filter(Boolean),
+        unterschied: form.unterschied.trim(),
+        preisrahmen: form.preisrahmen.trim(),
+        einzugsgebiet: form.einzugsgebiet.trim(),
+        funnel_url: form.funnel_url.trim(),
+      };
+      await api(`/jobs/${job.id}`, {
+        method: 'PATCH',
+        body: {
+          neukunden_daten,
+          // Sammelfelder für Kompatibilität mit Recruiting-Flows:
+          stelle: neukunden_daten.produkt || 'Neukunden-Kampagne',
+          region: neukunden_daten.einzugsgebiet || null,
+          benefits: neukunden_daten.vorteile.length ? neukunden_daten.vorteile : null,
+        },
+      });
+      setMsg('Gespeichert.');
+      reload?.();
+    } catch (err) { setMsg('Fehler: ' + err.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <form onSubmit={onSave} className="job-stelle-form">
+      <div className="section-head">
+        <div>
+          <h2 className="section-title">Produkt &amp; Zielgruppe</h2>
+          <p className="section-sub">Angebot, Zielgruppe und USP der Neukundenkampagne — Grundlage für Creatives und Ad-Copies.</p>
+        </div>
+        <button type="submit" className="btn-primary" disabled={busy || !form.produkt.trim()}>
+          {busy ? 'Speichere…' : 'Speichern'}
+        </button>
+      </div>
+
+      {msg && <div className="motiv-sub" style={{ marginBottom: 10 }}>{msg}</div>}
+
+      <fieldset className="formular-section">
+        <legend>Angebot</legend>
+        <div className="stelle-grid">
+          <label className="field field-full">
+            <span>Produkt / Dienstleistung *</span>
+            <input type="text" value={form.produkt} onChange={e => set('produkt', e.target.value)}
+              placeholder="z. B. Photovoltaik-Komplettlösung" required />
+          </label>
+          <label className="field field-full">
+            <span>Wofür Kunden gesucht werden</span>
+            <textarea rows={2} value={form.kundenprofil} onChange={e => set('kundenprofil', e.target.value)}
+              placeholder="z. B. Photovoltaik-Anlagen für Eigenheimbesitzer" />
+          </label>
+          <label className="field field-full">
+            <span>Zielgruppe</span>
+            <textarea rows={2} value={form.zielgruppe} onChange={e => set('zielgruppe', e.target.value)}
+              placeholder="z. B. Hausbesitzer 35-65, ländlich, mit eigenem Dach" />
+          </label>
+          <label className="field">
+            <span>Region / Einzugsgebiet</span>
+            <input type="text" value={form.einzugsgebiet} onChange={e => set('einzugsgebiet', e.target.value)}
+              placeholder="z. B. Bayern, Oberpfalz" />
+          </label>
+          <label className="field">
+            <span>Preisrahmen / Angebot (optional)</span>
+            <input type="text" value={form.preisrahmen} onChange={e => set('preisrahmen', e.target.value)}
+              placeholder="z. B. ab 15.000 €" />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="formular-section">
+        <legend>Vorteile des Produkts</legend>
+        <div className="benefits-list">
+          {form.vorteile.map((v, i) => (
+            <span key={i} className="benefit-chip">
+              {v}
+              <button type="button" className="benefit-chip-x" onClick={() => removeVorteil(i)} aria-label="Entfernen">×</button>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <input type="text" value={newVorteil} onChange={e => setNewVorteil(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVorteil(); } }}
+            placeholder="Neuer Vorteil, z. B. „Amortisation in 8 Jahren"" style={{ flex: 1 }} />
+          <button type="button" className="btn-ghost btn-sm" onClick={addVorteil} disabled={!newVorteil.trim()}>
+            + Hinzufügen
+          </button>
+        </div>
+      </fieldset>
+
+      <fieldset className="formular-section">
+        <legend>USP / Unterschied zum Wettbewerb</legend>
+        <label className="field field-full">
+          <span>Was unterscheidet euch von der Konkurrenz?</span>
+          <textarea rows={3} value={form.unterschied} onChange={e => set('unterschied', e.target.value)}
+            placeholder="z. B. Regionaler Anbieter, keine Subunternehmen, 25 Jahre Erfahrung, eigenes Montageteam" />
+        </label>
+      </fieldset>
+
+      <div style={{ marginTop: 14 }}>
+        <button type="submit" className="btn-primary" disabled={busy || !form.produkt.trim()}>
+          {busy ? 'Speichere…' : 'Speichern'}
+        </button>
+      </div>
+    </form>
   );
 }

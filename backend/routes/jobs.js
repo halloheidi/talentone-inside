@@ -31,8 +31,9 @@ router.get('/:id', async (req, res) => {
    Erstellt einen Job für einen BESTEHENDEN Kunden via URL/PDF/Manual/Formular.
    body: { kunde_id, mode: 'url'|'file'|'manual'|'formular', url?|fileData+fileType?|job?, customText? } */
 router.post('/quick-create', async (req, res) => {
-  const { kunde_id, mode, customText } = req.body || {};
+  const { kunde_id, mode, customText, projekttyp } = req.body || {};
   if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
+  const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
 
   const { data: kunde, error: kErr } = await supabase
     .from('talentone_kunden').select('*').eq('id', kunde_id).maybeSingle();
@@ -45,9 +46,10 @@ router.post('/quick-create', async (req, res) => {
       .from('talentone_jobs')
       .insert({
         kunde_id,
-        stelle: '[Briefing ausstehend]',
+        projekttyp: pt,
+        stelle: pt === 'neukundengewinnung' ? '[Produkt-Briefing ausstehend]' : '[Briefing ausstehend]',
         eingabe_methode: 'neu',
-        vorqualifizierung: kunde.agentur === 'nowagwirth',
+        vorqualifizierung: pt === 'mitarbeitergewinnung' && kunde.agentur === 'nowagwirth',
         formdata_komplett: { _wartet_auf_briefing: true },
       })
       .select().single();
@@ -122,7 +124,8 @@ router.post('/quick-create', async (req, res) => {
       .insert({
         ...jobData,
         kunde_id,
-        vorqualifizierung: kunde.agentur === 'nowagwirth',
+        projekttyp: pt,
+        vorqualifizierung: pt === 'mitarbeitergewinnung' && kunde.agentur === 'nowagwirth',
       })
       .select().single();
     if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
@@ -175,6 +178,8 @@ const ALLOWED_JOB_FIELDS = [
   'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
   'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
   'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder',
+  // Projekttyp „Neukundengewinnung" (Migration 021):
+  'projekttyp', 'neukunden_daten',
 ];
 
 router.patch('/:id', async (req, res) => {

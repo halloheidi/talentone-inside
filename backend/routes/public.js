@@ -199,9 +199,13 @@ router.post('/formular/:token/submit', async (req, res) => {
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
   if (kunde.status === 'aktiv') return res.status(410).json({ error: 'Bereits ausgefüllt.' });
 
-  const { kunde: kundePatch = {}, job: jobPatch = {}, formdata = {} } = req.body || {};
+  const { kunde: kundePatch = {}, job: jobPatch = {}, formdata = {}, projekttyp } = req.body || {};
+  const istNeukunden = projekttyp === 'neukundengewinnung';
   if (!kundePatch.firmenname?.trim()) return res.status(400).json({ error: 'Firmenname ist Pflicht.' });
-  if (!jobPatch.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
+  if (!istNeukunden && !jobPatch.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
+  if (istNeukunden && !(jobPatch.neukunden_daten?.produkt || '').trim()) {
+    return res.status(400).json({ error: 'Produkt/Dienstleistung ist Pflicht.' });
+  }
 
   try {
     // Kunde aktualisieren
@@ -217,9 +221,21 @@ router.post('/formular/:token/submit', async (req, res) => {
       .from('talentone_kunden').update(kundeUpdate).eq('id', kunde.id).select().single();
     if (uErr) return res.status(500).json({ error: `Kunde-Update: ${uErr.message}` });
 
-    // Job anlegen
-    const jobRow = {
+    // Job anlegen — für Neukundengewinnung sitzen die Text-Felder in
+    // neukunden_daten (jsonb); für Mitarbeitergewinnung wie bisher.
+    const jobRow = istNeukunden ? {
       kunde_id: kunde.id,
+      projekttyp: 'neukundengewinnung',
+      stelle: (jobPatch.neukunden_daten?.produkt || '').trim() || 'Neukunden-Kampagne',
+      region: jobPatch.neukunden_daten?.einzugsgebiet?.trim() || null,
+      benefits: Array.isArray(jobPatch.neukunden_daten?.vorteile) && jobPatch.neukunden_daten.vorteile.length
+        ? jobPatch.neukunden_daten.vorteile : null,
+      neukunden_daten: jobPatch.neukunden_daten || {},
+      eingabe_methode: 'formular',
+      formdata_komplett: formdata,
+    } : {
+      kunde_id: kunde.id,
+      projekttyp: 'mitarbeitergewinnung',
       stelle: jobPatch.stelle.trim(),
       region: jobPatch.region?.trim() || null,
       gehalt: jobPatch.gehalt?.trim() || null,
@@ -720,6 +736,56 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ feedback: data });
+});
+
+/* ════════════════════ Public Anfragen-Dashboard (Neukundengewinnung) ════════════════════
+ * Analoges Muster wie Bewerbungen, aber mit Kunden-Anfragen aus dem
+ * onepage.io-Webhook. Token: talentone_jobs.anfragen_token. */
+
+async function loadJobByAnfragenToken(token) {
+  const { data } = await supabase.from('talentone_jobs')
+    .select('id, stelle, region, kunde_id, projekttyp, neukunden_daten, anfragen_token')
+    .eq('anfragen_token', token).maybeSingle();
+  return data;
+}
+
+// GET /api/public/anfragen/:token — Liste + Job-Meta + Kunden-Branding
+router.get('/anfragen/:token', async (req, res) => {
+  const job = await loadJobByAnfragenToken(req.params.token);
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('firmenname, agentur, logo_url, farben').eq('id', job.kunde_id).maybeSingle();
+  const { data: anfragen = [] } = await supabase.from('talentone_anfragen')
+    .select('*').eq('job_id', job.id).order('created_at', { ascending: false });
+  res.json({
+    job: {
+      id: job.id, stelle: job.stelle, region: job.region,
+      produkt: job.neukunden_daten?.produkt || job.stelle,
+      projekttyp: job.projekttyp,
+    },
+    kunde,
+    anfragen,
+  });
+});
+
+// PATCH /api/public/anfragen/:token/:anfrageId  body: { status?, notizen? }
+router.patch('/anfragen/:token/:anfrageId', async (req, res) => {
+  const job = await loadJobByAnfragenToken(req.params.token);
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+  const { status, notizen } = req.body || {};
+  const patch = {};
+  if (status !== undefined) {
+    if (!['neu', 'kontaktiert', 'termin', 'gewonnen', 'verloren'].includes(status)) {
+      return res.status(400).json({ error: 'status ungültig.' });
+    }
+    patch.status = status;
+  }
+  if (notizen !== undefined) patch.notizen = notizen == null ? null : String(notizen);
+  const { data, error } = await supabase.from('talentone_anfragen')
+    .update(patch).eq('id', req.params.anfrageId).eq('job_id', job.id)
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ anfrage: data });
 });
 
 /* ════════════════════════════════════════════════════════════════

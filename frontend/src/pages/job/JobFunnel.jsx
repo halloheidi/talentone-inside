@@ -243,6 +243,13 @@ export default function JobFunnel() {
   if (loading || initBusy) {
     return <div className="card empty">{initBusy ? 'KI generiert die Funnel-Texte… (~10–20 Sekunden)' : 'Lade Funnel…'}</div>;
   }
+
+  // Neukundengewinnung: kein interner Funnel-Builder — externe Landingpage
+  // (onepage.io o. Ä.) + Webhook + interne Anfragen-Liste.
+  if (job?.projekttyp === 'neukundengewinnung') {
+    return <NeukundenFunnelTab job={job} kunde={kunde} />;
+  }
+
   if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
 
   const brandBase = getBrandBaseUrl(kunde?.agentur);
@@ -990,6 +997,167 @@ function ChipsEditor({ items = [], onChange, placeholder, max, vertical }) {
           <button type="button" className="btn-ghost btn-sm" onClick={add}>Hinzufügen</button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ═════════════════════ Neukunden-Funnel-Tab ═════════════════════ */
+const STATUS_LABEL_NK = { neu: '🆕 Neu', kontaktiert: '📞 Kontaktiert', termin: '📅 Termin', gewonnen: '✅ Gewonnen', verloren: '❌ Verloren' };
+
+function NeukundenFunnelTab({ job, kunde }) {
+  const nk = job.neukunden_daten || {};
+  const [funnelUrl, setFunnelUrl] = useState(nk.funnel_url || '');
+  const [funnelBusy, setFunnelBusy] = useState(false);
+  const [funnelMsg, setFunnelMsg] = useState('');
+  const [anfragenToken, setAnfragenToken] = useState(job.anfragen_token || '');
+  const [anfragen, setAnfragen] = useState([]);
+  const [loadingAnfragen, setLoadingAnfragen] = useState(true);
+
+  useEffect(() => {
+    if (!anfragenToken) {
+      api(`/anfragen/token/ensure/${job.id}`, { method: 'POST' })
+        .then(r => setAnfragenToken(r.token || ''))
+        .catch(() => {});
+    }
+    api(`/anfragen?job_id=${job.id}`)
+      .then(r => setAnfragen(r.anfragen || []))
+      .catch(() => {})
+      .finally(() => setLoadingAnfragen(false));
+    // eslint-disable-next-line
+  }, [job.id]);
+
+  const apiBase = getApiBaseUrl();
+  const webhookUrl = `${apiBase}/api/webhooks/leads?job_id=${job.id}`;
+  const brandBase = getBrandBaseUrl(kunde?.agentur);
+  const anfragenListUrl = anfragenToken ? `${brandBase}/anfragen/${anfragenToken}` : null;
+
+  async function saveFunnelUrl() {
+    setFunnelBusy(true); setFunnelMsg('');
+    try {
+      await api(`/jobs/${job.id}`, { method: 'PATCH', body: { neukunden_daten: { ...nk, funnel_url: funnelUrl.trim() } } });
+      setFunnelMsg('Gespeichert.');
+    } catch (err) { setFunnelMsg('Fehler: ' + err.message); }
+    finally { setFunnelBusy(false); }
+  }
+
+  async function refreshAnfragen() {
+    setLoadingAnfragen(true);
+    try { const r = await api(`/anfragen?job_id=${job.id}`); setAnfragen(r.anfragen || []); }
+    finally { setLoadingAnfragen(false); }
+  }
+
+  async function updateAnfrage(id, patch) {
+    setAnfragen(prev => prev.map(a => a.id === id ? { ...a, ...patch } : a));
+    try { await api(`/anfragen/${id}`, { method: 'PATCH', body: patch }); }
+    catch (err) { alert('Speichern fehlgeschlagen: ' + err.message); refreshAnfragen(); }
+  }
+
+  function copyToClipboard(text) { navigator.clipboard.writeText(text).catch(() => {}); }
+
+  return (
+    <div style={{ display: 'grid', gap: 18, padding: '4px 0' }}>
+      <section className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Externe Landingpage (onepage.io o. Ä.)</h3>
+        <p className="pane-hint" style={{ marginTop: 0 }}>Die URL, die in Ads / Ad-Copies verlinkt wird.</p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input type="url" value={funnelUrl} onChange={e => setFunnelUrl(e.target.value)}
+            placeholder="https://landingpage.example.com"
+            style={{ flex: 1, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
+          <button className="btn-primary btn-sm" onClick={saveFunnelUrl} disabled={funnelBusy}>Speichern</button>
+        </div>
+        {funnelMsg && <div className="motiv-sub" style={{ marginTop: 6 }}>{funnelMsg}</div>}
+      </section>
+
+      <section className="card" style={{ padding: 16 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Webhook-URL für die Landingpage</h3>
+        <p className="pane-hint" style={{ marginTop: 0 }}>
+          In onepage.io als „Webhook / Zapier-URL" hinterlegen. Jede Anfrage POST hierher → landet in der Liste und geht als Mail an den Kunden.
+        </p>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <code style={{ flex: 1, padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 6, fontSize: 12, wordBreak: 'break-all' }}>{webhookUrl}</code>
+          <button className="btn-ghost btn-sm" onClick={() => copyToClipboard(webhookUrl)}>Kopieren</button>
+        </div>
+        <details style={{ marginTop: 12, fontSize: 13 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>So richtest du das in onepage.io ein</summary>
+          <ol style={{ marginTop: 8, paddingLeft: 20, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+            <li>Formular-Block bearbeiten → „Integrationen / Nach Absenden" → „Webhook"</li>
+            <li>URL einfügen, Method POST, Content-Type application/json</li>
+            <li>Alle Formularfelder als Payload weitergeben — Name/E-Mail/Telefon werden automatisch erkannt</li>
+            <li>Testen: eine Test-Anfrage abschicken → sollte sofort in der Liste erscheinen</li>
+          </ol>
+        </details>
+      </section>
+
+      {anfragenListUrl && (
+        <section className="card" style={{ padding: 16 }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Anfragen-Link für den Kunden</h3>
+          <p className="pane-hint" style={{ marginTop: 0 }}>Weitergeben — der Kunde sieht alle Anfragen in Echtzeit.</p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <code style={{ flex: 1, padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 6, fontSize: 12, wordBreak: 'break-all' }}>{anfragenListUrl}</code>
+            <button className="btn-ghost btn-sm" onClick={() => copyToClipboard(anfragenListUrl)}>Kopieren</button>
+            <a className="btn-ghost btn-sm" href={anfragenListUrl} target="_blank" rel="noreferrer">Öffnen</a>
+          </div>
+        </section>
+      )}
+
+      <section>
+        <div className="section-head">
+          <div>
+            <h2 className="section-title">Anfragen ({anfragen.length})</h2>
+            <p className="section-sub">Eingegangene Kundenanfragen — Status + Notiz editierbar.</p>
+          </div>
+          <button className="btn-ghost btn-sm" onClick={refreshAnfragen} disabled={loadingAnfragen}>
+            {loadingAnfragen ? 'Lade…' : '↻ Aktualisieren'}
+          </button>
+        </div>
+        {loadingAnfragen && anfragen.length === 0 ? (
+          <div className="card empty">Lade Anfragen…</div>
+        ) : anfragen.length === 0 ? (
+          <div className="card empty">
+            <h2>Noch keine Anfragen</h2>
+            <p>Sobald über den Webhook oben eine Anfrage eingeht, taucht sie hier auf.</p>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table" style={{ margin: 0, width: '100%' }}>
+                <thead>
+                  <tr><th>Datum</th><th>Name</th><th>Kontakt</th><th>Weitere Felder</th><th>Status</th><th>Notizen</th></tr>
+                </thead>
+                <tbody>
+                  {anfragen.map(a => (
+                    <tr key={a.id} style={{ opacity: a.status === 'verloren' ? 0.55 : 1 }}>
+                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                      <td><strong>{a.name || '—'}</strong></td>
+                      <td style={{ fontSize: 12 }}>
+                        {a.email  && <div><a href={`mailto:${a.email}`}>{a.email}</a></div>}
+                        {a.telefon && <div><a href={`tel:${a.telefon}`}>{a.telefon}</a></div>}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                        {Object.entries(a.daten || {}).slice(0, 4).map(([k, v]) => (
+                          <div key={k}><strong>{k}:</strong> {String(v).slice(0, 60)}</div>
+                        ))}
+                      </td>
+                      <td>
+                        <select value={a.status} onChange={e => updateAnfrage(a.id, { status: e.target.value })}
+                          style={{ padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12 }}>
+                          {Object.entries(STATUS_LABEL_NK).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <textarea rows={2} defaultValue={a.notizen || ''}
+                          onBlur={e => e.target.value !== (a.notizen || '') && updateAnfrage(a.id, { notizen: e.target.value || null })}
+                          placeholder="Notiz…"
+                          style={{ width: 200, padding: '4px 6px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, resize: 'vertical' }} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

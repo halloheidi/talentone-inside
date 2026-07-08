@@ -162,4 +162,74 @@ router.post('/perspective', async (req, res) => {
   }
 });
 
+/* POST /api/webhooks/leads?job_id=<uuid>&secret=<optional>
+   Nimmt Kundenanfragen aus externen Landingpage-Buildern (onepage.io u. Ä.)
+   entgegen. Kontaktdaten werden extrahiert (Name/Mail/Telefon), alle
+   weiteren Felder landen in `daten` (jsonb). Anschließend Best-Effort-Mail
+   an den Kunden. */
+router.post('/leads', async (req, res) => {
+  const { job_id, secret } = req.query || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id query param fehlt.' });
+
+  const requiredSecret = process.env.LEADS_WEBHOOK_SECRET;
+  if (requiredSecret && secret !== requiredSecret) {
+    return res.status(401).json({ error: 'invalid secret' });
+  }
+
+  try {
+    const { data: job, error: jE } = await supabase
+      .from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
+    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+    const contact = extractContact(req.body);
+    // Rest-Felder = alles außer den Kontakt-/Meta-Feldern in einem jsonb-Dump.
+    const restDaten = {};
+    for (const [k, v] of Object.entries(req.body || {})) {
+      const lk = String(k).toLowerCase();
+      if (META_KEYS.has(lk) || FLAT_CONTACT_KEYS.has(lk)) continue;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        restDaten[k] = v;
+      } else if (v && typeof v === 'object') {
+        restDaten[k] = v;
+      }
+    }
+    // Wenn kein Rest-Feld extrahierbar war: alle Perspective-artigen Antworten mitschreiben
+    if (Object.keys(restDaten).length === 0 && contact.antworten?.length) {
+      for (const a of contact.antworten) restDaten[a.frage || 'antwort'] = a.antwort;
+    }
+
+    const { data: anfrage, error: insErr } = await supabase
+      .from('talentone_anfragen').insert({
+        job_id: job.id,
+        name:    contact.name,
+        email:   contact.email,
+        telefon: contact.telefon,
+        daten:   restDaten,
+        quelle:  'webhook',
+        status:  'neu',
+      }).select().single();
+    if (insErr) return res.status(500).json({ error: insErr.message });
+
+    // Best-Effort-Mail an den Kunden (blockt niemals die Response)
+    (async () => {
+      try {
+        const { data: kunde } = await supabase
+          .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+        if (!kunde?.email) return;
+        const { sendAnfrageMail } = await import('../mail.js');
+        const { getPublicBaseUrl } = await import('../branding.js');
+        const anfragenUrl = job.anfragen_token
+          ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${job.anfragen_token}`
+          : null;
+        await sendAnfrageMail({ to: kunde.email, kunde, job, anfrage, anfragenUrl });
+      } catch (err) { console.warn('[leads-mail]', err.message); }
+    })().catch(err => console.error('[leads-mail-uncaught]', err.message));
+
+    res.status(201).json({ ok: true, anfrage_id: anfrage.id });
+  } catch (err) {
+    console.error('[webhooks/leads]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

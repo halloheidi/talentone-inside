@@ -41,6 +41,10 @@ export default function NewProjectModal({ open, onClose, kunde }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null); // { mode: 'formular', email }
+  // Projekttyp — bei N&W wählbar zwischen Mitarbeitergewinnung (default)
+  // und Neukundengewinnung. Bei TalentOne bleibt es fix Mitarbeitergewinnung.
+  const kannNeukunden = kunde?.agentur === 'nowagwirth';
+  const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
 
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -71,7 +75,7 @@ export default function NewProjectModal({ open, onClose, kunde }) {
     setError('');
     setBusy(true);
     try {
-      let body = { kunde_id: kunde.id };
+      let body = { kunde_id: kunde.id, projekttyp };
       if (tab === 'url') {
         if (!url.trim()) throw new Error('Bitte URL eingeben.');
         body.mode = 'url';
@@ -142,6 +146,20 @@ export default function NewProjectModal({ open, onClose, kunde }) {
         </div>
       ) : (
         <>
+          {kannNeukunden && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: 0.03 }}>PROJEKTTYP</span>
+              <button type="button" onClick={() => setProjekttyp('mitarbeitergewinnung')} disabled={busy}
+                className={`pub-filter ${projekttyp === 'mitarbeitergewinnung' ? 'is-active' : ''}`}>
+                👷 Mitarbeitergewinnung
+              </button>
+              <button type="button" onClick={() => setProjekttyp('neukundengewinnung')} disabled={busy}
+                className={`pub-filter ${projekttyp === 'neukundengewinnung' ? 'is-active' : ''}`}>
+                🎯 Neukundengewinnung
+              </button>
+            </div>
+          )}
+
           <div className="modal-tabs">
             {TABS.map(t => (
               <button

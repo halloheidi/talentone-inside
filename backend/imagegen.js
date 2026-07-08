@@ -402,10 +402,94 @@ DESIGN-REGELN:
 - Wirkung: echtes Foto = Held, Overlay-Job-Block macht klar "hier wird XY gesucht in der Region"`;
 }
 
-// Wrapper — wählt den passenden Prompt anhand des Modus.
+// Wrapper — wählt den passenden Prompt anhand des Projekttyps und Modus.
+// Projekttyp „neukundengewinnung" → Lead-Gen-Layout (Produkt/Ergebnis im Fokus,
+// CTA „Kostenloses Angebot", keine Stellenbezeichnung). Sonst Recruiting.
 export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch }) {
+  if (job?.projekttyp === 'neukundengewinnung') {
+    return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
+  }
   if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch });
   return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch });
+}
+
+// Prompt für Neukundengewinnung (Lead-Gen-Ad).
+function buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch }) {
+  const nk = job?.neukunden_daten || {};
+  const produkt   = (nk.produkt || job?.stelle || 'Angebot').toString().trim();
+  const produktGross = produkt.toUpperCase();
+  const zielgruppe   = (nk.zielgruppe || '').toString().trim();
+  const region       = (nk.einzugsgebiet || job?.region || '').toString().trim();
+  const vorteile     = Array.isArray(nk.vorteile) ? nk.vorteile.filter(Boolean).slice(0, 4) : [];
+  const unterschied  = (nk.unterschied || '').toString().trim();
+  const firmenname   = kunde?.firmenname || '';
+  const orientation  = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const farben = buildFarbenHinweis(kunde);
+
+  const refHinweis = [];
+  const LOGO_FREI = `WICHTIG: Lasse den Bereich oben rechts (ca. 20% × 15%, mit Abstand zum Rand) VÖLLIG FREI — dort wird nachträglich per Code das Original-Firmenlogo als Overlay eingefügt. Zeichne oben rechts KEIN Logo, KEIN Firmenname-Text, KEINE Marken-Grafik.`;
+  if (mode === 'foto') {
+    if (hasLogo) {
+      refHinweis.push(`MITGELIEFERTE BILDER:\n[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-Referenz. ${LOGO_FREI}\n[BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm EXAKT als Hintergrund, ohne Verfremdung.`);
+    } else {
+      refHinweis.push(`MITGELIEFERTES BILD = HINTERGRUND. Übernimm EXAKT als Hintergrund, ohne Verfremdung.`);
+    }
+  } else {
+    if (hasLogo && person) {
+      refHinweis.push(
+        `MITGELIEFERTE BILDER:`,
+        `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. ${LOGO_FREI}`,
+        `[BILD 2 — DATEINAME "produkt"] = PRODUKT- oder KUNDEN-REFERENZ. Zeigt das Produkt / eine Anwendungssituation. Nutze es als visuelles Herzstück des Creatives — respektiere die realen Proportionen und Details.`,
+      );
+    } else if (hasLogo) {
+      refHinweis.push(`MITGELIEFERTES BILD = FIRMENLOGO. NUR als Farb-Referenz. ${LOGO_FREI}`);
+    } else if (person) {
+      refHinweis.push(`MITGELIEFERTES BILD = PRODUKT-REFERENZ. Nutze es als visuelles Herzstück (reale Details, keine Verfremdung).`);
+    }
+  }
+
+  const vorteileZeile = vorteile.length > 0
+    ? vorteile.map(v => `"${v}"`).join(', ')
+    : '"schnelle Umsetzung", "individuelle Beratung", "Top-Qualität", "u.v.m."';
+
+  return `Erstelle eine hochwertige Social Media Lead-Gen-Anzeige ${orientation} — professionelles Recruiting-Agentur-Design (Pinselstrich-/Spritzer-Elemente in Markenfarbe), aber inhaltlich auf KAUFINTERESSENTEN, nicht Bewerber.
+
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV / HINTERGRUND:
+${motiv || (mode === 'foto' ? 'Verwende das mitgelieferte Foto als Hintergrund.' : 'Realistisch und ansprechend, Fokus auf Produkt/Anwendung — z. B. echte Anwendungssituation, glückliche Kunden, Ergebnis.')}
+${zielgruppe ? `\nZielgruppe: ${zielgruppe}` : ''}${unterschied ? `\nUnterscheidungsmerkmal: ${unterschied}` : ''}
+
+═══════════════════════════════════════════════════════════════
+LAYOUT: FESTER UNTERER BEREICH (Angebot-Block) + FLEXIBLER OBERER BEREICH
+═══════════════════════════════════════════════════════════════
+
+FESTER UNTERER BEREICH (ca. 25% der Bildhöhe):
+• PRODUKT-/ANGEBOT-BEZEICHNUNG in fetten Großbuchstaben (formatfüllend): "${produktGross}"
+${region ? `• Meta-Leiste darunter: "📍 ${region}"` : ''}
+• Große CTA-Fläche: "Jetzt kostenloses Angebot sichern" ODER "Jetzt kostenlos anfragen" — als aufmerksamkeitsstarker Button in Markenfarbe, klare Kanten, sehr lesbar
+• Farbig hinterlegt in Markenfarbe (bzw. gewählter Akzentfarbe), Text in Kontrastfarbe
+
+FLEXIBLER BEREICH OBEN (die oberen ca. 60% — Stil & Anordnung darfst du variieren):
+
+• HOOK / HAUPTSPRUCH (Position frei):
+  ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden. GROSS, fett, sofort neugierig machend; gerne auf einem PINSELSTRICH-Banner in Markenfarbe. Mehrzeilig OK.`
+    : `Kurzer, emotionaler Hook (max. 5-6 Wörter), der Nutzen oder Ergebnis für den Kunden verspricht. KEIN "Wir suchen dich"-Klischee. Beispiel-Muster: Frage-Hook, Ergebnis-Versprechen, Neugier-Gap.`}
+
+• 3-4 PRODUKT-VORTEILE als runde Icon-Badges (Kreise, ca. 60-90px) mit Icon + kompakter Beschriftung: ${vorteileZeile}
+  Kompakte Begriffe — keine Sätze. Anordnung frei.
+
+• Logo-Bereich oben rechts bleibt FREI (wird per Code als Overlay ergänzt). KEIN Firmenname-Text.
+
+• Produkt/Motiv-Anordnung frei (links, rechts, mittig oder freigestellt)
+• Pinselstrich- oder Farbspritzer-Elemente in Markenfarbe als gestalterische Akzente
+
+DESIGN-REGELN:
+- HIERARCHIE der Größen: ANGEBOT-BEZEICHNUNG (am größten, formatfüllend im unteren Block) > CTA > Hook > Vorteile > Meta-Leiste
+- ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, CTA.' : 'Wähle 1-2 kräftige Akzentfarben (z. B. orange/türkis/rot) für Pinselstriche, Meta-Leiste und CTA.'}
+- Schrift modern, sehr lesbar
+- Keine QR-Codes, keine Rahmen ums Bild
+- Firmenname "${firmenname}" darf im unteren Bereich als kleiner Vermerk erscheinen (dezent, max. 8% Bildhöhe)
+- Muss am Handy sofort Scroll-Stop erzeugen und Kaufinteresse triggern (Angebot / Vorteil / CTA klar erkennbar)`;
 }
 
 /* ───────────────────────── Bild-Generierung ───────────────────────── */

@@ -24,6 +24,7 @@ const CUSTOMER_FACING = [
   'sendRechnungMail',        // neue Standalone-/Setup-Mail (Migration 013)
   'sendEinstellungsMail',
   'sendErinnerungsMail',
+  'sendAnfrageMail',   // Neukunden-Anfrage-Mail (Migration 021)
 ];
 
 // Team-Notifications und interne Mails — GARANTIERT ohne BCC. Werden hier

@@ -120,7 +120,81 @@ Zeile 1: Provokante Frage oder ungewöhnliches Statement + Emoji am Ende (🤔 /
 
 export const LINK_PLACEHOLDER = '[Funnel-Link wird ergänzt]';
 
+/* ═══════════════════ Neukundengewinnung (Lead-Gen) ═══════════════════ */
+function buildBriefingNeukunden(job, kunde) {
+  const nk = job.neukunden_daten || {};
+  const vorteile = Array.isArray(nk.vorteile) ? nk.vorteile.filter(Boolean) : [];
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  return `BRIEFING (Neukundengewinnung):
+- Firma: ${kunde?.firmenname || '-'}
+- Branche: ${branche || '-'}
+- Produkt / Dienstleistung: ${nk.produkt || '-'}
+- Zielgruppe: ${nk.zielgruppe || '-'}
+- Wofür Kunden gesucht werden: ${nk.kundenprofil || '-'}
+- Vorteile des Produkts: ${vorteile.join(', ') || '-'}
+- Unterschied zum Wettbewerb: ${nk.unterschied || '-'}
+- Preisrahmen / Angebot: ${nk.preisrahmen || '-'}
+- Einzugsgebiet: ${nk.einzugsgebiet || job.region || '-'}`;
+}
+
+const STYLE_SPEC_NEUKUNDEN = {
+  emotional: `STIL: PROBLEM / LÖSUNG — 130-180 Wörter
+
+ZWINGENDER AUFBAU:
+Zeile 1: 🎯 (oder branchenpassendes Emoji) + STARKER Hook zum Schmerzpunkt der Zielgruppe
+[Leerzeile]
+2-3 Sätze: Beschreibe den konkreten Schmerz/Frust der Zielgruppe — Du-Ansprache, "Kennst du das?" / "Nervt dich…?" / "Endlich schluss mit…"
+[Leerzeile]
+"So löst [Produkt] dein Problem:"
+[Leerzeile]
+3-4 Zeilen mit ✅ und konkretem Vorteil/Ergebnis
+[Leerzeile]
+👉 CTA (Kaufinteresse, KEINE Bewerbung): "Jetzt kostenloses Angebot sichern" oder "Kostenlose Beratung anfragen"
+📍 ${'${region}'}`,
+
+  benefit: `STIL: NUTZEN-FOKUSSIERT — 120-160 Wörter
+
+ZWINGENDER AUFBAU:
+Zeile 1: 🚀 (oder branchenpassendes Emoji) + Prägnante Headline zum Angebot: "[Produkt] für [Zielgruppe]!"
+[Leerzeile]
+"Das bekommst du:"
+[Leerzeile]
+5-7 Benefit-Zeilen mit passenden Emojis + konkretem Nutzen:
+💰 [Preis-Vorteil / Ersparnis]
+⏰ [Zeit-Vorteil / schnelle Lieferung]
+🏆 [Qualitäts-Vorteil]
+🤝 [Service / Beratung]
+[weitere passende Emojis: 🔧 🌱 🛡️ 📈 🎁 ⚡ etc.]
+➕ u.v.m.
+[Leerzeile]
+2 optionale Kontrast-Zeilen:
+❌ Kein [typisches Problem der Zielgruppe]
+❌ Kein [weiteres Problem]
+[Leerzeile]
+✅ Stattdessen: [klares positives Ergebnis]
+[Leerzeile]
+📩 Niedrigschwelliger CTA: "Jetzt kostenlos anfragen" / "Kostenloses Angebot sichern"
+📍 ${'${region}'}`,
+
+  kompakt: `STIL: KURZ & NEUGIER-GAP — 50-90 Wörter
+
+ZWINGENDER AUFBAU:
+Zeile 1: Provokante Frage oder Neugier-Hook + Emoji am Ende (🤔 / 💡 / 🚀 / 🎯 — passend wählen)
+[Leerzeile]
+"3 Gründe, warum [Produkt/Firma] anders ist:"
+[Leerzeile]
+1️⃣ [Vorteil, MAX 6 Wörter]
+2️⃣ [Vorteil, MAX 6 Wörter]
+3️⃣ [Vorteil, MAX 6 Wörter]
+[Leerzeile]
+👉 CTA (Kauf-Intent): "Jetzt kostenlos anfragen" / "Angebot sichern"`,
+};
+
 function buildPrompt(job, kunde, style, funnelUrl) {
+  // Weiche: für Neukundengewinnung eigenen Prompt-Pfad mit Kauf-CTA.
+  if (job?.projekttyp === 'neukundengewinnung') {
+    return buildPromptNeukunden(job, kunde, style, funnelUrl);
+  }
   const ort = cleanOrt(job.region) || 'Region';
   const stelle = stelleDisplay(job.stelle);
   const firma = kunde?.firmenname || 'das Unternehmen';
@@ -140,7 +214,11 @@ In der CTA-Zeile am Ende verwende DIESEN Platzhalter EXAKT (wird später automat
 ${LINK_PLACEHOLDER}
 Beispiel: "👉 Jetzt bewerben: ${LINK_PLACEHOLDER}"`;
 
-  return `${buildBriefing(job, kunde)}
+  return buildFinalPrompt({ briefing: buildBriefing(job, kunde), linkBlock, spec, kunde });
+}
+
+function buildFinalPrompt({ briefing, linkBlock, spec, kunde }) {
+  return `${briefing}
 
 ${linkBlock}
 
@@ -157,6 +235,44 @@ GLOBALE REGELN
 - Referenz-Vorbilder im Stil: Performance Recruiting, Terbeek, Schilling — kurze visuelle Häppchen, jede Zeile ein Wert
 - Stellenbezeichnung IMMER mit "(m/w/d)" am Ende — z.B. "Fahrzeugaufbereiter (m/w/d)", "Pflegefachkraft (m/w/d)". Niemals ohne.
 - Standort: NUR den Ort nennen (z.B. "📍 Essen"), KEINEN Umkreis / Radius / "+30km" / "(Umkreis 50km)".
+
+FORMAT
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>" }`;
+}
+
+// Neukunden-Ad-Copy: gleicher AUFGABE-Rahmen, aber mit Lead-Gen-Regeln.
+function buildPromptNeukunden(job, kunde, style, funnelUrl) {
+  const nk = job.neukunden_daten || {};
+  const ort = cleanOrt(nk.einzugsgebiet || job.region || '') || 'Region';
+  const produkt = nk.produkt || 'Produkt';
+  const spec = STYLE_SPEC_NEUKUNDEN[style]
+    ?.replaceAll('${region}', ort)
+    ?.replaceAll('${produkt}', produkt);
+  if (!spec) throw new Error(`Neukunden-Prompt: unbekannter Stil ${style}`);
+
+  const linkBlock = funnelUrl
+    ? `ANFRAGE-LINK: ${funnelUrl}
+Diesen Link MUSS in der CTA-Zeile am Ende exakt so vorkommen (z. B. "👉 Jetzt Angebot sichern: ${funnelUrl}").`
+    : `ANFRAGE-LINK: noch nicht verfügbar.
+In der CTA-Zeile den Platzhalter EXAKT verwenden: ${LINK_PLACEHOLDER}`;
+
+  return `${buildBriefingNeukunden(job, kunde)}
+
+${linkBlock}
+
+AUFGABE
+Schreibe EINE deutsche Social-Media-Lead-Gen-Ad für Facebook und Instagram, die BEWUSSTE KAUFINTERESSENTEN anspricht (KEINE Bewerber). CTA immer auf Anfrage/Angebot gerichtet — NICHT auf Bewerbung. Standalone verständlich, visuell mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
+
+${spec}
+
+GLOBALE REGELN
+- Du-Ansprache, locker, auf Augenhöhe — KEIN „Sehr geehrte Damen und Herren", KEIN „Bewerben Sie sich"
+- Emojis passend zur Branche (${kunde?.branche || 'allgemein'}) und Zielgruppe. Nicht random.
+- Konkrete Zahlen/Vorteile wenn möglich (z. B. „bis 40% Ersparnis" statt „günstig")
+- Echte Zeilenumbrüche zwischen den Sektionen (im JSON als \\n)
+- Standort: NUR den Ort/das Gebiet nennen, KEINE Umkreisangabe.
+- KEINE „(m/w/d)"-Notation — das hier ist keine Stellenanzeige.
 
 FORMAT
 Antworte NUR mit JSON, keine Markdown-Backticks:

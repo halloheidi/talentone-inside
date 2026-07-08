@@ -510,6 +510,71 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
   return await response.json();
 }
 
+/* ════════════════════ Neukunden-Anfrage an Kunden ════════════════════
+   Kommt via Webhook-Endpoint /api/webhooks/leads rein. Kompaktes „🎉 Neue
+   Anfrage"-Layout mit Link zum Public-Anfragen-Dashboard. Branding je
+   Agentur, BCC ans interne Team. */
+export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const produkt = job?.stelle || (job?.neukunden_daten?.produkt) || 'Produkt';
+  const daten = anfrage?.daten || {};
+  const datenRows = Object.entries(daten)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => `<tr>
+      <td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:35%;">${escape(k)}</td>
+      <td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;">${escape(String(v).slice(0, 300))}</td>
+    </tr>`).join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🎉 Neue Anfrage · ${escape(brand.name)}</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(anfrage?.name || 'Neue Kundenanfrage')}</h1>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Interesse an <strong>${escape(produkt)}</strong></p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:6px 0 18px;">
+        ${anfrage?.email   ? `<tr><td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:35%;">E-Mail</td><td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;"><a href="mailto:${escape(anfrage.email)}" style="color:#0a0a0a;">${escape(anfrage.email)}</a></td></tr>` : ''}
+        ${anfrage?.telefon ? `<tr><td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">Telefon</td><td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;"><a href="tel:${escape(anfrage.telefon)}" style="color:#0a0a0a;">${escape(anfrage.telefon)}</a></td></tr>` : ''}
+        ${datenRows}
+      </table>
+    </td></tr>
+    ${anfragenUrl ? `<tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(anfragenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;">→ Alle Anfragen ansehen</a>
+    </td></tr>` : ''}
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Melde dich zeitnah — je schneller die Kontaktaufnahme, desto höher die Abschluss-Wahrscheinlichkeit.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>Euer ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const textLines = [
+    `Neue Anfrage für ${produkt}`, '',
+    anfrage?.name    ? `Name:    ${anfrage.name}`    : null,
+    anfrage?.email   ? `E-Mail:  ${anfrage.email}`   : null,
+    anfrage?.telefon ? `Telefon: ${anfrage.telefon}` : null,
+    ...Object.entries(daten).map(([k, v]) => `${k}: ${String(v).slice(0, 200)}`),
+    anfragenUrl ? `\nAlle Anfragen: ${anfragenUrl}` : null,
+  ].filter(Boolean);
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getMailReplyTo(brand),
+      subject: `🎉 Neue Anfrage für ${produkt}: ${anfrage?.name || anfrage?.email || 'Interessent'}`,
+      html, text: textLines.join('\n'),
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ════════════════════ @-Mention im Projekt-Kommentar ════════════════════ */
 
 export async function sendMentionMail({ to, mentionedName, autor, projektName, kommentar, projektUrl }) {
