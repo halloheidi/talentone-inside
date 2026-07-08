@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 import Modal from '../../components/Modal.jsx';
+import { displayNameForEmail } from '../../lib/team-display.js';
 
 const BRANDS = [
   { key: 'talentone',   label: 'TalentOne' },
@@ -477,7 +478,10 @@ function AssetsTab({ brand }) {
                 <div style={{ color: 'var(--ink-3)' }}>Größe:</div>
                 <div>{Math.round(asset.size_bytes / 1024)} KB</div>
                 <div style={{ color: 'var(--ink-3)' }}>Hochgeladen:</div>
-                <div>{new Date(asset.uploaded_at).toLocaleString('de-DE')} {asset.uploaded_by ? `von ${asset.uploaded_by}` : ''}</div>
+                <div title={asset.uploaded_by || undefined}>
+                  {new Date(asset.uploaded_at).toLocaleString('de-DE')}
+                  {asset.uploaded_by ? ` von ${displayNameForEmail(asset.uploaded_by)}` : ''}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <a href={`/api/offer-catalog/brand-assets/${brand}/preview`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">📄 Vorschau</a>

@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { supabase } from '../lib/supabase.js';
 import Modal from '../components/Modal.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
+import { displayNameForEmail } from '../lib/team-display.js';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -234,7 +235,9 @@ export default function OffersList() {
                         </div>
                       )}
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--ink-3)' }}>{o.created_by || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--ink-3)' }} title={o.created_by || undefined}>
+                      {o.created_by ? displayNameForEmail(o.created_by) : '—'}
+                    </td>
                     <td style={{ whiteSpace: 'nowrap', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       {hasPdf && (
                         <button className="btn-ghost btn-sm" title="PDF öffnen" disabled={isBusy}
