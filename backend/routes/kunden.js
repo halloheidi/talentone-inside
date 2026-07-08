@@ -513,9 +513,10 @@ router.delete('/referenzbilder/:id', async (req, res) => {
 
 // POST /api/kunden/formular-anlegen  body: { email, firmenname?, ansprechpartner?, customText? }
 router.post('/formular-anlegen', async (req, res) => {
-  const { email, firmenname, ansprechpartner, customText, agentur } = req.body || {};
+  const { email, firmenname, ansprechpartner, customText, agentur, projekttyp } = req.body || {};
   if (!email?.trim()) return res.status(400).json({ error: 'E-Mail ist Pflicht.' });
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
+  const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
 
   const token = randomUUID();
   const { data: kunde, error: kErr } = await supabase
@@ -531,11 +532,24 @@ router.post('/formular-anlegen', async (req, res) => {
     .select().single();
   if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });
 
+  // Wartender Job (Platzhalter) — damit GET /formular/:token den projekttyp findet
+  const { error: jErr } = await supabase
+    .from('talentone_jobs')
+    .insert({
+      kunde_id: kunde.id,
+      projekttyp: pt,
+      stelle: pt === 'neukundengewinnung' ? '[Produkt-Briefing ausstehend]' : '[Briefing ausstehend]',
+      eingabe_methode: 'neu',
+      vorqualifizierung: pt === 'mitarbeitergewinnung' && finalAgentur === 'nowagwirth',
+      formdata_komplett: { _wartet_auf_briefing: true },
+    });
+  if (jErr) console.error('[formular-anlegen] Job anlegen:', jErr.message);
+
   const formularUrl = `${getPublicBaseUrl(kunde.agentur)}/formular/${token}`;
   try {
     await sendFormularEinladung({
       to: kunde.email, ansprechpartner: kunde.ansprechpartner,
-      formularUrl, customText, agentur: kunde.agentur,
+      formularUrl, customText, agentur: kunde.agentur, projekttyp: pt,
     });
   } catch (err) {
     console.error('[formular-anlegen] Mail:', err.message);

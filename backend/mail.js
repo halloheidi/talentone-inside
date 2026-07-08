@@ -110,11 +110,34 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
 
 /* ─────────────────── Formular-Einladung an Kunde ─────────────────── */
 
-export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, customText, agentur }) {
+export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, customText, agentur, projekttyp }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
   const grußname = ansprechpartner || 'zusammen';
-  const intro = (customText || '').trim() || `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`;
+  const isNeukunden = projekttyp === 'neukundengewinnung';
+
+  const defaultIntro = isNeukunden
+    ? `wir freuen uns auf eure Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um euer Angebot, eure Zielgruppe und euer Unternehmen ein. Dauert etwa 10 Minuten.`
+    : `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`;
+  const intro = (customText || '').trim() || defaultIntro;
+
+  const bullets = isNeukunden
+    ? [
+        'Euer Produkt oder eure Dienstleistung',
+        'Eure Zielgruppe und was ihr besonders gut könnt',
+        'Logo + ein paar Produkt- oder Referenzbilder',
+      ]
+    : [
+        'Eure offene Stelle und was sie besonders macht',
+        'Benefits und Arbeitsumfeld',
+        'Logo + ein paar Fotos von euch',
+      ];
+  const tipp = isNeukunden
+    ? `<strong>Tipp:</strong> Falls ihr eine bestehende Landingpage oder ein Angebots-PDF habt, könnt ihr die URL oder Datei oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`
+    : `<strong>Tipp:</strong> Falls ihr eine bestehende Stellenanzeige als URL oder PDF habt, könnt ihr sie oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`;
+  const subject = isNeukunden
+    ? 'Kurzes Briefing-Formular für eure Neukunden-Kampagne'
+    : 'Kurzes Briefing-Formular für eure Recruiting-Kampagne';
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -122,12 +145,10 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n/g, '<br>')}</p>
       <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">Im Formular fragen wir ab:</p>
       <ul style="font-size:14px;line-height:1.7;color:#2a2a2a;margin:0 0 22px;padding-left:18px;">
-        <li>Eure offene Stelle und was sie besonders macht</li>
-        <li>Benefits und Arbeitsumfeld</li>
-        <li>Logo + ein paar Fotos von euch</li>
+        ${bullets.map(b => `<li>${escape(b)}</li>`).join('')}
       </ul>
       <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">
-        <strong>Tipp:</strong> Falls ihr eine bestehende Stellenanzeige als URL oder PDF habt, könnt ihr sie oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.
+        ${tipp}
       </p>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
@@ -150,7 +171,7 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
       to,
       bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
-      subject: 'Kurzes Briefing-Formular für eure Recruiting-Kampagne',
+      subject,
       html, text,
     }),
   });

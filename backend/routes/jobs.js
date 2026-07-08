@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { extractFromUrl, extractFromFile, toJob } from '../extractor.js';
-import { sendUploadAnfrage } from '../mail.js';
+import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
+import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
 
 const router = Router();
@@ -55,23 +56,23 @@ router.post('/quick-create', async (req, res) => {
       .select().single();
     if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
 
-    // Mail mit Briefing-Anfrage versenden (Upload-Link mit personalisiertem Text)
-    let token = kunde.upload_token;
+    // Mail mit Briefing-Formular-Link versenden — Formular unter /formular/:token
+    // (nicht /upload/:token — das ist nur der Datei-Upload). Braucht formular_token.
+    let token = kunde.formular_token;
     if (!token) {
-      token = (await import('node:crypto')).randomUUID();
-      await supabase.from('talentone_kunden').update({ upload_token: token }).eq('id', kunde_id);
+      token = randomUUID();
+      await supabase.from('talentone_kunden').update({ formular_token: token }).eq('id', kunde_id);
     }
-    const uploadUrl = `${getPublicBaseUrl(kunde.agentur)}/upload/${token}`;
-    const defaultText = `wir starten ein neues Projekt für euch und brauchen dafür ein paar Briefing-Infos: Stelle, Region, Benefits, Gehalt, Eigenheiten der Position. Bitte schickt uns die Details — gerne per Mail-Antwort oder direkt über euren persönlichen Upload-Link (Fotos / Logo / Stellenanzeige als PDF).`;
+    const formularUrl = `${getPublicBaseUrl(kunde.agentur)}/formular/${token}`;
 
     try {
-      await sendUploadAnfrage({
+      await sendFormularEinladung({
         to: kunde.email,
-        kundenname: kunde.firmenname || 'euer Team',
         ansprechpartner: kunde.ansprechpartner,
-        uploadUrl,
-        customText: customText || defaultText,
+        formularUrl,
+        customText,
         agentur: kunde.agentur,
+        projekttyp: pt,
       });
     } catch (err) {
       console.error('[jobs/quick-create/formular] Mail:', err.message);

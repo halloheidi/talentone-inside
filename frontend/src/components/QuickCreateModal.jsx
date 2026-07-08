@@ -98,6 +98,7 @@ export default function QuickCreateModal({ open, onClose }) {
 
   // Invite-Tab: Kunde füllt selbst aus
   const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
+  const [inviteProjekttyp, setInviteProjekttyp] = useState('mitarbeitergewinnung');
   const [inviteSuccess, setInviteSuccess] = useState(null); // { firmenname, formularUrl } | null
 
   // Dubletten-Check: nutzt das aktive Firmenname-Feld je nach Tab (manual / invite)
@@ -151,6 +152,7 @@ export default function QuickCreateModal({ open, onClose }) {
             ansprechpartner: invite.ansprechpartner.trim() || undefined,
             customText: invite.customText.trim() || undefined,
             agentur,
+            projekttyp: agentur === 'nowagwirth' ? inviteProjekttyp : 'mitarbeitergewinnung',
           },
         });
         setInviteSuccess({
@@ -389,6 +391,21 @@ export default function QuickCreateModal({ open, onClose }) {
                   <span>Ansprechpartner (optional)</span>
                   <input value={invite.ansprechpartner} onChange={e => setInvite({ ...invite, ansprechpartner: e.target.value })} />
                 </label>
+                {agentur === 'nowagwirth' && (
+                  <div className="field field-full">
+                    <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#5a5955', letterSpacing: 0.05, textTransform: 'uppercase', marginBottom: 6 }}>Projekttyp</span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={() => setInviteProjekttyp('mitarbeitergewinnung')}
+                        className={`pub-filter ${inviteProjekttyp === 'mitarbeitergewinnung' ? 'is-active' : ''}`}>
+                        👥 Mitarbeitergewinnung
+                      </button>
+                      <button type="button" onClick={() => setInviteProjekttyp('neukundengewinnung')}
+                        className={`pub-filter ${inviteProjekttyp === 'neukundengewinnung' ? 'is-active' : ''}`}>
+                        🎯 Neukundengewinnung
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <label className="field field-full">
                   <span>Persönlicher Mail-Text (optional)</span>
                   <textarea
