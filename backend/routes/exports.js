@@ -93,7 +93,13 @@ router.post('/jobs/:id/export/anschreiben', async (req, res) => {
 });
 
 /* POST /api/jobs/:id/export/email
-   body: { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel } */
+   body: { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel }
+   Automatik: wenn zur Zeit des Versands bereits eine Review mit
+   status='aenderungen' existiert, wird dieser Versand als „Runde N+1"
+   markiert — eine neue leere Review-Row angelegt, Betreff/Body-Präfix,
+   Versand-Historie mit typ='entwurf_runde_N', und das verknüpfte Projekt
+   springt von „feedbackschleife" zurück auf „warte_auf_go" + Auto-
+   Kommentar. */
 router.post('/jobs/:id/export/email', async (req, res) => {
   const { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel } = req.body || {};
   if (!to?.trim()) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
@@ -112,28 +118,82 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     const reviewToken = await ensureReviewToken(job.id, job.review_token);
     const reviewUrl = `${baseUrl}/review/${reviewToken}`;
 
+    // Runden-Erkennung: gibt es bereits eine Review mit „aenderungen"?
+    // Wenn ja, ist DIESER Versand die Antwort auf das Kunden-Feedback → neue
+    // Runde. Sonst: normaler Runde-1-Versand.
+    const { data: latestReview } = await supabase.from('talentone_reviews')
+      .select('id, runde, status')
+      .eq('job_id', job.id)
+      .order('runde', { ascending: false }).limit(1).maybeSingle();
+    const istNeueRunde = !!(latestReview && latestReview.status === 'aenderungen');
+    const neueRundeNr = istNeueRunde ? (Number(latestReview.runde || 1) + 1) : 1;
+
+    // Bei neuer Runde: leere Review-Row anlegen, damit der Kunde beim
+    // Öffnen der Review-URL direkt eine frische Runde ohne Kommentare sieht.
+    if (istNeueRunde) {
+      await supabase.from('talentone_reviews').insert({
+        job_id: job.id, token: reviewToken,
+        status: null, kommentare: null, kommentare_snapshot: null,
+        runde: neueRundeNr,
+      });
+    }
+
+    const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
+    const finalBetreff = istNeueRunde
+      ? `Deine überarbeiteten Entwürfe — Runde ${neueRundeNr}`
+      : (betreff || null);
+    const finalAnschreiben = istNeueRunde
+      ? `Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:\n\n${anschreiben || ''}`.trim()
+      : anschreiben;
+
     await sendEntwurfsMail({
-      to: to.trim(), betreff, anschreiben, job, kunde,
+      to: to.trim(),
+      betreff: finalBetreff, anschreiben: finalAnschreiben,
+      job, kunde,
       creatives: selCreatives, adcopies: selAdcopies,
       funnelUrl, sheetUrl, reviewUrl,
     });
 
-    // Historie speichern
+    // Historie speichern (mit Runden-Marker)
     const { error: insErr } = await supabase.from('talentone_versand').insert({
       job_id: job.id,
       empfaenger: to.trim(),
-      betreff: betreff || null,
+      betreff: (rundePrefix + (finalBetreff || '')).trim() || null,
       gesendet_von: req.user?.email || null,
+      typ: `entwurf_runde_${neueRundeNr}`,
       inhalte: {
         creative_ids: selCreatives.map(c => c.id),
         adcopy_ids: selAdcopies.map(a => a.id),
         funnel_url: funnelUrl,
-        anschreiben,
+        anschreiben: finalAnschreiben,
+        runde: neueRundeNr,
       },
     });
     if (insErr) console.warn('[export/email] Historie-Insert:', insErr.message);
 
-    res.json({ ok: true });
+    // Bei neuer Runde: Projekt-Status auf 'warte_auf_go' + Auto-Kommentar
+    if (istNeueRunde && kunde?.id) {
+      try {
+        const { data: projekt } = await supabase.from('talentone_projekte')
+          .select('id, status').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt) {
+          await supabase.from('talentone_projekte').update({
+            status: 'warte_auf_go',
+            updated_at: new Date().toISOString(),
+          }).eq('id', projekt.id);
+          const dateDe = new Date().toLocaleDateString('de-DE');
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor: req.user?.email || 'System',
+            text: `📤 Überarbeitete Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet am ${dateDe}`,
+            quelle: 'system',
+          });
+        }
+      } catch (err) { console.warn('[export/email] Runde-N-Projekt-Sync:', err.message); }
+    }
+
+    res.json({ ok: true, runde: neueRundeNr, ist_neue_runde: istNeueRunde });
   } catch (err) {
     console.error('[export/email]', err.message);
     res.status(503).json({ error: err.message });
@@ -205,14 +265,18 @@ router.get('/jobs/:id/export/versand', async (req, res) => {
   res.json({ versand: data });
 });
 
-/* GET /api/jobs/:id/export/review — neueste Review-Antwort + Status */
+/* GET /api/jobs/:id/export/review — neueste Review-Antwort + alle Runden.
+   `review` ist die aktuelle (höchste runde) — das Frontend nutzt sie für den
+   Status-Chip. `runden` ist die absteigend sortierte Liste aller
+   abgeschlossenen Runden — Grundlage für die Timeline im Export-Tab. */
 router.get('/jobs/:id/export/review', async (req, res) => {
   const { data, error } = await supabase
     .from('talentone_reviews')
     .select('*').eq('job_id', req.params.id)
-    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    .order('runde', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ review: data });
+  const runden = data || [];
+  res.json({ review: runden[0] || null, runden });
 });
 
 /* POST /api/jobs/:id/export/kampagne-live

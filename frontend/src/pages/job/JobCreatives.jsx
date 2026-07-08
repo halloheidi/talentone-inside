@@ -447,6 +447,21 @@ export default function JobCreatives() {
           <button className="btn-ghost btn-sm" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}>
             {logoUploading ? 'Lade hoch…' : (kunde?.logo_url ? 'Logo ersetzen' : 'Logo hochladen')}
           </button>
+          {kunde?.logo_url && (
+            <button
+              className="btn-ghost btn-sm"
+              onClick={async () => {
+                try {
+                  const originalName = decodeURIComponent(kunde.logo_url.split('/').pop() || '').split('?')[0];
+                  const ext = (originalName.match(/\.[a-zA-Z0-9]+$/) || ['.png'])[0];
+                  const slug = (kunde.firmenname || 'logo').toString().normalize('NFKD')
+                    .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'logo';
+                  await downloadFromUrl(kunde.logo_url, `${slug}-logo${ext}`);
+                } catch (err) { alert('Download fehlgeschlagen: ' + err.message); }
+              }}
+              title="Logo in Originalqualität herunterladen"
+            >⬇ Download</button>
+          )}
         </div>
       </div>
 

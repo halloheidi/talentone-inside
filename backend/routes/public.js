@@ -430,9 +430,14 @@ router.get('/review/:token', async (req, res) => {
     : funnel.veroeffentlicht ? `${getPublicBaseUrl(kunde?.agentur)}/f/${funnel.id}`
     : null;
   const sheetUrl = funnel?.extern_sheet_url || null;
-  const { data: review } = await supabase
+  // Alle Runden absteigend — neueste zuerst. `review` ist die aktuelle
+  // (höchste runde) und wird vom Kunden bearbeitet; `vorherige_runden`
+  // sind einklappbar sichtbar (abgeschlossene ältere Iterationen).
+  const { data: alleReviews = [] } = await supabase
     .from('talentone_reviews').select('*').eq('job_id', job.id)
-    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    .order('runde', { ascending: false });
+  const review = alleReviews[0] || null;
+  const vorherige_runden = alleReviews.slice(1);
 
   res.json({
     job: { id: job.id, stelle: job.stelle, region: job.region },
@@ -442,6 +447,7 @@ router.get('/review/:token', async (req, res) => {
     funnel_url: funnelUrl,
     sheet_url: sheetUrl,
     review,
+    vorherige_runden,
   });
 });
 
@@ -455,10 +461,11 @@ router.post('/review/:token', async (req, res) => {
     .from('talentone_jobs').select('*').eq('review_token', req.params.token).maybeSingle();
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
 
-  // Upsert: existiert schon ein Review für den Job → updaten, sonst insert
+  // AKTUELLE Runde (höchste runde) suchen. Bei mehreren Runden bearbeitet
+  // der Kunde immer die neueste — alte Runden bleiben archiviert.
   const { data: existing } = await supabase
-    .from('talentone_reviews').select('id').eq('job_id', job.id)
-    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    .from('talentone_reviews').select('id, runde').eq('job_id', job.id)
+    .order('runde', { ascending: false }).limit(1).maybeSingle();
 
   // Snapshot der referenzierten Creatives + Adcopies zum Zeitpunkt des Reviews
   // → bleibt erhalten auch wenn Creatives später regeneriert/gelöscht werden.

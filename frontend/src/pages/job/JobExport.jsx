@@ -38,6 +38,7 @@ export default function JobExport() {
   // Versand-Historie + Review
   const [versand, setVersand] = useState([]);
   const [review, setReview] = useState(null);
+  const [runden, setRunden] = useState([]);
   const [showKommentare, setShowKommentare] = useState(false);
 
   // Reaktivierungs-Modal
@@ -54,7 +55,7 @@ export default function JobExport() {
     Promise.all([
       api(`/jobs/${job.id}/export`),
       api(`/jobs/${job.id}/export/versand`).catch(() => ({ versand: [] })),
-      api(`/jobs/${job.id}/export/review`).catch(() => ({ review: null })),
+      api(`/jobs/${job.id}/export/review`).catch(() => ({ review: null, runden: [] })),
     ])
       .then(([d, v, r]) => {
         setData(d);
@@ -63,6 +64,7 @@ export default function JobExport() {
         setSelectedAdcopies(new Set((d.adcopies || []).map(a => a.id)));
         setVersand(v.versand || []);
         setReview(r.review);
+        setRunden(r.runden || []);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -210,7 +212,7 @@ export default function JobExport() {
       setMailMsg('Mail verschickt!');
       // Historie + Review nachladen
       api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
-      api(`/jobs/${job.id}/export/review`).then(r => setReview(r.review)).catch(() => {});
+      api(`/jobs/${job.id}/export/review`).then(r => { setReview(r.review); setRunden(r.runden || []); }).catch(() => {});
       setTimeout(() => setShowMail(false), 1200);
     } catch (err) {
       setMailMsg(err.message);
@@ -333,15 +335,18 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         </div>
       )}
 
+      {/* ─────── Timeline der Runden (Versand + Feedback) ─────── */}
+      <RundenTimeline versand={versand} runden={runden} />
+
       {/* ─────── Review-Status ─────── */}
       {review && (review.status === 'freigegeben' || review.status === 'aenderungen') && (
         <div className={`review-status review-status-${review.status}`}>
           {review.status === 'freigegeben' ? (
-            <strong>✅ Kunde hat freigegeben am {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+            <strong>✅ Kunde hat freigegeben (Runde {review.runde || 1}) am {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
           ) : (
             <>
               <div className="review-status-head">
-                <strong>📝 Kunde hat Änderungswünsche</strong>
+                <strong>📝 Runde {review.runde || 1}: Kunde hat Änderungswünsche</strong>
                 <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>
                   {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
                 </span>
@@ -497,7 +502,9 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           {busy === 'alles' ? 'Lade alles…' : 'Alles herunterladen'}
         </button>
         <button className="btn-primary" onClick={openMailModal} disabled={!kunde?.email}>
-          Entwürfe an Kunden senden
+          {review?.status === 'aenderungen'
+            ? `Überarbeitete Entwürfe senden (Runde ${(Number(review?.runde) || 1) + 1})`
+            : 'Entwürfe an Kunden senden'}
         </button>
       </div>
       {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
@@ -1024,5 +1031,62 @@ function PauseFieldset({ kunde, job, letzteKampagnePause, onSent }) {
         </div>
       )}
     </fieldset>
+  );
+}
+
+/**
+ * Kompakte Timeline der Runden: pro Runde je zwei Ereignisse — Versand
+ * (aus talentone_versand.typ='entwurf_runde_N') und Feedback (aus
+ * talentone_reviews.runde). Sortiert absteigend, kompakter Chip-Look.
+ */
+function RundenTimeline({ versand, runden }) {
+  const events = [];
+  for (const v of versand || []) {
+    const m = (v.typ || '').match(/^entwurf_runde_(\d+)$/);
+    if (!m && v.typ === null && v.betreff) {
+      // Legacy-Versand vor Runden-Feld: als Runde 1 werten
+      events.push({
+        kind: 'versand', runde: 1, ts: v.created_at,
+        label: `📤 Runde 1 gesendet · ${v.empfaenger || ''}`,
+      });
+    } else if (m) {
+      const n = Number(m[1]);
+      events.push({
+        kind: 'versand', runde: n, ts: v.created_at,
+        label: `📤 Runde ${n} gesendet · ${v.empfaenger || ''}`,
+      });
+    }
+  }
+  for (const r of runden || []) {
+    if (r.status === 'aenderungen') {
+      events.push({ kind: 'feedback', runde: r.runde || 1, ts: r.updated_at, label: `📝 Feedback erhalten (Runde ${r.runde || 1})` });
+    } else if (r.status === 'freigegeben') {
+      events.push({ kind: 'freigabe', runde: r.runde || 1, ts: r.updated_at, label: `✅ Freigegeben (Runde ${r.runde || 1})` });
+    }
+  }
+  if (events.length === 0) return null;
+  events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  return (
+    <div className="runden-timeline" style={{
+      padding: '10px 14px', marginBottom: 12, borderRadius: 8,
+      background: 'var(--gray-50)', border: '1px solid var(--line)',
+      display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 12,
+    }}>
+      <strong style={{ marginRight: 4 }}>Verlauf:</strong>
+      {events.map((e, i) => (
+        <span
+          key={i}
+          title={new Date(e.ts).toLocaleString('de-DE')}
+          style={{
+            padding: '3px 8px', borderRadius: 100,
+            background: e.kind === 'freigabe' ? '#dcfce7' : e.kind === 'feedback' ? '#fef3c7' : '#e0eaf7',
+            color:      e.kind === 'freigabe' ? '#166534' : e.kind === 'feedback' ? '#92400e' : '#1e3a8a',
+            fontSize: 11, fontWeight: 600,
+          }}
+        >
+          {e.label} · {new Date(e.ts).toLocaleDateString('de-DE')}
+        </span>
+      ))}
+    </div>
   );
 }

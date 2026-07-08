@@ -126,6 +126,15 @@ export default function PublicReview() {
           </div>
         )}
 
+        {/* Vorherige Runden — einklappbar */}
+        <VorherigeRunden runden={data.vorherige_runden || []} creatives={creatives} adcopies={adcopies} />
+
+        {(data.review?.runde || 1) > 1 && !done && (
+          <div style={{ padding: '10px 14px', marginBottom: 16, borderRadius: 10, background: '#fef3c7', border: '1px solid #fbbf24', color: '#92400e', fontSize: 13 }}>
+            🔄 <strong>Runde {data.review.runde}</strong> — Danke für dein Feedback! Wir haben die Entwürfe überarbeitet.
+          </div>
+        )}
+
         {/* Creatives */}
         {creatives.length > 0 && (
           <section className="review-section">
@@ -263,5 +272,63 @@ export default function PublicReview() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * „Dein Feedback aus Runde N" — einklappbar. Nur sichtbar, wenn es
+ * mindestens eine vorherige abgeschlossene Runde gibt.
+ */
+function VorherigeRunden({ runden, creatives, adcopies }) {
+  const [open, setOpen] = useState(false);
+  const withKommentare = (runden || []).filter(r => r.kommentare && Object.keys(r.kommentare).length > 0);
+  if (withKommentare.length === 0) return null;
+
+  return (
+    <section style={{ marginBottom: 20 }}>
+      <button
+        type="button" onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'transparent', border: '1px solid var(--rv-line, #ddd)',
+          borderRadius: 8, padding: '10px 14px', cursor: 'pointer', fontSize: 13,
+          display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+          color: 'var(--rv-ink, #0a0a0a)',
+        }}
+      >
+        <span>{open ? '▼' : '▶'}</span>
+        Dein Feedback aus {withKommentare.length === 1 ? `Runde ${withKommentare[0].runde || 1}` : `${withKommentare.length} vorherigen Runden`}
+      </button>
+      {open && withKommentare.map(r => (
+        <div key={r.id} style={{ marginTop: 10, padding: 14, borderRadius: 10, background: '#fafaf8', border: '1px solid var(--rv-line, #ddd)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--rv-ink-3, #5a5955)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.04 }}>
+            Runde {r.runde || 1} · {r.updated_at ? new Date(r.updated_at).toLocaleDateString('de-DE') : ''}
+          </div>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+            {Object.entries(r.kommentare || {}).filter(([, v]) => (v || '').trim()).map(([key, text]) => {
+              let label = key;
+              if (key === 'general' || key === 'allgemein') label = 'Allgemein';
+              else if (key === 'funnel') label = 'Funnel';
+              else if (key.startsWith('creative_')) {
+                const id = key.slice('creative_'.length);
+                const snap = r.kommentare_snapshot?.[key];
+                const c = (snap && snap.bild_url) ? snap : (creatives || []).find(x => x.id === id);
+                label = `Creative ${c?.format || ''}`.trim();
+              } else if (key.startsWith('adcopy_')) {
+                const id = key.slice('adcopy_'.length);
+                const snap = r.kommentare_snapshot?.[key];
+                const a = snap || (adcopies || []).find(x => x.id === id);
+                label = `Ad-Copy ${a?.stil || ''}`.trim();
+              }
+              return (
+                <li key={key} style={{ fontSize: 13 }}>
+                  <strong style={{ color: 'var(--rv-ink-3, #5a5955)' }}>{label}:</strong>{' '}
+                  <span style={{ whiteSpace: 'pre-wrap' }}>{text}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 }

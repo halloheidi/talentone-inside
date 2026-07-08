@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { fileToBase64 } from '../lib/files.js';
+import { fileToBase64, downloadFromUrl } from '../lib/files.js';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
@@ -127,6 +127,17 @@ export default function KundeDetail() {
   const [extractBusy, setExtractBusy] = useState(null); // 'logo' | 'url' | null
   const [farbenPreview, setFarbenPreview] = useState(null); // { source, farben } | null
   const [extractError, setExtractError] = useState('');
+
+  async function downloadKundenLogo(k) {
+    if (!k?.logo_url) return;
+    try {
+      const originalName = decodeURIComponent(k.logo_url.split('/').pop() || '').split('?')[0];
+      const ext = (originalName.match(/\.[a-zA-Z0-9]+$/) || ['.png'])[0];
+      const slug = (k.firmenname || 'logo').toString().normalize('NFKD')
+        .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'logo';
+      await downloadFromUrl(k.logo_url, `${slug}-logo${ext}`);
+    } catch (err) { alert('Download fehlgeschlagen: ' + err.message); }
+  }
 
   async function onLogoChange(e) {
     const file = e.target.files?.[0];
@@ -370,18 +381,35 @@ export default function KundeDetail() {
       />
 
       <div className="kunde-head">
-        <button
-          type="button"
-          className={`kunde-head-logo ${kunde.logo_url ? 'has-image' : ''} is-clickable`}
-          onClick={() => !logoUploading && logoInputRef.current?.click()}
-          title={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
-          aria-label={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
-        >
-          {kunde.logo_url
-            ? <img src={kunde.logo_url} alt="" />
-            : <span>{(kunde.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
-          <span className="kunde-head-logo-edit">{logoUploading ? '…' : 'Ändern'}</span>
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className={`kunde-head-logo ${kunde.logo_url ? 'has-image' : ''} is-clickable`}
+            onClick={() => !logoUploading && logoInputRef.current?.click()}
+            title={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
+            aria-label={kunde.logo_url ? 'Logo ersetzen' : 'Logo hochladen'}
+          >
+            {kunde.logo_url
+              ? <img src={kunde.logo_url} alt="" />
+              : <span>{(kunde.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
+            <span className="kunde-head-logo-edit">{logoUploading ? '…' : 'Ändern'}</span>
+          </button>
+          {kunde.logo_url && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); downloadKundenLogo(kunde); }}
+              title="Logo in Originalqualität herunterladen"
+              aria-label="Logo herunterladen"
+              style={{
+                position: 'absolute', top: -4, right: -4, width: 26, height: 26,
+                border: '1px solid var(--line)', background: 'var(--ink)',
+                color: '#fff', borderRadius: '50%', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
+                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+              }}
+            >⬇</button>
+          )}
+        </div>
         <input
           ref={logoInputRef}
           type="file"
