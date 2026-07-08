@@ -667,7 +667,7 @@ function NeukundenProduktTab({ job, kunde, reload }) {
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <input type="text" value={newVorteil} onChange={e => setNewVorteil(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVorteil(); } }}
-            placeholder="Neuer Vorteil, z. B. „Amortisation in 8 Jahren"" style={{ flex: 1 }} />
+            placeholder='Neuer Vorteil, z. B. "Amortisation in 8 Jahren"' style={{ flex: 1 }} />
           <button type="button" className="btn-ghost btn-sm" onClick={addVorteil} disabled={!newVorteil.trim()}>
             + Hinzufügen
           </button>
