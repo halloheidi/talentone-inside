@@ -50,12 +50,14 @@ const KANBAN_COLUMNS = [
   { key: 'abgeschlossen',      label: 'Abgeschlossen',       color: '#10b981', match: ['abgeschlossen'] },
 ];
 
+// „zapier_eingerichtet" wurde 2026-07 entfernt — bestehende DB-Werte bleiben,
+// werden nur nicht mehr im UI angezeigt/gezählt.
 const CHECK_KEYS = [
   'fb_zugang', 'formular_verschickt', 'fotograf_organisiert',
   'fotos_erhalten', 'fotos_fertig', 'formular_erhalten',
   'onboarding_formular', 'creatives_erstellt', 'adcopies_geschrieben',
   'url_bestellt', 'url_connected', 'url_verifiziert_fb', 'events_gesetzt',
-  'bewerberliste_erstellt', 'zapier_eingerichtet', 'entwuerfe_verschickt',
+  'bewerberliste_erstellt', 'entwuerfe_verschickt',
   'go_vom_kunden', 'avv_unterzeichnet', 'adresse_werbekonto',
   'geschenk_verschickt', 'testi_vereinbaren',
 ];
@@ -74,7 +76,6 @@ const CHECK_LABELS = {
   url_verifiziert_fb: 'URL verifiziert in FB',
   events_gesetzt: 'Events gesetzt',
   bewerberliste_erstellt: 'Bewerberliste erstellt',
-  zapier_eingerichtet: 'Zapier eingerichtet',
   entwuerfe_verschickt: 'Entwürfe verschickt',
   go_vom_kunden: 'Go vom Kunden',
   avv_unterzeichnet: 'AVV unterzeichnet',
@@ -171,6 +172,10 @@ export default function ProjekteOverview() {
 
   /* ─── Merge mehrerer Projekte ─── */
   const [mergeOpen, setMergeOpen] = useState(false);
+  // Kanban-Merge: „⋯ → Mit anderem Projekt zusammenführen" öffnet den
+  // Such-Dialog mit der Quell-Card vorgemerkt. Danach zeigt MergeProjekteModal
+  // die Hauptprojekt-Wahl über beide Karten.
+  const [kanbanMergeSource, setKanbanMergeSource] = useState(null);
   async function performMerge(hauptId) {
     const mergedIds = Array.from(selectedIds).filter(id => id !== hauptId);
     if (mergedIds.length === 0) return;
@@ -299,7 +304,7 @@ export default function ProjekteOverview() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {selectedIds.size >= 2 && (
-            <button className="btn-ghost" onClick={() => setMergeOpen(true)}>
+            <button className="btn-primary" onClick={() => setMergeOpen(true)}>
               🔗 {selectedIds.size} zusammenführen
             </button>
           )}
@@ -314,11 +319,36 @@ export default function ProjekteOverview() {
         </div>
       </header>
 
+      {/* Hinweis: wie zusammenführen geht — sichtbar auf der Seite selbst,
+          damit die Funktion auffindbar bleibt. */}
+      <div style={{
+        padding: '10px 14px', marginBottom: 12, borderRadius: 8,
+        background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e3a8a', fontSize: 12,
+      }}>
+        <strong>🔗 Projekte zusammenführen:</strong>
+        {' '}In der <strong>Liste</strong> zwei oder mehr Zeilen per Checkbox auswählen — der Button
+        „🔗 … zusammenführen" erscheint oben. Im <strong>Kanban</strong> auf einer Karte das <strong>⋯</strong>-Menü öffnen
+        und „Mit anderem Projekt zusammenführen" wählen.
+      </div>
+
       {mergeOpen && (
         <MergeProjekteModal
           projekte={projekte.filter(p => selectedIds.has(p.id))}
           onCancel={() => setMergeOpen(false)}
           onConfirm={performMerge}
+        />
+      )}
+
+      {kanbanMergeSource && (
+        <KanbanMergePicker
+          sourceProjekt={projekte.find(p => p.id === kanbanMergeSource)}
+          alleProjekte={projekte}
+          onCancel={() => setKanbanMergeSource(null)}
+          onPick={targetId => {
+            setSelectedIds(new Set([kanbanMergeSource, targetId]));
+            setKanbanMergeSource(null);
+            setMergeOpen(true);
+          }}
         />
       )}
 
@@ -345,7 +375,7 @@ export default function ProjekteOverview() {
       {loading ? <div className="motiv-sub">Lade Projekte…</div>
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
-          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} />
+          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} />
           : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
                        selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} />
       }
@@ -372,7 +402,8 @@ export default function ProjekteOverview() {
 
 /* ═════════════════════ KANBAN-BOARD ═════════════════════ */
 
-function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {} }) {
+function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge }) {
+  const [openMenu, setOpenMenu] = useState(null); // id der offenen Menü-Karte
   return (
     <div className="kanban">
       {KANBAN_COLUMNS.map(col => {
@@ -397,7 +428,38 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                     onDragStart={e => onDragStart(e, p.id)}
                     onClick={() => onCardClick(p.id)}
                     className={`kanban-card ${zufRand ? 'card-zuf-' + zufRand : ''} ${statusClass}`}
+                    style={{ position: 'relative' }}
                   >
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id); }}
+                      title="Kartenaktionen"
+                      style={{
+                        position: 'absolute', top: 6, right: 6, width: 26, height: 26,
+                        border: '1px solid var(--line)', background: 'rgba(255,255,255,0.9)',
+                        borderRadius: 6, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)',
+                      }}
+                    >⋯</button>
+                    {openMenu === p.id && (
+                      <div
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          position: 'absolute', top: 34, right: 6, zIndex: 10,
+                          background: '#fff', border: '1px solid var(--line)', borderRadius: 8,
+                          boxShadow: '0 4px 16px rgba(0,0,0,0.1)', minWidth: 220, padding: 4,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => { setOpenMenu(null); onOpenMerge?.(p.id); }}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left', background: 'transparent',
+                            border: 'none', padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                          }}
+                        >🔗 Mit anderem Projekt zusammenführen</button>
+                      </div>
+                    )}
                     {p.status === 'feedbackschleife' && (
                       <span className="kanban-card-status-pill is-feedback">🔔 Neues Kundenfeedback</span>
                     )}
@@ -411,6 +473,11 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                       <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}>⛔ Kampagne blockiert — Zahlung überfällig</span>
                     )}
                     <AuftragBadge offerSnapshot={p.offer_snapshot} />
+                    {p.live_termin && (
+                      <span className="kanban-card-status-pill" style={{ background: '#dcfce7', color: '#166534' }}>
+                        🕐 Go-Live: {new Date(p.live_termin).toLocaleDateString('de-DE')}
+                      </span>
+                    )}
                     <div className="kanban-card-firma">{p.kunde || '—'}</div>
                     {p.gesuchte_positionen && <div className="kanban-card-pos">{p.gesuchte_positionen}{p.standorte ? ` · ${p.standorte}` : ''}</div>}
                     <div className="kanban-card-meta">
@@ -682,6 +749,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
           {/* Phasen */}
           <section><h3>Phasen</h3>
             <div className="slideover-form">
+              <label className="slideover-full"><span>Geplanter Go-Live-Termin</span><input type="date" className="cell-input" value={projekt.live_termin || ''} onChange={e => patch({ live_termin: e.target.value || null })} /></label>
               <label><span>Start Phase 1</span><input type="date" className="cell-input" value={projekt.start_phase1 || ''} onChange={e => patch({ start_phase1: e.target.value || null })} /></label>
               <label><span>Ende Phase 1</span><input type="date" className="cell-input" value={projekt.ende_phase1 || ''} onChange={e => patch({ ende_phase1: e.target.value || null })} /></label>
               <label className="slideover-full"><span>Phase 1 Einstellungen</span><DebouncedInput value={projekt.phase1_einstellungen || ''} onSave={patchField('phase1_einstellungen')} /></label>
@@ -1052,5 +1120,62 @@ function AuftragBadge({ offerSnapshot }) {
         Kampagnenstart: <strong>{startLabel}</strong> · Garantie bis: <strong>{endLabel}</strong> ({guaranteeDays} Tage)
       </span>
     </div>
+  );
+}
+
+/**
+ * Kanban-Merge-Picker: aus dem ⋯-Menü einer Card → sucht das zweite Projekt,
+ * mit dem zusammengeführt werden soll. Danach übernimmt das etablierte
+ * MergeProjekteModal die Hauptprojekt-Wahl.
+ */
+function KanbanMergePicker({ sourceProjekt, alleProjekte, onCancel, onPick }) {
+  const [suche, setSuche] = useState('');
+  const treffer = useMemo(() => {
+    const q = suche.trim().toLowerCase();
+    if (!sourceProjekt) return [];
+    return alleProjekte
+      .filter(p => p.id !== sourceProjekt.id)
+      .filter(p => !q || (p.projekt || '').toLowerCase().includes(q) || (p.kunde || '').toLowerCase().includes(q))
+      .slice(0, 30);
+  }, [suche, sourceProjekt, alleProjekte]);
+
+  return (
+    <Modal
+      open={!!sourceProjekt}
+      onClose={onCancel}
+      title="Projekt zum Zusammenführen wählen"
+      footer={<button className="btn-ghost" onClick={onCancel}>Abbrechen</button>}
+    >
+      <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+        Ausgangsprojekt: <strong>{sourceProjekt?.projekt || sourceProjekt?.kunde || 'Kunde'}</strong>
+      </div>
+      <input
+        type="text" autoFocus
+        placeholder="Projekt oder Firmenname suchen…"
+        value={suche} onChange={e => setSuche(e.target.value)}
+        style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, width: '100%', marginBottom: 10 }}
+      />
+      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
+        {treffer.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+            {suche ? 'Keine Treffer.' : 'Suchbegriff eingeben.'}
+          </div>
+        ) : treffer.map(p => (
+          <button
+            key={p.id} onClick={() => onPick(p.id)}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+              border: 'none', borderBottom: '1px solid var(--line)', background: 'transparent',
+              cursor: 'pointer', fontSize: 13,
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>{p.projekt || '(ohne Titel)'}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+              {p.kunde || '—'}{p.projektart ? ' · ' + p.projektart : ''}{p.status ? ' · ' + p.status : ''}
+            </div>
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }

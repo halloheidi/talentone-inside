@@ -5,7 +5,7 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
-import { sendReaktivierungsMail, sendKampagneLiveMail } from '../mail.js';
+import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail } from '../mail.js';
 import { logReaktivierung } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 
@@ -253,17 +253,26 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
     });
     if (insErr) console.warn('[kampagne-live] Versand-Insert:', insErr.message);
 
-    // Projekt automatisch auf 'live' setzen (best-effort)
+    // Projekt automatisch auf 'live' setzen (best-effort). Zusätzlich:
+    // start_phase1 = heute, ende_phase1 = heute + 30 Tage — der Live-Termin
+    // ist der Anker, ab dem Phase 1 offiziell zählt.
     if (set_status_live && kunde?.id) {
       try {
         const { data: projekt } = await supabase
-          .from('talentone_projekte').select('id,status').eq('kunde_id', kunde.id)
+          .from('talentone_projekte').select('id,status,start_phase1,ende_phase1').eq('kunde_id', kunde.id)
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
-        if (projekt && projekt.status !== 'live') {
-          await supabase.from('talentone_projekte')
-            .update({ status: 'live', updated_at: new Date().toISOString() })
-            .eq('id', projekt.id);
-          console.log(`[kampagne-live] Projekt ${projekt.id.slice(0,8)} → status=live`);
+        if (projekt) {
+          const today   = new Date();
+          const in30    = new Date(today.getTime() + 30 * 86400000);
+          const iso = d => d.toISOString().slice(0, 10);
+          const patch = { updated_at: new Date().toISOString() };
+          if (projekt.status !== 'live') patch.status = 'live';
+          if (!projekt.start_phase1)     patch.start_phase1 = iso(today);
+          if (!projekt.ende_phase1)      patch.ende_phase1  = iso(in30);
+          if (Object.keys(patch).length > 1) {
+            await supabase.from('talentone_projekte').update(patch).eq('id', projekt.id);
+            console.log(`[kampagne-live] Projekt ${projekt.id.slice(0,8)} → status=live, phase1=${patch.start_phase1 || 'unverändert'}–${patch.ende_phase1 || 'unverändert'}`);
+          }
         }
       } catch (err) { console.warn('[kampagne-live] Status-Update:', err.message); }
     }
@@ -271,6 +280,68 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[kampagne-live]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/export/kampagne-pause  body: { to?, customText? }
+   Meldet dem Kunden „Kampagne aufgrund technischer Probleme pausiert" (Du-Form).
+   Setzt am ersten Projekt des Kunden status='pausiert' + pausiert_seit=heute.
+   Schreibt einen automatischen Kommentar ins Projekt: „⏸️ Pausen-Mail an Kunden
+   gesendet am {Datum} (technische Probleme)". */
+router.post('/jobs/:id/export/kampagne-pause', async (req, res) => {
+  const { to, customText } = req.body || {};
+  try {
+    const { job, kunde } = await loadFullJob(req.params.id);
+    const recipient = (to || kunde?.email || '').trim();
+    if (!recipient) return res.status(400).json({ error: 'Kunden-E-Mail fehlt.' });
+
+    await sendKampagnePauseMail({
+      to: recipient,
+      kunde,
+      ansprechpartner: kunde?.ansprechpartner,
+      customText,
+    });
+
+    // Versand-Historie
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: recipient,
+      betreff: '⏸ Deine Kampagne ist kurz pausiert',
+      gesendet_von: req.user?.email || null,
+      typ: 'kampagne_pause',
+      inhalte: { customText: customText || null },
+    });
+
+    // Projekt: status=pausiert, pausiert_seit=heute + Kommentar
+    let projektId = null;
+    if (kunde?.id) {
+      try {
+        const { data: projekt } = await supabase
+          .from('talentone_projekte').select('id').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt) {
+          projektId = projekt.id;
+          const iso = new Date().toISOString().slice(0, 10);
+          await supabase.from('talentone_projekte').update({
+            status: 'pausiert',
+            pausiert_seit: iso,
+            updated_at: new Date().toISOString(),
+          }).eq('id', projekt.id);
+          const dateDe = new Date().toLocaleDateString('de-DE');
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor:      req.user?.email || 'System',
+            text:       `⏸️ Pausen-Mail an Kunden gesendet am ${dateDe} (technische Probleme)`,
+            quelle:     'system',
+          });
+        }
+      } catch (err) { console.warn('[kampagne-pause] Projekt-Update:', err.message); }
+    }
+
+    res.json({ ok: true, projekt_id: projektId });
+  } catch (err) {
+    console.error('[kampagne-pause]', err.message);
     res.status(503).json({ error: err.message });
   }
 });

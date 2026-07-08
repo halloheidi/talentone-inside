@@ -128,12 +128,17 @@ router.post('/upload', async (req, res) => {
   res.status(201).json({ creatives: inserted, errors: errors.length ? errors : undefined });
 });
 
-/* GET /api/creatives?job_id=… — Galerie für ein Projekt
+/* GET /api/creatives?job_id=…&archived=true — Galerie für ein Projekt.
+   Default: NUR aktive Creatives (archiviert=false). Mit `archived=true` als
+   Query-Parameter werden ausschließlich archivierte zurückgegeben — Basis für
+   die Archiv-Ansicht.
    Liefert zusätzlich last_generation_error, damit das Frontend Polling-Failures
    sieht ohne separates Endpoint. */
 router.get('/', async (req, res) => {
+  const archivedOnly = String(req.query.archived || '').toLowerCase() === 'true';
   let q = supabase.from('talentone_creatives').select('*').order('created_at', { ascending: false });
   if (req.query.job_id) q = q.eq('job_id', req.query.job_id);
+  q = q.eq('archiviert', archivedOnly);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
   res.json({
@@ -359,14 +364,40 @@ router.post('/:id/regenerate', async (req, res) => {
   }
 });
 
-/* DELETE /api/creatives/:id — Storage + DB-Zeile löschen. */
+/* POST /api/creatives/:id/archivieren — archiviert=true.
+   Standard-Weg zum „Entfernen" aus der Galerie. Bild bleibt in Storage + DB. */
+router.post('/:id/archivieren', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_creatives')
+    .update({ archiviert: true }).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ creative: data });
+});
+
+/* POST /api/creatives/:id/wiederherstellen — archiviert=false.
+   Aus der Archiv-Ansicht zurück in die aktive Galerie. */
+router.post('/:id/wiederherstellen', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_creatives')
+    .update({ archiviert: false }).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ creative: data });
+});
+
+/* DELETE /api/creatives/:id — Endgültig löschen (Storage + DB-Zeile).
+   Nur zulässig für BEREITS ARCHIVIERTE Creatives, damit ein versehentliches
+   Verwerfen aktiver Bilder nicht möglich ist. */
 router.delete('/:id', async (req, res) => {
   const { data: existing } = await supabase
     .from('talentone_creatives')
-    .select('bild_url')
+    .select('bild_url, archiviert')
     .eq('id', req.params.id)
     .maybeSingle();
-  if (existing?.bild_url) await deleteFromStorage(existing.bild_url);
+  if (!existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.archiviert !== true) {
+    return res.status(409).json({
+      error: 'Endgültiges Löschen nur für archivierte Creatives. Bitte zuerst archivieren.',
+    });
+  }
+  if (existing.bild_url) await deleteFromStorage(existing.bild_url);
   const { error } = await supabase.from('talentone_creatives').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });

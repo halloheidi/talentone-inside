@@ -5,6 +5,7 @@
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
+import sharp from 'sharp';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
@@ -281,14 +282,15 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
   const farben = buildFarbenHinweis(kunde);
 
   const refHinweis = [];
+  const LOGO_FREI_HINWEIS = `WICHTIG: Lasse den Bereich oben rechts (ca. 20% Breite × 15% Höhe, mit etwas Abstand zum Rand) VÖLLIG FREI und ruhig — dort wird nachträglich per Code das Original-Firmenlogo als Overlay eingefügt. Zeichne oder skizziere dort selbst KEIN Logo, KEIN Signet, KEINEN Firmenname-Text, KEINE Marken-Grafik. Farb-Balance darf sich am Logo orientieren (siehe mitgeliefertes Bild), aber das Logo selbst NICHT in das Bild integrieren.`;
   if (hasLogo && person) {
     refHinweis.push(
       `MITGELIEFERTE BILDER (in dieser Reihenfolge):`,
-      `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. Diese Datei ist AUSSCHLIESSLICH ein Marken-Element für den Logo-Abdruck. Platziere das Logo klein und dezent oben rechts im Creative (ca. 10% der Bildbreite, klare Kanten, transparenter Hintergrund respektiert). VERWENDE DIESES BILD NICHT als Person, NICHT als Hintergrund, NICHT als Stil-Referenz, NICHT für Bildkomposition.`,
+      `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. VERWENDE DIESES BILD NICHT als Person, NICHT als Hintergrund, NICHT als Bildelement. ${LOGO_FREI_HINWEIS}`,
       `[BILD 2 — DATEINAME "person"] = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. DIESE Person ist die Hauptfigur des Creatives. Übernimm Gesichtszüge, Hauttyp, Haarfarbe, Frisur und Statur aus diesem Foto und stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben. Kleidung darf der neuen Tätigkeit angepasst werden, das Gesicht NICHT.`,
     );
   } else if (hasLogo) {
-    refHinweis.push(`MITGELIEFERTES BILD = FIRMENLOGO. Ausschließlich Marken-Element. Platziere es klein und dezent oben rechts im Creative (ca. 10% der Bildbreite). NICHT als Hauptmotiv, NICHT als Stil-Referenz verwenden — nur als Logo-Abdruck.`);
+    refHinweis.push(`MITGELIEFERTES BILD = FIRMENLOGO. NUR als Farb-/Stil-Referenz — NICHT ins Bild zeichnen. ${LOGO_FREI_HINWEIS}`);
   } else if (person) {
     refHinweis.push(`MITGELIEFERTES BILD = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. Übernimm Gesichtszüge, Hauttyp, Haarfarbe, Frisur und Statur und stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben.`);
   }
@@ -325,7 +327,7 @@ FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung 
   Kompakte Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub" — keine Sätze. Anordnung frei (z.B. vertikal links, horizontal oben, etc.)
 
 • ${hasLogo
-    ? `LOGO dezent platziert (oben oder bei den Benefits — du wählst): klein (ca. 8-12% Bildbreite), klare Kanten. KEIN zusätzlicher Firmenname-Text — das Logo allein.`
+    ? `LOGO wird NACHTRÄGLICH oben rechts eingefügt — dort NICHTS platzieren, den Bereich freilassen (ca. 20% Breite × 15% Höhe). KEIN Firmenname-Text im Bild.`
     : `FIRMENNAME-SCHRIFTZUG dezent oben oder im Header-Bereich: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element.`}
 
 • Person/Hauptmotiv-Anordnung frei (links, rechts, mittig, ggf. freigestellt)
@@ -352,7 +354,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
 
   const refLines = hasLogo
     ? `MITGELIEFERTE BILDER (in dieser Reihenfolge):
-[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. Ausschließlich Marken-Element. Platziere es klein und dezent oben rechts (ca. 10% Bildbreite). NICHT als Hauptmotiv, NICHT als Stil-Referenz verwenden.
+[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. NICHT ins Bild zeichnen. Der Bereich oben rechts (ca. 20% Breite × 15% Höhe, mit Abstand zum Rand) bleibt VÖLLIG FREI — dort wird nachträglich per Code das Original-Logo als Overlay eingefügt.
 [BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
     : `MITGELIEFERTES BILD = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
 
@@ -527,10 +529,57 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
 
-  const buffer = Buffer.from(b64, 'base64');
+  let buffer = Buffer.from(b64, 'base64');
+
+  // Logo-Overlay per Sharp — das Original-PNG pixelgenau aufsetzen, damit
+  // gpt-image-2 das Firmenlogo nicht mehr verfälscht. Positioniert oben
+  // rechts, skaliert auf ~13% der Bildbreite mit 3% Padding zum Rand.
+  const logoRef = refs.find(r => r.isLogo);
+  if (logoRef?.buffer) {
+    try {
+      buffer = await applyLogoOverlay(buffer, logoRef.buffer);
+    } catch (err) {
+      console.warn(`[logo-overlay] fehlgeschlagen — fahre ohne Overlay fort: ${err.message}`);
+    }
+  }
+
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(buffer, filename);
   return { format, bildUrl, prompt };
+}
+
+/**
+ * Composed das Firmenlogo oben rechts über das fertige Creative. Reine Sharp-
+ * Operation — Logo bleibt exakt das Original (keine KI-Verfälschung).
+ *
+ * @param {Buffer} baseBuffer  — das generierte Creative (PNG)
+ * @param {Buffer} logoBuffer  — das originale Kunden-Logo
+ * @returns {Promise<Buffer>}   — komponiertes PNG
+ */
+async function applyLogoOverlay(baseBuffer, logoBuffer) {
+  const base = sharp(baseBuffer);
+  const meta = await base.metadata();
+  const width = meta.width;
+  const height = meta.height;
+  if (!width || !height) return baseBuffer;
+
+  // Zielbreite des Logos: 13% der Bildbreite. Höhe proportional durch Sharp.
+  const logoTargetWidth = Math.round(width * 0.13);
+  const paddingRight    = Math.round(width * 0.03);
+  const paddingTop      = Math.round(height * 0.03);
+
+  const resizedLogo = await sharp(logoBuffer)
+    .resize({ width: logoTargetWidth, withoutEnlargement: false })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const left = width - resizedLogo.info.width - paddingRight;
+  const top  = paddingTop;
+
+  return base
+    .composite([{ input: resizedLogo.data, left, top }])
+    .png()
+    .toBuffer();
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.

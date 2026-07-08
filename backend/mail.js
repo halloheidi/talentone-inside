@@ -739,6 +739,95 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
   return await response.json();
 }
 
+/* ════════════════════ Team-Alert (intern, keine Kunden-Adresse) ════════════════════
+   Kompakte HTML-Mail an das Kreativ-Team — z. B. für den 2-Tage-Reminder
+   vorm Go-Live oder für „neuer Kunde, Creatives können erstellt werden".
+   Empfänger sind fix: info@nowagwirth.de + laura.mueller@nowagwirth.de. */
+export async function sendTeamAlertMail({ subject, headline, lead, linkUrl, linkLabel = 'Zum Projekt' }) {
+  if (!process.env.RESEND_API_KEY) return null;
+  const to = ['info@nowagwirth.de', 'laura.mueller@nowagwirth.de'];
+  const brand = getBranding('nowagwirth');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📣 Team-Info · Inside</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(headline || '')}</h1>
+      <p style="font-size:14px;color:#2a2a2a;margin:0;line-height:1.55;">${escape(lead || '')}</p>
+    </td></tr>
+    ${linkUrl ? `<tr><td align="center" style="padding:16px 32px 24px;">
+      <a href="${escape(linkUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:100px;">→ ${escape(linkLabel)}</a>
+    </td></tr>` : ''}`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${headline}\n\n${lead}${linkUrl ? '\n\n' + linkLabel + ': ' + linkUrl : ''}`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: INTERNAL_FROM,
+      to,
+      subject: subject || 'Team-Info',
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    console.warn(`[team-alert] Resend ${response.status}: ${body.slice(0, 200)}`);
+    return null;
+  }
+  return await response.json();
+}
+
+/* ════════════════════ Kampagne pausiert — Kunden-Mail ════════════════════
+   „Wir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund
+   technischer Probleme pausiert." — Absender + BCC + Reply-To wie bei
+   sendKampagneLiveMail. */
+export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, customText }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const recipients = Array.isArray(to) ? to : [to];
+  const name = ansprechpartner || 'dich';
+
+  const introText = customText && customText.trim()
+    ? customText.trim()
+    : `Hallo ${name},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`;
+
+  const introHtml = introText
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">⏸ Kampagnen-Info · ${escape(brand.name)}</p>
+      ${introHtml}
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Rückfragen einfach auf diese Mail antworten.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Danke für deine Geduld!<br>Dein ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${introText}\n\nDanke für deine Geduld!\nDein ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getMailReplyTo(brand),
+      subject: '⏸ Deine Kampagne ist kurz pausiert',
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ════════════════════ Angebots-Mail (Phase 4b) ════════════════════
    Absender: angebote@talent-one.de bzw. angebote@nowagwirth.com — siehe
    getOfferMailFrom. Reply-To einheitlich: info@nowagwirth.de.

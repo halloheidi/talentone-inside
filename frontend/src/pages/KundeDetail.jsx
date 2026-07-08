@@ -57,6 +57,7 @@ export default function KundeDetail() {
   // Angebote & Aufträge des Kunden + Aktivitäten-Timeline
   const [offers, setOffers] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [projekte, setProjekte] = useState([]);
   const [sendOfferPreview, setSendOfferPreview] = useState(null);
   const [sendOrderPreview, setSendOrderPreview] = useState(null);
   const [billingOffer, setBillingOffer] = useState(null);
@@ -191,6 +192,11 @@ export default function KundeDetail() {
       .then(res => setActivity(res.activity || []))
       .catch(() => setActivity([]));
   }
+  function loadProjekte() {
+    api(`/projekte?kunde_id=${kundeId}`)
+      .then(res => setProjekte(res.projekte || []))
+      .catch(() => setProjekte([]));
+  }
 
   async function syncInvoicesNow() {
     setInvoicesSyncing(true);
@@ -324,7 +330,7 @@ export default function KundeDetail() {
     }
   }
 
-  useEffect(() => { load(); loadInvoices(); loadOffers(); loadActivity(); }, [kundeId]);
+  useEffect(() => { load(); loadInvoices(); loadOffers(); loadActivity(); loadProjekte(); }, [kundeId]);
 
   useEffect(() => {
     api(`/kunden/${kundeId}/referenzbilder`)
@@ -612,6 +618,8 @@ export default function KundeDetail() {
           />
         </div>
       </div>
+
+      <ProjektStatusRow projekte={projekte} />
 
       <div className="section-head">
         <div>
@@ -1253,5 +1261,58 @@ function ActivitySection({ activity }) {
         </ol>
       </div>
     </>
+  );
+}
+
+/* ═════════════════════ Projekt-Status-Row ═════════════════════
+   Zeigt den aktuellen Projekt-Status (aus talentone_projekte via kunde_id-
+   Verknüpfung) direkt am Kunden. Erlaubt Redakteur:innen im Kundenbereich
+   auf einen Blick zu sehen, ob eine Kampagne live läuft, im Feedback ist etc. */
+
+const PROJEKT_STATUS_META = {
+  vorbereitung:      { emoji: '🟠', label: 'Vorbereitung',      bg: '#fee2e2', color: '#991b1b' },
+  kickoff_vereinbart:{ emoji: '📅', label: 'Kick-Off vereinbart', bg: '#dbeafe', color: '#1e3a8a' },
+  onboarding:        { emoji: '🎯', label: 'Onboarding',        bg: '#ede9fe', color: '#5b21b6' },
+  golive_vereinbart: { emoji: '🕐', label: 'Go-Live vereinbart', bg: '#dbeafe', color: '#1e3a8a' },
+  warte_auf_go:      { emoji: '⏳', label: 'Warte auf Go',      bg: '#fef3c7', color: '#92400e' },
+  feedbackschleife:  { emoji: '🔔', label: 'Feedbackschleife',  bg: '#fef3c7', color: '#92400e' },
+  go:                { emoji: '✅', label: 'Go vom Kunden',     bg: '#dcfce7', color: '#166534' },
+  live:              { emoji: '🟢', label: 'Live',              bg: '#dcfce7', color: '#166534' },
+  pausiert:          { emoji: '⏸', label: 'Pausiert',          bg: '#fee2e2', color: '#991b1b' },
+  hold:              { emoji: '🟨', label: 'Hold',              bg: '#fef3c7', color: '#92400e' },
+  abgeschlossen:     { emoji: '🏁', label: 'Abgeschlossen',     bg: '#d1fae5', color: '#065f46' },
+};
+
+function ProjektStatusRow({ projekte }) {
+  if (!projekte?.length) return null;
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 14, borderRadius: 10,
+      background: 'var(--gray-50)', border: '1px solid var(--line)',
+      display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 13,
+    }}>
+      <strong style={{ marginRight: 4 }}>Projekt-Status:</strong>
+      {projekte.map(p => {
+        const meta = PROJEKT_STATUS_META[p.status] || { emoji: '·', label: p.status || '—', bg: 'var(--gray-100)', color: 'var(--ink-3)' };
+        return (
+          <Link
+            key={p.id} to="/projekte"
+            title={`${p.projekt || p.kunde || '—'} — im Projekte-Board öffnen`}
+            style={{
+              padding: '4px 10px', borderRadius: 100,
+              background: meta.bg, color: meta.color, fontSize: 12, fontWeight: 700,
+              textDecoration: 'none', display: 'inline-flex', gap: 4, alignItems: 'center',
+            }}
+          >
+            {meta.emoji} {meta.label}
+            {p.live_termin && (
+              <span style={{ fontSize: 10, opacity: 0.85, marginLeft: 4 }}>
+                · Go-Live {new Date(p.live_termin).toLocaleDateString('de-DE')}
+              </span>
+            )}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

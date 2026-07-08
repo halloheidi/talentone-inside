@@ -290,7 +290,8 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
 
   const letzterVersand = versand.find(v => v.typ !== 'reaktivierung' && v.typ !== 'kampagne_live') || versand[0];
   const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
-  const letzteKampagneLive = versand.find(v => v.typ === 'kampagne_live');
+  const letzteKampagneLive  = versand.find(v => v.typ === 'kampagne_live');
+  const letzteKampagnePause = versand.find(v => v.typ === 'kampagne_pause');
   const kommentarEntries = review?.kommentare && typeof review.kommentare === 'object'
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
@@ -534,6 +535,14 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         </button>
         {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
       </fieldset>
+
+      {/* ─────── Kampagne pausiert melden ─────── */}
+      <PauseFieldset
+        kunde={kunde}
+        job={job}
+        letzteKampagnePause={letzteKampagnePause}
+        onSent={() => api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {})}
+      />
 
       {/* ─────── Kunden-Reaktivierung ─────── */}
       <fieldset className="formular-section" style={{ marginTop: 22 }}>
@@ -944,4 +953,76 @@ function statusLabel(s) {
     entwurf: 'Entwurf', offen: '⏳ Offen', bezahlt: '✅ Bezahlt',
     ueberfaellig: '⚠ Überfällig', storniert: 'Storniert',
   })[s] || s;
+}
+
+/* Pausen-Mail: Modal + Sende-Fluss. Setzt beim Versand automatisch Projekt-
+   Status auf „Pausiert" und legt einen automatischen Kommentar an. */
+function PauseFieldset({ kunde, job, letzteKampagnePause, onSent }) {
+  const defaultText = `Hallo ${kunde?.ansprechpartner || 'du'},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`;
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(defaultText);
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    if (!kunde?.email) return;
+    setBusy(true);
+    try {
+      await api(`/jobs/${job.id}/export/kampagne-pause`, {
+        method: 'POST',
+        body: { to: kunde.email, customText: text },
+      });
+      setOpen(false);
+      onSent?.();
+      alert('Pausen-Mail verschickt + Projekt auf „Pausiert" gesetzt.');
+    } catch (err) {
+      alert(`Senden fehlgeschlagen: ${err.message}`);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <fieldset className="formular-section" style={{ marginTop: 22 }}>
+      <legend>Kampagne pausieren melden</legend>
+      {letzteKampagnePause ? (
+        <div className="versand-status" style={{ marginBottom: 10 }}>
+          <span>⏸ Pausen-Mail gesendet am <strong>{new Date(letzteKampagnePause.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzteKampagnePause.empfaenger}</strong></span>
+        </div>
+      ) : (
+        <p className="pane-hint" style={{ marginTop: 0, marginBottom: 10 }}>
+          Bei technischen Problemen dem Kunden Bescheid geben — das Projekt wird automatisch auf Status <strong>Pausiert</strong> gesetzt (mit heutigem Datum) und ein Kommentar wird angelegt.
+        </p>
+      )}
+      <button
+        className={letzteKampagnePause ? 'btn-ghost' : 'btn-primary'}
+        onClick={() => { setText(defaultText); setOpen(true); }}
+        disabled={!kunde?.email}
+      >
+        ⏸ Kampagne als pausiert melden
+      </button>
+      {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt.</div>}
+
+      {open && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 20, width: 640, maxWidth: '100%' }}>
+            <h3 style={{ margin: '0 0 6px' }}>Pausen-Mail an {kunde?.email}</h3>
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 12px' }}>
+              Text ist editierbar. Absender + BCC laufen wie bei den Kampagnen-Mails.
+            </p>
+            <textarea
+              rows={12} value={text} onChange={e => setText(e.target.value)}
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button className="btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Abbrechen</button>
+              <button className="btn-primary" onClick={send} disabled={busy}>
+                {busy ? 'Sende…' : '⏸ Jetzt senden'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </fieldset>
+  );
 }

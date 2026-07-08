@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
 import { findMemberByName } from '../team.js';
 
 const router = Router();
@@ -289,6 +289,31 @@ router.post('/formular/:token/submit', async (req, res) => {
           kundeUrl: `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}/jobs/${job.id}/stelle`,
         });
       } catch (err) { console.warn('[formular-bg] Mitarbeiter-Mail:', err.message); }
+
+      // Kreativ-Team-Alert: „🎨 Neuer Kunde — Creatives können erstellt werden".
+      // Idempotent per creative_auftrag_gesendet_at am verknüpften Projekt.
+      // Wir markieren am ersten passenden Projekt des Kunden — reicht als Guard.
+      try {
+        const { data: projekt } = await supabase
+          .from('talentone_projekte')
+          .select('id, creative_auftrag_gesendet_at')
+          .eq('kunde_id', kunde.id)
+          .is('creative_auftrag_gesendet_at', null)
+          .limit(1).maybeSingle();
+        if (projekt) {
+          const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+          await sendTeamAlertMail({
+            subject:   `🎨 Neuer Kunde ${updated.firmenname} — Creatives können erstellt werden`,
+            headline:  `Neuer Kunde: ${updated.firmenname}`,
+            lead:      `${updated.firmenname} hat das Onboarding-Formular ausgefüllt und wurde auf status='aktiv' gesetzt. Bereit für Creative-Erstellung.`,
+            linkUrl:   `${insideBase}/projekte?open=${projekt.id}`,
+            linkLabel: 'Zum Projekt',
+          });
+          await supabase.from('talentone_projekte')
+            .update({ creative_auftrag_gesendet_at: new Date().toISOString() })
+            .eq('id', projekt.id);
+        }
+      } catch (err) { console.warn('[formular-bg] Team-Alert:', err.message); }
     })().catch(err => console.error('[formular-bg] uncaught:', err));
   } catch (err) {
     console.error('[formular/submit]', err.message);

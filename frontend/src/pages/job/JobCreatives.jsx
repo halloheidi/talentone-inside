@@ -45,6 +45,7 @@ export default function JobCreatives() {
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
   const [expected, setExpected] = useState(0);
   const pollRef = useRef(null);
 
@@ -132,12 +133,13 @@ export default function JobCreatives() {
   /* ───── Galerie ───── */
   function loadGalerie() {
     setLoadingGalerie(true);
-    api(`/creatives?job_id=${job.id}`)
+    const archivedParam = showArchived ? '&archived=true' : '';
+    api(`/creatives?job_id=${job.id}${archivedParam}`)
       .then(res => setCreatives(res.creatives || []))
       .catch(() => {})
       .finally(() => setLoadingGalerie(false));
   }
-  useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id]);
+  useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id, showArchived]);
 
   /* ───── Kunden-Kommentare aus Review laden ───── */
   const [reviewKommentare, setReviewKommentare] = useState({}); // { 'creative_<id>': text, ... }
@@ -356,8 +358,21 @@ export default function JobCreatives() {
     }
   }
 
-  async function onDelete(id) {
-    if (!confirm('Wirklich löschen?')) return;
+  async function onArchive(id) {
+    if (!confirm('Creative archivieren? Das Bild verschwindet aus der Galerie, bleibt aber im Archiv wiederherstellbar.')) return;
+    try {
+      await api(`/creatives/${id}/archivieren`, { method: 'POST' });
+      setCreatives(prev => prev.filter(c => c.id !== id));
+    } catch (err) { alert(`Archivieren fehlgeschlagen: ${err.message}`); }
+  }
+  async function onRestore(id) {
+    try {
+      await api(`/creatives/${id}/wiederherstellen`, { method: 'POST' });
+      setCreatives(prev => prev.filter(c => c.id !== id));
+    } catch (err) { alert(`Wiederherstellen fehlgeschlagen: ${err.message}`); }
+  }
+  async function onDeleteForever(id) {
+    if (!confirm('Endgültig LÖSCHEN? Das Bild wird aus Storage und Datenbank entfernt und kann nicht mehr wiederhergestellt werden.')) return;
     try {
       await api(`/creatives/${id}`, { method: 'DELETE' });
       setCreatives(prev => prev.filter(c => c.id !== id));
@@ -716,12 +731,25 @@ export default function JobCreatives() {
       <section style={{ marginTop: 24 }}>
         <div className="section-head">
           <div>
-            <h2 className="section-title">Galerie</h2>
-            <p className="section-sub">{creatives.length} Creative{creatives.length === 1 ? '' : 's'} für dieses Projekt.</p>
+            <h2 className="section-title">{showArchived ? 'Archiv' : 'Galerie'}</h2>
+            <p className="section-sub">
+              {creatives.length} {showArchived ? 'archivierte' : 'aktive'} Creative{creatives.length === 1 ? '' : 's'} für dieses Projekt.
+            </p>
           </div>
-          <button className="btn-ghost btn-sm" onClick={() => setShowCreativeUpload(true)} title="Eigene Bilder/Videos hochladen">
-            <Icon name="plus" /> Fertiges Creative hochladen
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              className={`btn-ghost btn-sm ${showArchived ? 'is-active' : ''}`}
+              onClick={() => setShowArchived(v => !v)}
+              title="Archivierte Creatives anzeigen (wiederherstellbar)"
+            >
+              {showArchived ? '← Zurück zur Galerie' : '📦 Archiv anzeigen'}
+            </button>
+            {!showArchived && (
+              <button className="btn-ghost btn-sm" onClick={() => setShowCreativeUpload(true)} title="Eigene Bilder/Videos hochladen">
+                <Icon name="plus" /> Fertiges Creative hochladen
+              </button>
+            )}
+          </div>
         </div>
         {loadingGalerie && <div className="card empty">Lade Galerie…</div>}
         {!loadingGalerie && creatives.length === 0 && (
@@ -797,7 +825,14 @@ export default function JobCreatives() {
                         {reelBusy.has(c.id) ? 'Reel läuft…' : 'Reel'}
                       </button>
                     )}
-                    <button className="btn-ghost btn-sm btn-danger" onClick={() => onDelete(c.id)}>Löschen</button>
+                    {showArchived ? (
+                      <>
+                        <button className="btn-ghost btn-sm" onClick={() => onRestore(c.id)}>Wiederherstellen</button>
+                        <button className="btn-ghost btn-sm btn-danger" onClick={() => onDeleteForever(c.id)}>Endgültig löschen</button>
+                      </>
+                    ) : (
+                      <button className="btn-ghost btn-sm btn-danger" onClick={() => onArchive(c.id)}>Archivieren</button>
+                    )}
                   </div>
                 </div>
               </div>

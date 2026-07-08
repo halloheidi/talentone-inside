@@ -29,6 +29,7 @@ import { startOfferSyncScheduler } from './offer-sync.js';
 import { startInvoiceSyncScheduler } from './invoice-sync.js';
 import { startBillingScheduler } from './billing-scheduler.js';
 import { startReminderScheduler } from './billing-reminder.js';
+import { startLiveTerminReminderScheduler } from './live-termin-reminder.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -103,5 +104,6 @@ app.listen(PORT, () => {
   startInvoiceSyncScheduler();
   startBillingScheduler();
   startReminderScheduler();
+  startLiveTerminReminderScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });

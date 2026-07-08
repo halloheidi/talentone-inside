@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { computeAutoChecklist, mergeChecklist } from '../projekt-sync.js';
 import { TEAM_MEMBERS, findMemberByName } from '../team.js';
 import { sendMentionMail } from '../mail.js';
+import { addNote as closeAddNote } from '../close.js';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ const ALLOWED_FIELDS = [
   'ready_for_upsell', 'upsell_wer', 'position_im_unternehmen', 'persoenlichkeitstyp',
   'email', 'verantwortlich', 'fotograf', 'letzter_kontakt', 'kontaktstatus',
   'werbekosten', 'close_lead_id', 'kunde_id', 'checkliste',
+  'live_termin',
 ];
 
 function pickFields(body) {
@@ -45,10 +47,11 @@ function pickFields(body) {
    guarantee_period_days, brand und billing_phase des Angebots
    mitgeliefert — Frontend zeigt sie live (kein Kopieren). */
 router.get('/', async (req, res) => {
-  const { data, error } = await supabase
-    .from('talentone_projekte')
-    .select('*')
-    .order('created_at', { ascending: false });
+  let q = supabase.from('talentone_projekte').select('*').order('created_at', { ascending: false });
+  // Optionaler kunde_id-Filter — wird u. a. von der Kunden-Detailseite genutzt,
+  // um den Projekt-Status im Header darzustellen.
+  if (req.query.kunde_id) q = q.eq('kunde_id', req.query.kunde_id);
+  const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
   // Kommentar-Zähler dazu joinen (einzelner aggregate-call)
@@ -287,6 +290,14 @@ router.post('/:id/kommentare', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
 
   res.status(201).json({ kommentar: data });
+
+  // Kommentar an Close-Lead spiegeln (best-effort, nur neue intern verfasste
+  // Kommentare — Airtable-Imports werden NICHT nachträglich synchronisiert).
+  if (projekt.close_lead_id) {
+    const note = `Kommentar von ${autorName} aus Inside-Tool: ${text.trim()}`;
+    closeAddNote({ leadId: projekt.close_lead_id, note })
+      .catch(err => console.warn('[kommentar close-note]', err.message));
+  }
 
   // @-Mention-E-Mail im Hintergrund (best-effort)
   if (erw.length > 0) {

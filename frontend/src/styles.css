@@ -283,8 +283,14 @@ button { font-family: inherit; }
 .content {
   flex: 1;
   padding: 32px 36px;
-  max-width: 1200px;
   width: 100%;
+  /* max-width entfernt 2026-07 — Tabellen-Listen (Kunden, Projekte, Zahlungen,
+     Angebote, Rechnungen, Bewerbungen) nutzen jetzt einheitlich die volle
+     verfügbare Breite. Für die alten schmalen Layouts wird selektiv per
+     .content-narrow zurückgekappt, wo Formulare o. Ä. lesbarer sind. */
+}
+.content-narrow {
+  max-width: 1200px;
 }
 
 /* Page Head */
