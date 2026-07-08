@@ -104,6 +104,15 @@ router.get('/formular/:token', async (req, res) => {
   if (kunde.status === 'aktiv') {
     return res.status(410).json({ error: 'Dieses Formular wurde bereits ausgefüllt.' });
   }
+  // Falls beim Anlegen bereits ein „wartender" Job existiert (quick-create
+  // mode='formular'), liefern wir dessen projekttyp mit — die Public-Formular-
+  // Seite wählt danach die richtige Variante (Recruiting vs. Neukunden).
+  const { data: pendingJob } = await supabase
+    .from('talentone_jobs')
+    .select('id, projekttyp, formdata_komplett')
+    .eq('kunde_id', kunde.id)
+    .contains('formdata_komplett', { _wartet_auf_briefing: true })
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
   res.json({
     kunde: {
       firmenname: kunde.firmenname,
@@ -111,6 +120,7 @@ router.get('/formular/:token', async (req, res) => {
       email: kunde.email,
       agentur: kunde.agentur || 'talentone',
     },
+    projekttyp: pendingJob?.projekttyp || 'mitarbeitergewinnung',
   });
 });
 
@@ -122,14 +132,15 @@ router.post('/formular/:token/extract', async (req, res) => {
   if (kunde.status === 'aktiv') return res.status(410).json({ error: 'Bereits ausgefüllt.' });
 
   try {
-    const { mode } = req.body || {};
+    const { mode, projekttyp } = req.body || {};
+    const opts = { projekttyp: projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung' };
     let extracted;
     if (mode === 'url') {
       if (!req.body.url) return res.status(400).json({ error: 'URL fehlt.' });
-      extracted = await extractFromUrl(req.body.url);
+      extracted = await extractFromUrl(req.body.url, opts);
     } else if (mode === 'file') {
       if (!req.body.fileData || !req.body.fileType) return res.status(400).json({ error: 'fileData / fileType fehlt.' });
-      extracted = await extractFromFile(req.body.fileData, req.body.fileType);
+      extracted = await extractFromFile(req.body.fileData, req.body.fileType, opts);
     } else {
       return res.status(400).json({ error: 'Unbekannter Modus.' });
     }
@@ -247,9 +258,25 @@ router.post('/formular/:token/submit', async (req, res) => {
       formdata_komplett: formdata,
       vorqualifizierung: updated.agentur === 'nowagwirth',
     };
-    const { data: job, error: jErr } = await supabase
-      .from('talentone_jobs').insert(jobRow).select().single();
-    if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
+    // Wenn beim NewProjectModal ein „wartender" Job angelegt wurde
+    // (formdata_komplett._wartet_auf_briefing=true), UPDATEN wir diesen
+    // statt einen zweiten Job zu erzeugen.
+    const { data: pending } = await supabase
+      .from('talentone_jobs')
+      .select('id')
+      .eq('kunde_id', kunde.id)
+      .contains('formdata_komplett', { _wartet_auf_briefing: true })
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+    let job, jErr;
+    if (pending) {
+      ({ data: job, error: jErr } = await supabase
+        .from('talentone_jobs').update(jobRow).eq('id', pending.id).select().single());
+    } else {
+      ({ data: job, error: jErr } = await supabase
+        .from('talentone_jobs').insert(jobRow).select().single());
+    }
+    if (jErr) return res.status(500).json({ error: `Job speichern: ${jErr.message}` });
 
     // Antwort sofort raus
     res.status(201).json({ ok: true });

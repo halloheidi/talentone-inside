@@ -34,17 +34,42 @@ Extrahiere die Informationen und antworte NUR mit einem JSON-Objekt, ohne Markdo
   "quereinsteiger": false
 }`;
 
-async function callClaude(text) {
+// Prompt für Neukunden-Extraktion (Landingpages, Angebots-PDFs, Firmen-Websites).
+// Andere Semantik: Produkt/Dienstleistung + Zielgruppe + USP statt Stellendaten.
+const EXTRACT_PROMPT_NEUKUNDEN = (text) => `Du liest den Inhalt einer Firmen-Website / Landingpage / Produktbroschüre und extrahierst die wichtigsten Informationen für eine Neukundengewinnungs-Kampagne (nicht Recruiting!).
+
+Inhalt:
+---
+${text}
+---
+
+Extrahiere und antworte NUR mit einem JSON-Objekt, ohne Markdown-Backticks:
+
+{
+  "firma": "Name des Unternehmens oder leer",
+  "branche": "handwerk|pflege|einzelhandel|gastro|buero|logistik oder leer",
+  "produkt": "Das Hauptprodukt oder die Dienstleistung — was wird angeboten? Kurz und prägnant, max. 60 Zeichen.",
+  "kundenprofil": "Für welche Kunden ist das Angebot gedacht? Für welchen Zweck / welche Nische?",
+  "zielgruppe": "Wer soll erreicht werden (Alter, Situation, Region, Bedürfnis) — kurz.",
+  "vorteile": ["Array der wichtigsten Produkt-Vorteile / Alleinstellungsmerkmale, jeweils prägnant (max. 5 Einträge)"],
+  "unterschied": "Was unterscheidet den Anbieter vom Wettbewerb (USP)?",
+  "preisrahmen": "Preisangabe / Angebot wenn genannt, z. B. 'ab 15.000 €' oder leer",
+  "einzugsgebiet": "Region / Einzugsgebiet aus dem Text oder leer",
+  "kontakt_email": "E-Mail-Adresse aus dem Text oder leer",
+  "kontakt_telefon": "Telefonnummer aus dem Text oder leer"
+}`;
+
+async function callClaude(text, promptFactory = EXTRACT_PROMPT) {
   const truncated = text.slice(0, 5000);
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
     max_tokens: 1000,
-    messages: [{ role: 'user', content: EXTRACT_PROMPT(truncated) }],
+    messages: [{ role: 'user', content: promptFactory(truncated) }],
   });
   return parseJsonContent(data);
 }
 
-export async function extractFromUrl(url) {
+export async function extractFromUrl(url, opts = {}) {
   if (!url || !/^https?:\/\//i.test(url)) {
     throw new Error('Ungültige URL.');
   }
@@ -73,10 +98,11 @@ export async function extractFromUrl(url) {
     throw new Error('Konnte keinen Text von der URL lesen.');
   }
 
-  return await callClaude(textContent);
+  const prompt = opts.projekttyp === 'neukundengewinnung' ? EXTRACT_PROMPT_NEUKUNDEN : EXTRACT_PROMPT;
+  return await callClaude(textContent, prompt);
 }
 
-export async function extractFromFile(fileData, fileType) {
+export async function extractFromFile(fileData, fileType, opts = {}) {
   if (!fileData) throw new Error('Keine Datei.');
 
   const buffer = Buffer.from(fileData, 'base64');
@@ -98,7 +124,8 @@ export async function extractFromFile(fileData, fileType) {
     throw new Error('Konnte keinen Text aus der Datei lesen.');
   }
 
-  return await callClaude(text);
+  const prompt = opts.projekttyp === 'neukundengewinnung' ? EXTRACT_PROMPT_NEUKUNDEN : EXTRACT_PROMPT;
+  return await callClaude(text, prompt);
 }
 
 // Mappt das extrahierte Objekt auf eine talentone_kunden-Zeile

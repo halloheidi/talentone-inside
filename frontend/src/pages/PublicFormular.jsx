@@ -132,6 +132,7 @@ function detectFileType(file) {
 export default function PublicFormular() {
   const { token } = useParams();
   const [info, setInfo] = useState(null);
+  const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
   const [loadError, setLoadError] = useState('');
   const [done, setDone] = useState(false);
 
@@ -161,6 +162,7 @@ export default function PublicFormular() {
     publicApi(`/formular/${token}`)
       .then(res => {
         setInfo(res.kunde);
+        setProjekttyp(res.projekttyp || 'mitarbeitergewinnung');
         setForm(prev => ({
           ...prev,
           firmenname: res.kunde.firmenname || '',
@@ -386,6 +388,14 @@ export default function PublicFormular() {
         </div>
       </div>
     );
+  }
+
+  // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante.
+  if (projekttyp === 'neukundengewinnung') {
+    return <NeukundenBriefingForm
+      token={token} info={info}
+      onDone={() => setDone(true)}
+    />;
   }
 
   return (
@@ -623,6 +633,378 @@ export default function PublicFormular() {
             </button>
           </div>
         </form>
+        <BrandFooter agentur={info?.agentur} />
+      </div>
+    </div>
+  );
+}
+
+/* ═════════════════════ Neukunden-Briefing-Formular ═════════════════════
+   Alternative Formular-Variante für projekttyp='neukundengewinnung'.
+   Reine Public-Ansicht — nutzt dieselben /formular/:token/{extract,logo,foto,submit}
+   Endpoints, schickt aber projekttyp='neukundengewinnung' mit und mapt die
+   Felder in job.neukunden_daten. */
+
+function NeukundenBriefingForm({ token, info, onDone }) {
+  const [mode, setMode] = useState('manual');
+  const [extractUrl, setExtractUrl] = useState('');
+  const [extractFile, setExtractFile] = useState(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState('');
+  const [extractedHinweis, setExtractedHinweis] = useState('');
+  const extractFileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    firmenname: info.firmenname || '',
+    ansprechpartner: info.ansprechpartner || '',
+    telefon: '',
+    website_url: '',
+    branche: '',
+    produkt: '',
+    kundenprofil: '',
+    zielgruppe: '',
+    vorteile: [],
+    unterschied: '',
+    preisrahmen: '',
+    einzugsgebiet: '',
+  });
+  const [newVorteil, setNewVorteil] = useState('');
+  const [logo, setLogo] = useState(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [fotos, setFotos] = useState([]);
+  const [fotoBusy, setFotoBusy] = useState(false);
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const logoInputRef = useRef(null);
+  const fotoInputRef = useRef(null);
+
+  function setF(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
+  function addVorteil() {
+    const v = newVorteil.trim();
+    if (!v) return;
+    setF('vorteile', [...form.vorteile, v]);
+    setNewVorteil('');
+  }
+  function removeVorteil(i) {
+    setF('vorteile', form.vorteile.filter((_, idx) => idx !== i));
+  }
+
+  async function runExtractUrl() {
+    if (!extractUrl.trim()) return setExtractError('Bitte URL eingeben.');
+    setExtracting(true); setExtractError(''); setExtractedHinweis('');
+    try {
+      const res = await publicApi(`/formular/${token}/extract`, {
+        method: 'POST',
+        body: { mode: 'url', url: extractUrl.trim(), projekttyp: 'neukundengewinnung' },
+      });
+      applyExtracted(res.extracted);
+      setMode('manual');
+      setExtractedHinweis('✅ Wir haben deine Website analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.');
+    } catch (err) { setExtractError('Extraktion fehlgeschlagen: ' + err.message); }
+    finally { setExtracting(false); }
+  }
+
+  async function runExtractFile() {
+    if (!extractFile) return setExtractError('Bitte Datei auswählen.');
+    const fileType = detectFileType(extractFile);
+    if (!fileType) return setExtractError('Nur PDF oder DOCX unterstützt.');
+    setExtracting(true); setExtractError(''); setExtractedHinweis('');
+    try {
+      const fileData = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',').pop());
+        r.onerror = reject;
+        r.readAsDataURL(extractFile);
+      });
+      const res = await publicApi(`/formular/${token}/extract`, {
+        method: 'POST',
+        body: { mode: 'file', fileData, fileType, projekttyp: 'neukundengewinnung' },
+      });
+      applyExtracted(res.extracted);
+      setMode('manual');
+      setExtractedHinweis('✅ Wir haben das PDF analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.');
+    } catch (err) { setExtractError('Extraktion fehlgeschlagen: ' + err.message); }
+    finally { setExtracting(false); }
+  }
+
+  function applyExtracted(ex) {
+    if (!ex) return;
+    setForm(prev => ({
+      ...prev,
+      firmenname:    prev.firmenname || ex.firma || '',
+      branche:       prev.branche || ex.branche || '',
+      produkt:       prev.produkt || ex.produkt || '',
+      kundenprofil:  prev.kundenprofil || ex.kundenprofil || '',
+      zielgruppe:    prev.zielgruppe || ex.zielgruppe || '',
+      vorteile:      prev.vorteile.length ? prev.vorteile : (Array.isArray(ex.vorteile) ? ex.vorteile : []),
+      unterschied:   prev.unterschied || ex.unterschied || '',
+      preisrahmen:   prev.preisrahmen || ex.preisrahmen || '',
+      einzugsgebiet: prev.einzugsgebiet || ex.einzugsgebiet || '',
+      telefon:       prev.telefon || ex.kontakt_telefon || '',
+    }));
+  }
+
+  async function onLogoChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setLogoBusy(true);
+    try {
+      const fileData = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',').pop());
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const res = await publicApi(`/formular/${token}/logo`, {
+        method: 'POST',
+        body: { fileData, fileName: file.name, contentType: file.type || 'image/png' },
+      });
+      setLogo({ url: res.logo_url });
+    } catch (err) { alert('Logo-Upload fehlgeschlagen: ' + err.message); }
+    finally { setLogoBusy(false); }
+  }
+
+  async function onFotosChange(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setFotoBusy(true);
+    try {
+      for (const file of files) {
+        const fileData = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(',').pop());
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        });
+        const res = await publicApi(`/formular/${token}/foto`, {
+          method: 'POST',
+          body: {
+            fileData, fileName: file.name, contentType: file.type || 'image/jpeg',
+            beschreibung: 'Produktbild',
+          },
+        });
+        setFotos(prev => [...prev, res.foto || { id: Date.now(), bild_url: res.bild_url }]);
+      }
+    } catch (err) { alert('Foto-Upload fehlgeschlagen: ' + err.message); }
+    finally { setFotoBusy(false); }
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    setSubmitError('');
+    if (!form.firmenname.trim()) return setSubmitError('Firmenname ist Pflicht.');
+    if (!form.produkt.trim())    return setSubmitError('Produkt/Dienstleistung ist Pflicht.');
+    setSubmitBusy(true);
+    try {
+      await publicApi(`/formular/${token}/submit`, {
+        method: 'POST',
+        body: {
+          projekttyp: 'neukundengewinnung',
+          kunde: {
+            firmenname:      form.firmenname.trim(),
+            ansprechpartner: form.ansprechpartner.trim() || null,
+            telefon:         form.telefon.trim() || null,
+            website_url:     form.website_url.trim() || null,
+            branche:         form.branche || null,
+          },
+          job: {
+            neukunden_daten: {
+              produkt:       form.produkt.trim(),
+              kundenprofil:  form.kundenprofil.trim(),
+              zielgruppe:    form.zielgruppe.trim(),
+              vorteile:      form.vorteile.filter(Boolean),
+              unterschied:   form.unterschied.trim(),
+              preisrahmen:   form.preisrahmen.trim(),
+              einzugsgebiet: form.einzugsgebiet.trim(),
+            },
+          },
+        },
+      });
+      onDone();
+    } catch (err) { setSubmitError(err.message); }
+    finally { setSubmitBusy(false); }
+  }
+
+  return (
+    <div className="public-page">
+      <div className="public-card public-card-form">
+        <BrandHeader agentur={info?.agentur} />
+        <h1 className="public-title">Neukunden-Briefing</h1>
+        <p className="public-sub">
+          Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : 'zusammen'}! Damit wir eine passgenaue Kampagne für neue Kunden bauen können, brauchen wir ein paar Infos zu deinem Angebot. ~10 Minuten.
+        </p>
+
+        {/* Eingabewege — URL / PDF / Manuell */}
+        <div className="modal-tabs" style={{ marginBottom: 16 }}>
+          <button className={`modal-tab ${mode === 'url' ? 'is-active' : ''}`} onClick={() => setMode('url')}>🌐 Website / URL</button>
+          <button className={`modal-tab ${mode === 'file' ? 'is-active' : ''}`} onClick={() => setMode('file')}>📄 PDF / Broschüre</button>
+          <button className={`modal-tab ${mode === 'manual' ? 'is-active' : ''}`} onClick={() => setMode('manual')}>✍️ Selbst ausfüllen</button>
+        </div>
+
+        {mode === 'url' && (
+          <div className="modal-pane">
+            <p className="pane-hint">URL deiner Firmen-Website oder Produkt-Landingpage — die KI zieht Produkt, Zielgruppe und Vorteile automatisch raus.</p>
+            <label className="field field-full">
+              <span>URL</span>
+              <input type="url" placeholder="https://…" value={extractUrl} onChange={e => setExtractUrl(e.target.value)} />
+            </label>
+            <button type="button" className="btn-primary" onClick={runExtractUrl} disabled={extracting || !extractUrl.trim()}>
+              {extracting ? 'Analysiere…' : 'Analysieren'}
+            </button>
+            {extractError && <div className="alert alert-error" style={{ marginTop: 8 }}>{extractError}</div>}
+          </div>
+        )}
+
+        {mode === 'file' && (
+          <div className="modal-pane">
+            <p className="pane-hint">Angebots-PDF, Produktbroschüre oder Firmenpräsentation hochladen.</p>
+            <input ref={extractFileInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              style={{ display: 'none' }} onChange={e => setExtractFile(e.target.files?.[0] || null)} />
+            <button type="button" className="btn-ghost" onClick={() => extractFileInputRef.current?.click()}>
+              {extractFile ? `📎 ${extractFile.name}` : '📎 Datei auswählen'}
+            </button>
+            <button type="button" className="btn-primary" style={{ marginLeft: 8 }} onClick={runExtractFile} disabled={extracting || !extractFile}>
+              {extracting ? 'Analysiere…' : 'Analysieren'}
+            </button>
+            {extractError && <div className="alert alert-error" style={{ marginTop: 8 }}>{extractError}</div>}
+          </div>
+        )}
+
+        {extractedHinweis && (
+          <div className="alert" style={{ background: '#dcfce7', color: '#166534', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+            {extractedHinweis}
+          </div>
+        )}
+
+        {/* Manuelles Formular — immer sichtbar */}
+        <form onSubmit={onSubmit} className="public-form">
+          <fieldset className="formular-section">
+            <legend>Deine Firma</legend>
+            <div className="stelle-grid">
+              <label className="field"><span>Firmenname *</span>
+                <input required value={form.firmenname} onChange={e => setF('firmenname', e.target.value)} />
+              </label>
+              <label className="field"><span>Ansprechpartner</span>
+                <input value={form.ansprechpartner} onChange={e => setF('ansprechpartner', e.target.value)} />
+              </label>
+              <label className="field"><span>Telefon</span>
+                <input value={form.telefon} onChange={e => setF('telefon', e.target.value)} />
+              </label>
+              <label className="field"><span>Website</span>
+                <input type="url" placeholder="https://…" value={form.website_url} onChange={e => setF('website_url', e.target.value)} />
+              </label>
+              <label className="field"><span>Branche</span>
+                <select value={form.branche} onChange={e => setF('branche', e.target.value)}>
+                  <option value="">— bitte wählen —</option>
+                  <option value="handwerk">Handwerk & Bau</option>
+                  <option value="pflege">Pflege & Soziales</option>
+                  <option value="einzelhandel">Einzelhandel</option>
+                  <option value="gastro">Gastronomie & Hotel</option>
+                  <option value="buero">Büro & Verwaltung</option>
+                  <option value="logistik">Logistik & Transport</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="formular-section">
+            <legend>Dein Angebot</legend>
+            <div className="stelle-grid">
+              <label className="field field-full"><span>Produkt / Dienstleistung — was bietet ihr an? *</span>
+                <input required value={form.produkt} onChange={e => setF('produkt', e.target.value)}
+                  placeholder="z. B. Photovoltaik-Komplettlösung inkl. Speicher" />
+              </label>
+              <label className="field field-full"><span>Wofür werden Kunden gesucht?</span>
+                <textarea rows={2} value={form.kundenprofil} onChange={e => setF('kundenprofil', e.target.value)}
+                  placeholder="z. B. Photovoltaik-Anlagen für Eigenheimbesitzer" />
+              </label>
+              <label className="field field-full"><span>Zielgruppe — wen wollt ihr erreichen?</span>
+                <textarea rows={2} value={form.zielgruppe} onChange={e => setF('zielgruppe', e.target.value)}
+                  placeholder="z. B. Hausbesitzer 35-65, ländlich, mit eigenem Dach" />
+              </label>
+              <label className="field"><span>Region / Einzugsgebiet</span>
+                <input value={form.einzugsgebiet} onChange={e => setF('einzugsgebiet', e.target.value)}
+                  placeholder="z. B. Bayern, Oberpfalz" />
+              </label>
+              <label className="field"><span>Preisrahmen (optional)</span>
+                <input value={form.preisrahmen} onChange={e => setF('preisrahmen', e.target.value)}
+                  placeholder="z. B. ab 15.000 €" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset className="formular-section">
+            <legend>Vorteile deines Produkts</legend>
+            <div className="benefits-list">
+              {form.vorteile.map((v, i) => (
+                <span key={i} className="benefit-chip">
+                  {v}
+                  <button type="button" className="benefit-chip-x" onClick={() => removeVorteil(i)} aria-label="Entfernen">×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input type="text" value={newVorteil} onChange={e => setNewVorteil(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVorteil(); } }}
+                placeholder='Neuer Vorteil, z. B. "Amortisation in 8 Jahren"' style={{ flex: 1 }} />
+              <button type="button" className="btn-ghost btn-sm" onClick={addVorteil} disabled={!newVorteil.trim()}>+ Hinzufügen</button>
+            </div>
+          </fieldset>
+
+          <fieldset className="formular-section">
+            <legend>Was unterscheidet euch vom Wettbewerb?</legend>
+            <label className="field field-full">
+              <textarea rows={3} value={form.unterschied} onChange={e => setF('unterschied', e.target.value)}
+                placeholder="z. B. Regionaler Anbieter, keine Subunternehmen, 25 Jahre Erfahrung, eigenes Montageteam" />
+            </label>
+          </fieldset>
+
+          <fieldset className="formular-section">
+            <legend>Logo (empfohlen)</legend>
+            <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp"
+              style={{ display: 'none' }} onChange={onLogoChange} />
+            {logo?.url ? (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <img src={logo.url} alt="" style={{ maxHeight: 60, background: '#fff', padding: 6, borderRadius: 6 }} />
+                <button type="button" className="btn-ghost btn-sm" onClick={() => logoInputRef.current?.click()}>Ersetzen</button>
+              </div>
+            ) : (
+              <button type="button" className="btn-ghost" onClick={() => logoInputRef.current?.click()} disabled={logoBusy}>
+                {logoBusy ? 'Lade hoch…' : '📎 Logo hochladen'}
+              </button>
+            )}
+          </fieldset>
+
+          <fieldset className="formular-section">
+            <legend>Produktbilder ({fotos.length})</legend>
+            <p className="pane-hint" style={{ margin: '0 0 8px' }}>
+              Bilder deines Produkts / typischer Anwendungssituationen / zufriedener Kunden. Bitte in guter Qualität — landen später als Herzstück in den Werbeanzeigen.
+            </p>
+            <input ref={fotoInputRef} type="file" multiple accept="image/*"
+              style={{ display: 'none' }} onChange={onFotosChange} />
+            <button type="button" className="btn-ghost" onClick={() => fotoInputRef.current?.click()} disabled={fotoBusy}>
+              {fotoBusy ? 'Lade hoch…' : '📎 Bilder hinzufügen'}
+            </button>
+            {fotos.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                {fotos.map((f, i) => (
+                  <img key={f.id || i} src={f.bild_url} alt="" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6 }} />
+                ))}
+              </div>
+            )}
+          </fieldset>
+
+          {submitError && <div className="alert alert-error" style={{ marginTop: 8 }}>{submitError}</div>}
+
+          <div className="formular-submit">
+            <button type="submit" className="btn-primary" disabled={submitBusy || !form.firmenname.trim() || !form.produkt.trim()}>
+              {submitBusy ? 'Sende…' : 'Briefing absenden'}
+            </button>
+          </div>
+        </form>
+
         <BrandFooter agentur={info?.agentur} />
       </div>
     </div>
