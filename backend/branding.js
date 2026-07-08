@@ -44,7 +44,7 @@ const BRANDING = {
     websiteUrl: 'https://nowagwirth.com',
     // Mail (Domain in Resend verifiziert: nowagwirth.com)
     from: 'Nowag & Wirth <noreply@nowagwirth.com>',
-    replyTo: 'info@nowagwirth.com',
+    replyTo: 'info@nowagwirth.de',
     mailVerified: NOWAGWIRTH_MAIL_VERIFIED,
     // Farben (Weiß / Rot / Schwarz)
     primary: '#0a0a0a',
@@ -97,13 +97,13 @@ export function getMailReplyTo(brand) {
 // Absender speziell für Angebote (Phase 4b): angebote@ statt noreply@.
 // User hat bestätigt, dass beide Domains in Resend verifiziert sind —
 // daher hier KEIN Fallback-Weg über TalentOne, sondern immer marken-native.
-// Reply-To für Angebote einheitlich: info@nowagwirth.com.
+// Reply-To für Angebote einheitlich: info@nowagwirth.de.
 export function getOfferMailFrom(brand) {
   if (brand.key === 'nowagwirth') return 'Nowag & Wirth <angebote@nowagwirth.com>';
   return 'TalentOne <angebote@talent-one.de>';
 }
 export function getOfferMailReplyTo(brand) {
-  return 'info@nowagwirth.com';
+  return 'info@nowagwirth.de';
 }
 
 // Offer-Marken-Schlüssel (talentone | nowag_wirth) → Agentur-Schlüssel für

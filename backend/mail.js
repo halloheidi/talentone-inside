@@ -741,7 +741,7 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
 
 /* ════════════════════ Angebots-Mail (Phase 4b) ════════════════════
    Absender: angebote@talent-one.de bzw. angebote@nowagwirth.com — siehe
-   getOfferMailFrom. Reply-To einheitlich: info@nowagwirth.com.
+   getOfferMailFrom. Reply-To einheitlich: info@nowagwirth.de.
    BCC ans Team wie bei allen Kundenmails. Angebot als PDF im Anhang. */
 export async function sendAngebotMail({
   to, offerBrand, subject, body, pdfBuffer, pdfFilename,
@@ -914,7 +914,7 @@ export async function sendRechnungMail({
 }
 
 /* ════════════════════ Einstellungs-Mail (Phase 5 Nachtrag) ════════════════════
-   Absender wie beim Angebotsversand: angebote@… + Reply-To info@nowagwirth.com.
+   Absender wie beim Angebotsversand: angebote@… + Reply-To info@nowagwirth.de.
    Ruft dieselbe getOfferMailFrom/-ReplyTo/-BCC-Logik auf. */
 export async function sendEinstellungsMail({
   to, offerBrand, subject, body,
@@ -959,7 +959,7 @@ export async function sendEinstellungsMail({
 
 /* ════════════════════ Rechnungs-Erinnerungsmail (Phase 5) ════════════════════
    reminder_email-Template + Merge-Tags. Absender wie Angebote:
-   angebote@… mit info@nowagwirth.com als Reply-To + BCC ans Team. */
+   angebote@… mit info@nowagwirth.de als Reply-To + BCC ans Team. */
 export async function sendErinnerungsMail({
   to, offerBrand, subject, body,
 }) {

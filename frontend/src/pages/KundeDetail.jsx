@@ -1064,7 +1064,7 @@ function SendInvoiceMailModal({ invoice, onClose, onSent }) {
       </>}
     >
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-        Absender richtet sich nach der Marke der Rechnung. Reply-To geht an info@nowagwirth.com. Die Rechnung als PDF wird automatisch aus easybill angefügt.
+        Absender richtet sich nach der Marke der Rechnung. Reply-To geht an info@nowagwirth.de. Die Rechnung als PDF wird automatisch aus easybill angefügt.
       </p>
 
       {preview?.already_sent && (

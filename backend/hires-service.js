@@ -6,7 +6,7 @@
 //   - Merge-Tag-Auflösung inkl. {{extra_stelle_preis}} aus dem Katalog
 //     und {{abrechnung_hinweis}} aus billing-rules.js
 //   - Versand über sendEinstellungsMail (Absender wie Angebote:
-//     angebote@… mit info@nowagwirth.com als Reply-To, BCC ans Team)
+//     angebote@… mit info@nowagwirth.de als Reply-To, BCC ans Team)
 
 import { supabase } from './supabase.js';
 import { pickHireMailBodyKey, resolveAbrechnungsHinweis } from './billing-rules.js';

@@ -4,7 +4,7 @@
 // status IN (sent, partially_paid, overdue) und due_date < heute, die noch
 // nicht in den letzten 5 Tagen erinnert wurden. Nutzt reminder_email-
 // Template je Marke, löst Merge-Tags auf und sendet über
-// sendErinnerungsMail (angebote@… + Reply-To info@nowagwirth.com, Team-BCC).
+// sendErinnerungsMail (angebote@… + Reply-To info@nowagwirth.de, Team-BCC).
 // Idempotent per Feld reminder_sent_at (nicht persistiert — Signal ist die
 // Zeit seit letzter Erinnerung + der eigene 5-Tage-Guard über updated_at).
 //

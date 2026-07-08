@@ -392,7 +392,7 @@ export function SendOfferModal({ preview, onClose, onSent }) {
       </>}
     >
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.com. Das easybill-PDF wird automatisch als Anhang angefügt.
+        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Das easybill-PDF wird automatisch als Anhang angefügt.
       </p>
 
       {preview.flyer_available && (
@@ -531,7 +531,7 @@ export function SendOrderModal({ preview, onClose, onSent }) {
       </>}
     >
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
-        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.com. Die AB als PDF wird automatisch aus easybill angefügt.
+        Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Die AB als PDF wird automatisch aus easybill angefügt.
       </p>
 
       {preview.flyer_available && (
