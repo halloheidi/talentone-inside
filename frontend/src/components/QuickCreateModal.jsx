@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import { api } from '../lib/api.js';
+import BrancheField from './BrancheField.jsx';
 
 // Debounced Dubletten-Check während des Tippens — sucht in Kunden + Projekten
 function useDubletten(firmenname) {
@@ -448,7 +449,7 @@ export default function QuickCreateModal({ open, onClose }) {
               </label>
               <label className="field">
                 <span>Branche</span>
-                <input value={manual.branche} onChange={e => setManual({ ...manual, branche: e.target.value })} />
+                <BrancheField value={manual.branche} onChange={v => setManual({ ...manual, branche: v })} />
               </label>
               <label className="field">
                 <span>E-Mail</span>

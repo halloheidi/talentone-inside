@@ -2,16 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { fileToBase64 } from '../../lib/files.js';
-
-const BRANCHE_OPTIONS = [
-  { value: '', label: '— bitte wählen —' },
-  { value: 'handwerk', label: 'Handwerk & Bau' },
-  { value: 'pflege', label: 'Pflege & Soziales' },
-  { value: 'einzelhandel', label: 'Einzelhandel' },
-  { value: 'gastro', label: 'Gastronomie & Hotel' },
-  { value: 'buero', label: 'Büro & Verwaltung' },
-  { value: 'logistik', label: 'Logistik & Transport' },
-];
+import BrancheField from '../../components/BrancheField.jsx';
 const MITARBEITER_OPTIONS = [
   { value: '', label: '— nicht angegeben —' },
   { value: '1-10', label: '1–10' },
@@ -321,9 +312,7 @@ export default function JobStelleninfos() {
           </label>
           <label className="field">
             <span>Branche</span>
-            <select value={form.branche} onChange={e => setF('branche', e.target.value)}>
-              {BRANCHE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <BrancheField value={form.branche || ''} onChange={v => setF('branche', v)} />
           </label>
           <label className="field">
             <span>Gehalt / Spanne</span>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
 import { getBrand } from '../lib/branding.js';
+import BrancheField from '../components/BrancheField.jsx';
 
 // Meta Pixel — TalentOne (Formular-Eingang als Lead)
 const META_PIXEL_ID = import.meta.env.VITE_META_PIXEL_ID || '1696247654718860';
@@ -60,16 +61,6 @@ async function publicApi(path, options = {}) {
   }
   return res.json();
 }
-
-const BRANCHE_OPTIONS = [
-  { value: '', label: '— bitte wählen —' },
-  { value: 'handwerk', label: 'Handwerk & Bau' },
-  { value: 'pflege', label: 'Pflege & Soziales' },
-  { value: 'einzelhandel', label: 'Einzelhandel' },
-  { value: 'gastro', label: 'Gastronomie & Hotel' },
-  { value: 'buero', label: 'Büro & Verwaltung' },
-  { value: 'logistik', label: 'Logistik & Transport' },
-];
 
 const MITARBEITER_OPTIONS = [
   { value: '', label: '— bitte wählen —' },
@@ -470,9 +461,7 @@ export default function PublicFormular() {
               </label>
               <label className="field">
                 <span>Branche</span>
-                <select value={form.branche} onChange={e => setField('branche', e.target.value)}>
-                  {BRANCHE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                <BrancheField value={form.branche} onChange={v => setField('branche', v)} />
               </label>
               <label className="field">
                 <span>Wie viele Mitarbeiter?</span>
@@ -896,15 +885,7 @@ function NeukundenBriefingForm({ token, info, onDone }) {
                 <input type="url" placeholder="https://…" value={form.website_url} onChange={e => setF('website_url', e.target.value)} />
               </label>
               <label className="field"><span>Branche</span>
-                <select value={form.branche} onChange={e => setF('branche', e.target.value)}>
-                  <option value="">— bitte wählen —</option>
-                  <option value="handwerk">Handwerk & Bau</option>
-                  <option value="pflege">Pflege & Soziales</option>
-                  <option value="einzelhandel">Einzelhandel</option>
-                  <option value="gastro">Gastronomie & Hotel</option>
-                  <option value="buero">Büro & Verwaltung</option>
-                  <option value="logistik">Logistik & Transport</option>
-                </select>
+                <BrancheField value={form.branche} onChange={v => setF('branche', v)} />
               </label>
             </div>
           </fieldset>
