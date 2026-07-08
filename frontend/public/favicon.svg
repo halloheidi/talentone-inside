@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#000000"/>
+  <!-- Weißes "T" links -->
+  <rect x="0" y="150" width="200" height="55" fill="#ffffff"/>
+  <rect x="72" y="150" width="55" height="270" fill="#ffffff"/>
+  <!-- Gelber Kreis-Outline rechts -->
+  <circle cx="342" cy="256" r="130" fill="none" stroke="#d4ff3d" stroke-width="30"/>
+</svg>
