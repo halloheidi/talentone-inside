@@ -68,6 +68,15 @@ router.post('/upload/:token', async (req, res) => {
         await deleteFromBucket('talentone-logos', kunde.logo_url);
       }
       await supabase.from('talentone_kunden').update({ logo_url: publicUrl }).eq('id', kunde.id);
+      // Transparente Version im Hintergrund vorbereiten
+      (async () => {
+        try {
+          const [{ deleteFromBucket }, { prepareAndSaveTransparentLogo }] = await Promise.all([
+            import('../storage.js'), import('../logo.js'),
+          ]);
+          await prepareAndSaveTransparentLogo(kunde.id, buffer, { supabase, uploadBuffer, deleteFromBucket });
+        } catch (err) { console.warn('[public-upload] transparent-Logo:', err.message); }
+      })();
       // zusätzlich in talentone_referenzbilder als typ=logo loggen, damit der Mitarbeiter den Verlauf sieht
       await supabase.from('talentone_referenzbilder').insert({
         kunde_id: kunde.id, bild_url: publicUrl, typ: 'logo', uploaded_via: 'kunde',
@@ -168,6 +177,12 @@ router.post('/formular/:token/logo', async (req, res) => {
     const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType });
     if (kunde.logo_url) await deleteFromBucket('talentone-logos', kunde.logo_url);
     await supabase.from('talentone_kunden').update({ logo_url: publicUrl }).eq('id', kunde.id);
+    (async () => {
+      try {
+        const { prepareAndSaveTransparentLogo } = await import('../logo.js');
+        await prepareAndSaveTransparentLogo(kunde.id, buffer, { supabase, uploadBuffer, deleteFromBucket });
+      } catch (err) { console.warn('[formular/logo] transparent:', err.message); }
+    })();
     res.status(201).json({ logo_url: publicUrl });
   } catch (err) {
     console.error('[formular/logo]', err.message);

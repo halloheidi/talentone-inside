@@ -132,6 +132,10 @@ router.post('/quick-create', async (req, res) => {
           });
           await supabase.from('talentone_kunden').update({ logo_url: logoUrl }).eq('id', kunde.id);
           console.log(`[quick-create-bg] Logo gesetzt für ${kunde.id.slice(0, 8)}`);
+          try {
+            const { prepareAndSaveTransparentLogo } = await import('../logo.js');
+            await prepareAndSaveTransparentLogo(kunde.id, logoBuffer, { supabase, uploadBuffer, deleteFromBucket });
+          } catch (err) { console.warn('[quick-create-bg] transparent-Logo:', err.message); }
         } catch (err) {
           console.warn('[quick-create-bg] Logo-Upload fehlgeschlagen:', err.message);
         }
@@ -427,6 +431,14 @@ router.post('/:id/logo', async (req, res) => {
       .single();
     if (uErr) return res.status(500).json({ error: uErr.message });
 
+    // Transparente Version im Hintergrund — blockiert die Response nicht
+    (async () => {
+      try {
+        const { prepareAndSaveTransparentLogo } = await import('../logo.js');
+        await prepareAndSaveTransparentLogo(req.params.id, buffer, { supabase, uploadBuffer, deleteFromBucket });
+      } catch (err) { console.warn('[logo-upload] transparent:', err.message); }
+    })();
+
     res.status(201).json({ kunde: updated });
   } catch (err) {
     console.error('[logo-upload]', err.message);
@@ -436,10 +448,33 @@ router.post('/:id/logo', async (req, res) => {
 
 router.delete('/:id/logo', async (req, res) => {
   const { data: existing } = await supabase
-    .from('talentone_kunden').select('logo_url').eq('id', req.params.id).maybeSingle();
+    .from('talentone_kunden').select('logo_url, logo_transparent_url').eq('id', req.params.id).maybeSingle();
   if (existing?.logo_url) await deleteFromBucket('talentone-logos', existing.logo_url);
-  await supabase.from('talentone_kunden').update({ logo_url: null }).eq('id', req.params.id);
+  if (existing?.logo_transparent_url) await deleteFromBucket('talentone-logos', existing.logo_transparent_url);
+  await supabase.from('talentone_kunden')
+    .update({ logo_url: null, logo_transparent_url: null }).eq('id', req.params.id);
   res.json({ ok: true });
+});
+
+/* POST /api/kunden/:id/logo/reprocess
+   Regeneriert die transparente Version des Logos aus dem aktuellen logo_url.
+   Für Bestandsdaten und für Fälle, wo die Auto-Prep fehlgeschlagen ist. */
+router.post('/:id/logo/reprocess', async (req, res) => {
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, logo_url').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  if (!kunde.logo_url) return res.status(400).json({ error: 'Kein Logo hinterlegt.' });
+  try {
+    const { fetchAsBuffer } = await import('../storage.js');
+    const { prepareAndSaveTransparentLogo } = await import('../logo.js');
+    const { buffer } = await fetchAsBuffer(kunde.logo_url);
+    const publicUrl = await prepareAndSaveTransparentLogo(kunde.id, buffer,
+      { supabase, uploadBuffer, deleteFromBucket });
+    res.json({ ok: true, logo_transparent_url: publicUrl });
+  } catch (err) {
+    console.error('[logo-reprocess]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ─────────────────── Referenzbilder ─────────────────── */

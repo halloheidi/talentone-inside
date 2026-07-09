@@ -4,8 +4,9 @@
 //                            Upload nach Supabase Storage (Bucket: talentone-creatives).
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
-import { fetchAsBuffer } from './storage.js';
-import sharp from 'sharp';
+import { fetchAsBuffer, uploadBuffer } from './storage.js';
+import { supabase } from './supabase.js';
+import { makeTransparent, composeLogoOverlay } from './logo.js';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
@@ -282,7 +283,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
   const farben = buildFarbenHinweis(kunde);
 
   const refHinweis = [];
-  const LOGO_FREI_HINWEIS = `WICHTIG: Lasse den Bereich oben rechts (ca. 20% Breite × 15% Höhe, mit etwas Abstand zum Rand) VÖLLIG FREI und ruhig — dort wird nachträglich per Code das Original-Firmenlogo als Overlay eingefügt. Zeichne oder skizziere dort selbst KEIN Logo, KEIN Signet, KEINEN Firmenname-Text, KEINE Marken-Grafik. Farb-Balance darf sich am Logo orientieren (siehe mitgeliefertes Bild), aber das Logo selbst NICHT in das Bild integrieren.`;
+  const LOGO_FREI_HINWEIS = `KRITISCH — LOGO-REGEL: Zeichne im gesamten Bild KEIN Logo, KEIN Firmenlogo, KEIN Signet, KEIN Markenzeichen, KEINEN Firmenname-Text, KEINE Wortmarke, KEINE Buchstaben-Grafik, die an ein Logo erinnert. Das echte Original-Logo wird nachträglich per Code oben rechts als Overlay eingefügt. Halte im Bereich oben rechts (ca. 22% Breite × 18% Höhe, mit ~3% Abstand zum Rand) einen ruhigen, weitgehend flächigen Bereich frei (keine Gesichter, keine wichtigen Details, keine Text-Elemente) — der Bereich darf farblich Teil der Szene sein, aber ohne kritische Bildinhalte. Farb-Balance darf sich am mitgelieferten Logo orientieren, das Logo selbst darf NIRGENDS ins Bild.`;
   if (hasLogo && person) {
     refHinweis.push(
       `MITGELIEFERTE BILDER (in dieser Reihenfolge):`,
@@ -354,7 +355,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
 
   const refLines = hasLogo
     ? `MITGELIEFERTE BILDER (in dieser Reihenfolge):
-[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. NICHT ins Bild zeichnen. Der Bereich oben rechts (ca. 20% Breite × 15% Höhe, mit Abstand zum Rand) bleibt VÖLLIG FREI — dort wird nachträglich per Code das Original-Logo als Overlay eingefügt.
+[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. Das Logo wird NIEMALS ins Bild gezeichnet — es wird nachträglich per Code als Overlay oben rechts eingefügt. Nutze das Bild nur, um die Markenfarbe zu erkennen.
 [BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`
     : `MITGELIEFERTES BILD = HINTERGRUND. Übernimm dieses Foto EXAKT als Hintergrund, ohne es zu verändern: keine Personen austauschen, keine Komposition ändern, keine Farben verfälschen, keine Filter, kein neuer Bildstil. Es bleibt der echte, originale Foto-Look.`;
 
@@ -387,7 +388,7 @@ FLEXIBLER BEREICH OBEN (ca. obere 65% — du wählst Stil & Anordnung der Overla
   Kompakte Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub". Anordnung frei.
 
 • ${hasLogo
-    ? `LOGO dezent platziert (oben oder bei den Benefits): klein (ca. 8-12% Bildbreite). KEIN zusätzlicher Firmenname-Text.`
+    ? `LOGO wird NACHTRÄGLICH oben rechts als Overlay eingefügt — der Bereich oben rechts (ca. 22% Breite × 15% Höhe, mit Abstand zum Rand) bleibt VÖLLIG FREI. Zeichne dort NICHTS: kein Logo, kein Signet, kein Firmenname-Text, keine Marken-Grafik. Falls das Hintergrundfoto in diesem Bereich Bildinhalt hat, den Bereich mit einem dezenten dunklen Verlauf abdunkeln — sonst nichts.`
     : `FIRMENNAME-SCHRIFTZUG dezent oben: "${firmenname}" als sauberer Text-Schriftzug, klein. KEIN Logo-Element.`}
 
 • Pinselstrich- oder Farbspritzer-Akzente in Markenfarbe (organisch, nicht überladen)
@@ -427,7 +428,7 @@ function buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person
   const farben = buildFarbenHinweis(kunde);
 
   const refHinweis = [];
-  const LOGO_FREI = `WICHTIG: Lasse den Bereich oben rechts (ca. 20% × 15%, mit Abstand zum Rand) VÖLLIG FREI — dort wird nachträglich per Code das Original-Firmenlogo als Overlay eingefügt. Zeichne oben rechts KEIN Logo, KEIN Firmenname-Text, KEINE Marken-Grafik.`;
+  const LOGO_FREI = `KRITISCH — LOGO-REGEL: Zeichne im gesamten Bild KEIN Logo, KEIN Firmenlogo, KEIN Signet, KEIN Markenzeichen, KEINEN Firmenname-Text, KEINE Wortmarke. Das echte Original-Logo wird nachträglich per Code oben rechts als Overlay eingefügt. Halte oben rechts (ca. 22% Breite × 18% Höhe, mit ~3% Abstand zum Rand) einen ruhigen Bereich frei (keine wichtigen Details, keine Text-Elemente).`;
   if (mode === 'foto') {
     if (hasLogo) {
       refHinweis.push(`MITGELIEFERTE BILDER:\n[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-Referenz. ${LOGO_FREI}\n[BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm EXAKT als Hintergrund, ohne Verfremdung.`);
@@ -613,57 +614,63 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
 
-  let buffer = Buffer.from(b64, 'base64');
+  const rawBuffer = Buffer.from(b64, 'base64');
+  let finalBuffer = rawBuffer;
+  let bildOhneLogoUrl = null;
 
-  // Logo-Overlay per Sharp — das Original-PNG pixelgenau aufsetzen, damit
-  // gpt-image-2 das Firmenlogo nicht mehr verfälscht. Positioniert oben
-  // rechts, skaliert auf ~13% der Bildbreite mit 3% Padding zum Rand.
+  // Rohbild (ohne Overlay) separat speichern — Basis für spätere Logo-Neupositionierung.
+  // Wenn kein Logo verwendet wird, ist bild_url == bild_ohne_logo_url; wir speichern
+  // dann nur einmal, um Storage zu sparen.
   const logoRef = refs.find(r => r.isLogo);
   if (logoRef?.buffer) {
+    const rawFilename = `${job.id}/raw-${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
     try {
-      buffer = await applyLogoOverlay(buffer, logoRef.buffer);
+      bildOhneLogoUrl = await uploadToStorage(rawBuffer, rawFilename);
+    } catch (err) {
+      console.warn(`[imagegen] raw-upload fehlgeschlagen (nicht kritisch): ${err.message}`);
+    }
+    try {
+      const transparentLogo = await ensureTransparentLogo(kunde, logoRef.buffer);
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo);
     } catch (err) {
       console.warn(`[logo-overlay] fehlgeschlagen — fahre ohne Overlay fort: ${err.message}`);
     }
   }
 
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
-  const bildUrl = await uploadToStorage(buffer, filename);
-  return { format, bildUrl, prompt };
+  const bildUrl = await uploadToStorage(finalBuffer, filename);
+  return { format, bildUrl, prompt, bildOhneLogoUrl };
 }
 
 /**
- * Composed das Firmenlogo oben rechts über das fertige Creative. Reine Sharp-
- * Operation — Logo bleibt exakt das Original (keine KI-Verfälschung).
- *
- * @param {Buffer} baseBuffer  — das generierte Creative (PNG)
- * @param {Buffer} logoBuffer  — das originale Kunden-Logo
- * @returns {Promise<Buffer>}   — komponiertes PNG
+ * Liefert das transparente Logo des Kunden. Wenn `logo_transparent_url` fehlt
+ * oder unerreichbar ist, wird es on-the-fly aus dem übergebenen Original-Buffer
+ * präpariert und im Bucket „talentone-logos" abgelegt.
  */
-async function applyLogoOverlay(baseBuffer, logoBuffer) {
-  const base = sharp(baseBuffer);
-  const meta = await base.metadata();
-  const width = meta.width;
-  const height = meta.height;
-  if (!width || !height) return baseBuffer;
-
-  // Zielbreite des Logos: 13% der Bildbreite. Höhe proportional durch Sharp.
-  const logoTargetWidth = Math.round(width * 0.13);
-  const paddingRight    = Math.round(width * 0.03);
-  const paddingTop      = Math.round(height * 0.03);
-
-  const resizedLogo = await sharp(logoBuffer)
-    .resize({ width: logoTargetWidth, withoutEnlargement: false })
-    .png()
-    .toBuffer({ resolveWithObject: true });
-
-  const left = width - resizedLogo.info.width - paddingRight;
-  const top  = paddingTop;
-
-  return base
-    .composite([{ input: resizedLogo.data, left, top }])
-    .png()
-    .toBuffer();
+async function ensureTransparentLogo(kunde, originalLogoBuffer) {
+  if (kunde?.logo_transparent_url) {
+    try {
+      const { buffer } = await fetchAsBuffer(kunde.logo_transparent_url);
+      return buffer;
+    } catch (err) {
+      console.warn(`[logo] logo_transparent_url unerreichbar — regeneriere: ${err.message}`);
+    }
+  }
+  const transparent = await makeTransparent(originalLogoBuffer);
+  if (kunde?.id) {
+    try {
+      const path = `${kunde.id}/transparent-${Date.now()}.png`;
+      const publicUrl = await uploadBuffer({
+        bucket: 'talentone-logos', path, buffer: transparent, contentType: 'image/png',
+      });
+      await supabase.from('talentone_kunden')
+        .update({ logo_transparent_url: publicUrl })
+        .eq('id', kunde.id);
+    } catch (err) {
+      console.warn(`[logo] transparent-Upload fehlgeschlagen (Overlay funktioniert trotzdem): ${err.message}`);
+    }
+  }
+  return transparent;
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.

@@ -7,6 +7,7 @@ import Icon from '../../components/Icon.jsx';
 import Lightbox from '../../components/Lightbox.jsx';
 import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
 import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
+import LogoPositionModal from '../../components/LogoPositionModal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
@@ -44,6 +45,7 @@ export default function JobCreatives() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
+  const [logoPosTarget, setLogoPosTarget] = useState(null);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const [expected, setExpected] = useState(0);
@@ -831,6 +833,9 @@ export default function JobCreatives() {
                     {c.typ !== 'video' && c.quelle !== 'upload' && (
                       <button className="btn-ghost btn-sm" onClick={() => openRework(c)}>Überarbeiten</button>
                     )}
+                    {c.typ !== 'video' && c.bild_ohne_logo_url && kunde?.logo_url && (
+                      <button className="btn-ghost btn-sm" onClick={() => setLogoPosTarget(c)}>Logo anpassen</button>
+                    )}
                     {c.format === 'story' && c.typ !== 'video' && (
                       <button
                         className="btn-ghost btn-sm"
@@ -897,6 +902,15 @@ export default function JobCreatives() {
         onClose={() => setShowCreativeUpload(false)}
         jobId={job.id}
         onUploaded={(c) => setCreatives(prev => [c, ...prev])}
+      />
+
+      {/* ───────── Logo-Positions-Modal ───────── */}
+      <LogoPositionModal
+        open={!!logoPosTarget}
+        creative={logoPosTarget}
+        logoUrl={kunde?.logo_url}
+        onClose={() => setLogoPosTarget(null)}
+        onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
       />
     </div>
   );

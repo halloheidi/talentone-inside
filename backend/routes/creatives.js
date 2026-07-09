@@ -279,8 +279,10 @@ router.post('/generate', async (req, res) => {
       if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
       if (allOk.length > 0) {
-        const rows = allOk.map(({ format, bildUrl, prompt }) => ({
-          job_id, format, typ: 'bild', bild_url: bildUrl, prompt, status: 'fertig',
+        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl }) => ({
+          job_id, format, typ: 'bild', bild_url: bildUrl,
+          bild_ohne_logo_url: bildOhneLogoUrl || null,
+          prompt, status: 'fertig',
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
         if (insErr) {
@@ -347,6 +349,7 @@ router.post('/:id/regenerate', async (req, res) => {
         format: existing.format,
         typ: 'bild',
         bild_url: result.bildUrl,
+        bild_ohne_logo_url: result.bildOhneLogoUrl || null,
         prompt: result.prompt,
         status: 'fertig',
       })
@@ -355,6 +358,7 @@ router.post('/:id/regenerate', async (req, res) => {
     if (insErr) return res.status(500).json({ error: insErr.message });
 
     await deleteFromStorage(existing.bild_url);
+    if (existing.bild_ohne_logo_url) await deleteFromStorage(existing.bild_ohne_logo_url);
     await supabase.from('talentone_creatives').delete().eq('id', existing.id);
 
     res.status(201).json({ creative: created });
@@ -388,7 +392,7 @@ router.post('/:id/wiederherstellen', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const { data: existing } = await supabase
     .from('talentone_creatives')
-    .select('bild_url, archiviert')
+    .select('bild_url, bild_ohne_logo_url, archiviert')
     .eq('id', req.params.id)
     .maybeSingle();
   if (!existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
@@ -398,6 +402,7 @@ router.delete('/:id', async (req, res) => {
     });
   }
   if (existing.bild_url) await deleteFromStorage(existing.bild_url);
+  if (existing.bild_ohne_logo_url) await deleteFromStorage(existing.bild_ohne_logo_url);
   const { error } = await supabase.from('talentone_creatives').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
@@ -447,6 +452,84 @@ router.post('/:id/reel', async (req, res) => {
       console.error('[reel-bg]', err.message);
     }
   })().catch(err => console.error('[reel-bg] uncaught:', err));
+});
+
+/* PATCH /api/creatives/:id/logo-position
+   body: { x?, y?, width_pct? }  — Werte 0..1, x/y = Zentrum des Logos.
+   Rendert das Creative aus bild_ohne_logo_url + kunden.logo_transparent_url
+   neu; ersetzt bild_url + speichert logo_position. */
+router.patch('/:id/logo-position', async (req, res) => {
+  const { x, y, width_pct } = req.body || {};
+  const position = {};
+  if (x != null) position.x = Number(x);
+  if (y != null) position.y = Number(y);
+  if (width_pct != null) position.width_pct = Number(width_pct);
+  for (const k of Object.keys(position)) {
+    if (!Number.isFinite(position[k]) || position[k] < 0 || position[k] > 1) {
+      return res.status(400).json({ error: `${k} muss Zahl zwischen 0 und 1 sein.` });
+    }
+  }
+
+  const { data: existing, error: e1 } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (e1 || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (!existing.bild_ohne_logo_url) {
+    return res.status(409).json({ error: 'Kein Roh-Bild (bild_ohne_logo_url) gespeichert — Logo-Position lässt sich für dieses Creative nicht nachjustieren. Bitte neu generieren.' });
+  }
+
+  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', existing.job_id).single();
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, logo_url, logo_transparent_url').eq('id', job.kunde_id).single();
+  if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
+
+  try {
+    const [{ fetchAsBuffer }, { makeTransparent, composeLogoOverlay }] = await Promise.all([
+      import('../storage.js'), import('../logo.js'),
+    ]);
+
+    // Base-Bild laden
+    const base = await fetchAsBuffer(existing.bild_ohne_logo_url);
+
+    // Transparentes Logo: bevorzugt aus logo_transparent_url, sonst on-the-fly
+    let transparentLogo;
+    if (kunde.logo_transparent_url) {
+      try { transparentLogo = (await fetchAsBuffer(kunde.logo_transparent_url)).buffer; }
+      catch (err) { console.warn('[logo-position] transparent-URL nicht ladbar, regeneriere:', err.message); }
+    }
+    if (!transparentLogo) {
+      const { buffer: origBuf } = await fetchAsBuffer(kunde.logo_url);
+      transparentLogo = await makeTransparent(origBuf);
+      try {
+        const path = `${kunde.id}/transparent-${Date.now()}.png`;
+        const publicUrl = await uploadBuffer({
+          bucket: 'talentone-logos', path, buffer: transparentLogo, contentType: 'image/png',
+        });
+        await supabase.from('talentone_kunden')
+          .update({ logo_transparent_url: publicUrl }).eq('id', kunde.id);
+      } catch (err) { console.warn('[logo-position] transparent-Upload skip:', err.message); }
+    }
+
+    const composed = await composeLogoOverlay(base.buffer, transparentLogo, position);
+
+    // Neues Bild uploaden, altes ersetzen
+    const path = `${existing.job_id}/${existing.format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    const newUrl = await uploadBuffer({
+      bucket: CREATIVES_BUCKET, path, buffer: composed, contentType: 'image/png',
+    });
+    const oldUrl = existing.bild_url;
+
+    const { data: updated, error: uErr } = await supabase.from('talentone_creatives')
+      .update({ bild_url: newUrl, logo_position: position })
+      .eq('id', existing.id).select().single();
+    if (uErr) return res.status(500).json({ error: uErr.message });
+
+    if (oldUrl && oldUrl !== existing.bild_ohne_logo_url) await deleteFromStorage(oldUrl);
+
+    res.json({ creative: updated });
+  } catch (err) {
+    console.error('[logo-position]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
