@@ -267,6 +267,28 @@ export default function JobView() {
         </div>
       </div>
 
+      {/* Formular-Ausgefüllt-Hinweis — dezenter grüner Info-Banner wenn der
+          Kunde den Job über das öffentliche Formular submitted hat. Zeitpunkt
+          ist job.created_at (Insert erfolgt exakt beim submit). */}
+      {job.eingabe_methode === 'formular' && (
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center',
+          background: '#dcfce7', border: '1px solid #86efac',
+          padding: '8px 14px', borderRadius: 8, marginBottom: 10,
+          fontSize: 13, color: '#166534',
+        }}>
+          <span aria-hidden style={{ fontSize: 16 }}>✅</span>
+          <span>
+            <strong>Vom Kunden ausgefüllt</strong> am{' '}
+            {new Date(job.created_at).toLocaleString('de-DE', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+              hour: '2-digit', minute: '2-digit',
+            })} Uhr
+            {kunde?.ansprechpartner ? ` · ${kunde.ansprechpartner}` : ''}
+          </span>
+        </div>
+      )}
+
       {/* Arbeitshinweis + Status-Badge über allen Tabs */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
         <div style={{ flex: 1 }}>

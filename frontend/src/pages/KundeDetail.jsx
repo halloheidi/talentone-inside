@@ -473,7 +473,23 @@ export default function KundeDetail() {
         <div className="kunde-head-body">
           {!editMode ? (
             <>
-              <h1 className="page-title">{kunde.firmenname || '—'}</h1>
+              <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span>{kunde.firmenname || '—'}</span>
+                {(() => {
+                  const formularJob = jobs.find(j => j.eingabe_methode === 'formular');
+                  if (!formularJob) return null;
+                  const datum = new Date(formularJob.created_at).toLocaleDateString('de-DE');
+                  return (
+                    <span title={`Kunde hat das Briefing-Formular am ${new Date(formularJob.created_at).toLocaleString('de-DE')} eigenständig ausgefüllt.`}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        background: '#dcfce7', color: '#166534',
+                        padding: '3px 10px', borderRadius: 100,
+                        fontSize: 12, fontWeight: 600,
+                      }}>✅ Formular ausgefüllt · {datum}</span>
+                  );
+                })()}
+              </h1>
               <div className="kunde-head-meta">
                 {kunde.agentur && (
                   <span><strong>Agentur:</strong> {kunde.agentur === 'nowagwirth' ? 'Nowag & Wirth' : 'TalentOne'}</span>
