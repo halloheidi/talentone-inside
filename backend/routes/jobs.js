@@ -36,6 +36,8 @@ router.post('/quick-create', async (req, res) => {
   const {
     kunde_id, mode, customText, projekttyp,
     projektdauer, fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details,
+    // Neu: Start-Status + Kick-Off-Termin
+    projekt_status, kickoff_termin,
   } = req.body || {};
   if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
   const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
@@ -90,15 +92,16 @@ router.post('/quick-create', async (req, res) => {
       projekt: '[Wartet auf Briefing]',
       kunde: kunde.firmenname,
       kunde_id,
-      job_id: job.id,
       agentur: kunde.agentur,
-      status: 'vorbereitung',
+      status: projekt_status || 'vorbereitung',
       projektdauer: projektdauer || null,
       fotograf_noetig: kunde.agentur === 'nowagwirth' ? !!fotograf_noetig : false,
       zahlung_aufgeteilt: !!zahlung_aufgeteilt,
       garantie: !!garantie,
       garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
-    }).then(() => {}).catch(() => {});
+      kickoff_termin: kickoff_termin || null,
+    }).then(({ error }) => { if (error) console.error('[quick-create projekt-insert]', error.message); })
+      .catch(err => console.error('[quick-create projekt-insert]', err.message));
 
     return res.status(201).json({ job, mode: 'formular', mailSent: true });
   }
@@ -147,15 +150,20 @@ router.post('/quick-create', async (req, res) => {
       projekt: job.stelle || 'Neues Projekt',
       kunde: kunde.firmenname,
       kunde_id,
-      job_id: job.id,
       agentur: kunde.agentur,
-      status: 'kickoff_vereinbart',
+      status: projekt_status || 'vorbereitung',
+      projektart: pt === 'neukundengewinnung' ? 'Neukundengewinnung' :
+                  (kunde.agentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+      gesuchte_positionen: job.stelle || null,
+      standorte: job.region || null,
       projektdauer: projektdauer || null,
       fotograf_noetig: kunde.agentur === 'nowagwirth' ? !!fotograf_noetig : false,
       zahlung_aufgeteilt: !!zahlung_aufgeteilt,
       garantie: !!garantie,
       garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
-    }).then(() => {}).catch(() => {});
+      kickoff_termin: kickoff_termin || null,
+    }).then(({ error }) => { if (error) console.error('[quick-create projekt-insert]', error.message); })
+      .catch(err => console.error('[quick-create projekt-insert]', err.message));
 
     res.status(201).json({ job });
   } catch (err) {

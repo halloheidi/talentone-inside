@@ -34,6 +34,8 @@ router.post('/quick-create', async (req, res) => {
     mode, logo, agentur, projekt_status, projektart, verantwortlich,
     // Migration 025: neue Projekt-Flags direkt beim Anlegen
     projektdauer, fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details,
+    // Migration 027
+    kickoff_termin,
   } = req.body || {};
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
   let kundeData = { agentur: finalAgentur };
@@ -106,7 +108,7 @@ router.post('/quick-create', async (req, res) => {
     }
 
     // Projekt in Kanban anlegen (Kanban/Liste-Übersicht)
-    const status = PROJEKTE_STATI.includes(projekt_status) ? projekt_status : 'kickoff_vereinbart';
+    const status = PROJEKTE_STATI.includes(projekt_status) ? projekt_status : 'vorbereitung';
     const projektName = job.stelle || kunde.firmenname || 'Neues Projekt';
     await supabase.from('talentone_projekte').insert({
       projekt: projektName,
@@ -120,6 +122,7 @@ router.post('/quick-create', async (req, res) => {
       zahlung_aufgeteilt: !!zahlung_aufgeteilt,
       garantie: !!garantie,
       garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
+      kickoff_termin: kickoff_termin || null,
       gesuchte_positionen: job.stelle || null,
       standorte: job.region || null,
       verantwortlich: verantwortlich || null,
@@ -775,6 +778,21 @@ router.post('/formular-anlegen', async (req, res) => {
       formdata_komplett: { _wartet_auf_briefing: true },
     });
   if (jErr) console.error('[formular-anlegen] Job anlegen:', jErr.message);
+
+  // Projekt in Kanban anlegen — sonst taucht der neue Kunde nirgends auf.
+  const { error: pErr } = await supabase.from('talentone_projekte').insert({
+    projekt: '[Wartet auf Briefing]',
+    kunde: kunde.firmenname || kunde.email,
+    kunde_id: kunde.id,
+    status: 'vorbereitung',
+    agentur: finalAgentur,
+    projektart: pt === 'neukundengewinnung' ? 'Neukundengewinnung' :
+                (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+    email: kunde.email || null,
+    close_lead_id: kunde.close_lead_id || null,
+    updated_at: new Date().toISOString(),
+  });
+  if (pErr) console.error('[formular-anlegen] Projekt-Insert:', pErr.message);
 
   const formularUrl = `${getPublicBaseUrl(kunde.agentur)}/formular/${token}`;
   try {

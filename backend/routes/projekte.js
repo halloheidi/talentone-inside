@@ -33,6 +33,8 @@ const ALLOWED_FIELDS = [
   'live_termin',
   // Neue Flags (Migration 025)
   'agentur', 'fotograf_noetig', 'zahlung_aufgeteilt', 'garantie', 'garantie_details',
+  // Migration 027
+  'kickoff_termin',
 ];
 
 function pickFields(body) {
@@ -386,6 +388,67 @@ router.post('/:id/duplicate', async (req, res) => {
   if (iErr) return res.status(500).json({ error: iErr.message });
 
   res.status(201).json({ projekt: created });
+});
+
+/* POST /api/projekte/backfill-missing
+   Fuer alle Kunden mit Jobs aber ohne Projekt → ein Projekt anlegen.
+   Nachzieh-Sync fuer Bestandsdaten aus der Zeit als Auto-Anlage nicht griff. */
+router.post('/backfill-missing', async (req, res) => {
+  try {
+    // 1. Kunden mit Jobs finden
+    const { data: kunden } = await supabase.from('talentone_kunden')
+      .select('id, firmenname, email, agentur, close_lead_id, status');
+    if (!kunden?.length) return res.json({ created: 0, checked: 0 });
+
+    let created = 0;
+    const results = [];
+    for (const k of kunden) {
+      // Hat der Kunde ein Projekt?
+      const { count: pCount } = await supabase.from('talentone_projekte')
+        .select('id', { count: 'exact', head: true }).eq('kunde_id', k.id);
+      if (pCount && pCount > 0) continue;
+
+      // Hat der Kunde einen Job?
+      const { data: jobs } = await supabase.from('talentone_jobs')
+        .select('id, stelle, region, projekttyp, eingabe_methode, formdata_komplett')
+        .eq('kunde_id', k.id).order('created_at', { ascending: true });
+      if (!jobs?.length) continue;
+
+      // Primaeren Job auswaehlen — nicht-Platzhalter bevorzugt
+      const primary = jobs.find(j =>
+        !((j.formdata_komplett || {})._wartet_auf_briefing)) || jobs[0];
+      const istNeu = primary.projekttyp === 'neukundengewinnung';
+      const istPlatzhalter = !!(primary.formdata_komplett?._wartet_auf_briefing);
+      const finalAgentur = k.agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
+
+      const row = {
+        projekt: istPlatzhalter ? '[Wartet auf Briefing]' : (primary.stelle || k.firmenname || 'Neues Projekt'),
+        kunde: k.firmenname || k.email,
+        kunde_id: k.id,
+        status: istPlatzhalter ? 'vorbereitung' : (k.status === 'aktiv' ? 'onboarding' : 'vorbereitung'),
+        agentur: finalAgentur,
+        projektart: istNeu ? 'Neukundengewinnung' :
+                    (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+        gesuchte_positionen: primary.stelle || null,
+        standorte: primary.region || null,
+        email: k.email || null,
+        close_lead_id: k.close_lead_id || null,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from('talentone_projekte').insert(row).select().single();
+      if (error) {
+        results.push({ kunde_id: k.id, firmenname: k.firmenname, error: error.message });
+        continue;
+      }
+      created++;
+      results.push({ kunde_id: k.id, firmenname: k.firmenname, projekt_id: data.id });
+    }
+
+    res.json({ created, checked: kunden.length, results });
+  } catch (err) {
+    console.error('[backfill-missing]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

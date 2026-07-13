@@ -79,7 +79,8 @@ export default function QuickCreateModal({ open, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [agentur, setAgentur] = useState('talentone');
-  const [projektStatus, setProjektStatus] = useState('kickoff_vereinbart');
+  const [projektStatus, setProjektStatus] = useState('vorbereitung');
+  const [kickoffTermin, setKickoffTermin] = useState('');
   const [projektart, setProjektart] = useState('');
   const [projektFlags, setProjektFlags] = useState({
     projektdauer: '', fotograf_noetig: false, zahlung_aufgeteilt: false,
@@ -217,6 +218,7 @@ export default function QuickCreateModal({ open, onClose }) {
 
       body.agentur = agentur;
       body.projekt_status = projektStatus;
+      body.kickoff_termin = projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null;
       body.projektart = projektart || null;
       body.projektdauer = projektFlags.projektdauer || null;
       body.fotograf_noetig = !!projektFlags.fotograf_noetig;
@@ -288,6 +290,12 @@ export default function QuickCreateModal({ open, onClose }) {
                 {PROJEKT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
+            {projektStatus === 'kickoff_vereinbart' && (
+              <label>
+                <span>Kick-Off Termin</span>
+                <input type="date" value={kickoffTermin} onChange={e => setKickoffTermin(e.target.value)} disabled={busy} />
+              </label>
+            )}
             <label>
               <span>Projektart</span>
               <select value={projektart} onChange={e => setProjektart(e.target.value)} disabled={busy}>

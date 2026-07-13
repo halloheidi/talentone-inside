@@ -51,6 +51,8 @@ export default function NewProjectModal({ open, onClose, kunde }) {
   // und Neukundengewinnung. Bei TalentOne bleibt es fix Mitarbeitergewinnung.
   const kannNeukunden = kunde?.agentur === 'nowagwirth';
   const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
+  const [projektStatus, setProjektStatus] = useState('vorbereitung');
+  const [kickoffTermin, setKickoffTermin] = useState('');
   const [projektFlags, setProjektFlags] = useState({
     projektdauer: '', fotograf_noetig: false, zahlung_aufgeteilt: false,
     garantie: false, garantie_details: '',
@@ -87,6 +89,8 @@ export default function NewProjectModal({ open, onClose, kunde }) {
     try {
       let body = {
         kunde_id: kunde.id, projekttyp,
+        projekt_status: projektStatus,
+        kickoff_termin: projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null,
         projektdauer: projektFlags.projektdauer || null,
         fotograf_noetig: !!projektFlags.fotograf_noetig,
         zahlung_aufgeteilt: !!projektFlags.zahlung_aufgeteilt,
@@ -179,6 +183,24 @@ export default function NewProjectModal({ open, onClose, kunde }) {
 
           <div style={{ padding: 12, background: '#fafaf8', borderRadius: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: 0.03, marginBottom: 8 }}>PROJEKT-ECKDATEN</div>
+            <div className="form-grid" style={{ marginBottom: 10 }}>
+              <label className="field">
+                <span>Start-Status</span>
+                <select value={projektStatus} onChange={e => setProjektStatus(e.target.value)}>
+                  <option value="vorbereitung">Vorbereitung</option>
+                  <option value="kickoff_vereinbart">Kick-Off vereinbart</option>
+                  <option value="onboarding">Onboarding</option>
+                  <option value="warte_auf_go">Warte auf Go!</option>
+                  <option value="live">Live</option>
+                </select>
+              </label>
+              {projektStatus === 'kickoff_vereinbart' && (
+                <label className="field">
+                  <span>Kick-Off Termin</span>
+                  <input type="date" value={kickoffTermin} onChange={e => setKickoffTermin(e.target.value)} />
+                </label>
+              )}
+            </div>
             <ProjektFlagsFields
               value={projektFlags}
               onChange={setProjektFlags}

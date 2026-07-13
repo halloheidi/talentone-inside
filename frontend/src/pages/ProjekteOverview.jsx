@@ -519,6 +519,11 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                       <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}>⛔ Kampagne blockiert — Zahlung überfällig</span>
                     )}
                     <AuftragBadge offerSnapshot={p.offer_snapshot} />
+                    {p.kickoff_termin && (
+                      <span className="kanban-card-status-pill" style={{ background: '#dbeafe', color: '#1e40af' }}>
+                        📅 Kick-Off: {new Date(p.kickoff_termin).toLocaleDateString('de-DE')}
+                      </span>
+                    )}
                     {p.live_termin && (
                       <span className="kanban-card-status-pill" style={{ background: '#dcfce7', color: '#166534' }}>
                         🕐 Go-Live: {new Date(p.live_termin).toLocaleDateString('de-DE')}
@@ -795,6 +800,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
           {/* Phasen */}
           <section><h3>Phasen</h3>
             <div className="slideover-form">
+              <label><span>Kick-Off-Termin</span><input type="date" className="cell-input" value={projekt.kickoff_termin || ''} onChange={e => patch({ kickoff_termin: e.target.value || null })} /></label>
               <label className="slideover-full"><span>Geplanter Go-Live-Termin</span><input type="date" className="cell-input" value={projekt.live_termin || ''} onChange={e => patch({ live_termin: e.target.value || null })} /></label>
               <label><span>Start Phase 1</span><input type="date" className="cell-input" value={projekt.start_phase1 || ''} onChange={e => patch({ start_phase1: e.target.value || null })} /></label>
               <label><span>Ende Phase 1</span><input type="date" className="cell-input" value={projekt.ende_phase1 || ''} onChange={e => patch({ ende_phase1: e.target.value || null })} /></label>
