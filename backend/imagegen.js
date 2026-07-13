@@ -7,6 +7,7 @@ import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
+import { extendTo9x16 } from './imageops.js';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
@@ -614,7 +615,19 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
 
-  const rawBuffer = Buffer.from(b64, 'base64');
+  let rawBuffer = Buffer.from(b64, 'base64');
+
+  // Story-Format: gpt-image-2 liefert 1024x1536 (2:3). Meta Reels/Stories brauchen
+  // 1080x1920 (9:16). Wir erweitern per Sharp mit "ambient extend" (Mirror+Blur),
+  // damit das Bild reel-tauglich ist und Kling ein sauberes 9:16-Video macht.
+  if (format === 'story') {
+    try {
+      rawBuffer = await extendTo9x16(rawBuffer);
+    } catch (err) {
+      console.warn(`[extend-9x16] fehlgeschlagen — behalte 2:3-Original: ${err.message}`);
+    }
+  }
+
   let finalBuffer = rawBuffer;
   let bildOhneLogoUrl = null;
 

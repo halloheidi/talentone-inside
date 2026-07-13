@@ -102,7 +102,7 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
               width: '100%',
               maxWidth: 480,
               margin: '0 auto',
-              aspectRatio: creative.format === 'story' ? '2 / 3' : '1 / 1',
+              aspectRatio: creative.format === 'story' ? '9 / 16' : '1 / 1',
               background: '#000',
               borderRadius: 8,
               overflow: 'hidden',
