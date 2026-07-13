@@ -955,13 +955,15 @@ export async function sendAngebotMail({
     });
   }
 
+  const bccList = getInternalBcc([], recipients);
+  console.log(`[sendAngebotMail] to=${recipients.join(',')} bcc=${bccList.join(',')} brand=${offerBrand}`);
   const response = await fetch(RESEND_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
       from: getOfferMailFrom(brand),
       to: recipients,
-      bcc: getInternalBcc([], recipients),
+      bcc: bccList,
       reply_to: getOfferMailReplyTo(brand),
       subject: subject || 'Ihr Angebot',
       html, text,
@@ -1016,13 +1018,15 @@ export async function sendAuftragMail({
     });
   }
 
+  const bccList = getInternalBcc([], recipients);
+  console.log(`[sendAuftragMail] to=${recipients.join(',')} bcc=${bccList.join(',')} brand=${offerBrand}`);
   const response = await fetch(RESEND_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
       from: getOfferMailFrom(brand),
       to: recipients,
-      bcc: getInternalBcc([], recipients),
+      bcc: bccList,
       reply_to: getOfferMailReplyTo(brand),
       subject: subject || 'Ihre Auftragsbestätigung',
       html, text,

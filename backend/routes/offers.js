@@ -443,7 +443,10 @@ router.post('/calculate', async (req, res) => {
   }
 });
 
-/* GET /api/offers?brand=&status= — Liste */
+/* GET /api/offers?brand=&status=&customer_id=&easybill_customer_id= — Liste
+   customer_id: interne UUID des Kunden (talentone_kunden.id) — primäre Quelle
+   easybill_customer_id: Fallback, wenn die interne Verknüpfung noch fehlt
+   (z.B. bei Angeboten, die vor der ersten Verknüpfung angelegt wurden). */
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
@@ -451,6 +454,8 @@ router.get('/', async (req, res) => {
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
+  if (req.query.customer_id) q = q.eq('customer_id', req.query.customer_id);
+  if (req.query.easybill_customer_id) q = q.eq('easybill_customer_id', String(req.query.easybill_customer_id));
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
 
@@ -550,9 +555,23 @@ router.post('/', async (req, res) => {
       ? Math.max(1, Math.min(10, Math.round(+b.hires_target)))
       : 1;
 
+    // Auto-Verknüpfung mit internem Kunden: wenn kein customer_id explizit
+    // mitkommt, versuchen wir via easybill_customer_id → E-Mail → interner
+    // Kunde zu matchen. So verhindert man dass Angebote "verwaist" bleiben.
+    let resolvedCustomerId = b.customer_id || null;
+    if (!resolvedCustomerId && b.easybill_customer_id) {
+      const { data: ebc } = await supabase.from('talentone_easybill_customers')
+        .select('email, company_name').eq('easybill_id', String(b.easybill_customer_id)).maybeSingle();
+      if (ebc?.email) {
+        const { data: k } = await supabase.from('talentone_kunden')
+          .select('id').eq('email', ebc.email).maybeSingle();
+        if (k?.id) resolvedCustomerId = k.id;
+      }
+    }
+
     const row = {
       brand:                       b.brand,
-      customer_id:                 b.customer_id || null,
+      customer_id:                 resolvedCustomerId,
       easybill_customer_id:        String(b.easybill_customer_id),
       customer_snapshot:           b.customer_snapshot || {},
       close_lead_id:               b.close_lead_id || null,
