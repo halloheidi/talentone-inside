@@ -5,7 +5,8 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
-import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, sendEntwurfReminder } from '../mail.js';
+import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, sendEntwurfReminder, sendTerminEinladung } from '../mail.js';
+import { TERMINE, getTerminMeta } from '../termine.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 
@@ -552,6 +553,154 @@ router.post('/jobs/:id/export/review-manuell', async (req, res) => {
   } catch (err) {
     console.error('[review-manuell]', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* GET /api/termine/config — Frontend-Katalog aller Termin-Arten */
+router.get('/termine/config', (req, res) => {
+  const cfg = {};
+  for (const [key, t] of Object.entries(TERMINE)) {
+    cfg[key] = {
+      label: t.label, subject: t.subject, intro: t.intro,
+      personen: [
+        ...(t.daniel   ? [{ key: 'daniel',   label: 'Daniel' }] : []),
+        ...(t.johannes ? [{ key: 'johannes', label: 'Johannes' }] : []),
+      ],
+    };
+  }
+  res.json({ termine: cfg });
+});
+
+/* POST /api/jobs/:id/export/termin-einladung
+   body: { terminKey, personKey, to?, subject?, customText? } */
+router.post('/jobs/:id/export/termin-einladung', async (req, res) => {
+  const { terminKey, personKey, to, subject, customText } = req.body || {};
+  const meta = getTerminMeta(terminKey, personKey);
+  if (!meta) return res.status(400).json({ error: 'Ungültige Termin-Kombination.' });
+
+  try {
+    const { job, kunde } = await loadFullJob(req.params.id);
+    const recipient = (to || kunde?.email || '').trim();
+    if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
+
+    await sendTerminEinladung({
+      to: recipient,
+      ansprechpartner: kunde?.ansprechpartner,
+      agentur: kunde?.agentur,
+      subject: subject || meta.subject,
+      calLink: meta.url,
+      customText,
+      personLabel: meta.personLabel,
+    });
+
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: recipient,
+      betreff: subject || meta.subject,
+      gesendet_von: req.user?.email || null,
+      typ: 'termin_einladung',
+      inhalte: {
+        terminKey, personKey, cal_link: meta.url,
+        label: meta.label, personLabel: meta.personLabel,
+        customText: customText || null,
+      },
+    });
+
+    // Projekt-Kommentar (best-effort)
+    if (kunde?.id) {
+      (async () => {
+        try {
+          const { data: projekt } = await supabase.from('talentone_projekte')
+            .select('id').eq('kunde_id', kunde.id)
+            .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          if (projekt) {
+            await supabase.from('talentone_kommentare').insert({
+              projekt_id: projekt.id,
+              autor: req.user?.email || 'System',
+              text: `📅 Termin-Einladung (${meta.label}, bei ${meta.personLabel}) an Kunden gesendet`,
+              quelle: 'system',
+            });
+          }
+        } catch (err) { console.warn('[termin-einladung projekt-kommentar]', err.message); }
+      })();
+    }
+
+    // Close-Note (best-effort)
+    notifyKunde(kunde, `📅 Termin-Einladung (${meta.label}) an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[termin-einladung close-note]', err.message));
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[termin-einladung]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/kunden/:id/termin-einladung — analog fuer den KundeDetail-Weg
+   (kein Job-Kontext noetig). Loggt ohne job_id. */
+router.post('/kunden/:id/termin-einladung', async (req, res) => {
+  const { terminKey, personKey, to, subject, customText } = req.body || {};
+  const meta = getTerminMeta(terminKey, personKey);
+  if (!meta) return res.status(400).json({ error: 'Ungültige Termin-Kombination.' });
+
+  try {
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('*').eq('id', req.params.id).maybeSingle();
+    if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+    const recipient = (to || kunde.email || '').trim();
+    if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
+
+    await sendTerminEinladung({
+      to: recipient,
+      ansprechpartner: kunde.ansprechpartner,
+      agentur: kunde.agentur,
+      subject: subject || meta.subject,
+      calLink: meta.url,
+      customText,
+      personLabel: meta.personLabel,
+    });
+
+    // Projekt-Kommentar + Versand-Historie (falls es ein Projekt gibt) — best-effort.
+    // Historie am erstbesten Job, damit sie im Export-Tab sichtbar wird.
+    const { data: firstJob } = await supabase.from('talentone_jobs')
+      .select('id').eq('kunde_id', kunde.id).order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (firstJob) {
+      await supabase.from('talentone_versand').insert({
+        job_id: firstJob.id,
+        empfaenger: recipient,
+        betreff: subject || meta.subject,
+        gesendet_von: req.user?.email || null,
+        typ: 'termin_einladung',
+        inhalte: {
+          terminKey, personKey, cal_link: meta.url,
+          label: meta.label, personLabel: meta.personLabel,
+          customText: customText || null,
+        },
+      });
+    }
+    (async () => {
+      try {
+        const { data: projekt } = await supabase.from('talentone_projekte')
+          .select('id').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt) {
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor: req.user?.email || 'System',
+            text: `📅 Termin-Einladung (${meta.label}, bei ${meta.personLabel}) an Kunden gesendet`,
+            quelle: 'system',
+          });
+        }
+      } catch (err) { console.warn('[kunde/termin-einladung projekt-kommentar]', err.message); }
+    })();
+
+    notifyKunde(kunde, `📅 Termin-Einladung (${meta.label}) an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[kunde/termin-einladung close-note]', err.message));
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[kunde/termin-einladung]', err.message);
+    res.status(503).json({ error: err.message });
   }
 });
 

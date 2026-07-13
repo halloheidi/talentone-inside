@@ -919,6 +919,62 @@ export async function sendEntwurfReminder({ to, ansprechpartner, reviewUrl, cust
    „Wir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund
    technischer Probleme pausiert." — Absender + BCC + Reply-To wie bei
    sendKampagneLiveMail. */
+/* ════════════════════ Termin-Einladung — Kunden-Mail ════════════════════
+   Freundliche Du-Form-Einladung mit Calendly-Link, Branding + BCC. */
+export async function sendTerminEinladung({
+  to, ansprechpartner, agentur,
+  subject, calLink, calLabel = 'Termin auswählen',
+  customText, personLabel,
+}) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agentur);
+  const gruss = ansprechpartner || 'zusammen';
+
+  const bodyHtml = String(customText || '')
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📅 Termin-Einladung${personLabel ? ` · Bei ${escape(personLabel)}` : ''}</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      ${bodyHtml}
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(calLink)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ ${escape(calLabel)}</a>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen einfach auf diese Mail antworten.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `Hallo ${gruss},\n\n${customText || ''}\n\nTermin auswählen: ${calLink}\n\nBei Fragen einfach antworten.\nDein ${brand.name}-Team`;
+
+  const recipients = Array.isArray(to) ? to : [to];
+  const bccList = getInternalBcc([], recipients);
+  console.log(`[sendTerminEinladung] to=${recipients.join(',')} bcc=${bccList.join(',')} link=${calLink}`);
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: bccList,
+      reply_to: 'info@nowagwirth.com',
+      subject: subject || 'Terminvorschlag',
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, customText }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);

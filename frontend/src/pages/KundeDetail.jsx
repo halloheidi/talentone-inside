@@ -7,6 +7,7 @@ import Modal from '../components/Modal.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
+import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
 import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
 
@@ -42,6 +43,7 @@ export default function KundeDetail() {
   const [showCreate, setShowCreate] = useState(false);
 
   const [showAnfrage, setShowAnfrage] = useState(false);
+  const [showTermin, setShowTermin] = useState(false);
   const [anfrageText, setAnfrageText] = useState(DEFAULT_ANFRAGE);
   const [anfrageBusy, setAnfrageBusy] = useState(false);
   const [anfrageMsg, setAnfrageMsg] = useState('');
@@ -526,6 +528,14 @@ export default function KundeDetail() {
                 >
                   Fotos & Logo beim Kunden anfragen
                 </button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={() => setShowTermin(true)}
+                  title={kunde.email ? '' : 'Kunden-E-Mail fehlt'}
+                  disabled={!kunde.email}
+                >
+                  📅 Termin-Einladung senden
+                </button>
               </div>
             </>
           ) : (
@@ -885,6 +895,14 @@ export default function KundeDetail() {
         open={showCreate}
         kunde={kunde}
         onClose={() => setShowCreate(false)}
+      />
+
+      <TerminEinladungModal
+        open={showTermin}
+        onClose={() => setShowTermin(false)}
+        kunde={kunde}
+        kundeId={kundeId}
+        onKundeUpdated={setKunde}
       />
 
       {/* Kunde-Löschen-Modal */}

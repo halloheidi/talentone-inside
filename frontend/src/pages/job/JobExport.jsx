@@ -6,6 +6,7 @@ import Modal from '../../components/Modal.jsx';
 import Lightbox from '../../components/Lightbox.jsx';
 import EntwurfPreflightModal from '../../components/EntwurfPreflightModal.jsx';
 import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
+import TerminEinladungModal from '../../components/TerminEinladungModal.jsx';
 import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
@@ -31,6 +32,7 @@ export default function JobExport() {
   const [showManuell, setShowManuell] = useState(false);
   const [manuellForm, setManuellForm] = useState({ status: 'freigegeben', notiz: '' });
   const [manuellBusy, setManuellBusy] = useState(false);
+  const [showTermin, setShowTermin] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -571,6 +573,9 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         <button className="btn-ghost" onClick={downloadAlles} disabled={busy || (selectedCreatives.size === 0 && selectedAdcopies.size === 0)}>
           {busy === 'alles' ? 'Lade alles…' : 'Alles herunterladen'}
         </button>
+        <button className="btn-ghost" onClick={() => setShowTermin(true)} disabled={!kunde?.email}>
+          📅 Termin-Einladung senden
+        </button>
         <button className="btn-primary" onClick={openMailModal} disabled={!kunde?.email}>
           {review?.status === 'aenderungen'
             ? `Überarbeitete Entwürfe senden (Runde ${(Number(review?.runde) || 1) + 1})`
@@ -704,6 +709,16 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`}
         />
       )}
+
+      {/* ─────── Termin-Einladung ─────── */}
+      <TerminEinladungModal
+        open={showTermin}
+        onClose={() => setShowTermin(false)}
+        kunde={kunde}
+        jobId={job?.id}
+        onKundeUpdated={() => reload?.()}
+        onSent={() => api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {})}
+      />
 
       {/* ─────── Reminder-Modal ─────── */}
       <Modal
