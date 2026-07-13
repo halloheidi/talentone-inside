@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Modal from './Modal.jsx';
+import Lightbox from './Lightbox.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 
 // Zwischenschritt vor dem Versenden der Entwürfe:
@@ -10,9 +11,10 @@ import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 export default function EntwurfPreflightModal({ open, onClose, kunde, creatives, jobStelle, onConfirm, onKundeUpdated, isRunde = false }) {
   const [logoOk, setLogoOk] = useState(false);
   const [textOk, setTextOk] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   useEffect(() => {
-    if (open) { setLogoOk(false); setTextOk(false); }
+    if (open) { setLogoOk(false); setTextOk(false); setLightboxIndex(null); }
   }, [open]);
 
   const canSend = logoOk && textOk;
@@ -38,26 +40,58 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
       {/* Close-Lead-Warnung */}
       <CloseLeadWarnung kunde={kunde} onSaved={onKundeUpdated} />
 
-      {/* Thumbnails */}
+      {/* Thumbnails — Klick öffnet Groß-Ansicht mit Pfeilen zum Blättern */}
       {creatives?.length > 0 && (
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-          gap: 8, marginBottom: 16, maxHeight: 300, overflowY: 'auto',
-          padding: 6, background: '#fafaf8', borderRadius: 8,
-        }}>
-          {creatives.map(c => (
-            <div key={c.id} style={{ position: 'relative', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1', background: '#000', borderRadius: 6, overflow: 'hidden' }}>
-              {c.typ === 'video'
-                ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-              <span style={{
-                position: 'absolute', top: 4, right: 4,
-                background: 'rgba(0,0,0,0.65)', color: '#fff',
-                fontSize: 10, padding: '2px 6px', borderRadius: 100,
-              }}>{c.format === 'story' ? '9:16' : '1:1'}{c.typ === 'video' ? ' · Reel' : ''}</span>
-            </div>
-          ))}
-        </div>
+        <>
+          <p style={{ fontSize: 11, color: '#5a5955', margin: '0 0 6px' }}>
+            💡 Klick auf ein Bild öffnet die Groß-Ansicht — mit ←/→ blätterst du durch alle Creatives.
+          </p>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+            gap: 8, marginBottom: 16, maxHeight: 300, overflowY: 'auto',
+            padding: 6, background: '#fafaf8', borderRadius: 8,
+          }}>
+            {creatives.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setLightboxIndex(i)}
+                title="Klicken für Groß-Ansicht"
+                style={{
+                  position: 'relative', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1',
+                  background: '#000', borderRadius: 6, overflow: 'hidden',
+                  border: 'none', padding: 0, cursor: 'zoom-in',
+                }}
+              >
+                {c.typ === 'video'
+                  ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+                  : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />}
+                <span style={{
+                  position: 'absolute', top: 4, right: 4,
+                  background: 'rgba(0,0,0,0.65)', color: '#fff',
+                  fontSize: 10, padding: '2px 6px', borderRadius: 100,
+                  pointerEvents: 'none',
+                }}>{c.format === 'story' ? '9:16' : '1:1'}{c.typ === 'video' ? ' · Reel' : ''}</span>
+                <span style={{
+                  position: 'absolute', bottom: 4, right: 4,
+                  background: 'rgba(0,0,0,0.65)', color: '#fff',
+                  fontSize: 10, padding: '2px 6px', borderRadius: 100,
+                  pointerEvents: 'none',
+                }}>🔍</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {lightboxIndex !== null && creatives?.length > 0 && (
+        <Lightbox
+          items={creatives}
+          index={Math.max(0, Math.min(lightboxIndex, creatives.length - 1))}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+          filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`}
+        />
       )}
 
       {jobStelle && (
