@@ -35,6 +35,7 @@ const PROJEKTART_OPTIONEN = [
   'Mitarbeitergewinnung', 'TalentOne - Mitarbeitergewinnung', 'Abo',
   'Neukundengewinnung', 'Social Media Betreuung', 'Employer Branding',
   'Mitarbeiterbefragung', 'Homepage', 'Karriereseite',
+  'Recruiting Video', 'Image Video',
 ];
 
 const TABS = [

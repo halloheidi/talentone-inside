@@ -30,6 +30,8 @@ const PROJEKTART_OPTIONEN = [
   'Mitarbeiterbefragung',
   'Homepage',
   'Karriereseite',
+  'Recruiting Video',
+  'Image Video',
 ];
 
 const PROJEKTDAUER_OPTIONEN = [
