@@ -30,7 +30,11 @@ const PROJEKTE_STATI = [
 ];
 
 router.post('/quick-create', async (req, res) => {
-  const { mode, logo, agentur, projekt_status, projektart, verantwortlich } = req.body || {};
+  const {
+    mode, logo, agentur, projekt_status, projektart, verantwortlich,
+    // Migration 025: neue Projekt-Flags direkt beim Anlegen
+    projektdauer, fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details,
+  } = req.body || {};
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
   let kundeData = { agentur: finalAgentur };
   let jobData = {};
@@ -110,6 +114,12 @@ router.post('/quick-create', async (req, res) => {
       kunde_id: kunde.id,
       status,
       projektart: projektart || (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+      projektdauer: projektdauer || null,
+      agentur: finalAgentur,
+      fotograf_noetig: finalAgentur === 'nowagwirth' ? !!fotograf_noetig : false,
+      zahlung_aufgeteilt: !!zahlung_aufgeteilt,
+      garantie: !!garantie,
+      garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
       gesuchte_positionen: job.stelle || null,
       standorte: job.region || null,
       verantwortlich: verantwortlich || null,

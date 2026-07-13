@@ -52,17 +52,38 @@ const KANBAN_COLUMNS = [
   { key: 'abgeschlossen',      label: 'Abgeschlossen',       color: '#10b981', match: ['abgeschlossen'] },
 ];
 
-// „zapier_eingerichtet" wurde 2026-07 entfernt — bestehende DB-Werte bleiben,
-// werden nur nicht mehr im UI angezeigt/gezählt.
-const CHECK_KEYS = [
-  'fb_zugang', 'formular_verschickt', 'fotograf_organisiert',
-  'fotos_erhalten', 'fotos_fertig', 'formular_erhalten',
-  'onboarding_formular', 'creatives_erstellt', 'adcopies_geschrieben',
-  'url_bestellt', 'url_connected', 'url_verifiziert_fb', 'events_gesetzt',
-  'bewerberliste_erstellt', 'entwuerfe_verschickt',
-  'go_vom_kunden', 'avv_unterzeichnet', 'adresse_werbekonto',
-  'geschenk_verschickt', 'testi_vereinbaren',
+// Dynamische Checkliste (2026-07):
+// - „zapier_eingerichtet", „testi_vereinbaren" und „adresse_werbekonto" wurden
+//   entfernt. Bestehende DB-Werte bleiben, werden aber nicht mehr angezeigt/gezählt.
+// - CHECK_KEYS_BASE gilt für alle Projekte.
+// - CHECK_KEYS_NW greift nur bei Nowag-&-Wirth-Projekten.
+// - CHECK_KEYS_FOTO greift nur wenn fotograf_noetig=true (nur N&W möglich).
+const CHECK_KEYS_BASE = [
+  'formular_verschickt', 'formular_erhalten', 'onboarding_formular',
+  'fotos_erhalten', 'creatives_erstellt', 'adcopies_geschrieben',
+  'entwuerfe_verschickt', 'go_vom_kunden', 'bewerberliste_erstellt',
+  'avv_unterzeichnet', 'geschenk_verschickt',
 ];
+const CHECK_KEYS_NW = [
+  'fb_zugang', 'url_bestellt', 'url_connected', 'url_verifiziert_fb', 'events_gesetzt',
+];
+const CHECK_KEYS_FOTO = ['fotograf_organisiert', 'fotos_fertig'];
+
+// Union aller möglichen Keys — nur für Kanban-Progress-Bar-Fallback wenn Projekt
+// noch keine agentur hat. Neue Projekte wählen die Teilmenge über activeCheckKeys().
+const CHECK_KEYS = [...CHECK_KEYS_BASE, ...CHECK_KEYS_NW, ...CHECK_KEYS_FOTO];
+
+/** Liefert die für ein konkretes Projekt aktiven Checklisten-Keys. */
+function activeCheckKeys(projekt) {
+  const istNw = projekt?.agentur === 'nowagwirth';
+  const foto = istNw && !!projekt?.fotograf_noetig;
+  return [
+    ...CHECK_KEYS_BASE,
+    ...(istNw ? CHECK_KEYS_NW : []),
+    ...(foto ? CHECK_KEYS_FOTO : []),
+  ];
+}
+
 const CHECK_LABELS = {
   fb_zugang: 'Facebook-Zugang',
   formular_verschickt: 'Formular verschickt',
@@ -81,9 +102,7 @@ const CHECK_LABELS = {
   entwuerfe_verschickt: 'Entwürfe verschickt',
   go_vom_kunden: 'Go vom Kunden',
   avv_unterzeichnet: 'AVV unterzeichnet',
-  adresse_werbekonto: 'Adresse im Werbekonto',
   geschenk_verschickt: 'Geschenk verschickt',
-  testi_vereinbaren: 'Testimonial vereinbaren',
 };
 
 function initials(name) {
@@ -282,7 +301,14 @@ export default function ProjekteOverview() {
     csvDownload(`kommentare-${new Date().toISOString().slice(0,10)}.csv`, all);
   }
 
-  function checklistDone(c) { return CHECK_KEYS.filter(k => c?.[k]).length; }
+  // Zählt nur die für dieses Projekt aktiven Checklisten-Punkte.
+  // Bestehende Legacy-Flags (adresse_werbekonto, testi_vereinbaren, zapier_eingerichtet)
+  // werden ignoriert, egal ob true oder false in der DB.
+  function checklistDone(projekt) {
+    const keys = activeCheckKeys(projekt);
+    const c = projekt?.checkliste || {};
+    return { done: keys.filter(k => c[k]).length, total: keys.length };
+  }
 
   /* ─── Drag&Drop ─── */
   const dragId = useRef(null);
@@ -418,7 +444,7 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
             </div>
             <div className="kanban-col-body">
               {cards.map(p => {
-                const done = checklistDone(p.checkliste);
+                const { done, total } = checklistDone(p);
                 const zufRand = p.zufriedenheit ? (p.zufriedenheit >= 4 ? 'good' : p.zufriedenheit >= 3 ? 'ok' : 'bad') : null;
                 const statusClass = p.status === 'feedbackschleife' ? 'card-status-feedback'
                                   : p.status === 'go' ? 'card-status-go'
@@ -487,8 +513,8 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                       {p.verantwortlich && <span className="kanban-avatar" title={p.verantwortlich}>{initials(p.verantwortlich)}</span>}
                     </div>
                     <div className="proj-progress" style={{ marginTop: 6 }}>
-                      <div className="proj-progress-bar" style={{ width: `${(done/CHECK_KEYS.length)*100}%` }} />
-                      <span className="proj-progress-label">{done}/{CHECK_KEYS.length}</span>
+                      <div className="proj-progress-bar" style={{ width: `${total ? (done/total)*100 : 0}%` }} />
+                      <span className="proj-progress-label">{done}/{total}</span>
                     </div>
                   </div>
                 );
@@ -527,7 +553,7 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
         </tr></thead>
         <tbody>
           {filtered.map(p => {
-            const done = checklistDone(p.checkliste);
+            const { done, total } = checklistDone(p);
             const isChecked = selectedIds.has(p.id);
             return (
               <tr key={p.id} onClick={() => onCardClick(p.id)} style={{ cursor: 'pointer' }} className={isChecked ? 'is-selected' : ''}>
@@ -546,7 +572,7 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
                 <td><span className="chip" style={{ fontSize: 11 }}>{p.projektart || '—'}</span></td>
                 <td style={{ maxWidth: 200 }}>{p.gesuchte_positionen || '—'}</td>
                 <td style={{ maxWidth: 200 }}>{p.standorte || '—'}</td>
-                <td><div className="proj-progress"><div className="proj-progress-bar" style={{ width: `${(done/CHECK_KEYS.length)*100}%` }} /><span className="proj-progress-label">{done}/{CHECK_KEYS.length}</span></div></td>
+                <td><div className="proj-progress"><div className="proj-progress-bar" style={{ width: `${total ? (done/total)*100 : 0}%` }} /><span className="proj-progress-label">{done}/{total}</span></div></td>
                 <td>{p.kommentar_count || 0}</td>
                 <td>{p.pixel ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.pixel.slice(0, 8)}…</span> : '—'}</td>
                 <td className="td-date">{p.letzter_kontakt ? new Date(p.letzter_kontakt).toLocaleDateString('de-DE') : '—'}</td>
@@ -768,10 +794,26 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Enddatum Abo</span><input type="date" className="cell-input" value={projekt.enddatum_abo || ''} onChange={e => patch({ enddatum_abo: e.target.value || null })} /></label>
               <label><span>Pausiert seit</span><input type="date" className="cell-input" value={projekt.pausiert_seit || ''} onChange={e => patch({ pausiert_seit: e.target.value || null })} /></label>
               <label><span>Werbekosten</span><DebouncedInput value={projekt.werbekosten || ''} onSave={patchField('werbekosten')} /></label>
+              <label><span>Zahlung aufgeteilt</span><input type="checkbox" checked={!!projekt.zahlung_aufgeteilt} onChange={e => patch({ zahlung_aufgeteilt: e.target.checked })} /></label>
               <label><span>Ziel erreicht</span><input type="checkbox" checked={!!projekt.ziel_erreicht} onChange={e => patch({ ziel_erreicht: e.target.checked })} /></label>
               <label><span>RE bezahlt</span><input type="checkbox" checked={!!projekt.re_bezahlt} onChange={e => patch({ re_bezahlt: e.target.checked })} /></label>
               <label><span>RE 2 bezahlt</span><input type="checkbox" checked={!!projekt.re2_bezahlt} onChange={e => patch({ re2_bezahlt: e.target.checked })} /></label>
               <label><span>Bewertet</span><input type="checkbox" checked={!!projekt.bewertet} onChange={e => patch({ bewertet: e.target.checked })} /></label>
+            </div>
+          </section>
+
+          {/* Projekt-Flags (Migration 025) */}
+          <section><h3>Projekt-Eckdaten</h3>
+            <div className="slideover-form">
+              {projekt.agentur === 'nowagwirth' && (
+                <label><span>📸 Fotograf nötig</span><input type="checkbox" checked={!!projekt.fotograf_noetig} onChange={e => patch({ fotograf_noetig: e.target.checked })} /></label>
+              )}
+              <label><span>🛡️ Garantie</span><input type="checkbox" checked={!!projekt.garantie} onChange={e => patch({ garantie: e.target.checked })} /></label>
+              {projekt.garantie && (
+                <label className="slideover-full"><span>Garantie-Details</span>
+                  <DebouncedInput value={projekt.garantie_details || ''} onSave={patchField('garantie_details')} />
+                </label>
+              )}
             </div>
           </section>
 
@@ -799,21 +841,29 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
             <DebouncedInput rows={4} value={projekt.notizen || ''} onSave={patchField('notizen')} />
           </section>
 
-          {/* Onboarding-Checkliste */}
+          {/* Onboarding-Checkliste — dynamisch je nach Agentur + Fotograf-Flag */}
           <section>
-            <h3>Onboarding-Checkliste ({CHECK_KEYS.filter(k => projekt.checkliste?.[k]).length}/{CHECK_KEYS.length})</h3>
-            <div className="checklist-grid">
-              {CHECK_KEYS.map(key => {
-                const isAuto = autoKeys.includes(key);
-                return (
-                  <label key={key} className={`checklist-item ${projekt.checkliste?.[key] ? 'is-done' : ''}`}>
-                    <input type="checkbox" checked={!!projekt.checkliste?.[key]} onChange={() => toggleCheck(key)} />
-                    <span>{CHECK_LABELS[key]}</span>
-                    {isAuto && <span className="checklist-auto" title="Auto-gesetzt aus Kampagnen-Tool">🔗</span>}
-                  </label>
-                );
-              })}
-            </div>
+            {(() => {
+              const keys = activeCheckKeys(projekt);
+              const done = keys.filter(k => projekt.checkliste?.[k]).length;
+              return (
+                <>
+                  <h3>Onboarding-Checkliste ({done}/{keys.length})</h3>
+                  <div className="checklist-grid">
+                    {keys.map(key => {
+                      const isAuto = autoKeys.includes(key);
+                      return (
+                        <label key={key} className={`checklist-item ${projekt.checkliste?.[key] ? 'is-done' : ''}`}>
+                          <input type="checkbox" checked={!!projekt.checkliste?.[key]} onChange={() => toggleCheck(key)} />
+                          <span>{CHECK_LABELS[key]}</span>
+                          {isAuto && <span className="checklist-auto" title="Auto-gesetzt aus Kampagnen-Tool">🔗</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </section>
 
           {/* Externe Verknüpfungen */}

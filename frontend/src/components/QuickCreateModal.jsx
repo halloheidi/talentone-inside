@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import { api } from '../lib/api.js';
 import BrancheField from './BrancheField.jsx';
+import ProjektFlagsFields from './ProjektFlagsFields.jsx';
 
 // Debounced Dubletten-Check während des Tippens — sucht in Kunden + Projekten
 function useDubletten(firmenname) {
@@ -80,6 +81,10 @@ export default function QuickCreateModal({ open, onClose }) {
   const [agentur, setAgentur] = useState('talentone');
   const [projektStatus, setProjektStatus] = useState('kickoff_vereinbart');
   const [projektart, setProjektart] = useState('');
+  const [projektFlags, setProjektFlags] = useState({
+    projektdauer: '', fotograf_noetig: false, zahlung_aufgeteilt: false,
+    garantie: false, garantie_details: '',
+  });
   const [verantwortlich, setVerantwortlich] = useState('');
   const [team, setTeam] = useState([]);
 
@@ -213,6 +218,11 @@ export default function QuickCreateModal({ open, onClose }) {
       body.agentur = agentur;
       body.projekt_status = projektStatus;
       body.projektart = projektart || null;
+      body.projektdauer = projektFlags.projektdauer || null;
+      body.fotograf_noetig = !!projektFlags.fotograf_noetig;
+      body.zahlung_aufgeteilt = !!projektFlags.zahlung_aufgeteilt;
+      body.garantie = !!projektFlags.garantie;
+      body.garantie_details = projektFlags.garantie ? (projektFlags.garantie_details || null) : null;
       body.verantwortlich = verantwortlich || null;
       const res = await api('/kunden/quick-create', { method: 'POST', body });
       reset();
@@ -292,6 +302,13 @@ export default function QuickCreateModal({ open, onClose }) {
                 {team.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
               </select>
             </label>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <ProjektFlagsFields
+              value={projektFlags}
+              onChange={setProjektFlags}
+              agentur={agentur}
+            />
           </div>
         </div>
       )}

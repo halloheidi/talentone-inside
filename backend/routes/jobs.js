@@ -33,7 +33,10 @@ router.get('/:id', async (req, res) => {
    Erstellt einen Job für einen BESTEHENDEN Kunden via URL/PDF/Manual/Formular.
    body: { kunde_id, mode: 'url'|'file'|'manual'|'formular', url?|fileData+fileType?|job?, customText? } */
 router.post('/quick-create', async (req, res) => {
-  const { kunde_id, mode, customText, projekttyp } = req.body || {};
+  const {
+    kunde_id, mode, customText, projekttyp,
+    projektdauer, fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details,
+  } = req.body || {};
   if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
   const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
 
@@ -90,6 +93,11 @@ router.post('/quick-create', async (req, res) => {
       job_id: job.id,
       agentur: kunde.agentur,
       status: 'vorbereitung',
+      projektdauer: projektdauer || null,
+      fotograf_noetig: kunde.agentur === 'nowagwirth' ? !!fotograf_noetig : false,
+      zahlung_aufgeteilt: !!zahlung_aufgeteilt,
+      garantie: !!garantie,
+      garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
     }).then(() => {}).catch(() => {});
 
     return res.status(201).json({ job, mode: 'formular', mailSent: true });
@@ -142,6 +150,11 @@ router.post('/quick-create', async (req, res) => {
       job_id: job.id,
       agentur: kunde.agentur,
       status: 'kickoff_vereinbart',
+      projektdauer: projektdauer || null,
+      fotograf_noetig: kunde.agentur === 'nowagwirth' ? !!fotograf_noetig : false,
+      zahlung_aufgeteilt: !!zahlung_aufgeteilt,
+      garantie: !!garantie,
+      garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
     }).then(() => {}).catch(() => {});
 
     res.status(201).json({ job });

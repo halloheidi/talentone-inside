@@ -31,6 +31,8 @@ const ALLOWED_FIELDS = [
   'email', 'verantwortlich', 'fotograf', 'letzter_kontakt', 'kontaktstatus',
   'werbekosten', 'close_lead_id', 'kunde_id', 'checkliste',
   'live_termin',
+  // Neue Flags (Migration 025)
+  'agentur', 'fotograf_noetig', 'zahlung_aufgeteilt', 'garantie', 'garantie_details',
 ];
 
 function pickFields(body) {

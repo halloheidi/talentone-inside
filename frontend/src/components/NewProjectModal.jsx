@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
+import ProjektFlagsFields from './ProjektFlagsFields.jsx';
 import { api } from '../lib/api.js';
 
 const TABS = [
@@ -50,6 +51,10 @@ export default function NewProjectModal({ open, onClose, kunde }) {
   // und Neukundengewinnung. Bei TalentOne bleibt es fix Mitarbeitergewinnung.
   const kannNeukunden = kunde?.agentur === 'nowagwirth';
   const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
+  const [projektFlags, setProjektFlags] = useState({
+    projektdauer: '', fotograf_noetig: false, zahlung_aufgeteilt: false,
+    garantie: false, garantie_details: '',
+  });
 
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
@@ -80,7 +85,14 @@ export default function NewProjectModal({ open, onClose, kunde }) {
     setError('');
     setBusy(true);
     try {
-      let body = { kunde_id: kunde.id, projekttyp };
+      let body = {
+        kunde_id: kunde.id, projekttyp,
+        projektdauer: projektFlags.projektdauer || null,
+        fotograf_noetig: !!projektFlags.fotograf_noetig,
+        zahlung_aufgeteilt: !!projektFlags.zahlung_aufgeteilt,
+        garantie: !!projektFlags.garantie,
+        garantie_details: projektFlags.garantie ? (projektFlags.garantie_details || null) : null,
+      };
       if (tab === 'url') {
         if (!url.trim()) throw new Error('Bitte URL eingeben.');
         body.mode = 'url';
@@ -164,6 +176,15 @@ export default function NewProjectModal({ open, onClose, kunde }) {
               </button>
             </div>
           )}
+
+          <div style={{ padding: 12, background: '#fafaf8', borderRadius: 8, marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', letterSpacing: 0.03, marginBottom: 8 }}>PROJEKT-ECKDATEN</div>
+            <ProjektFlagsFields
+              value={projektFlags}
+              onChange={setProjektFlags}
+              agentur={kunde?.agentur}
+            />
+          </div>
 
           <div className="modal-tabs">
             {TABS.map(t => (
