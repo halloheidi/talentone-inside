@@ -77,7 +77,7 @@ export default function KundeDetail() {
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
     firmenname: '', ansprechpartner: '', email: '', telefon: '',
-    branche: '', agentur: 'talentone', notizen: '',
+    branche: '', agentur: 'talentone', notizen: '', close_lead_id: '',
   });
   const [editBusy, setEditBusy] = useState(false);
   const [editMsg, setEditMsg] = useState('');
@@ -91,6 +91,7 @@ export default function KundeDetail() {
       branche: kunde?.branche || '',
       agentur: kunde?.agentur || 'talentone',
       notizen: kunde?.notizen || '',
+      close_lead_id: kunde?.close_lead_id || '',
     });
     setEditMode(true);
     setEditMsg('');
@@ -99,6 +100,11 @@ export default function KundeDetail() {
   async function saveEdit() {
     setEditBusy(true); setEditMsg('');
     try {
+      const closeLead = editForm.close_lead_id.trim();
+      if (closeLead && !closeLead.startsWith('lead_')) {
+        setEditMsg('Close Lead ID muss mit lead_ beginnen.');
+        setEditBusy(false); return;
+      }
       const res = await api(`/kunden/${kundeId}`, {
         method: 'PATCH',
         body: {
@@ -109,6 +115,7 @@ export default function KundeDetail() {
           branche: editForm.branche.trim() || null,
           agentur: editForm.agentur || 'talentone',
           notizen: editForm.notizen.trim() || null,
+          close_lead_id: closeLead || null,
         },
       });
       setKunde(res.kunde);
@@ -488,6 +495,17 @@ export default function KundeDetail() {
                     <option value="talentone">TalentOne</option>
                     <option value="nowagwirth">Nowag & Wirth</option>
                   </select>
+                </label>
+                <label className="field field-full">
+                  <span>Close Lead ID {editForm.agentur === 'nowagwirth' && <em style={{ color: '#dc2626', fontStyle: 'normal' }}>*</em>}</span>
+                  <input
+                    value={editForm.close_lead_id}
+                    onChange={e => setEditForm({ ...editForm, close_lead_id: e.target.value })}
+                    placeholder="lead_XXXXX…"
+                  />
+                  <small style={{ display: 'block', fontSize: 11, color: 'var(--ink-3)', marginTop: 3 }}>
+                    Du findest die Lead ID in Close: Lead öffnen → die ID steht in der URL — den Teil ab <code>lead_</code> kopieren.
+                  </small>
                 </label>
                 <label className="field field-full">
                   <span>Notizen</span>

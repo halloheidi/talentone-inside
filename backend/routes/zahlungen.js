@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { createInvoice, fetchInvoice, mapStatus } from '../paypal.js';
 import { sendZahlungsMail, sendRechnungsMail } from '../mail.js';
+import { notifyKunde } from '../close.js';
 import * as easybill from '../easybill.js';
 import { getBranding } from '../branding.js';
 
@@ -245,6 +246,15 @@ router.post('/:id/send', async (req, res) => {
         updated_at: new Date().toISOString(),
       })
       .eq('id', z.id).select().single();
+
+    // Close-Note (best-effort)
+    const betragEuro = z.betrag_cent != null
+      ? (z.betrag_cent / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
+      : '';
+    if (kunde) {
+      notifyKunde(kunde, `💳 Zahlungslink${betragEuro ? ` über ${betragEuro}` : ''} gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+        .catch(err => console.warn('[zahlung-send close-note]', err.message));
+    }
     res.json({ zahlung: updated });
   } catch (err) {
     console.error('[zahlung-send]', err.message);

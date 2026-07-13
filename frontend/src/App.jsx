@@ -13,6 +13,7 @@ import KundeDetail from './pages/KundeDetail.jsx';
 import BewerbungenOverview from './pages/BewerbungenOverview.jsx';
 import ZahlungenOverview from './pages/ZahlungenOverview.jsx';
 import ProjekteOverview from './pages/ProjekteOverview.jsx';
+import LiveKampagnen from './pages/LiveKampagnen.jsx';
 import AnalyseFunnel from './pages/AnalyseFunnel.jsx';
 import JobView from './pages/JobView.jsx';
 import JobStelleninfos from './pages/job/JobStelleninfos.jsx';
@@ -62,6 +63,7 @@ export default function App() {
         <Route path="bewerbungen" element={<BewerbungenOverview />} />
         <Route path="zahlungen" element={<ZahlungenOverview />} />
         <Route path="projekte" element={<ProjekteOverview />} />
+        <Route path="live-kampagnen" element={<LiveKampagnen />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
         <Route path="angebote" element={<OffersList />} />
         <Route path="angebote/neu" element={<OfferWizard />} />

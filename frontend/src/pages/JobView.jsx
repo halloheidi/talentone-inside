@@ -13,10 +13,139 @@ const TABS = [
   { to: 'export', label: 'Export' },
 ];
 
+const STATUS_LABELS = {
+  vorbereitung: 'Vorbereitung',
+  kickoff_vereinbart: 'Kick-Off vereinbart',
+  onboarding: 'Onboarding',
+  golive_vereinbart: 'Go-Live vereinbart',
+  warte_auf_go: 'Warte auf Go!',
+  feedbackschleife: 'Feedbackschleife',
+  go: 'Go',
+  live: 'Live',
+  pausiert: 'Pausiert',
+  hold: 'Hold',
+  abgeschlossen: 'Abgeschlossen',
+};
+
+function StatusBadge({ projekt }) {
+  if (!projekt) return null;
+  const status = projekt.status;
+  if (status === 'live') {
+    const start = projekt.start_phase1 || projekt.live_seit;
+    let tagInfo = '';
+    if (start) {
+      const t = Math.floor((Date.now() - new Date(start).getTime()) / 86400000);
+      tagInfo = ` — Tag ${t} von 30`;
+    }
+    const color = start ? (
+      (Math.floor((Date.now() - new Date(start).getTime()) / 86400000) >= 28) ? '#dc2626'
+      : (Math.floor((Date.now() - new Date(start).getTime()) / 86400000) >= 20) ? '#f59e0b'
+      : '#16a34a'
+    ) : '#16a34a';
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: color, color: '#fff',
+        padding: '4px 12px', borderRadius: 100,
+        fontSize: 12, fontWeight: 600,
+      }}>🟢 LIVE{start ? ` seit ${new Date(start).toLocaleDateString('de-DE')}` : ''}{tagInfo}</span>
+    );
+  }
+  const label = STATUS_LABELS[status] || status;
+  const isFeedback = status === 'feedbackschleife';
+  const isGo = status === 'go';
+  const bg = isFeedback ? '#fef3c7' : isGo ? '#dcfce7' : '#e0f2fe';
+  const fg = isFeedback ? '#92400e' : isGo ? '#166534' : '#1e40af';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      background: bg, color: fg,
+      padding: '4px 12px', borderRadius: 100,
+      fontSize: 12, fontWeight: 600,
+    }}>{label}</span>
+  );
+}
+
+function ArbeitshinweiseInline({ job, onSaved }) {
+  const [value, setValue] = useState(job.arbeitshinweise || '');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => { setValue(job.arbeitshinweise || ''); }, [job.arbeitshinweise, job.id]);
+
+  function scheduleSave(newVal) {
+    setValue(newVal);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        const trimmed = newVal.trim();
+        const res = await api(`/jobs/${job.id}`, { method: 'PATCH', body: { arbeitshinweise: trimmed || null } });
+        onSaved?.(res.job);
+      } catch (err) { console.warn('[arbeitshinweise-save]', err.message); }
+      setSaving(false);
+    }, 700);
+  }
+
+  if (!editing && !value.trim()) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        style={{
+          background: 'transparent', border: '1px dashed #d4d4d0',
+          padding: '6px 12px', borderRadius: 6, color: '#5a5955',
+          fontSize: 12, cursor: 'pointer',
+        }}
+      >+ Arbeitshinweis hinzufügen</button>
+    );
+  }
+
+  if (!editing && value.trim()) {
+    return (
+      <div
+        onClick={() => setEditing(true)}
+        style={{
+          background: '#fef3c7', border: '1px solid #fbbf24',
+          padding: '10px 14px', borderRadius: 8, color: '#78350f',
+          fontSize: 14, fontWeight: 500, cursor: 'text',
+          display: 'flex', gap: 8, alignItems: 'center',
+        }}
+        title="Klicken zum Bearbeiten"
+      >
+        <span aria-hidden>⚠️</span>
+        <span style={{ flex: 1, whiteSpace: 'pre-wrap' }}>{value}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', padding: 10, borderRadius: 8 }}>
+      <textarea
+        autoFocus rows={2}
+        value={value}
+        placeholder='z. B. "Keine KI-Bilder gewünscht — nur echte Fotos verwenden"'
+        onChange={e => scheduleSave(e.target.value)}
+        onBlur={() => setEditing(false)}
+        style={{
+          width: '100%', border: 'none', background: 'transparent',
+          fontSize: 14, fontFamily: 'inherit', resize: 'vertical',
+          color: '#78350f', outline: 'none',
+        }}
+      />
+      <div style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>
+        {saving ? 'Speichere…' : 'Auto-Save nach 0.7s'}
+      </div>
+    </div>
+  );
+}
+
 export default function JobView() {
   const { kundeId, jobId } = useParams();
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);
+  const [projekt, setProjekt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -104,6 +233,15 @@ export default function JobView() {
       .finally(() => setLoading(false));
   }, [jobId, kundeId]);
 
+  // Verknüpftes Projekt laden (für Status-Badge). Erstes/primäres Projekt des Kunden.
+  useEffect(() => {
+    if (!kundeId) return;
+    api(`/projekte?kunde_id=${kundeId}`).then(r => {
+      const primary = (r.projekte || [])[0] || null;
+      setProjekt(primary);
+    }).catch(() => setProjekt(null));
+  }, [kundeId, job?.id]);
+
   if (loading) return <div className="card empty">Lade…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!job) return <div className="card empty"><h2>Projekt nicht gefunden</h2></div>;
@@ -127,6 +265,14 @@ export default function JobView() {
             {[job.region, job.gehalt].filter(Boolean).join(' · ') || 'Noch keine Details hinterlegt.'}
           </p>
         </div>
+      </div>
+
+      {/* Arbeitshinweis + Status-Badge über allen Tabs */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
+        </div>
+        {projekt && <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>}
       </div>
 
       {hasPending && (

@@ -69,6 +69,54 @@ export async function addTask({ leadId, text, assignedTo, dueIso }) {
   });
 }
 
+/**
+ * Best-effort-Note für allgemeine Tool-Aktivitäten (Formular-Versand, Feedback,
+ * Zahlungen, Go-Live etc.). Liest close_lead_id vom Kunden (primär), fällt
+ * bei Bedarf auf projekte.close_lead_id oder Email-Suche zurück. Blockt nie
+ * den aufrufenden Flow, loggt bei Misserfolg als warn.
+ *
+ * @param {object} kunde  — talentone_kunden-Zeile (mindestens close_lead_id oder email)
+ * @param {string} noteText — der volle Notiz-Text (Emoji-Prefix nach Wunsch)
+ * @returns {Promise<{ok: boolean, leadId?: string, error?: string}>}
+ */
+export async function notifyKunde(kunde, noteText) {
+  if (!process.env.CLOSE_API_KEY) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
+  if (!kunde || !noteText) return { ok: false, error: 'kunde oder noteText fehlt' };
+  const leadIdCandidate = kunde.close_lead_id;
+  try {
+    const lead = await findLead({
+      closeLeadId: leadIdCandidate,
+      email: !leadIdCandidate ? kunde.email : null,
+    });
+    if (!lead?.id) return { ok: false, error: `Kein Close-Lead gefunden (kunde=${kunde.id?.slice?.(0,8)})` };
+    await addNote({ leadId: lead.id, note: noteText });
+    return { ok: true, leadId: lead.id };
+  } catch (err) {
+    console.warn('[close/notifyKunde]', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Wie notifyKunde, aber lädt den Kunden selbst per ID nach.
+ * Für Kontexte, in denen nur eine kunde_id verfügbar ist.
+ */
+export async function notifyKundeById(kundeId, noteText, supabaseClient) {
+  if (!kundeId || !noteText || !supabaseClient) return { ok: false, error: 'Args fehlen' };
+  try {
+    const { data: kunde } = await supabaseClient
+      .from('talentone_kunden')
+      .select('id, close_lead_id, email')
+      .eq('id', kundeId)
+      .maybeSingle();
+    if (!kunde) return { ok: false, error: 'Kunde nicht gefunden' };
+    return await notifyKunde(kunde, noteText);
+  } catch (err) {
+    console.warn('[close/notifyKundeById]', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 /** Convenience: Reaktivierungs-Task + Note kombiniert. */
 export async function logReaktivierung({ leadIdOrEmail, kundenname, stelle, assignToName = 'Daniel Nowag' }) {
   if (!process.env.CLOSE_API_KEY) {

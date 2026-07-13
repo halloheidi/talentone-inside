@@ -6,7 +6,7 @@ import {
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
 import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail } from '../mail.js';
-import { logReaktivierung } from '../close.js';
+import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 
 const router = Router();
@@ -171,6 +171,10 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     });
     if (insErr) console.warn('[export/email] Historie-Insert:', insErr.message);
 
+    // Close-Note (best-effort)
+    notifyKunde(kunde, `📤 Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[export/email close-note]', err.message));
+
     // Bei neuer Runde: Projekt-Status auf 'warte_auf_go' + Auto-Kommentar
     if (istNeueRunde && kunde?.id) {
       try {
@@ -317,6 +321,10 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
     });
     if (insErr) console.warn('[kampagne-live] Versand-Insert:', insErr.message);
 
+    // Close-Note (best-effort)
+    notifyKunde(kunde, `🚀 Kampagne live gemeldet am ${new Date().toLocaleDateString('de-DE')}${job?.stelle ? ` — Stelle: ${job.stelle}` : ''}`)
+      .catch(err => console.warn('[kampagne-live close-note]', err.message));
+
     // Projekt automatisch auf 'live' setzen (best-effort). Zusätzlich:
     // start_phase1 = heute, ende_phase1 = heute + 30 Tage — der Live-Termin
     // ist der Anker, ab dem Phase 1 offiziell zählt.
@@ -376,6 +384,10 @@ router.post('/jobs/:id/export/kampagne-pause', async (req, res) => {
       typ: 'kampagne_pause',
       inhalte: { customText: customText || null },
     });
+
+    // Close-Note (best-effort)
+    notifyKunde(kunde, `⏸️ Kampagne pausiert (technische Probleme) — Mail an Kunden am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[kampagne-pause close-note]', err.message));
 
     // Projekt: status=pausiert, pausiert_seit=heute + Kommentar
     let projektId = null;

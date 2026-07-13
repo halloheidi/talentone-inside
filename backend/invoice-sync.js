@@ -93,6 +93,31 @@ async function syncOne(invoice) {
   const { patch, changed } = computeInvoiceStatusPatch(invoice, doc);
   if (!patch) return { checked: true, changed: false };
   await supabase.from('talentone_invoices').update(patch).eq('id', invoice.id);
+
+  // Zahlung neu eingegangen? → Close-Note (best-effort)
+  if (changed && patch.status === 'paid' && invoice.status !== 'paid') {
+    try {
+      const { data: full } = await supabase.from('talentone_invoices')
+        .select('offer_id, amount_cent').eq('id', invoice.id).maybeSingle();
+      let kundeId = null;
+      if (full?.offer_id) {
+        const { data: offer } = await supabase.from('talentone_offers')
+          .select('customer_id').eq('id', full.offer_id).maybeSingle();
+        kundeId = offer?.customer_id || null;
+      }
+      if (kundeId) {
+        const { notifyKundeById } = await import('./close.js');
+        const betragCent = Number(full?.amount_cent) || Number(doc.amount) || 0;
+        const betragEuro = betragCent > 0
+          ? (betragCent / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' })
+          : '';
+        notifyKundeById(kundeId,
+          `✅ Zahlung${betragEuro ? ` über ${betragEuro}` : ''} eingegangen am ${new Date().toLocaleDateString('de-DE')}`,
+          supabase,
+        ).catch(err => console.warn('[invoice-sync close-note inner]', err.message));
+      }
+    } catch (err) { console.warn('[invoice-sync close-note]', err.message); }
+  }
   return { checked: true, changed };
 }
 

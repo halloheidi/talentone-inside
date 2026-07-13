@@ -7,6 +7,7 @@ import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '.
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
+import { notifyKunde } from '../close.js';
 import { findMemberByName } from '../team.js';
 
 const router = Router();
@@ -348,6 +349,10 @@ router.post('/formular/:token/submit', async (req, res) => {
         });
       } catch (err) { console.warn('[formular-bg] Mitarbeiter-Mail:', err.message); }
 
+      // Close-Note (best-effort)
+      notifyKunde(updated, `✅ Kunde hat das Briefing-Formular ausgefüllt am ${new Date().toLocaleDateString('de-DE')}`)
+        .catch(err => console.warn('[formular-bg close-note]', err.message));
+
       // Kreativ-Team-Alert: „🎨 Neuer Kunde — Creatives können erstellt werden".
       // Idempotent per creative_auftrag_gesendet_at am verknüpften Projekt.
       // Wir markieren am ersten passenden Projekt des Kunden — reicht als Guard.
@@ -574,6 +579,13 @@ router.post('/review/:token', async (req, res) => {
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
       await sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives, adcopies, snapshot: kommentare_snapshot });
+
+      // Close-Note (best-effort)
+      const kundenText = status === 'freigegeben'
+        ? `✅ Kunde hat Entwürfe freigegeben am ${new Date().toLocaleDateString('de-DE')}`
+        : `📝 Kunde hat Änderungswünsche gesendet am ${new Date().toLocaleDateString('de-DE')}`;
+      notifyKunde(kunde, kundenText)
+        .catch(err => console.warn('[review close-note]', err.message));
 
       // ── Projekt-Sync: Kommentar + Status-Wechsel + Mail an Verantwortlichen ──
       try {

@@ -46,7 +46,7 @@ const TABS = [
 
 const EMPTY_MANUAL = {
   firmenname: '', ansprechpartner: '', email: '', telefon: '', branche: '', notizen: '',
-  stelle: '', region: '', gehalt: '',
+  stelle: '', region: '', gehalt: '', close_lead_id: '',
 };
 
 function fileToBase64(file) {
@@ -176,6 +176,9 @@ export default function QuickCreateModal({ open, onClose }) {
       } else {
         if (!manual.firmenname.trim()) throw new Error('Firmenname ist Pflicht.');
         if (!manual.stelle.trim()) throw new Error('Stelle ist Pflicht.');
+        const closeLead = manual.close_lead_id.trim();
+        if (agentur === 'nowagwirth' && !closeLead) throw new Error('Close Lead ID ist bei Nowag & Wirth Pflicht.');
+        if (closeLead && !closeLead.startsWith('lead_')) throw new Error('Close Lead ID muss mit lead_ beginnen.');
         body = {
           mode: 'manual',
           kunde: {
@@ -185,6 +188,7 @@ export default function QuickCreateModal({ open, onClose }) {
             telefon: manual.telefon,
             branche: manual.branche,
             notizen: manual.notizen,
+            close_lead_id: closeLead || undefined,
           },
           job: { stelle: manual.stelle, region: manual.region, gehalt: manual.gehalt },
         };
@@ -458,6 +462,19 @@ export default function QuickCreateModal({ open, onClose }) {
               <label className="field">
                 <span>Telefon</span>
                 <input value={manual.telefon} onChange={e => setManual({ ...manual, telefon: e.target.value })} />
+              </label>
+              <label className="field field-full">
+                <span>Close Lead ID {agentur === 'nowagwirth' && <em style={{ color: '#dc2626', fontStyle: 'normal' }}>*</em>}</span>
+                <input
+                  value={manual.close_lead_id}
+                  onChange={e => setManual({ ...manual, close_lead_id: e.target.value })}
+                  placeholder="lead_XXXXX…"
+                />
+                <small style={{ display: 'block', fontSize: 11, color: '#5a5955', marginTop: 3 }}>
+                  Du findest die Lead ID in Close: Lead öffnen → die ID steht in der URL
+                  (<code>app.close.com/lead/lead_XXXXX...</code>) — den Teil ab <code>lead_</code> kopieren.
+                  {agentur === 'nowagwirth' ? ' Pflicht bei Nowag & Wirth.' : ' Optional bei TalentOne.'}
+                </small>
               </label>
             </div>
           </div>

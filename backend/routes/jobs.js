@@ -3,6 +3,7 @@ import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { extractFromUrl, extractFromFile, toJob } from '../extractor.js';
 import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
+import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
 
@@ -78,6 +79,8 @@ router.post('/quick-create', async (req, res) => {
       console.error('[jobs/quick-create/formular] Mail:', err.message);
       // Job bleibt — Team kann manuell nachfassen
     }
+    notifyKunde(kunde, `📋 Onboarding-Formular an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[jobs/quick-create/formular close-note]', err.message));
 
     // Projekt in Kanban anlegen
     await supabase.from('talentone_projekte').insert({
@@ -181,6 +184,8 @@ const ALLOWED_JOB_FIELDS = [
   'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder',
   // Projekttyp „Neukundengewinnung" (Migration 021):
   'projekttyp', 'neukunden_daten',
+  // Arbeitshinweise-Banner (Migration 023)
+  'arbeitshinweise',
 ];
 
 router.patch('/:id', async (req, res) => {

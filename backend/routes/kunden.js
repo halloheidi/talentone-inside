@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
+import { notifyKunde } from '../close.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 
 const router = Router();
@@ -40,6 +41,9 @@ router.post('/quick-create', async (req, res) => {
       const { kunde = {}, job = {} } = req.body;
       if (!kunde.firmenname?.trim()) return res.status(400).json({ error: 'Firmenname ist Pflicht.' });
       if (!job.stelle?.trim()) return res.status(400).json({ error: 'Stelle ist Pflicht.' });
+      if (kunde.close_lead_id && !/^lead_/.test(kunde.close_lead_id)) {
+        return res.status(400).json({ error: 'close_lead_id muss mit lead_ beginnen.' });
+      }
       kundeData = {
         ...kundeData,
         firmenname: kunde.firmenname.trim(),
@@ -48,6 +52,7 @@ router.post('/quick-create', async (req, res) => {
         telefon: kunde.telefon || null,
         branche: kunde.branche || null,
         notizen: kunde.notizen || null,
+        close_lead_id: kunde.close_lead_id || null,
       };
       jobData = {
         stelle: job.stelle.trim(),
@@ -109,6 +114,7 @@ router.post('/quick-create', async (req, res) => {
       standorte: job.region || null,
       verantwortlich: verantwortlich || null,
       email: kunde.email || null,
+      close_lead_id: kunde.close_lead_id || null,  // Punkt 8: Kunde ist primär, Projekt sync
       updated_at: new Date().toISOString(),
     });
 
@@ -315,11 +321,15 @@ router.get('/:id/activity', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { firmenname, ansprechpartner, email, telefon, logo_url, branche, notizen } = req.body || {};
+  const { firmenname, ansprechpartner, email, telefon, logo_url, branche, notizen, close_lead_id, agentur } = req.body || {};
   if (!firmenname) return res.status(400).json({ error: 'firmenname ist Pflicht.' });
+  if (close_lead_id && !/^lead_/.test(close_lead_id)) {
+    return res.status(400).json({ error: 'close_lead_id muss mit lead_ beginnen.' });
+  }
   const { data, error } = await supabase
     .from('talentone_kunden')
-    .insert({ firmenname, ansprechpartner, email, telefon, logo_url, branche, notizen })
+    .insert({ firmenname, ansprechpartner, email, telefon, logo_url, branche, notizen,
+              close_lead_id: close_lead_id || null, agentur: agentur || null })
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
@@ -328,8 +338,14 @@ router.post('/', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben', 'website_url', 'agentur',
-                   'paypal_enabled', 'campaign_payment_status'];
+                   'paypal_enabled', 'campaign_payment_status', 'close_lead_id'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  if (patch.close_lead_id !== undefined) {
+    if (patch.close_lead_id === '' || patch.close_lead_id === null) patch.close_lead_id = null;
+    else if (!/^lead_/.test(patch.close_lead_id)) {
+      return res.status(400).json({ error: 'close_lead_id muss mit lead_ beginnen.' });
+    }
+  }
   const { data, error } = await supabase
     .from('talentone_kunden')
     .update(patch)
@@ -592,6 +608,8 @@ router.post('/formular-anlegen', async (req, res) => {
     await supabase.from('talentone_kunden').delete().eq('id', kunde.id);
     return res.status(503).json({ error: `Mail-Versand fehlgeschlagen: ${err.message}` });
   }
+  notifyKunde(kunde, `📋 Onboarding-Formular an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+    .catch(err => console.warn('[formular-anlegen close-note]', err.message));
 
   res.status(201).json({ kunde, formularUrl });
 });
@@ -626,6 +644,8 @@ router.post('/:id/anfrage', async (req, res) => {
       customText,
       agentur: kunde.agentur,
     });
+    notifyKunde(kunde, `📸 Foto- & Logo-Anfrage an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[anfrage close-note]', err.message));
     res.json({ ok: true, uploadUrl });
   } catch (err) {
     console.error('[anfrage]', err.message);

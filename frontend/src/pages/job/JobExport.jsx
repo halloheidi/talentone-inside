@@ -3,6 +3,8 @@ import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { downloadFromUrl } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
+import EntwurfPreflightModal from '../../components/EntwurfPreflightModal.jsx';
+import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
 import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
@@ -17,7 +19,8 @@ function badgeFor(c) {
 }
 
 export default function JobExport() {
-  const { job, kunde } = useJob();
+  const { job, kunde, reload } = useJob();
+  const [showPreflight, setShowPreflight] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -600,8 +603,8 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
-            <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim()}>
-              {mailBusy ? 'Sende…' : 'Mail senden'}
+            <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim()}>
+              {mailBusy ? 'Sende…' : 'Weiter zum Check…'}
             </button>
           </>
         }
@@ -633,6 +636,21 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         {mailMsg && <div className="form-msg" style={{ marginTop: 10 }}>{mailMsg}</div>}
       </Modal>
 
+      {/* ─────── Preflight-Check-Modal ─────── */}
+      <EntwurfPreflightModal
+        open={showPreflight}
+        onClose={() => !mailBusy && setShowPreflight(false)}
+        kunde={kunde}
+        creatives={(data?.creatives || []).filter(c => selectedCreatives.has(c.id))}
+        jobStelle={job?.stelle}
+        isRunde={!!(review && review.status === 'aenderungen')}
+        onKundeUpdated={() => reload?.()}
+        onConfirm={async () => {
+          setShowPreflight(false);
+          await sendMail();
+        }}
+      />
+
       {/* ─────── Reaktivierungs-Modal ─────── */}
       <Modal
         open={showReak}
@@ -655,6 +673,8 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           Die Mail enthält nur die ausgewählten Creatives (max. 6 Bilder) und einen Termin-Button.
           Kein Funnel, keine Ad-Copies, keine Review-Seite.
         </p>
+
+        <CloseLeadWarnung kunde={kunde} onSaved={() => reload?.()} />
 
         {/* Creatives auswählen */}
         <div className="form-grid">
