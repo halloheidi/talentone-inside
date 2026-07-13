@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import Icon from './Icon.jsx';
 import { downloadFromUrl } from '../lib/files.js';
 
-export default function Lightbox({ items, index, onClose, onNavigate, filenameFor }) {
+export default function Lightbox({ items, index, onClose, onNavigate, filenameFor, isSelected, onToggleSelect }) {
   const item = items[index];
 
   const next = useCallback(() => {
@@ -20,6 +20,10 @@ export default function Lightbox({ items, index, onClose, onNavigate, filenameFo
       if (e.key === 'Escape') onClose();
       else if (e.key === 'ArrowRight') next();
       else if (e.key === 'ArrowLeft') prev();
+      else if ((e.key === ' ' || e.code === 'Space') && onToggleSelect && item) {
+        e.preventDefault();
+        onToggleSelect(item);
+      }
     }
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
@@ -27,7 +31,7 @@ export default function Lightbox({ items, index, onClose, onNavigate, filenameFo
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [onClose, next, prev]);
+  }, [onClose, next, prev, onToggleSelect, item]);
 
   if (!item) return null;
 
@@ -53,6 +57,23 @@ export default function Lightbox({ items, index, onClose, onNavigate, filenameFo
           <span className="lb-meta-counter">{index + 1} / {items.length}</span>
         </div>
         <div className="lb-actions">
+          {onToggleSelect && (() => {
+            const selected = isSelected?.(item);
+            return (
+              <button
+                className="lb-btn"
+                onClick={e => { e.stopPropagation(); onToggleSelect(item); }}
+                title={selected ? 'Aus Versand-Auswahl entfernen' : 'Für Versand auswählen'}
+                style={{
+                  background: selected ? '#16a34a' : 'rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  fontWeight: 600,
+                }}
+              >
+                {selected ? '✓ Ausgewählt' : '☐ Auswählen'}
+              </button>
+            );
+          })()}
           <button className="lb-btn" onClick={onDownload} title="Herunterladen">
             <Icon name="download" size={18} />
             <span>Download</span>

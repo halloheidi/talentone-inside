@@ -177,10 +177,12 @@ router.post('/quick-create', async (req, res) => {
 });
 
 router.get('/', async (req, res) => {
-  const { data, error } = await supabase
-    .from('talentone_kunden')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const includeArchived = req.query.include_archived === '1';
+  const onlyArchived    = req.query.only_archived    === '1';
+  let q = supabase.from('talentone_kunden').select('*').order('created_at', { ascending: false });
+  if (onlyArchived) q = q.eq('archiviert', true);
+  else if (!includeArchived) q = q.eq('archiviert', false);
+  const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
   res.json({ kunden: data });
 });
@@ -356,10 +358,174 @@ router.patch('/:id', async (req, res) => {
   res.json({ kunde: data });
 });
 
+/* GET /api/kunden/:id/loeschen-vorschau
+   Liefert Zählwerte aller verknüpften Datensätze — Basis für die
+   Klartext-Warnung im Bestätigungs-Dialog. */
+router.get('/:id/loeschen-vorschau', async (req, res) => {
+  const id = req.params.id;
+  try {
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('id, firmenname').eq('id', id).maybeSingle();
+    if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+    // Job-IDs sammeln
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('id').eq('kunde_id', id);
+    const jobIds = jobs.map(j => j.id);
+
+    // Für jede abhängige Tabelle: Anzahl
+    const countAt = async (table, filterCol, filterVal) => {
+      if (Array.isArray(filterVal) && filterVal.length === 0) return 0;
+      let q = supabase.from(table).select('id', { count: 'exact', head: true });
+      if (Array.isArray(filterVal)) q = q.in(filterCol, filterVal);
+      else q = q.eq(filterCol, filterVal);
+      const { count } = await q;
+      return count || 0;
+    };
+
+    const [creatives, bewerbungen, funnels, adcopies, reviews, referenzbilder, versand, zahlungen, anfragen, projekte] = await Promise.all([
+      countAt('talentone_creatives', 'job_id', jobIds),
+      countAt('talentone_bewerbungen', 'job_id', jobIds),
+      countAt('talentone_funnels', 'job_id', jobIds),
+      countAt('talentone_adcopies', 'job_id', jobIds),
+      countAt('talentone_reviews', 'job_id', jobIds),
+      countAt('talentone_referenzbilder', 'kunde_id', id),
+      countAt('talentone_versand', 'job_id', jobIds),
+      countAt('talentone_zahlungen', 'kunde_id', id),
+      countAt('talentone_anfragen', 'job_id', jobIds),
+      countAt('talentone_projekte', 'kunde_id', id),
+    ]);
+
+    res.json({
+      firmenname: kunde.firmenname,
+      counts: {
+        jobs: jobs.length,
+        creatives, bewerbungen, funnels, adcopies, reviews,
+        referenzbilder, versand, zahlungen, anfragen,
+        projekte, // hint: bleiben erhalten, nur kunde_id genullt
+      },
+    });
+  } catch (err) {
+    console.error('[loeschen-vorschau]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* DELETE /api/kunden/:id  body: { firmenname_confirm: string }
+   Kaskadierter Delete: entfernt alle abhängigen Daten inkl. Storage-Objekte.
+   Sicherheit: der Firmenname muss zur Bestätigung im Body mitgeschickt werden.
+   Projekte werden NICHT gelöscht — nur kunde_id genullt (Historie bleibt). */
 router.delete('/:id', async (req, res) => {
-  const { error } = await supabase.from('talentone_kunden').delete().eq('id', req.params.id);
+  const id = req.params.id;
+  const { firmenname_confirm } = req.body || {};
+
+  const { data: kunde, error: kErr } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, logo_url, logo_transparent_url').eq('id', id).maybeSingle();
+  if (kErr) return res.status(500).json({ error: kErr.message });
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  const expected = (kunde.firmenname || '').trim();
+  if (!firmenname_confirm || firmenname_confirm.trim() !== expected) {
+    return res.status(400).json({
+      error: `Bestätigung fehlt oder falsch. Bitte den Firmennamen exakt eintippen: "${expected}"`,
+    });
+  }
+
+  try {
+    const { deleteFromStorage: delCreative } = await import('../imagegen.js');
+
+    // 1. Job-IDs holen (Basis für alle abhängigen Zeilen)
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('id').eq('kunde_id', id);
+    const jobIds = jobs.map(j => j.id);
+
+    // 2. Creatives — Storage-Files sammeln UND anschließend DB-Zeilen löschen
+    if (jobIds.length) {
+      const { data: creatives = [] } = await supabase.from('talentone_creatives')
+        .select('bild_url, bild_ohne_logo_url').in('job_id', jobIds);
+      for (const c of creatives) {
+        if (c.bild_url) await delCreative(c.bild_url).catch(() => {});
+        if (c.bild_ohne_logo_url) await delCreative(c.bild_ohne_logo_url).catch(() => {});
+      }
+      await supabase.from('talentone_creatives').delete().in('job_id', jobIds);
+
+      // 3. Bewerbungen → bewerber_notizen, bewerber_kundenfeedback, bewerber_spalten_werte
+      const { data: bewerbungen = [] } = await supabase.from('talentone_bewerbungen')
+        .select('id').in('job_id', jobIds);
+      const bewerbungIds = bewerbungen.map(b => b.id);
+      if (bewerbungIds.length) {
+        await Promise.all([
+          supabase.from('talentone_bewerber_notizen').delete().in('bewerbung_id', bewerbungIds),
+          supabase.from('talentone_bewerber_kundenfeedback').delete().in('bewerbung_id', bewerbungIds),
+          supabase.from('talentone_bewerber_spalten_werte').delete().in('bewerbung_id', bewerbungIds),
+        ]);
+      }
+
+      // 4. Bewerbungen + bewerber_spalten + funnels + adcopies + reviews + versand + anfragen
+      await Promise.all([
+        supabase.from('talentone_bewerbungen').delete().in('job_id', jobIds),
+        supabase.from('talentone_bewerber_spalten').delete().in('job_id', jobIds),
+        supabase.from('talentone_funnels').delete().in('job_id', jobIds),
+        supabase.from('talentone_adcopies').delete().in('job_id', jobIds),
+        supabase.from('talentone_reviews').delete().in('job_id', jobIds),
+        supabase.from('talentone_versand').delete().in('job_id', jobIds),
+        supabase.from('talentone_anfragen').delete().in('job_id', jobIds),
+        supabase.from('talentone_zahlungen').delete().in('job_id', jobIds),
+      ]);
+    }
+
+    // 5. Referenzbilder — Storage + DB
+    const { data: refbilder = [] } = await supabase.from('talentone_referenzbilder')
+      .select('bild_url, typ').eq('kunde_id', id);
+    for (const r of refbilder) {
+      const bucket = r.typ === 'logo' ? 'talentone-logos' : 'talentone-referenzbilder';
+      if (r.bild_url) await deleteFromBucket(bucket, r.bild_url).catch(() => {});
+    }
+    await supabase.from('talentone_referenzbilder').delete().eq('kunde_id', id);
+
+    // 6. Zahlungen (kunde_id-basiert, falls noch welche ohne job_id existieren)
+    await supabase.from('talentone_zahlungen').delete().eq('kunde_id', id);
+
+    // 7. Jobs
+    await supabase.from('talentone_jobs').delete().eq('kunde_id', id);
+
+    // 8. Projekte: NICHT löschen — nur kunde_id nullen (Historie bleibt)
+    await supabase.from('talentone_projekte')
+      .update({ kunde_id: null }).eq('kunde_id', id);
+
+    // 9. Logo-Storage aufräumen
+    if (kunde.logo_url) await deleteFromBucket('talentone-logos', kunde.logo_url).catch(() => {});
+    if (kunde.logo_transparent_url) await deleteFromBucket('talentone-logos', kunde.logo_transparent_url).catch(() => {});
+
+    // 10. Kunde selbst
+    const { error: dErr } = await supabase.from('talentone_kunden').delete().eq('id', id);
+    if (dErr) return res.status(500).json({ error: dErr.message });
+
+    console.log(`[kunde-delete] ${expected} (${id.slice(0, 8)}) + ${jobIds.length} Jobs gelöscht.`);
+    res.json({ ok: true, deleted_jobs: jobIds.length });
+  } catch (err) {
+    console.error('[kunde-delete]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/kunden/:id/archivieren — Soft-Archiv: verschwindet aus Liste,
+   Daten bleiben. body: {} */
+router.post('/:id/archivieren', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_kunden')
+    .update({ archiviert: true, archiviert_am: new Date().toISOString() })
+    .eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true });
+  res.json({ kunde: data });
+});
+
+/* POST /api/kunden/:id/wiederherstellen — Reaktiviert einen archivierten Kunden. */
+router.post('/:id/wiederherstellen', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_kunden')
+    .update({ archiviert: false, archiviert_am: null })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ kunde: data });
 });
 
 /* ─────────────────── Farb-Vorschau (Preview, speichert NICHT) ─────────────────── */

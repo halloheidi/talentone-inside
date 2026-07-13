@@ -13,6 +13,7 @@ export default function KundenList() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [agenturFilter, setAgenturFilter] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [view, setView] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'cards'; } catch (e) { return 'cards'; }
   });
@@ -24,13 +25,14 @@ export default function KundenList() {
 
   function load() {
     setLoading(true);
-    api('/kunden')
+    const q = showArchived ? '?only_archived=1' : '';
+    api(`/kunden${q}`)
       .then(res => setKunden(res.kunden || []))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [showArchived]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,6 +80,15 @@ export default function KundenList() {
             <option value="talentone">TalentOne</option>
             <option value="nowagwirth">Nowag &amp; Wirth</option>
           </select>
+        </div>
+        <div className="filter-group" style={{ alignSelf: 'flex-end' }}>
+          <button
+            className={`pub-filter ${showArchived ? 'is-active' : ''}`}
+            onClick={() => setShowArchived(v => !v)}
+            title="Nur archivierte Kunden anzeigen"
+          >
+            {showArchived ? '📦 Archiv (aktiv)' : '📦 Archiv anzeigen'}
+          </button>
         </div>
         {(search || agenturFilter) && (
           <button className="btn-ghost btn-sm" onClick={() => { setSearch(''); setAgenturFilter(''); }} style={{ alignSelf: 'flex-end' }}>

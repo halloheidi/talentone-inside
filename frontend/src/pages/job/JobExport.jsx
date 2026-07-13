@@ -3,6 +3,7 @@ import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { downloadFromUrl } from '../../lib/files.js';
 import Modal from '../../components/Modal.jsx';
+import Lightbox from '../../components/Lightbox.jsx';
 import EntwurfPreflightModal from '../../components/EntwurfPreflightModal.jsx';
 import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
 import { getBrandBaseUrl } from '../../lib/branding.js';
@@ -23,6 +24,7 @@ export default function JobExport() {
   const [showPreflight, setShowPreflight] = useState(false);
   const [showGoLive, setShowGoLive] = useState(false);
   const [goLiveBusy, setGoLiveBusy] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -426,16 +428,30 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
               <span>Alle auswählen ({selectedCreatives.size}/{creatives.length})</span>
             </label>
             <div className="export-grid">
-              {creatives.map(c => {
+              {creatives.map((c, i) => {
                 const checked = selectedCreatives.has(c.id);
                 return (
                   <label key={c.id} className={`export-card ${checked ? 'is-checked' : ''}`}>
                     <input type="checkbox" checked={checked} onChange={() => toggleCreative(c.id)} />
-                    <div className="export-thumb">
+                    <div
+                      className="export-thumb"
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setLightboxIndex(i); }}
+                      style={{ cursor: 'zoom-in', position: 'relative' }}
+                      title="Klicken für Groß-Ansicht"
+                    >
                       {c.typ === 'video'
                         ? <video src={c.bild_url} preload="metadata" muted playsInline />
                         : <img src={c.bild_url} alt="" loading="lazy" />}
                       <span className={`format-badge format-${c.format}`}>{badgeFor(c)}</span>
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute', bottom: 6, right: 6,
+                          background: 'rgba(0,0,0,0.6)', color: '#fff',
+                          padding: '2px 6px', borderRadius: 100, fontSize: 10,
+                          pointerEvents: 'none',
+                        }}
+                      >🔍 Groß-Ansicht</span>
                     </div>
                     <div className="export-date">
                       {new Date(c.created_at).toLocaleDateString('de-DE')}
@@ -626,6 +642,19 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         </div>
         {mailMsg && <div className="form-msg" style={{ marginTop: 10 }}>{mailMsg}</div>}
       </Modal>
+
+      {/* ─────── Lightbox für Creative-Auswahl ─────── */}
+      {lightboxIndex !== null && creatives.length > 0 && (
+        <Lightbox
+          items={creatives}
+          index={Math.max(0, Math.min(lightboxIndex, creatives.length - 1))}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+          isSelected={c => selectedCreatives.has(c.id)}
+          onToggleSelect={c => toggleCreative(c.id)}
+          filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`}
+        />
+      )}
 
       {/* ─────── Go-Live-Modal ─────── */}
       <Modal

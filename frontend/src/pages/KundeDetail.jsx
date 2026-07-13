@@ -48,6 +48,51 @@ export default function KundeDetail() {
 
   const [referenzbilder, setReferenzbilder] = useState([]);
 
+  // Archivieren + Löschen
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(null); // { preview, typedName, busy, error } | null
+
+  async function archiveKunde() {
+    if (!confirm(`"${kunde?.firmenname || 'Diesen Kunden'}" archivieren? Der Kunde verschwindet aus der Liste, alle Daten bleiben erhalten.`)) return;
+    setArchiveBusy(true);
+    try {
+      const res = await api(`/kunden/${kundeId}/archivieren`, { method: 'POST' });
+      setKunde(res.kunde);
+    } catch (err) { alert(err.message); }
+    finally { setArchiveBusy(false); }
+  }
+  async function unarchiveKunde() {
+    setArchiveBusy(true);
+    try {
+      const res = await api(`/kunden/${kundeId}/wiederherstellen`, { method: 'POST' });
+      setKunde(res.kunde);
+    } catch (err) { alert(err.message); }
+    finally { setArchiveBusy(false); }
+  }
+  async function openDeleteModal() {
+    setDeleteModal({ preview: null, typedName: '', busy: true, error: '' });
+    try {
+      const res = await api(`/kunden/${kundeId}/loeschen-vorschau`);
+      setDeleteModal({ preview: res, typedName: '', busy: false, error: '' });
+    } catch (err) {
+      setDeleteModal({ preview: null, typedName: '', busy: false, error: err.message });
+    }
+  }
+  async function confirmDelete() {
+    if (!deleteModal?.preview) return;
+    setDeleteModal(m => ({ ...m, busy: true, error: '' }));
+    try {
+      await api(`/kunden/${kundeId}`, {
+        method: 'DELETE',
+        body: { firmenname_confirm: deleteModal.typedName },
+      });
+      alert(`"${deleteModal.preview.firmenname}" wurde vollständig gelöscht.`);
+      window.location.href = '/kunden';
+    } catch (err) {
+      setDeleteModal(m => ({ ...m, busy: false, error: err.message }));
+    }
+  }
+
   // Rechnungen (alle talentone_invoices dieses Kunden)
   const [invoices, setInvoices] = useState([]);
   const [invoicesBusy, setInvoicesBusy] = useState(false);
@@ -520,6 +565,31 @@ export default function KundeDetail() {
                   {editBusy ? 'Speichere…' : 'Speichern'}
                 </button>
               </div>
+
+              {/* Gefahrenzone — Archivieren + Löschen */}
+              <div style={{ marginTop: 20, padding: 14, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: 0.05, marginBottom: 8 }}>
+                  ⚠️ Gefahrenzone
+                </div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {!kunde?.archiviert ? (
+                    <button className="btn-ghost btn-sm" onClick={archiveKunde} disabled={archiveBusy}>
+                      {archiveBusy ? '…' : '📦 Kunde archivieren'}
+                    </button>
+                  ) : (
+                    <button className="btn-ghost btn-sm" onClick={unarchiveKunde} disabled={archiveBusy}>
+                      {archiveBusy ? '…' : '↩️ Aus Archiv holen'}
+                    </button>
+                  )}
+                  <button className="btn-ghost btn-sm" style={{ color: '#991b1b', borderColor: '#fca5a5' }}
+                    onClick={openDeleteModal}>
+                    🗑️ Kunde endgültig löschen
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: '#7f1d1d', marginTop: 8, marginBottom: 0 }}>
+                  Archivieren blendet den Kunden nur aus der Liste, Daten bleiben. Löschen entfernt Kunde + Jobs + Creatives + Bewerbungen + Funnels + Ad Copies + Referenzbilder + Reviews unwiderruflich. Verknüpfte Projekte bleiben in der Projektübersicht als Historie.
+                </p>
+              </div>
             </div>
           )}
         </div>
@@ -799,6 +869,86 @@ export default function KundeDetail() {
         kunde={kunde}
         onClose={() => setShowCreate(false)}
       />
+
+      {/* Kunde-Löschen-Modal */}
+      <Modal
+        open={!!deleteModal}
+        onClose={() => !deleteModal?.busy && setDeleteModal(null)}
+        title="🗑️ Kunde endgültig löschen"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setDeleteModal(null)} disabled={deleteModal?.busy}>Abbrechen</button>
+            <button
+              className="btn-primary"
+              style={{ background: '#dc2626', borderColor: '#dc2626' }}
+              disabled={
+                !deleteModal?.preview ||
+                deleteModal?.busy ||
+                (deleteModal?.typedName || '').trim() !== (deleteModal?.preview?.firmenname || '').trim()
+              }
+              onClick={confirmDelete}
+            >
+              {deleteModal?.busy ? 'Lösche…' : 'Endgültig löschen'}
+            </button>
+          </>
+        }
+      >
+        {!deleteModal ? null : deleteModal.busy && !deleteModal.preview ? (
+          <p>Lade Vorschau…</p>
+        ) : deleteModal.preview ? (
+          <>
+            <p style={{ marginTop: 0 }}>
+              Kunde <strong>{deleteModal.preview.firmenname || '(ohne Name)'}</strong> wirklich löschen? Damit werden auch gelöscht:
+            </p>
+            <ul style={{ fontSize: 13, lineHeight: 1.8, background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 20px', borderRadius: 8 }}>
+              {(() => {
+                const c = deleteModal.preview.counts;
+                const rows = [
+                  [c.jobs, 'Job(s) / Kampagne(n)'],
+                  [c.creatives, 'Creative(s) inkl. Storage-Dateien'],
+                  [c.bewerbungen, 'Bewerbung(en) inkl. Feedback + Notizen'],
+                  [c.funnels, 'Funnel(s)'],
+                  [c.adcopies, 'Ad Copy(s)'],
+                  [c.reviews, 'Review(s)'],
+                  [c.referenzbilder, 'Referenzbild(er) inkl. Storage'],
+                  [c.versand, 'Versand-Historien'],
+                  [c.zahlungen, 'Zahlung(en)'],
+                  [c.anfragen, 'Kunden-Anfrage(n)'],
+                ].filter(r => r[0] > 0);
+                return rows.map(([n, l]) => (
+                  <li key={l}><strong>{n}</strong> {l}</li>
+                ));
+              })()}
+              {deleteModal.preview.counts.projekte > 0 && (
+                <li style={{ color: '#5a5955' }}>
+                  <em>{deleteModal.preview.counts.projekte} Projekt(e) in der Übersicht bleiben erhalten</em> (nur die Kunden-Verknüpfung wird entfernt).
+                </li>
+              )}
+            </ul>
+            <p style={{ color: '#991b1b', fontWeight: 600, marginBottom: 6 }}>
+              Das kann nicht rückgängig gemacht werden.
+            </p>
+            <p style={{ fontSize: 13, marginBottom: 6, marginTop: 12 }}>
+              Zur Bestätigung tippe bitte den Firmennamen ein:
+            </p>
+            <p style={{ fontSize: 13, fontFamily: 'monospace', background: '#f4f3f0', padding: '6px 10px', borderRadius: 6, marginBottom: 6 }}>
+              {deleteModal.preview.firmenname}
+            </p>
+            <input
+              type="text" autoFocus
+              value={deleteModal.typedName}
+              onChange={e => setDeleteModal(m => ({ ...m, typedName: e.target.value }))}
+              placeholder="Firmenname exakt eintippen…"
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid #d4d4d0', borderRadius: 8, fontSize: 14 }}
+            />
+            {deleteModal.error && (
+              <p style={{ color: '#c1272d', fontSize: 13, marginTop: 8, marginBottom: 0 }}>{deleteModal.error}</p>
+            )}
+          </>
+        ) : (
+          <p style={{ color: '#c1272d' }}>{deleteModal.error}</p>
+        )}
+      </Modal>
     </div>
   );
 }
