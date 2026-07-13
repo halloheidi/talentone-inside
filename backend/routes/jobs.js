@@ -310,4 +310,47 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
   }
 });
 
+/* POST /api/jobs/:id/create-projekt
+   Idempotent: legt ein Projekt in talentone_projekte fuer den Job an,
+   falls fuer den Kunden noch keins existiert. Uebertraegt vorhandene
+   Job-Infos (Stelle, Region, Projekttyp) als Startwerte. */
+router.post('/:id/create-projekt', async (req, res) => {
+  const { data: job, error: jE } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id, stelle, region, projekttyp, formdata_komplett').eq('id', req.params.id).maybeSingle();
+  if (jE) return res.status(500).json({ error: jE.message });
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+  // Existiert schon eins fuer diesen Kunden? Dann bestehendes zurueckgeben.
+  const { data: existing } = await supabase.from('talentone_projekte')
+    .select('*').eq('kunde_id', job.kunde_id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (existing) return res.status(200).json({ projekt: existing, already_existed: true });
+
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, email, agentur, close_lead_id').eq('id', job.kunde_id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  const istNeu = job.projekttyp === 'neukundengewinnung';
+  const istPlatzhalter = !!(job.formdata_komplett?._wartet_auf_briefing);
+  const finalAgentur = kunde.agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
+
+  const { data: created, error: iErr } = await supabase.from('talentone_projekte').insert({
+    projekt: istPlatzhalter ? '[Wartet auf Briefing]' : (job.stelle || kunde.firmenname || 'Neues Projekt'),
+    kunde: kunde.firmenname || kunde.email,
+    kunde_id: kunde.id,
+    status: 'vorbereitung',
+    agentur: finalAgentur,
+    projektart: istNeu ? 'Neukundengewinnung' :
+                (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+    gesuchte_positionen: job.stelle || null,
+    standorte: job.region || null,
+    email: kunde.email || null,
+    close_lead_id: kunde.close_lead_id || null,
+    updated_at: new Date().toISOString(),
+  }).select().single();
+  if (iErr) return res.status(500).json({ error: iErr.message });
+
+  res.status(201).json({ projekt: created, already_existed: false });
+});
+
 export default router;

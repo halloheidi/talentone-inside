@@ -125,6 +125,15 @@ router.post('/perspective', async (req, res) => {
 
     const contact = extractContact(req.body);
 
+    // Unvollstaendige Bewerbungen ausfiltern: wenn WEDER E-Mail NOCH Telefon
+    // vorliegt, hat der Interessent das Kontaktformular am Ende nicht
+    // ausgefuellt. Solche Datensaetze wollen wir NICHT im Kunden-Postfach
+    // sehen. 200 OK statt 400, damit Perspective nicht retryt.
+    if (!contact.email && !contact.telefon) {
+      console.log(`[perspective] Bewerbung ohne Kontaktdaten verworfen (job ${job.id.slice(0,8)})`);
+      return res.status(200).json({ ok: true, skipped: 'no_contact' });
+    }
+
     const { data: bew, error: insErr } = await supabase
       .from('talentone_bewerbungen')
       .insert({

@@ -27,6 +27,31 @@ const STATUS_LABELS = {
   abgeschlossen: 'Abgeschlossen',
 };
 
+function UebertragenButton({ jobId, onCreated }) {
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true);
+    try {
+      const res = await api(`/jobs/${jobId}/create-projekt`, { method: 'POST' });
+      onCreated?.(res.projekt);
+    } catch (err) { alert(err.message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <button
+      type="button" onClick={run} disabled={busy}
+      style={{
+        background: '#eff6ff', color: '#1e40af',
+        border: '1px dashed #93c5fd', borderRadius: 8,
+        padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+      }}
+      title="Für diesen Job ein Projekt in der Übersicht anlegen"
+    >
+      {busy ? '…' : '➕ In Projektübersicht übertragen'}
+    </button>
+  );
+}
+
 function StatusBadge({ projekt }) {
   if (!projekt) return null;
   const status = projekt.status;
@@ -294,7 +319,10 @@ export default function JobView() {
         <div style={{ flex: 1 }}>
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
-        {projekt && <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>}
+        {projekt
+          ? <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>
+          : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
+        }
       </div>
 
       {hasPending && (

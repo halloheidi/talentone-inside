@@ -33,6 +33,8 @@ import { startReminderScheduler } from './billing-reminder.js';
 import { startLiveTerminReminderScheduler } from './live-termin-reminder.js';
 import { startWeeklyCloseSummaryScheduler } from './weekly-close-summary.js';
 import { startEntwurfsReminderScheduler } from './entwurfs-reminder.js';
+import { startDailyBewerbungsReportScheduler } from './daily-bewerbungs-report.js';
+import { startWeeklyBewerbungsReportScheduler } from './weekly-bewerbungs-report.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -111,5 +113,7 @@ app.listen(PORT, () => {
   startLiveTerminReminderScheduler();
   startWeeklyCloseSummaryScheduler();
   startEntwurfsReminderScheduler();
+  startDailyBewerbungsReportScheduler();
+  startWeeklyBewerbungsReportScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });
