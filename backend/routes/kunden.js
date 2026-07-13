@@ -564,10 +564,13 @@ router.delete('/referenzbilder/:id', async (req, res) => {
 
 // POST /api/kunden/formular-anlegen  body: { email, firmenname?, ansprechpartner?, customText? }
 router.post('/formular-anlegen', async (req, res) => {
-  const { email, firmenname, ansprechpartner, customText, agentur, projekttyp } = req.body || {};
+  const { email, firmenname, ansprechpartner, customText, agentur, projekttyp, close_lead_id } = req.body || {};
   if (!email?.trim()) return res.status(400).json({ error: 'E-Mail ist Pflicht.' });
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
   const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
+  if (close_lead_id && !/^lead_/.test(close_lead_id)) {
+    return res.status(400).json({ error: 'close_lead_id muss mit lead_ beginnen.' });
+  }
 
   const token = randomUUID();
   const { data: kunde, error: kErr } = await supabase
@@ -579,6 +582,7 @@ router.post('/formular-anlegen', async (req, res) => {
       status: 'wartend',
       formular_token: token,
       agentur: finalAgentur,
+      close_lead_id: close_lead_id || null,
     })
     .select().single();
   if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });

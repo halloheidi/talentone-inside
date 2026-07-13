@@ -6,6 +6,7 @@ import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
+import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
 import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
 
@@ -785,6 +786,7 @@ export default function KundeDetail() {
           Wir verschicken eine Mail an <strong>{kunde?.email || '(keine Mail hinterlegt)'}</strong> mit einem persönlichen Upload-Link.
           Der Kunde kann dort Logo und Fotos ohne Login hochladen — die Dateien tauchen automatisch hier oben auf.
         </p>
+        <CloseLeadWarnung kunde={kunde} onSaved={(k) => setKunde(k)} />
         <label className="field field-full">
           <span>Persönlicher Text (editierbar)</span>
           <textarea rows={6} value={anfrageText} onChange={e => setAnfrageText(e.target.value)} />

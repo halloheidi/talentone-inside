@@ -98,7 +98,7 @@ export default function QuickCreateModal({ open, onClose }) {
   const logoInputRef = useRef(null);
 
   // Invite-Tab: Kunde füllt selbst aus
-  const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
+  const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '', close_lead_id: '' });
   const [inviteProjekttyp, setInviteProjekttyp] = useState('mitarbeitergewinnung');
   const [inviteSuccess, setInviteSuccess] = useState(null); // { firmenname, formularUrl } | null
 
@@ -145,6 +145,10 @@ export default function QuickCreateModal({ open, onClose }) {
       // Modus "Kunde füllt aus" — anderer Endpoint, kein Job-Anlegen
       if (tab === 'invite') {
         if (!invite.email.trim()) throw new Error('E-Mail des Kunden ist Pflicht.');
+        const inviteCloseLead = invite.close_lead_id.trim();
+        if (inviteCloseLead && !inviteCloseLead.startsWith('lead_')) {
+          throw new Error('Close Lead ID muss mit lead_ beginnen.');
+        }
         const res = await api('/kunden/formular-anlegen', {
           method: 'POST',
           body: {
@@ -154,6 +158,7 @@ export default function QuickCreateModal({ open, onClose }) {
             customText: invite.customText.trim() || undefined,
             agentur,
             projekttyp: agentur === 'nowagwirth' ? inviteProjekttyp : 'mitarbeitergewinnung',
+            close_lead_id: inviteCloseLead || undefined,
           },
         });
         setInviteSuccess({
@@ -411,6 +416,18 @@ export default function QuickCreateModal({ open, onClose }) {
                     </div>
                   </div>
                 )}
+                <label className="field field-full">
+                  <span>Close Lead ID {agentur === 'nowagwirth' && <em style={{ color: '#dc2626', fontStyle: 'normal' }}>empfohlen</em>}</span>
+                  <input
+                    value={invite.close_lead_id}
+                    onChange={e => setInvite({ ...invite, close_lead_id: e.target.value })}
+                    placeholder="lead_XXXXX…"
+                  />
+                  <small style={{ display: 'block', fontSize: 11, color: '#5a5955', marginTop: 3 }}>
+                    Wenn du die Lead ID jetzt eingibst, wird das Onboarding-Formular direkt am Close-Lead protokolliert.
+                    Ohne ID: du kannst sie später beim Kunden nachtragen (kein harter Blocker).
+                  </small>
+                </label>
                 <label className="field field-full">
                   <span>Persönlicher Mail-Text (optional)</span>
                   <textarea

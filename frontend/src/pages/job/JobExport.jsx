@@ -21,6 +21,8 @@ function badgeFor(c) {
 export default function JobExport() {
   const { job, kunde, reload } = useJob();
   const [showPreflight, setShowPreflight] = useState(false);
+  const [showGoLive, setShowGoLive] = useState(false);
+  const [goLiveBusy, setGoLiveBusy] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -326,7 +328,7 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
       )}
 
       {/* ─────── Zahlungen (PayPal) ─────── */}
-      <ZahlungenSection job={job} kunde={kunde} />
+      <ZahlungenSection job={job} kunde={kunde} onKundeUpdated={() => reload?.()} />
 
       {/* ─────── Versand-Status oben ─────── */}
       {letzterVersand && (
@@ -526,19 +528,7 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         )}
         <button
           className={letzteKampagneLive ? 'btn-ghost' : 'btn-primary'}
-          onClick={async () => {
-            const confirmText = letzteKampagneLive
-              ? `Bereits am ${new Date(letzteKampagneLive.created_at).toLocaleDateString('de-DE')} gemeldet — wirklich nochmal senden?`
-              : `„🚀 Deine Kampagne ist live!"-Mail an ${kunde?.email} senden und das Projekt auf Status „Live" setzen?`;
-            if (!confirm(confirmText)) return;
-            try {
-              await api(`/jobs/${job.id}/export/kampagne-live`, { method: 'POST', body: { to: kunde?.email } });
-              api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
-              alert('Mail verschickt + Projekt auf Live gesetzt.');
-            } catch (err) {
-              alert(`Senden fehlgeschlagen: ${err.message}`);
-            }
-          }}
+          onClick={() => setShowGoLive(true)}
           disabled={!kunde?.email}
         >
           🚀 Kampagne als Live melden
@@ -551,6 +541,7 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         kunde={kunde}
         job={job}
         letzteKampagnePause={letzteKampagnePause}
+        onKundeUpdated={() => reload?.()}
         onSent={() => api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {})}
       />
 
@@ -634,6 +625,42 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           )}
         </div>
         {mailMsg && <div className="form-msg" style={{ marginTop: 10 }}>{mailMsg}</div>}
+      </Modal>
+
+      {/* ─────── Go-Live-Modal ─────── */}
+      <Modal
+        open={showGoLive}
+        onClose={() => !goLiveBusy && setShowGoLive(false)}
+        title="🚀 Kampagne als Live melden"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setShowGoLive(false)} disabled={goLiveBusy}>Abbrechen</button>
+            <button
+              className="btn-primary"
+              disabled={goLiveBusy || !kunde?.email}
+              onClick={async () => {
+                setGoLiveBusy(true);
+                try {
+                  await api(`/jobs/${job.id}/export/kampagne-live`, { method: 'POST', body: { to: kunde?.email } });
+                  api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+                  setShowGoLive(false);
+                  alert('Mail verschickt + Projekt auf Live gesetzt.');
+                } catch (err) {
+                  alert(`Senden fehlgeschlagen: ${err.message}`);
+                } finally { setGoLiveBusy(false); }
+              }}
+            >
+              {goLiveBusy ? 'Sende…' : 'Jetzt live melden'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          {letzteKampagneLive
+            ? <>Bereits am <strong>{new Date(letzteKampagneLive.created_at).toLocaleDateString('de-DE')}</strong> gemeldet — beim erneuten Senden wird die Meldung überschrieben.</>
+            : <>Die „🚀 Deine Kampagne ist live!"-Mail geht an <strong>{kunde?.email}</strong>. Das Projekt wird automatisch auf Status <strong>Live</strong> gesetzt (start_phase1 = heute, ende_phase1 = +30 Tage).</>}
+        </p>
+        <CloseLeadWarnung kunde={kunde} onSaved={() => reload?.()} />
       </Modal>
 
       {/* ─────── Preflight-Check-Modal ─────── */}
@@ -729,12 +756,13 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
 
 /* ═══════════════════ Zahlungen / PayPal ═══════════════════ */
 
-function ZahlungenSection({ job, kunde }) {
+function ZahlungenSection({ job, kunde, onKundeUpdated }) {
   const [zahlungen, setZahlungen] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sendTarget, setSendTarget] = useState(null); // Zahlung für Send-Modal
 
   async function load() {
     setLoading(true);
@@ -819,11 +847,11 @@ function ZahlungenSection({ job, kunde }) {
     })();
   }
 
-  async function sendMail(z) {
-    if (!confirm(`Zahlungslink per Mail an ${kunde?.email || 'Kunden'} senden?`)) return;
+  async function sendMailConfirmed(z) {
     try {
       const res = await api(`/zahlungen/${z.id}/send`, { method: 'POST', body: {} });
       setZahlungen(prev => prev.map(x => x.id === z.id ? res.zahlung : x));
+      setSendTarget(null);
     } catch (err) { alert(err.message); }
   }
   async function refreshStatus(z) {
@@ -888,7 +916,7 @@ function ZahlungenSection({ job, kunde }) {
                         {z.pay_link && z.status !== 'bezahlt' && (
                           <button className="btn-ghost btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(z.pay_link); } catch {} }}>Pay-Link</button>
                         )}
-                        {z.status !== 'bezahlt' && <button className="btn-ghost btn-sm" onClick={() => sendMail(z)}>Mail (Pay)</button>}
+                        {z.status !== 'bezahlt' && <button className="btn-ghost btn-sm" onClick={() => setSendTarget(z)}>Mail (Pay)</button>}
                         {z.status === 'bezahlt' && !z.easybill_id && (
                           <button className="btn-ghost btn-sm" onClick={() => createEasybillManually(z)}>Rechnung erstellen</button>
                         )}
@@ -971,6 +999,29 @@ function ZahlungenSection({ job, kunde }) {
           </p>
         </Modal>
       )}
+
+      {/* Zahlungslink-Send-Modal mit Close-Lead-Warnung */}
+      <Modal
+        open={!!sendTarget}
+        onClose={() => setSendTarget(null)}
+        title="Zahlungslink per Mail senden"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setSendTarget(null)}>Abbrechen</button>
+            <button className="btn-primary" onClick={() => sendMailConfirmed(sendTarget)} disabled={!kunde?.email}>
+              Senden
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Der Zahlungslink wird an <strong>{kunde?.email || '(keine Mail hinterlegt)'}</strong> gesendet.
+          {sendTarget && (
+            <> Betrag: <strong>{fmtEur(sendTarget.betrag_brutto ?? sendTarget.betrag_cent ?? 0)}</strong>.</>
+          )}
+        </p>
+        <CloseLeadWarnung kunde={kunde} onSaved={onKundeUpdated} />
+      </Modal>
     </div>
   );
 }
@@ -984,7 +1035,7 @@ function statusLabel(s) {
 
 /* Pausen-Mail: Modal + Sende-Fluss. Setzt beim Versand automatisch Projekt-
    Status auf „Pausiert" und legt einen automatischen Kommentar an. */
-function PauseFieldset({ kunde, job, letzteKampagnePause, onSent }) {
+function PauseFieldset({ kunde, job, letzteKampagnePause, onSent, onKundeUpdated }) {
   const defaultText = `Hallo ${kunde?.ansprechpartner || 'du'},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(defaultText);
@@ -1037,6 +1088,7 @@ function PauseFieldset({ kunde, job, letzteKampagnePause, onSent }) {
             <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 12px' }}>
               Text ist editierbar. Absender + BCC laufen wie bei den Kampagnen-Mails.
             </p>
+            <CloseLeadWarnung kunde={kunde} onSaved={onKundeUpdated} />
             <textarea
               rows={12} value={text} onChange={e => setText(e.target.value)}
               style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }}

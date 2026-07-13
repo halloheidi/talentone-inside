@@ -4,6 +4,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
+import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 import { api } from '../lib/api.js';
 
 const TABS = [
@@ -41,6 +42,10 @@ export default function NewProjectModal({ open, onClose, kunde }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(null); // { mode: 'formular', email }
+  // Wenn die Close Lead ID im Modal nachgetragen wird, halten wir sie lokal
+  // vor — der Parent sieht das Update erst nach Modal-Close per onCreated.
+  const [kundeLocal, setKundeLocal] = useState(null);
+  const currentKunde = kundeLocal || kunde;
   // Projekttyp — bei N&W wählbar zwischen Mitarbeitergewinnung (default)
   // und Neukundengewinnung. Bei TalentOne bleibt es fix Mitarbeitergewinnung.
   const kannNeukunden = kunde?.agentur === 'nowagwirth';
@@ -252,13 +257,14 @@ export default function NewProjectModal({ open, onClose, kunde }) {
           {tab === 'formular' && (
             <div className="modal-pane">
               <p className="pane-hint">
-                Wir verschicken eine Briefing-Anfrage an <strong>{kunde?.email || '(keine E-Mail hinterlegt)'}</strong>. Das Projekt wird mit Status „[Briefing ausstehend]" in der Kanban-Übersicht angelegt. Sobald der Kunde antwortet (per Mail-Antwort oder über den Upload-Link), kannst du die Details direkt im Projekt ergänzen.
+                Wir verschicken eine Briefing-Anfrage an <strong>{currentKunde?.email || '(keine E-Mail hinterlegt)'}</strong>. Das Projekt wird mit Status „[Briefing ausstehend]" in der Kanban-Übersicht angelegt. Sobald der Kunde antwortet (per Mail-Antwort oder über den Upload-Link), kannst du die Details direkt im Projekt ergänzen.
               </p>
-              {!kunde?.email && (
+              {!currentKunde?.email && (
                 <div className="alert alert-warn" style={{ marginBottom: 12 }}>
                   ⚠ Der Kunde hat keine E-Mail-Adresse hinterlegt — bitte erst beim Kunden ergänzen.
                 </div>
               )}
+              <CloseLeadWarnung kunde={currentKunde} onSaved={setKundeLocal} />
               <label className="field field-full">
                 <span>Persönlicher Mail-Text (optional)</span>
                 <textarea
