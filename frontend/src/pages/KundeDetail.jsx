@@ -753,6 +753,7 @@ export default function KundeDetail() {
       </div>
 
       <ProjektStatusRow projekte={projekte} />
+      <ProjektInfoCards projekte={projekte} />
 
       <div className="section-head">
         <div>
@@ -1496,6 +1497,75 @@ const PROJEKT_STATUS_META = {
   hold:              { emoji: '🟨', label: 'Hold',              bg: '#fef3c7', color: '#92400e' },
   abgeschlossen:     { emoji: '🏁', label: 'Abgeschlossen',     bg: '#d1fae5', color: '#065f46' },
 };
+
+// Kompakte Karten mit den Kern-Vertragsdaten pro Projekt — direkt sichtbar
+// unterhalb der Status-Chip-Row, damit man beim Öffnen des Kunden sofort
+// die Vertragslage sieht (Migration 025 Felder + Status + Live-Termin).
+function ProjektInfoCards({ projekte }) {
+  if (!projekte?.length) return null;
+  return (
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 14 }}>
+      {projekte.map(p => {
+        const meta = PROJEKT_STATUS_META[p.status] || { emoji: '·', label: p.status || '—', bg: '#e5e7eb', color: '#374151' };
+        return (
+          <Link key={p.id} to="/projekte"
+            style={{
+              background: '#fff', border: '1px solid var(--line)', borderRadius: 10,
+              padding: '10px 12px', textDecoration: 'none', color: 'inherit',
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}
+            title="Zum Projekte-Board"
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {p.projekt || p.gesuchte_positionen || '—'}
+              </strong>
+              <span style={{
+                padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700,
+                background: meta.bg, color: meta.color,
+              }}>{meta.emoji} {meta.label}</span>
+            </div>
+            {p.projektart && (
+              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{p.projektart}</div>
+            )}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
+              {p.projektdauer && (
+                <span style={{ background: '#f3f4f6', color: '#374151', padding: '2px 8px', borderRadius: 6 }}>
+                  ⏱ {p.projektdauer}
+                </span>
+              )}
+              {p.garantie ? (
+                <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 6 }}
+                  title={p.garantie_details || ''}>
+                  ✓ Garantie{p.garantie_details ? `: ${p.garantie_details}` : ''}
+                </span>
+              ) : (
+                <span style={{ background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 6 }}>
+                  Ohne Garantie
+                </span>
+              )}
+              {p.zahlung_aufgeteilt && (
+                <span style={{ background: '#fef3c7', color: '#78350f', padding: '2px 8px', borderRadius: 6 }}>
+                  💰 Zahlung aufgeteilt
+                </span>
+              )}
+              {p.fotograf_noetig && (
+                <span style={{ background: '#e0f2fe', color: '#075985', padding: '2px 8px', borderRadius: 6 }}>
+                  📸 Fotograf nötig
+                </span>
+              )}
+            </div>
+            {p.live_termin && (
+              <div style={{ fontSize: 11, color: '#166534' }}>
+                🕐 Go-Live: {new Date(p.live_termin).toLocaleDateString('de-DE')}
+              </div>
+            )}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
 
 function ProjektStatusRow({ projekte }) {
   if (!projekte?.length) return null;

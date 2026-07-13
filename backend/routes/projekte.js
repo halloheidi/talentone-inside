@@ -273,7 +273,7 @@ router.post('/:id/kommentare', async (req, res) => {
   if (!text?.trim()) return res.status(400).json({ error: 'Text fehlt.' });
 
   const { data: projekt } = await supabase
-    .from('talentone_projekte').select('id, projekt').eq('id', req.params.id).maybeSingle();
+    .from('talentone_projekte').select('id, projekt, close_lead_id, kunde_id').eq('id', req.params.id).maybeSingle();
   if (!projekt) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
 
   const autorName = (autor || req.user?.email || 'Mitarbeiter').toString();
@@ -295,11 +295,22 @@ router.post('/:id/kommentare', async (req, res) => {
 
   // Kommentar an Close-Lead spiegeln (best-effort, nur neue intern verfasste
   // Kommentare — Airtable-Imports werden NICHT nachträglich synchronisiert).
-  if (projekt.close_lead_id) {
-    const note = `Kommentar von ${autorName} aus Inside-Tool: ${text.trim()}`;
-    closeAddNote({ leadId: projekt.close_lead_id, note })
-      .catch(err => console.warn('[kommentar close-note]', err.message));
-  }
+  // Priorität: projekt.close_lead_id → Fallback auf kunde.close_lead_id
+  // (die Lead ID ist laut Punkt 8 primär am Kunden hinterlegt).
+  (async () => {
+    try {
+      let leadId = projekt.close_lead_id;
+      if (!leadId && projekt.kunde_id) {
+        const { data: kunde } = await supabase.from('talentone_kunden')
+          .select('close_lead_id').eq('id', projekt.kunde_id).maybeSingle();
+        leadId = kunde?.close_lead_id || null;
+      }
+      if (leadId) {
+        const note = `Kommentar von ${autorName} aus Inside-Tool: ${text.trim()}`;
+        await closeAddNote({ leadId, note });
+      }
+    } catch (err) { console.warn('[kommentar close-note]', err.message); }
+  })();
 
   // @-Mention-E-Mail im Hintergrund (best-effort)
   if (erw.length > 0) {
@@ -339,6 +350,42 @@ router.delete('/kommentare/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_kommentare').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* POST /api/projekte/:id/duplicate — Projekt duplizieren.
+   Kopiert Stammdaten (Kunde, Projektart, Positionen, Standorte, Projektdauer,
+   Garantie, Zahlung aufgeteilt, Verantwortlich, Arbeitshinweise via job?)
+   und laesst weg: Kommentare, Checkliste, Phasen/Termine, Bewerbungen,
+   Status startet auf 'vorbereitung'. Name bekommt "(Kopie)"-Suffix. */
+router.post('/:id/duplicate', async (req, res) => {
+  const { data: src, error: sErr } = await supabase.from('talentone_projekte')
+    .select('*').eq('id', req.params.id).maybeSingle();
+  if (sErr) return res.status(500).json({ error: sErr.message });
+  if (!src) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+
+  const KOPIERT = [
+    // Stammdaten laut Anforderung
+    'kunde', 'kunde_id', 'projektart', 'projektdauer',
+    'gesuchte_positionen', 'standorte',
+    'verantwortlich', 'closer', 'email', 'agentur',
+    'fotograf', 'fotograf_noetig', 'zahlung_aufgeteilt',
+    'garantie', 'garantie_details',
+    'close_lead_id', 'pixel', 'notizen',
+    'position_im_unternehmen', 'persoenlichkeitstyp',
+  ];
+  const neu = {
+    projekt: `${src.projekt || 'Neues Projekt'} (Kopie)`,
+    status: 'vorbereitung',
+    checkliste: {},
+    updated_at: new Date().toISOString(),
+  };
+  for (const k of KOPIERT) if (src[k] !== undefined && src[k] !== null) neu[k] = src[k];
+
+  const { data: created, error: iErr } = await supabase.from('talentone_projekte')
+    .insert(neu).select().single();
+  if (iErr) return res.status(500).json({ error: iErr.message });
+
+  res.status(201).json({ projekt: created });
 });
 
 export default router;

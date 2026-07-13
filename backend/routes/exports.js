@@ -5,7 +5,7 @@ import {
   streamCreativesZip, streamAdCopiesPdf,
   generateAnschreibensVorschlag, sendEntwurfsMail,
 } from '../exports.js';
-import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail } from '../mail.js';
+import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, sendEntwurfReminder } from '../mail.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 
@@ -419,6 +419,139 @@ router.post('/jobs/:id/export/kampagne-pause', async (req, res) => {
   } catch (err) {
     console.error('[kampagne-pause]', err.message);
     res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/export/entwurf-reminder  body: { to?, customText? }
+   Manueller Reminder an den Kunden, wenn er noch nicht auf die letzten
+   Entwuerfe reagiert hat. Setzt keinen Status, aendert nichts am Review —
+   loggt nur in talentone_versand (typ=entwurf_reminder). */
+router.post('/jobs/:id/export/entwurf-reminder', async (req, res) => {
+  const { to, customText } = req.body || {};
+  try {
+    const { job, kunde } = await loadFullJob(req.params.id);
+    const recipient = (to || kunde?.email || '').trim();
+    if (!recipient) return res.status(400).json({ error: 'Kunden-E-Mail fehlt.' });
+
+    // Review-Token sicherstellen (fuer den Freigabe-Button)
+    const token = await ensureReviewToken(job.id, job.review_token);
+    const reviewUrl = `${getPublicBaseUrl(kunde?.agentur)}/review/${token}`;
+
+    await sendEntwurfReminder({
+      to: recipient,
+      ansprechpartner: kunde?.ansprechpartner,
+      reviewUrl, customText,
+      agentur: kunde?.agentur,
+    });
+
+    // Versand-Historie
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: recipient,
+      betreff: 'Kurze Erinnerung: deine Entwürfe warten auf Freigabe',
+      gesendet_von: req.user?.email || null,
+      typ: 'entwurf_reminder',
+      inhalte: { customText: customText || null, review_url: reviewUrl },
+    });
+
+    // Close-Note (best-effort)
+    notifyKunde(kunde, `🔔 Entwurfs-Reminder an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[entwurf-reminder close-note]', err.message));
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[entwurf-reminder]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/export/review-manuell
+   body: { status: 'freigegeben'|'aenderungen', notiz?: string }
+   Team setzt das Review-Ergebnis eigenhaendig, weil der Kunde anderweitig
+   geantwortet hat (Telefon/Mail). Verhindert weitere 7-Tage-Reminder,
+   loest denselben Projekt-Sync + Auto-Kommentar aus wie ein normales
+   Public-Review-Ergebnis. */
+router.post('/jobs/:id/export/review-manuell', async (req, res) => {
+  const { status, notiz } = req.body || {};
+  if (!['freigegeben', 'aenderungen'].includes(status)) {
+    return res.status(400).json({ error: 'status muss "freigegeben" oder "aenderungen" sein.' });
+  }
+  try {
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, kunde_id, stelle').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('id, firmenname, agentur, close_lead_id, email').eq('id', job.kunde_id).maybeSingle();
+
+    // Aktuelle (hoechste) Runde suchen — analog Public-Review-Endpoint
+    const { data: existing } = await supabase
+      .from('talentone_reviews').select('id, runde').eq('job_id', job.id)
+      .order('runde', { ascending: false }).limit(1).maybeSingle();
+
+    const patch = {
+      status,
+      manuell_beantwortet: true,
+      manuell_notiz: notiz?.toString().trim() || null,
+      reminder_intern_gesendet_at: null, // Reset: neue Runde bekaeme neue Reminder
+    };
+
+    let savedReview;
+    if (existing) {
+      const { data, error } = await supabase.from('talentone_reviews')
+        .update(patch).eq('id', existing.id).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      savedReview = data;
+    } else {
+      const { data, error } = await supabase.from('talentone_reviews')
+        .insert({ job_id: job.id, token: randomUUID(), ...patch }).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      savedReview = data;
+    }
+
+    // Projekt-Kommentar + Status-Update (best-effort)
+    (async () => {
+      try {
+        const { data: projekt } = await supabase
+          .from('talentone_projekte').select('id, status')
+          .eq('kunde_id', kunde?.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (!projekt) return;
+
+        const datum = new Date().toLocaleDateString('de-DE');
+        const label = status === 'freigegeben' ? 'Freigabe' : 'Änderungswünsche';
+        const notizPart = notiz ? `\n\nNotiz: ${notiz}` : '';
+        await supabase.from('talentone_kommentare').insert({
+          projekt_id: projekt.id,
+          autor: 'Kundenfeedback (manuell)',
+          text: `✓ Kunde hat manuell geantwortet: ${label} — ${datum}${notizPart}`,
+          quelle: 'review',
+        });
+
+        // Kanban-Automatik: Freigabe → 'go', Aenderungen → 'feedbackschleife'
+        let newStatus = null;
+        if (status === 'freigegeben' && projekt.status !== 'live') newStatus = 'go';
+        if (status === 'aenderungen') newStatus = 'feedbackschleife';
+        if (newStatus && newStatus !== projekt.status) {
+          await supabase.from('talentone_projekte')
+            .update({ status: newStatus, updated_at: new Date().toISOString() })
+            .eq('id', projekt.id);
+        }
+
+        // Close-Note (best-effort)
+        if (kunde) {
+          const noteText = status === 'freigegeben'
+            ? `✅ Kunde hat Entwürfe freigegeben (manuell — anderweitig geantwortet) am ${datum}${notiz ? ` · Notiz: ${notiz}` : ''}`
+            : `📝 Kunde hat Änderungswünsche gesendet (manuell — anderweitig geantwortet) am ${datum}${notiz ? ` · Notiz: ${notiz}` : ''}`;
+          notifyKunde(kunde, noteText).catch(err => console.warn('[review-manuell close-note]', err.message));
+        }
+      } catch (err) { console.warn('[review-manuell sync]', err.message); }
+    })();
+
+    res.json({ ok: true, review: savedReview });
+  } catch (err) {
+    console.error('[review-manuell]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

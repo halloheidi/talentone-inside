@@ -24,6 +24,13 @@ export default function JobExport() {
   const [showPreflight, setShowPreflight] = useState(false);
   const [showGoLive, setShowGoLive] = useState(false);
   const [goLiveBusy, setGoLiveBusy] = useState(false);
+  // Entwurfs-Reminder + Manuell-Antwort
+  const [showReminder, setShowReminder] = useState(false);
+  const [reminderText, setReminderText] = useState('');
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [showManuell, setShowManuell] = useState(false);
+  const [manuellForm, setManuellForm] = useState({ status: 'freigegeben', notiz: '' });
+  const [manuellBusy, setManuellBusy] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -297,10 +304,16 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
   const funnel = data?.funnel;
   const allCreativesSelected = creatives.length > 0 && selectedCreatives.size === creatives.length;
 
-  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung' && v.typ !== 'kampagne_live') || versand[0];
+  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung' && v.typ !== 'kampagne_live' && v.typ !== 'entwurf_reminder' && v.typ !== 'kampagne_pause') || versand[0];
+  const letzterEntwurfsVersand = versand.find(v => (v.typ || '').startsWith('entwurf_runde_'));
+  const letzterReminderVersand = versand.find(v => v.typ === 'entwurf_reminder');
   const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
   const letzteKampagneLive  = versand.find(v => v.typ === 'kampagne_live');
   const letzteKampagnePause = versand.find(v => v.typ === 'kampagne_pause');
+  // Reminder ist zulaessig, wenn Entwuerfe raus sind und weder Freigabe noch
+  // Aenderungswuensche noch manuelle Antwort erfasst wurden.
+  const kannReminderSenden = !!letzterEntwurfsVersand
+    && (!review || (review.status !== 'freigegeben' && review.status !== 'aenderungen' && !review.manuell_beantwortet));
   const kommentarEntries = review?.kommentare && typeof review.kommentare === 'object'
     ? Object.entries(review.kommentare).filter(([, v]) => (v || '').trim())
     : [];
@@ -339,6 +352,42 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           <button className="btn-ghost btn-sm" onClick={openMailModal} disabled={!kunde?.email}>
             Erneut senden
           </button>
+          {kannReminderSenden && (
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => {
+                const grus = kunde?.ansprechpartner || 'zusammen';
+                setReminderText(`Hallo ${grus},\n\nvor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback.\n\nBei Fragen melde dich gerne jederzeit!`);
+                setShowReminder(true);
+              }}
+              disabled={!kunde?.email}
+              title="Freundlichen Reminder mit Review-Link senden"
+            >🔔 Reminder senden</button>
+          )}
+          {letzterEntwurfsVersand && (!review || (review.status !== 'freigegeben' && review.status !== 'aenderungen' && !review.manuell_beantwortet)) && (
+            <button
+              className="btn-ghost btn-sm"
+              onClick={() => { setManuellForm({ status: 'freigegeben', notiz: '' }); setShowManuell(true); }}
+              title="Kunde hat per Telefon/Mail geantwortet — Review-Status manuell setzen"
+            >✓ Kunde hat anderweitig geantwortet</button>
+          )}
+        </div>
+      )}
+
+      {/* Reminder-Info */}
+      {letzterReminderVersand && (
+        <div className="versand-status" style={{ background: '#fef3c7', color: '#78350f', borderColor: '#fde68a' }}>
+          <span>🔔 Reminder gesendet am <strong>{new Date(letzterReminderVersand.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong></span>
+        </div>
+      )}
+
+      {/* Manuell-Antwort-Info */}
+      {review?.manuell_beantwortet && (
+        <div className="versand-status" style={{ background: '#e0f2fe', color: '#075985', borderColor: '#bae6fd' }}>
+          <span>
+            ✓ Kunde hat manuell geantwortet (Runde {review.runde || 1}) — <strong>{review.status === 'freigegeben' ? 'Freigabe' : 'Änderungswünsche'}</strong>
+            {review.manuell_notiz ? ` · „${review.manuell_notiz}"` : ''}
+          </span>
         </div>
       )}
 
@@ -655,6 +704,95 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`}
         />
       )}
+
+      {/* ─────── Reminder-Modal ─────── */}
+      <Modal
+        open={showReminder}
+        onClose={() => !reminderBusy && setShowReminder(false)}
+        title="🔔 Reminder an Kunden senden"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setShowReminder(false)} disabled={reminderBusy}>Abbrechen</button>
+            <button className="btn-primary" disabled={reminderBusy || !kunde?.email}
+              onClick={async () => {
+                setReminderBusy(true);
+                try {
+                  await api(`/jobs/${job.id}/export/entwurf-reminder`, {
+                    method: 'POST',
+                    body: { to: kunde?.email, customText: reminderText.trim() || null },
+                  });
+                  api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+                  setShowReminder(false);
+                } catch (err) { alert(`Senden fehlgeschlagen: ${err.message}`); }
+                finally { setReminderBusy(false); }
+              }}
+            >
+              {reminderBusy ? 'Sende…' : 'Reminder senden'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Kurze Nachfrage an <strong>{kunde?.email}</strong>. Enthält den Review-Link zur Freigabe.
+        </p>
+        <CloseLeadWarnung kunde={kunde} onSaved={() => reload?.()} />
+        <label className="field field-full">
+          <span>Text (Du-Form, editierbar)</span>
+          <textarea rows={9} value={reminderText} onChange={e => setReminderText(e.target.value)} />
+        </label>
+      </Modal>
+
+      {/* ─────── Kunde hat manuell geantwortet ─────── */}
+      <Modal
+        open={showManuell}
+        onClose={() => !manuellBusy && setShowManuell(false)}
+        title="✓ Kunde hat anderweitig geantwortet"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setShowManuell(false)} disabled={manuellBusy}>Abbrechen</button>
+            <button className="btn-primary" disabled={manuellBusy}
+              onClick={async () => {
+                setManuellBusy(true);
+                try {
+                  await api(`/jobs/${job.id}/export/review-manuell`, {
+                    method: 'POST',
+                    body: { status: manuellForm.status, notiz: manuellForm.notiz.trim() || null },
+                  });
+                  // Review + Historie neu laden
+                  api(`/jobs/${job.id}/export/review`).then(r => { setReview(r.review); setRunden(r.runden || []); }).catch(() => {});
+                  api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+                  setShowManuell(false);
+                } catch (err) { alert(`Fehler: ${err.message}`); }
+                finally { setManuellBusy(false); }
+              }}
+            >
+              {manuellBusy ? 'Speichere…' : 'Ergebnis übernehmen'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Der Kunde hat telefonisch oder per Mail geantwortet. Setze den Review-Status, damit die 7-Tage-Erinnerung stoppt und der Projekt-Status entsprechend springt.
+        </p>
+        <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 12px', background: manuellForm.status === 'freigegeben' ? '#dcfce7' : '#f4f3f0', borderRadius: 8, cursor: 'pointer' }}>
+            <input type="radio" checked={manuellForm.status === 'freigegeben'}
+              onChange={() => setManuellForm(f => ({ ...f, status: 'freigegeben' }))} />
+            <span><strong>✅ Freigegeben</strong> (telefonisch / per Mail) — Projekt geht auf „Go"</span>
+          </label>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 12px', background: manuellForm.status === 'aenderungen' ? '#fef3c7' : '#f4f3f0', borderRadius: 8, cursor: 'pointer' }}>
+            <input type="radio" checked={manuellForm.status === 'aenderungen'}
+              onChange={() => setManuellForm(f => ({ ...f, status: 'aenderungen' }))} />
+            <span><strong>📝 Änderungswünsche</strong> (telefonisch / per Mail) — Projekt geht auf „Feedbackschleife"</span>
+          </label>
+        </div>
+        <label className="field field-full">
+          <span>Notiz (optional) — was hat der Kunde gesagt?</span>
+          <textarea rows={3} value={manuellForm.notiz}
+            onChange={e => setManuellForm(f => ({ ...f, notiz: e.target.value }))}
+            placeholder="z. B. „Am Telefon freigegeben, wir starten am Montag." />
+        </label>
+      </Modal>
 
       {/* ─────── Go-Live-Modal ─────── */}
       <Modal

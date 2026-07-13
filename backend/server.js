@@ -32,6 +32,7 @@ import { startBillingScheduler } from './billing-scheduler.js';
 import { startReminderScheduler } from './billing-reminder.js';
 import { startLiveTerminReminderScheduler } from './live-termin-reminder.js';
 import { startWeeklyCloseSummaryScheduler } from './weekly-close-summary.js';
+import { startEntwurfsReminderScheduler } from './entwurfs-reminder.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -109,5 +110,6 @@ app.listen(PORT, () => {
   startReminderScheduler();
   startLiveTerminReminderScheduler();
   startWeeklyCloseSummaryScheduler();
+  startEntwurfsReminderScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });

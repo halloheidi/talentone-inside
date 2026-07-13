@@ -864,6 +864,57 @@ export async function sendTeamAlertMail({ subject, headline, lead, linkUrl, link
   return await response.json();
 }
 
+/* ════════════════════ Entwurfs-Reminder — Kunden-Mail ════════════════════
+   Kurze Du-Form-Nachfrage wenn der Kunde noch nicht auf die Entwuerfe
+   reagiert hat. Enthaelt den Review-Link. Absender + BCC + Reply-To wie
+   bei den anderen Kunden-Mails. */
+export async function sendEntwurfReminder({ to, ansprechpartner, reviewUrl, customText, agentur }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agentur);
+  const gruss = ansprechpartner || 'zusammen';
+
+  const defaultText = `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`;
+  const intro = (customText || '').trim() || defaultText;
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔔 Kurze Erinnerung</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n\n/g, '</p><p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">').replace(/\n/g, '<br>')}</p>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Entwürfe ansehen &amp; freigeben</a>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen melde dich gerne jederzeit!</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `Hallo ${gruss},\n\n${intro}\n\nEntwürfe ansehen & freigeben: ${reviewUrl}\n\nBei Fragen melde dich gerne jederzeit!\nDein ${brand.name}-Team`;
+
+  const recipients = Array.isArray(to) ? to : [to];
+  const bccList = getInternalBcc([], recipients);
+  console.log(`[sendEntwurfReminder] to=${recipients.join(',')} bcc=${bccList.join(',')}`);
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: bccList,
+      reply_to: getMailReplyTo(brand),
+      subject: `Kurze Erinnerung: deine Entwürfe warten auf Freigabe`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ════════════════════ Kampagne pausiert — Kunden-Mail ════════════════════
    „Wir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund
    technischer Probleme pausiert." — Absender + BCC + Reply-To wie bei

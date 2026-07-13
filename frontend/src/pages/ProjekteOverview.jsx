@@ -264,6 +264,16 @@ export default function ProjekteOverview() {
     } catch (err) { console.error('save-fail', err.message); }
   }
 
+  async function duplicateProjekt(id) {
+    try {
+      const res = await api(`/projekte/${id}/duplicate`, { method: 'POST' });
+      setProjekte(prev => [res.projekt, ...prev]);
+      setSelectedId(res.projekt.id);
+    } catch (err) {
+      alert(`Duplizieren fehlgeschlagen: ${err.message}`);
+    }
+  }
+
   async function moveToKanban(id, kanbanKey) {
     // Beim Drop in eine Spalte: setze status auf den primären Status der Spalte
     // (vorbereitung-Spalte → "vorbereitung", andere → ihr key)
@@ -403,7 +413,7 @@ export default function ProjekteOverview() {
       {loading ? <div className="motiv-sub">Lade Projekte…</div>
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
-          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} />
+          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} onDuplicate={duplicateProjekt} />
           : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
                        selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} />
       }
@@ -430,7 +440,7 @@ export default function ProjekteOverview() {
 
 /* ═════════════════════ KANBAN-BOARD ═════════════════════ */
 
-function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge }) {
+function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge, onDuplicate }) {
   const [openMenu, setOpenMenu] = useState(null); // id der offenen Menü-Karte
   return (
     <div className="kanban">
@@ -486,6 +496,14 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                             border: 'none', padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
                           }}
                         >🔗 Mit anderem Projekt zusammenführen</button>
+                        <button
+                          type="button"
+                          onClick={() => { setOpenMenu(null); onDuplicate?.(p.id); }}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left', background: 'transparent',
+                            border: 'none', padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                          }}
+                        >📋 Projekt duplizieren</button>
                       </div>
                     )}
                     {p.status === 'feedbackschleife' && (
