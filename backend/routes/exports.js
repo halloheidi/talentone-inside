@@ -102,8 +102,17 @@ router.post('/jobs/:id/export/anschreiben', async (req, res) => {
    springt von „feedbackschleife" zurück auf „warte_auf_go" + Auto-
    Kommentar. */
 router.post('/jobs/:id/export/email', async (req, res) => {
-  const { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel } = req.body || {};
+  // resend_mode:
+  //   'new_round'  → frische Feedback-Runde starten (Kunden-Reaktion + Überarbeitung)
+  //   'same_round' → gleiche Runde erneut versenden (Mail untergegangen, versehentlich freigegeben,
+  //                  Reminder mit Inhalt). Setzt die aktuelle Runde wieder auf 'offen'.
+  //   undefined    → Auto-Guess: neue Runde nur wenn Vorrunde 'aenderungen'/'freigegeben' war.
+  //                  Fuer Rueckwaertskompatibilitaet mit aelteren Frontend-Versionen.
+  const { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel, resend_mode } = req.body || {};
   if (!to?.trim()) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
+  if (resend_mode && !['new_round', 'same_round'].includes(resend_mode)) {
+    return res.status(400).json({ error: 'resend_mode muss "new_round" oder "same_round" sein.' });
+  }
 
   try {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
@@ -119,30 +128,39 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     const reviewToken = await ensureReviewToken(job.id, job.review_token);
     const reviewUrl = `${baseUrl}/review/${reviewToken}`;
 
-    // Runden-Erkennung: gibt es bereits eine Review mit „aenderungen"?
-    // Wenn ja, ist DIESER Versand die Antwort auf das Kunden-Feedback → neue
-    // Runde. Sonst: normaler Runde-1-Versand.
     const { data: latestReview } = await supabase.from('talentone_reviews')
       .select('id, runde, status')
       .eq('job_id', job.id)
       .order('runde', { ascending: false }).limit(1).maybeSingle();
-    // Neue Runde wird geoeffnet, sobald die letzte Review bereits eine
-    // Reaktion des Kunden hat (aenderungen ODER freigegeben) — beim erneuten
-    // Versand soll der Kunde immer eine frische, offene Runde sehen und
-    // wieder kommentieren koennen. Wenn latestReview.status noch offen ist,
-    // bleiben wir in derselben Runde.
     const abgeschlossenerStatus = new Set(['aenderungen', 'freigegeben']);
-    const istNeueRunde = !!(latestReview && abgeschlossenerStatus.has(latestReview.status));
-    const neueRundeNr = istNeueRunde ? (Number(latestReview.runde || 1) + 1) : (Number(latestReview?.runde) || 1);
+    const autoNeueRunde = !!(latestReview && abgeschlossenerStatus.has(latestReview.status));
 
-    // Bei neuer Runde: leere Review-Row anlegen, damit der Kunde beim
-    // Öffnen der Review-URL direkt eine frische Runde ohne Kommentare sieht.
+    // Modus bestimmen: explizit > Auto-Guess
+    const istNeueRunde = resend_mode
+      ? resend_mode === 'new_round'
+      : autoNeueRunde;
+    // Bei "same_round": aktuelle Runde behalten. Sonst: hochzaehlen wenn moeglich.
+    const neueRundeNr = istNeueRunde
+      ? ((Number(latestReview?.runde) || 0) + 1)
+      : (Number(latestReview?.runde) || 1);
+
     if (istNeueRunde) {
+      // Frische offene Review-Row fuer die neue Runde
       await supabase.from('talentone_reviews').insert({
         job_id: job.id, token: reviewToken,
-        status: null, kommentare: null, kommentare_snapshot: null,
+        status: 'offen', kommentare: null, kommentare_snapshot: null,
         runde: neueRundeNr,
       });
+    } else if (latestReview?.id && latestReview.status !== null) {
+      // Gleiche Runde: bestehende Row wieder auf 'offen' setzen (Kunde kann
+      // erneut kommentieren, auch wenn er vorher freigegeben oder Aenderungen
+      // gesendet hatte).
+      await supabase.from('talentone_reviews')
+        .update({ status: 'offen', kommentare: null, kommentare_snapshot: null,
+                  manuell_beantwortet: false, manuell_notiz: null,
+                  reminder_intern_gesendet_at: null,
+                  updated_at: new Date().toISOString() })
+        .eq('id', latestReview.id);
     }
 
     const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
@@ -162,24 +180,38 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     });
 
     // Historie speichern (mit Runden-Marker)
+    // Bei "same_round" markieren wir den Versand als 'entwurf_resend' — damit
+    // die Timeline "↩️ Runde X erneut gesendet" sauber unterscheidet.
+    const historyTyp = istNeueRunde
+      ? `entwurf_runde_${neueRundeNr}`
+      : (resend_mode === 'same_round' ? `entwurf_resend_${neueRundeNr}` : `entwurf_runde_${neueRundeNr}`);
+    const historyBetreff = istNeueRunde
+      ? `${rundePrefix}${finalBetreff || ''}`.trim() || null
+      : (resend_mode === 'same_round'
+          ? `↩️ Runde ${neueRundeNr} erneut gesendet — ${finalBetreff || ''}`.trim()
+          : (finalBetreff || null));
     const { error: insErr } = await supabase.from('talentone_versand').insert({
       job_id: job.id,
       empfaenger: to.trim(),
-      betreff: (rundePrefix + (finalBetreff || '')).trim() || null,
+      betreff: historyBetreff,
       gesendet_von: req.user?.email || null,
-      typ: `entwurf_runde_${neueRundeNr}`,
+      typ: historyTyp,
       inhalte: {
         creative_ids: selCreatives.map(c => c.id),
         adcopy_ids: selAdcopies.map(a => a.id),
         funnel_url: funnelUrl,
         anschreiben: finalAnschreiben,
         runde: neueRundeNr,
+        resend_mode: resend_mode || (istNeueRunde ? 'new_round' : 'same_round'),
       },
     });
     if (insErr) console.warn('[export/email] Historie-Insert:', insErr.message);
 
     // Close-Note (best-effort)
-    notifyKunde(kunde, `📤 Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${new Date().toLocaleDateString('de-DE')}`)
+    const closeText = resend_mode === 'same_round'
+      ? `↩️ Runde ${neueRundeNr} erneut gesendet an ${to.trim()} · ${new Date().toLocaleDateString('de-DE')}`
+      : `📤 Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${new Date().toLocaleDateString('de-DE')}`;
+    notifyKunde(kunde, closeText)
       .catch(err => console.warn('[export/email close-note]', err.message));
 
     // Bei neuer Runde: Projekt-Status auf 'warte_auf_go' + Auto-Kommentar
@@ -737,7 +769,7 @@ router.post('/jobs/:id/export/review-reset', async (req, res) => {
 
     // Neue offene Runde einfuegen
     const { data: created, error } = await supabase.from('talentone_reviews').insert({
-      job_id: job.id, token, status: null,
+      job_id: job.id, token, status: 'offen',
       kommentare: null, kommentare_snapshot: null,
       runde: neueRundeNr,
     }).select().single();

@@ -192,21 +192,31 @@ export default function JobExport() {
   }
 
   /* ───── Mail-Modal ───── */
-  function openMailModal() {
+  // mode = 'new_round' | 'same_round'
+  function openMailModal(mode = 'new_round') {
+    const istResend = mode === 'same_round';
+    const anschreibenDefault = istResend
+      ? `Hallo ${kunde?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`
+      : '';
     setMailForm({
       to: kunde?.email || '',
-      betreff: `${kunde?.firmenname || 'Ihre Recruiting-Kampagne'} — Entwürfe zur Freigabe`,
-      anschreiben: '',
+      betreff: istResend
+        ? `${kunde?.firmenname || 'Deine Kampagne'} — Entwürfe nochmal zur Freigabe`
+        : `${kunde?.firmenname || 'Ihre Recruiting-Kampagne'} — Entwürfe zur Freigabe`,
+      anschreiben: anschreibenDefault,
       include_funnel: !!data?.funnel_url,
+      resend_mode: mode,
     });
     setMailMsg('');
     setShowMail(true);
-    // Anschreiben-Vorschlag im Hintergrund laden
-    setAnschreibensBusy(true);
-    api(`/jobs/${job.id}/export/anschreiben`, { method: 'POST' })
-      .then(r => setMailForm(prev => ({ ...prev, anschreiben: r.text || '' })))
-      .catch(() => {})
-      .finally(() => setAnschreibensBusy(false));
+    if (!istResend) {
+      // KI-Anschreiben-Vorschlag nur bei neuer Runde
+      setAnschreibensBusy(true);
+      api(`/jobs/${job.id}/export/anschreiben`, { method: 'POST' })
+        .then(r => setMailForm(prev => ({ ...prev, anschreiben: r.text || prev.anschreiben })))
+        .catch(() => {})
+        .finally(() => setAnschreibensBusy(false));
+    }
   }
 
   async function sendMail() {
@@ -223,6 +233,7 @@ export default function JobExport() {
           creative_ids: Array.from(selectedCreatives),
           adcopy_ids: Array.from(selectedAdcopies),
           include_funnel: mailForm.include_funnel,
+          resend_mode: mailForm.resend_mode || undefined,
         },
       });
       setMailMsg('Mail verschickt!');
@@ -351,8 +362,9 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
       {letzterVersand && (
         <div className="versand-status">
           <span>✅ Entwürfe gesendet am <strong>{new Date(letzterVersand.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzterVersand.empfaenger}</strong></span>
-          <button className="btn-ghost btn-sm" onClick={openMailModal} disabled={!kunde?.email}>
-            Erneut senden
+          <button className="btn-ghost btn-sm" onClick={() => openMailModal('same_round')} disabled={!kunde?.email}
+            title="Gleiche Runde nochmal — Kunde kann wieder kommentieren">
+            ↩️ Erneut senden (gleiche Runde)
           </button>
           {kannReminderSenden && (
             <button
@@ -592,10 +604,53 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         <button className="btn-ghost" onClick={() => setShowTermin(true)} disabled={!kunde?.email}>
           📅 Termin-Einladung senden
         </button>
-        <button className="btn-primary" onClick={openMailModal} disabled={!kunde?.email}>
-          {review?.status === 'aenderungen'
-            ? `Überarbeitete Entwürfe senden (Runde ${(Number(review?.runde) || 1) + 1})`
-            : 'Entwürfe an Kunden senden'}
+        {/* Kontextabhaengige Send-Buttons:
+            - Wenn noch NIE ein Entwurfsversand raus ist → nur "Entwuerfe senden" (Runde 1)
+            - Sonst: "Erneut senden" IMMER + "Ueberarbeitete Runde" NUR wenn Kunde
+              reagiert hat (freigegeben oder aenderungen) */}
+        {(() => {
+          const hatteVersand = !!letzterEntwurfsVersand;
+          const hatKundenReaktion = review && (review.status === 'freigegeben' || review.status === 'aenderungen' || review.manuell_beantwortet);
+          if (!hatteVersand) {
+            return (
+              <button className="btn-primary" onClick={() => openMailModal('new_round')} disabled={!kunde?.email}>
+                Entwürfe an Kunden senden
+              </button>
+            );
+          }
+          return (
+            <>
+              <button
+                className={hatKundenReaktion ? 'btn-ghost' : 'btn-primary'}
+                onClick={() => openMailModal('same_round')}
+                disabled={!kunde?.email}
+                title="Gleiche Entwürfe nochmal — Kunde kann wieder kommentieren"
+              >
+                ↩️ Erneut senden (Runde {Number(review?.runde) || 1})
+              </button>
+              {hatKundenReaktion && (
+                <button
+                  className="btn-primary"
+                  onClick={() => openMailModal('new_round')}
+                  disabled={!kunde?.email}
+                  title="Nach Überarbeitung — startet Feedbackrunde X+1"
+                >
+                  📤 Überarbeitete Entwürfe senden (Runde {(Number(review?.runde) || 1) + 1})
+                </button>
+              )}
+            </>
+          );
+        })()}
+        <span
+          style={{ display: 'block', flexBasis: '100%', fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}
+        >
+          {letzterEntwurfsVersand
+            ? '↩️ Erneut senden = gleiche Runde, Kunde kann wieder kommentieren · 📤 Überarbeitete Runde = frische Runde nach Anpassungen'
+            : ''}
+        </span>
+        {/* Legacy-Button (verborgen halten, damit alte Ref weiter kompiliert) */}
+        <button style={{ display: 'none' }} onClick={() => openMailModal('new_round')}>
+          _legacy
         </button>
       </div>
       {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
@@ -868,7 +923,8 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         kunde={kunde}
         creatives={(data?.creatives || []).filter(c => selectedCreatives.has(c.id))}
         jobStelle={job?.stelle}
-        isRunde={!!(review && review.status === 'aenderungen')}
+        isRunde={mailForm.resend_mode === 'new_round'}
+        istResend={mailForm.resend_mode === 'same_round'}
         onKundeUpdated={() => reload?.()}
         onConfirm={async () => {
           setShowPreflight(false);

@@ -8,7 +8,7 @@ import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 // - 2 Pflicht-Checkboxen (Logo + Rechtschreibung/Stellenbezeichnung)
 // - Close-Lead-Warnung mit Inline-Nachtragen falls fehlend
 // - "Jetzt senden" ist erst aktiv wenn beide Boxen gesetzt sind
-export default function EntwurfPreflightModal({ open, onClose, kunde, creatives, jobStelle, onConfirm, onKundeUpdated, isRunde = false }) {
+export default function EntwurfPreflightModal({ open, onClose, kunde, creatives, jobStelle, onConfirm, onKundeUpdated, isRunde = false, istResend = false }) {
   const [logoOk, setLogoOk] = useState(false);
   const [textOk, setTextOk] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -23,7 +23,9 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
     <Modal
       open={open}
       onClose={onClose}
-      title={isRunde ? 'Überarbeitete Entwürfe senden — letzter Check' : 'Entwürfe senden — letzter Check'}
+      title={istResend
+        ? '↩️ Erneut senden (gleiche Runde) — letzter Check'
+        : (isRunde ? '📤 Überarbeitete Entwürfe senden — letzter Check' : 'Entwürfe senden — letzter Check')}
       footer={
         <>
           <button type="button" className="btn-ghost" onClick={onClose}>Abbrechen</button>

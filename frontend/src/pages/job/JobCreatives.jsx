@@ -43,6 +43,7 @@ export default function JobCreatives() {
   // Stilvorlagen
   const [stilvorlagen, setStilvorlagen] = useState([]);
   const [stilvorlageId, setStilvorlageId] = useState(null);
+  const [stilLightboxIndex, setStilLightboxIndex] = useState(null);
 
   // Generation
   const [varianten, setVarianten] = useState(1);
@@ -738,15 +739,15 @@ export default function JobCreatives() {
         <section className="card-form" style={{ marginTop: 18 }}>
           <div className="form-section-title" style={{ marginBottom: 8 }}>Stil-Vorlage</div>
           <div style={{ display: 'flex', gap: 10, overflowX: 'auto', padding: '4px 2px 8px' }}>
-            {stilvorlagen.map(v => {
+            {stilvorlagen.map((v, i) => {
               const aktiv = stilvorlageId === v.id;
               return (
-                <button
+                <div
                   key={v.id}
-                  type="button"
                   onClick={() => setStilvorlageId(v.id)}
                   title={v.beschreibung || v.name}
                   style={{
+                    position: 'relative',
                     flex: '0 0 180px',
                     border: aktiv ? '2px solid var(--accent, #16a34a)' : '1px solid var(--line)',
                     borderRadius: 10,
@@ -757,13 +758,27 @@ export default function JobCreatives() {
                   }}
                 >
                   <div style={{
-                    aspectRatio: '1/1', background: '#f4f3f0',
+                    aspectRatio: '1/1', background: '#f4f3f0', position: 'relative',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: '#9a9994', fontSize: 32,
                   }}>
                     {v.vorschau_url
                       ? <img src={v.vorschau_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       : '🎨'}
+                    {v.vorschau_url && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setStilLightboxIndex(i); }}
+                        title="Vorschau in Groß-Ansicht öffnen"
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          background: 'rgba(0,0,0,0.65)', color: '#fff',
+                          border: 'none', borderRadius: 100, cursor: 'pointer',
+                          width: 28, height: 28, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontSize: 14,
+                        }}
+                      >🔍</button>
+                    )}
                   </div>
                   <div style={{ padding: '8px 10px' }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{v.name}</div>
@@ -773,7 +788,7 @@ export default function JobCreatives() {
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -932,6 +947,23 @@ export default function JobCreatives() {
             filenameFor={buildFilename}
           />
         )}
+
+        {stilLightboxIndex !== null && stilvorlagen.some(v => v.vorschau_url) && (() => {
+          const items = stilvorlagen.filter(v => v.vorschau_url).map(v => ({
+            id: v.id, bild_url: v.vorschau_url, format: 'quadrat', typ: 'foto',
+            created_at: v.updated_at || v.created_at, name: v.name,
+          }));
+          const clamped = Math.max(0, Math.min(stilLightboxIndex, items.length - 1));
+          return (
+            <Lightbox
+              items={items}
+              index={clamped}
+              onClose={() => setStilLightboxIndex(null)}
+              onNavigate={setStilLightboxIndex}
+              filenameFor={v => `stil-${(v.name || 'vorlage').replace(/[^\w-]+/g, '-')}.png`}
+            />
+          );
+        })()}
       </section>
 
       {/* ───────── Rework-Modal ───────── */}

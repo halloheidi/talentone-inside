@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
+import Lightbox from '../../components/Lightbox.jsx';
 
 // Admin-Verwaltung fuer die Stilvorlagen der Creative-Generierung.
 // Editieren des layout_prompt live moeglich (ohne Deploy).
@@ -8,6 +9,7 @@ export default function StilvorlagenAdmin() {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [edit, setEdit] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   async function load() {
     try {
@@ -89,12 +91,23 @@ export default function StilvorlagenAdmin() {
             padding: 14, display: 'flex', gap: 14, alignItems: 'flex-start',
             opacity: v.aktiv ? 1 : 0.55,
           }}>
-            <div style={{
-              width: 80, height: 80, background: '#f4f3f0', borderRadius: 8, flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
-            }}>
+            <button
+              type="button"
+              onClick={() => {
+                if (!v.vorschau_url) return;
+                const idx = list.filter(x => x.vorschau_url).findIndex(x => x.id === v.id);
+                setLightboxIndex(idx >= 0 ? idx : 0);
+              }}
+              disabled={!v.vorschau_url}
+              title={v.vorschau_url ? 'Vorschau in Groß-Ansicht öffnen' : 'Keine Vorschau'}
+              style={{
+                width: 80, height: 80, background: '#f4f3f0', borderRadius: 8, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
+                border: 'none', padding: 0, cursor: v.vorschau_url ? 'zoom-in' : 'default',
+              }}
+            >
               {v.vorschau_url ? <img src={v.vorschau_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} /> : '🎨'}
-            </div>
+            </button>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <strong style={{ fontSize: 15 }}>{v.name}</strong>
@@ -169,6 +182,24 @@ export default function StilvorlagenAdmin() {
           </div>
         </div>
       )}
+
+      {lightboxIndex !== null && (() => {
+        const items = list.filter(v => v.vorschau_url).map(v => ({
+          id: v.id, bild_url: v.vorschau_url, format: 'quadrat', typ: 'foto',
+          created_at: v.updated_at || v.created_at, name: v.name,
+        }));
+        if (!items.length) return null;
+        const clamped = Math.max(0, Math.min(lightboxIndex, items.length - 1));
+        return (
+          <Lightbox
+            items={items}
+            index={clamped}
+            onClose={() => setLightboxIndex(null)}
+            onNavigate={setLightboxIndex}
+            filenameFor={v => `stil-${(v.name || 'vorlage').replace(/[^\w-]+/g, '-')}.png`}
+          />
+        );
+      })()}
     </div>
   );
 }

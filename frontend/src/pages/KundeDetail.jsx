@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { fileToBase64, downloadFromUrl } from '../lib/files.js';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
+import Lightbox from '../components/Lightbox.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
@@ -50,6 +51,7 @@ export default function KundeDetail() {
   const [anfrageMsg, setAnfrageMsg] = useState('');
 
   const [referenzbilder, setReferenzbilder] = useState([]);
+  const [refLightboxIndex, setRefLightboxIndex] = useState(null);
 
   // Archivieren + Löschen
   const [archiveBusy, setArchiveBusy] = useState(false);
@@ -739,11 +741,16 @@ export default function KundeDetail() {
             : <>Noch keine Referenzbilder hinterlegt.</>}
         </div>
         <div className="ref-strip-grid">
-          {referenzbilder.slice(0, 12).map(r => (
+          {referenzbilder.slice(0, 12).map((r, i) => (
             <div key={r.id} className="ref-strip-thumb" title={r.beschreibung || r.typ}>
-              <a href={r.bild_url} target="_blank" rel="noreferrer">
+              <button
+                type="button"
+                onClick={() => setRefLightboxIndex(i)}
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', height: '100%' }}
+                title="Klick für Groß-Ansicht"
+              >
                 <img src={r.bild_url} alt="" />
-              </a>
+              </button>
               {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
               <button
                 type="button"
@@ -896,6 +903,16 @@ export default function KundeDetail() {
         </label>
         {anfrageMsg && <div className="form-msg" style={{ marginTop: 8 }}>{anfrageMsg}</div>}
       </Modal>
+
+      {refLightboxIndex !== null && referenzbilder.length > 0 && (
+        <Lightbox
+          items={referenzbilder.map(r => ({ ...r, format: 'quadrat', typ: r.typ === 'logo' ? 'logo' : 'foto' }))}
+          index={Math.max(0, Math.min(refLightboxIndex, referenzbilder.length - 1))}
+          onClose={() => setRefLightboxIndex(null)}
+          onNavigate={setRefLightboxIndex}
+          filenameFor={r => (r.beschreibung || r.typ || 'bild').replace(/[^\w-]+/g, '-') + '.png'}
+        />
+      )}
 
       <NewProjectModal
         open={showCreate}

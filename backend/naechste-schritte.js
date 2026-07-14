@@ -49,14 +49,18 @@ function berechneSchritt(ctx) {
   const { kunde, projekt, refbilderCount, versandTypen, anfrageDatum,
           creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
 
-  // Pausiert/Abgeschlossen kommen vom Projekt-Status
-  if (projekt?.status === 'pausiert') return { ...REGEL_BY_KEY.pausiert };
-  if (projekt?.status === 'abgeschlossen') return { ...REGEL_BY_KEY.abgeschlossen };
-
-  // 1. Kunde wartet auf Formular
-  if (kunde?.status === 'wartend') return { ...REGEL_BY_KEY.wartet_formular };
-
-  // Live (aus projekt.status oder review freigegeben + noch keine live_seit)
+  // ══════════════════════════════════════════════════════════════════════
+  // PROJEKT-STATUS HAT VORRANG:
+  // Wenn der Projekt-Status ein "finaler" Zustand ist, zeigen wir DIESEN
+  // Badge — egal was im Tool-Workflow (Fotos, Creatives, Ad Copies, Funnel)
+  // noch fehlen mag. Rationale: eine Live-Kampagne braucht keinen
+  // "Ad Copies erstellen"-Hinweis, denn sie ist ja bereits live —
+  // Ad Copies wurden ggf. ausserhalb des Tools (direkt in Meta) erledigt.
+  // Die Workflow-Pruefung greift NUR bei Aufbau-Status
+  // (vorbereitung, onboarding, kickoff_vereinbart, golive_vereinbart,
+  //  warte_auf_go, feedbackschleife) — also solange wir aktiv am Aufbau
+  // arbeiten.
+  // ══════════════════════════════════════════════════════════════════════
   if (projekt?.status === 'live') {
     const start = projekt.start_phase1 || projekt.live_seit;
     if (start) {
@@ -67,6 +71,12 @@ function berechneSchritt(ctx) {
     }
     return { ...REGEL_BY_KEY.live };
   }
+  if (projekt?.status === 'pausiert')     return { ...REGEL_BY_KEY.pausiert };
+  if (projekt?.status === 'abgeschlossen') return { ...REGEL_BY_KEY.abgeschlossen };
+  if (projekt?.status === 'go')            return { ...REGEL_BY_KEY.bereit_golive };
+
+  // Kunde wartet auf Formular
+  if (kunde?.status === 'wartend') return { ...REGEL_BY_KEY.wartet_formular };
 
   // 2. Foto-Logik — mit Skip-Regel bei bereits vorhandenen Creatives:
   //   a) Wenn Creatives existieren → Foto-Schritt komplett überspringen
