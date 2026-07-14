@@ -9,6 +9,7 @@ import {
   STORAGE_BUCKET as CREATIVES_BUCKET,
 } from '../imagegen.js';
 import { uploadBuffer, extFromMime, safeFilenameStem } from '../storage.js';
+import { generateOverlays } from '../overlay-renderer.js';
 
 const router = Router();
 
@@ -228,12 +229,13 @@ router.post('/spruch-verbessern', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits } = req.body || {};
   console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten} spruch="${(spruch||'').slice(0,40)}"`);
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
-  if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
+  if (!['ki', 'foto', 'overlay'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki", "foto" oder "overlay" sein.' });
   if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
   if (mode === 'foto' && !foto_id) return res.status(400).json({ error: 'foto_id ist Pflicht in Modus "foto".' });
+  if (mode === 'overlay' && !spruch?.trim()) return res.status(400).json({ error: 'spruch ist Pflicht in Modus "overlay".' });
   const n = Math.min(Math.max(parseInt(varianten, 10) || 1, 1), 3);
 
   // Job + Kunde vorab laden, damit Validation-Fehler sofort kommen.
@@ -278,6 +280,47 @@ router.post('/generate', async (req, res) => {
   // Alte Fehlermeldung clearen damit das Frontend nicht den Fehler vom letzten Run sieht
   clearGenError(job_id);
   res.status(202).json({ accepted: true, expected, message: 'Generierung gestartet — Bilder erscheinen automatisch in der Galerie.' });
+
+  // ── Overlay-Modus laeuft komplett getrennt (kein OpenAI, kein KI-Bild) ──
+  if (mode === 'overlay') {
+    (async () => {
+      console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=overlay varianten=${n}`);
+      try {
+        const allRows = [];
+        for (let i = 0; i < n; i++) {
+          const overlays = await generateOverlays({
+            job, kunde, spruch,
+            benefits: Array.isArray(benefits) && benefits.length ? benefits : null,
+            formats: ['1:1', '9:16'],
+          });
+          for (const o of overlays) {
+            allRows.push({
+              job_id,
+              format: o.format === '1:1' ? 'quadrat' : 'story',
+              typ: 'overlay',
+              bild_url: o.bild_url,
+              status: 'fertig',
+              prompt: `Overlay · Hook: "${spruch}"`,
+            });
+          }
+        }
+        if (allRows.length) {
+          const { error: insErr } = await supabase.from('talentone_creatives').insert(allRows);
+          if (insErr) recordGenError(job_id, `DB-Insert fehlgeschlagen: ${insErr.message}`);
+          else console.log(`[generate-bg] ${allRows.length} Overlay(s) fuer job ${job_id} fertig.`);
+        } else {
+          recordGenError(job_id, 'Kein Overlay konnte gerendert werden.');
+        }
+      } catch (err) {
+        console.error('[generate-bg overlay]', err);
+        recordGenError(job_id, err.message || String(err));
+      }
+    })().catch(err => {
+      console.error('[generate-bg overlay uncaught]', err);
+      recordGenError(job_id, err.message || String(err));
+    });
+    return;
+  }
 
   // Hintergrund-Job
   (async () => {

@@ -516,6 +516,13 @@ export default function KundeDetail() {
                     onChanged={updated => setKunde(k => ({ ...k, paypal_enabled: updated.paypal_enabled }))}
                   />
                 </span>
+                <span>
+                  <strong>KI-Bilder erlaubt:</strong>
+                  <KiFreigabeToggle
+                    kunde={kunde}
+                    onChanged={updated => setKunde(k => ({ ...k, keine_ki_bilder: updated.keine_ki_bilder }))}
+                  />
+                </span>
               </div>
               {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
               <div className="kunde-head-actions">
@@ -1053,6 +1060,32 @@ export default function KundeDetail() {
         )}
       </Modal>
     </div>
+  );
+}
+
+function KiFreigabeToggle({ kunde, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  async function toggle(disallow) {
+    setBusy(true);
+    try {
+      const res = await api(`/kunden/${kunde.id}`, {
+        method: 'PATCH', body: { keine_ki_bilder: !!disallow },
+      });
+      onChanged(res.kunde);
+    } catch (e) { alert(e.message); }
+    finally { setBusy(false); }
+  }
+  // UI-Semantik: Ja = KI erlaubt, Nein = keine KI (Overlay only)
+  const erlaubt = !kunde.keine_ki_bilder;
+  return (
+    <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center', marginLeft: 4, cursor: 'pointer' }}
+      title={erlaubt ? 'Kunde erlaubt KI-generierte Bilder' : 'Kunde will keine KI-Bilder — nur Overlays / echte Fotos'}>
+      <input type="checkbox" checked={erlaubt} disabled={busy}
+        onChange={e => toggle(!e.target.checked)} />
+      <span style={{ fontSize: 12, color: erlaubt ? 'var(--ink-3)' : '#b45309' }}>
+        {erlaubt ? 'ja' : '⚠️ nein (nur Overlays)'}
+      </span>
+    </label>
   );
 }
 

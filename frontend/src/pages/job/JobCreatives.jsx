@@ -11,9 +11,14 @@ import LogoPositionModal from '../../components/LogoPositionModal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
+  // Ein-Mal-Default: wenn Kunde KI-Bilder ablehnt, direkt in Overlay-Modus starten.
+  useEffect(() => {
+    if (kunde?.keine_ki_bilder && mode === 'ki') setMode('overlay');
+    // eslint-disable-next-line
+  }, [kunde?.id]);
 
-  // Modus
-  const [mode, setMode] = useState('ki'); // 'ki' | 'foto'
+  // Modus — bei Kunden ohne KI-Freigabe automatisch 'overlay' als Default
+  const [mode, setMode] = useState('ki'); // 'ki' | 'foto' | 'overlay'
 
   // Motive (Modus KI)
   const [vorschlaege, setVorschlaege] = useState([]);
@@ -358,13 +363,19 @@ export default function JobCreatives() {
       setGenerateError('Bitte ein Foto auswählen oder neu hochladen.');
       return;
     }
+    if (mode === 'overlay' && !spruch.trim()) {
+      setGenerateError('Für den Overlay-Modus brauchst du einen Hook/Spruch.');
+      return;
+    }
     setGenerating(true);
     const baseline = creatives.length;
     try {
       const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
         ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined }
-        : { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined };
+        : mode === 'foto'
+        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined }
+        : { job_id: job.id, mode: 'overlay', varianten, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
       setExpected(exp);
@@ -485,11 +496,20 @@ export default function JobCreatives() {
       </div>
 
       {/* ───────── Modus-Toggle ───────── */}
+      {kunde?.keine_ki_bilder && (
+        <div style={{ padding: '10px 14px', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, marginBottom: 12, fontSize: 13, color: '#78350f' }}>
+          ⚠️ <strong>{kunde.firmenname}</strong> möchte keine KI-Bilder — bitte nur Overlays oder eigene Fotos verwenden.
+        </div>
+      )}
       <div className="mode-cards">
         <button
           type="button"
-          className={`mode-card ${mode === 'ki' ? 'is-active' : ''}`}
-          onClick={() => setMode('ki')}
+          className={`mode-card ${mode === 'ki' ? 'is-active' : ''} ${kunde?.keine_ki_bilder ? 'is-disabled' : ''}`}
+          onClick={() => {
+            if (kunde?.keine_ki_bilder && !confirm(`${kunde.firmenname} hat KI-Bilder ausgeschlossen. Trotzdem KI-Modus wählen?`)) return;
+            setMode('ki');
+          }}
+          style={kunde?.keine_ki_bilder ? { opacity: 0.55 } : undefined}
         >
           <div className="mode-card-title">KI-Bild generieren</div>
           <div className="mode-card-desc">
@@ -504,6 +524,17 @@ export default function JobCreatives() {
           <div className="mode-card-title">Eigenes Foto verwenden</div>
           <div className="mode-card-desc">
             Echtes Foto bleibt unverändert als Hintergrund. Logo, Spruch und Benefits werden professionell als Overlay hinzugefügt.
+          </div>
+        </button>
+        <button
+          type="button"
+          className={`mode-card ${mode === 'overlay' ? 'is-active' : ''}`}
+          onClick={() => setMode('overlay')}
+          title="Für Kunden ohne KI-Bild-Freigabe — transparentes PNG zum Drüberlegen in Canva"
+        >
+          <div className="mode-card-title">📐 Nur Overlay (ohne KI)</div>
+          <div className="mode-card-desc">
+            Transparentes PNG mit Hook, Job-Block, Benefits und Logo. In Canva über ein eigenes Foto legen — kein Bild geht durch die KI.
           </div>
         </button>
       </div>
@@ -677,7 +708,8 @@ export default function JobCreatives() {
         )}
       </section>
 
-      {/* ───────── Personen-Sektion ───────── */}
+      {/* ───────── Personen-Sektion (nicht im Overlay-Modus) ───────── */}
+      {mode !== 'overlay' && (
       <section className="card-form" style={{ marginTop: 18 }}>
         <div className="form-section-title" style={{ marginBottom: 4 }}>
           {mode === 'ki' ? 'Personen-Referenz (optional)' : 'Hintergrund-Foto auswählen'}
@@ -733,6 +765,7 @@ export default function JobCreatives() {
           />
         </div>
       </section>
+      )}
 
       {/* ───────── Stil-Auswahl (Vorlagen) ───────── */}
       {stilvorlagen.length > 0 && (
@@ -813,9 +846,11 @@ export default function JobCreatives() {
             <button
               className="btn-primary"
               onClick={onGenerate}
-              disabled={generating || (mode === 'ki' ? !motiv : !fotoId)}
+              disabled={generating || (mode === 'ki' ? !motiv : mode === 'foto' ? !fotoId : !spruch.trim())}
             >
-              {generating ? `Generiere ${expected} Bilder…` : 'Creatives generieren'}
+              {generating
+                ? (mode === 'overlay' ? `Rendere ${expected} Overlays…` : `Generiere ${expected} Bilder…`)
+                : (mode === 'overlay' ? 'Overlays rendern' : 'Creatives generieren')}
             </button>
           </div>
         </div>
@@ -871,12 +906,28 @@ export default function JobCreatives() {
                       <video src={c.bild_url} preload="metadata" muted playsInline />
                       <span className="creative-play-icon" aria-hidden>▶</span>
                     </>
+                  ) : c.typ === 'overlay' ? (
+                    // Schachbrett-Hintergrund macht die Transparenz sofort sichtbar.
+                    <div style={{
+                      width: '100%', height: '100%',
+                      backgroundImage: 'linear-gradient(45deg, #d0d0d0 25%, transparent 25%), linear-gradient(-45deg, #d0d0d0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d0d0d0 75%), linear-gradient(-45deg, transparent 75%, #d0d0d0 75%)',
+                      backgroundSize: '20px 20px',
+                      backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0',
+                      backgroundColor: '#f5f5f5',
+                    }}>
+                      <img src={c.bild_url} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    </div>
                   ) : (
                     <img src={c.bild_url} alt="" loading="lazy" />
                   )}
                   <span className={`format-badge format-${c.format}`}>
                     {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'sonstiges' ? '?' : '1:1')}
                   </span>
+                  {c.typ === 'overlay' && (
+                    <span style={{ position: 'absolute', top: 8, left: 8, background: '#0a0a0a', color: '#d4ff00', padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}>
+                      📐 Overlay
+                    </span>
+                  )}
                   {c.quelle === 'upload' && (
                     <span className="creative-upload-badge" title="Manuell hochgeladen">⬆ Hochgeladen</span>
                   )}
