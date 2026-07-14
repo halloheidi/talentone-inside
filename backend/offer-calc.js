@@ -58,6 +58,8 @@ export function calculateOfferTotals({
   vat_rate = 19,
   extra_job_sku = null,           // Legacy: einzelne SKU (behalten für Backwards-Compat)
   extra_job_skus = null,          // Neuer Kontrakt: Menge > 1 zulässig für ALLE SKUs in diesem Set
+  discount_type = null,           // 'percent' | 'flat' | null — Rabatt auf setup_total
+  discount_value = 0,             // bei 'percent' 0-100, bei 'flat' EUR netto
 } = {}) {
   // Vereinheitlicht in ein Set. Legacy-Wert wird beigemischt, damit alte
   // Aufrufer weiter funktionieren.
@@ -107,7 +109,7 @@ export function calculateOfferTotals({
     });
   }
 
-  const setup_total = round2(
+  const setup_before_discount = round2(
     lines.filter(l => SETUP_CATEGORIES.has(l.category))
          .reduce((sum, l) => sum + l.line_total, 0)
   );
@@ -116,12 +118,22 @@ export function calculateOfferTotals({
          .reduce((sum, l) => sum + l.line_total, 0)
   );
 
+  // Rabatt auf setup_total anwenden. Bleibt bei 0 wenn kein Rabatt gesetzt.
+  let discount_amount = 0;
+  const dv = Number(discount_value) || 0;
+  if (discount_type === 'percent' && dv > 0) {
+    discount_amount = round2(setup_before_discount * Math.min(dv, 100) / 100);
+  } else if (discount_type === 'flat' && dv > 0) {
+    discount_amount = round2(Math.min(dv, setup_before_discount));
+  }
+  const setup_total = round2(setup_before_discount - discount_amount);
+
   const adBudget = Number.isFinite(+ad_budget_monthly) && +ad_budget_monthly > 0
     ? round2(+ad_budget_monthly)
     : 0;
 
   // monthly_total = die wiederkehrende Service-Rate OHNE Werbebudget-Durchleitung.
-  // first_month_total = Setup + 1. Monat (Service) + (nur TalentOne) Werbebudget.
+  // first_month_total = Setup (nach Rabatt) + 1. Monat (Service) + (nur TalentOne) Werbebudget.
   const monthly_total = monthly_total_service;
   const first_month_total = round2(setup_total + monthly_total_service + adBudget);
 
@@ -129,6 +141,10 @@ export function calculateOfferTotals({
   return {
     positions: lines,
     setup_total,
+    setup_before_discount,
+    discount_type: discount_amount > 0 ? discount_type : null,
+    discount_value: discount_amount > 0 ? dv : 0,
+    discount_amount,
     monthly_total,
     monthly_total_service,
     ad_budget_monthly: adBudget,

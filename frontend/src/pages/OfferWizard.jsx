@@ -81,7 +81,11 @@ export default function OfferWizard() {
   const [adBudget, setAdBudget] = useState('800');
   // Garantie + Einstellungen-Ziel (Phase 5 Nachtrag)
   const [guaranteePeriodDays, setGuaranteePeriodDays] = useState(30);
+  const [guaranteeNote, setGuaranteeNote] = useState('Kostenlos weiterarbeiten, wenn nach 30 Tagen keine Einstellung erfolgt ist.');
   const [hiresTarget, setHiresTarget] = useState(1);
+  // Rabatt (beide Brands): percent | flat, Wert in %/EUR
+  const [discountType, setDiscountType] = useState('');       // '' = kein Rabatt
+  const [discountValue, setDiscountValue] = useState('');
   // Schritt 4
   const [totals, setTotals] = useState(null);
   const [templates, setTemplates] = useState([]);
@@ -111,10 +115,12 @@ export default function OfferWizard() {
     return false;
   }, [step, customer, brand, products.length, step3Error]);
 
-  // Marken-Default für Garantie: TalentOne 30 fix, N&W 30 (wählbar)
+  // Marken-Default fuer Garantie: bei Brand-Wechsel Note default setzen (falls User leer).
   useEffect(() => {
-    if (brand === 'talentone') setGuaranteePeriodDays(30);
-  }, [brand]);
+    setGuaranteeNote(prev => prev && prev.trim()
+      ? prev
+      : `Kostenlos weiterarbeiten, wenn nach ${guaranteePeriodDays} Tagen keine Einstellung erfolgt ist.`);
+  }, [brand, guaranteePeriodDays]);
 
   // Wenn Marke wechselt: Katalog + Textbausteine laden, Default-Optionen wählen
   useEffect(() => {
@@ -155,13 +161,15 @@ export default function OfferWizard() {
           selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
           additional_positions_count: additionalPositionsCount,
           ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+          discount_type: discountType || null,
+          discount_value: Number(discountValue) || 0,
         };
         const res = await api('/offers/calculate', { method: 'POST', body: payload });
         setTotals(res.totals);
       } catch (err) { setError(err.message); }
     }, 250);
     return () => calcTimer.current && clearTimeout(calcTimer.current);
-  }, [brand, products, selectedIds, additionalPositionsCount, adBudget]);
+  }, [brand, products, selectedIds, additionalPositionsCount, adBudget, discountType, discountValue]);
 
   function buildPayload() {
     return {
@@ -177,8 +185,11 @@ export default function OfferWizard() {
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
       additional_positions_count: additionalPositionsCount,
       ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
-      guarantee_period_days: brand === 'talentone' ? 30 : guaranteePeriodDays,
+      guarantee_period_days: guaranteePeriodDays,
+      guarantee_note: guaranteeNote,
       hires_target: hiresTarget,
+      discount_type: discountType || null,
+      discount_value: Number(discountValue) || 0,
     };
   }
 
@@ -296,6 +307,8 @@ export default function OfferWizard() {
             brand={brand} customer={customer} products={products}
             selectedIds={selectedIds} totals={totals} templates={templates}
             additionalPositionsCount={additionalPositionsCount}
+            guaranteeNote={guaranteeNote}
+            guaranteePeriodDays={guaranteePeriodDays}
             savingDraft={savingDraft} onSaveDraft={saveDraft}
             creatingOffer={creatingOffer}
             onCreateEasybill={createEasybillOffer}
@@ -758,34 +771,79 @@ function Step3Config({
 
       <section style={{ marginBottom: 22, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
         <SectionHead label="Garantie & Einstellungsziel" />
-        <div style={{ display: 'grid', gridTemplateColumns: brand === 'nowag_wirth' ? '1fr 1fr' : '1fr', gap: 14 }}>
-          {brand === 'nowag_wirth' && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+          <input type="checkbox" checked={guaranteePeriodDays > 0}
+            onChange={e => setGuaranteePeriodDays(e.target.checked ? (brand === 'talentone' ? 30 : 30) : 0)} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>🛡️ Garantie gewähren</span>
+        </label>
+        {guaranteePeriodDays > 0 && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: brand === 'nowag_wirth' ? '1fr 1fr' : '1fr 1fr', gap: 14 }}>
+              {brand === 'nowag_wirth' ? (
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Zeitraum</span>
+                  <select value={guaranteePeriodDays} onChange={e => setGuaranteePeriodDays(Number(e.target.value))}
+                    style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
+                    <option value={30}>30 Tagen</option>
+                    <option value={60}>60 Tagen</option>
+                    <option value={90}>90 Tagen</option>
+                  </select>
+                </label>
+              ) : (
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Zeitraum</span>
+                  <input type="number" min="1" max="180" value={guaranteePeriodDays}
+                    onChange={e => setGuaranteePeriodDays(Math.max(1, Math.min(180, parseInt(e.target.value, 10) || 30)))}
+                    style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }} />
+                </label>
+              )}
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Einstellungsziel</span>
+                <input type="number" min="1" max="10" value={hiresTarget}
+                  onChange={e => setHiresTarget(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                  style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
+              </label>
+            </div>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Beschreibungstext im Angebot</span>
+              <textarea rows={2} value={guaranteeNote} onChange={e => setGuaranteeNote(e.target.value)}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
+              <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Erscheint im Angebot/PDF und wird beim Annehmen ans Projekt uebertragen.</span>
+            </label>
+          </div>
+        )}
+        {guaranteePeriodDays === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '6px 0 0' }}>Keine Garantie gewaehrt.</p>
+        )}
+      </section>
+
+      <section style={{ marginBottom: 22, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
+        <SectionHead label="Rabatt (optional)" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Rabatt-Typ</span>
+            <select value={discountType} onChange={e => setDiscountType(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
+              <option value="">Kein Rabatt</option>
+              <option value="percent">Prozent (%)</option>
+              <option value="flat">Festbetrag (EUR)</option>
+            </select>
+          </label>
+          {discountType && (
             <label style={{ display: 'grid', gap: 4 }}>
               <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>
-                Erfolgsgarantie: Einstellung innerhalb von
+                {discountType === 'percent' ? 'Prozent (0-100)' : 'Betrag in EUR (netto)'}
               </span>
-              <select value={guaranteePeriodDays} onChange={e => setGuaranteePeriodDays(Number(e.target.value))}
-                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
-                <option value={30}>30 Tagen</option>
-                <option value={60}>60 Tagen</option>
-                <option value={90}>90 Tagen</option>
-              </select>
-              <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>je nach Schwierigkeit des Stellenprofils</span>
+              <input type="number" min="0" max={discountType === 'percent' ? 100 : 999999} step="0.01"
+                value={discountValue} onChange={e => setDiscountValue(e.target.value)}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
             </label>
           )}
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>
-              Gewünschte Einstellungen für diese Stelle
-            </span>
-            <input type="number" min="1" max="10" value={hiresTarget}
-              onChange={e => setHiresTarget(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
-              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, width: 100, textAlign: 'right' }} />
-            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>1–10 · Basis für die Fortschrittsanzeige und Einstellungs-Mails</span>
-          </label>
         </div>
-        {brand === 'talentone' && (
-          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '10px 0 0' }}>
-            TalentOne-Bewerbungsgarantie: <strong>30 Tage</strong> fix. Bei ausbleibender Einstellung entfällt maximal einmal die Servicepauschale.
+        {discountType && Number(discountValue) > 0 && totals?.discount_amount > 0 && (
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '8px 0 0' }}>
+            → Rabatt: <strong>-{totals.discount_amount.toFixed(2).replace('.', ',')} €</strong> auf Setup
+            (Setup vor Rabatt: {totals.setup_before_discount?.toFixed(2).replace('.', ',')} € → nach Rabatt: {totals.setup_total?.toFixed(2).replace('.', ',')} €).
           </p>
         )}
       </section>
@@ -940,13 +998,16 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
 }
 
 // ─────────────────────── Step 4 ───────────────────────
-function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
+function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, guaranteeNote, guaranteePeriodDays, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
   const positionsWithText = (totals?.positions || []).map(l => ({
     ...l,
     description: products.find(p => p.id === l.product_id)?.description || '',
   }));
   const brandMeta = BRAND_META[brand];
-  const guarantee = templates.find(t => t.key === 'guarantee')?.text || '';
+  // Vorrang: manuell gepflegter Guarantee-Text; sonst Template. Wenn Garantie aus (0 Tage): keine Anzeige.
+  const guarantee = (guaranteePeriodDays > 0)
+    ? ((guaranteeNote && guaranteeNote.trim()) || templates.find(t => t.key === 'guarantee')?.text || '')
+    : '';
   const paymentTerms = templates.find(t => t.key === 'payment_terms')?.text || '';
 
   if (!totals) return <div>Lade Vorschau…</div>;

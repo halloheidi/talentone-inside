@@ -95,6 +95,12 @@ export async function ensureProjektForOffer(offer) {
   const firma = offer.customer_snapshot?.company_name || 'Kunde';
   const projektname = `${firma} — ${brandLabel}`.slice(0, 200);
 
+  const guaranteeActive = Number(offer.guarantee_period_days) > 0;
+  const guaranteeText = offer.guarantee_note
+    || (guaranteeActive
+      ? `Kostenlos weiterarbeiten, wenn nach ${offer.guarantee_period_days} Tagen keine Einstellung erfolgt ist.`
+      : null);
+
   const { data: created, error } = await supabase
     .from('talentone_projekte')
     .insert({
@@ -106,6 +112,8 @@ export async function ensureProjektForOffer(offer) {
       projektart:         brandLabel,
       status:             'vorbereitung',
       auftrag_checkliste: items,
+      garantie:           guaranteeActive,
+      garantie_details:   guaranteeText,
       updated_at:         new Date().toISOString(),
     })
     .select().single();

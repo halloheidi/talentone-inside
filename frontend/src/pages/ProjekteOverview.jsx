@@ -533,6 +533,10 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                     {p.gesuchte_positionen && <div className="kanban-card-pos">{p.gesuchte_positionen}{p.standorte ? ` · ${p.standorte}` : ''}</div>}
                     <div className="kanban-card-meta">
                       {p.projektart && <span className="kanban-badge">{p.projektart}</span>}
+                      {p.garantie && (
+                        <span className="kanban-badge" style={{ background: '#dcfce7', color: '#166534' }}
+                          title={p.garantie_details || 'Garantie aktiv'}>🛡️ Garantie</span>
+                      )}
                       {p.verantwortlich && <span className="kanban-avatar" title={p.verantwortlich}>{initials(p.verantwortlich)}</span>}
                     </div>
                     <div className="proj-progress" style={{ marginTop: 6 }}>

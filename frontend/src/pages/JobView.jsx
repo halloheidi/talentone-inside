@@ -319,6 +319,12 @@ export default function JobView() {
         <div style={{ flex: 1 }}>
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
+        {projekt?.garantie && (
+          <div style={{ padding: '4px 10px', background: '#dcfce7', color: '#166534', borderRadius: 6, fontSize: 12, fontWeight: 600, maxWidth: 320 }}
+            title={projekt.garantie_details || 'Garantie aktiv'}>
+            🛡️ Garantie{projekt.garantie_details ? `: ${projekt.garantie_details.slice(0, 60)}${projekt.garantie_details.length > 60 ? '…' : ''}` : ''}
+          </div>
+        )}
         {projekt
           ? <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />

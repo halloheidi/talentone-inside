@@ -61,6 +61,9 @@ export function buildEasybillOfferPayload({
   ad_budget_monthly = null,
   vat_rate = 19,
   templates = [],
+  discount_type = null,
+  discount_value = 0,
+  guarantee_note = null,
 } = {}) {
   const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
 
@@ -72,6 +75,8 @@ export function buildEasybillOfferPayload({
     ad_budget_monthly,
     vat_rate,
     extra_job_skus: extraSkus,
+    discount_type,
+    discount_value,
   });
 
   const productById = new Map(products.map(p => [p.id, p]));
@@ -112,6 +117,21 @@ export function buildEasybillOfferPayload({
     }));
   }
 
+  // Rabatt (falls gesetzt): negative Setup-Position, wird auf Setup verrechnet.
+  if (totals.discount_amount > 0) {
+    const rabattTitel = totals.discount_type === 'percent'
+      ? `Rabatt (${totals.discount_value}% auf Setup)`
+      : 'Rabatt (Einmalig)';
+    items.push(makePosition({
+      pos: pos++,
+      titleWithSuffix: rabattTitel,
+      description: null,
+      quantity: 1,
+      unit_price: -Math.abs(totals.discount_amount),
+      vat_percent: vat_rate,
+    }));
+  }
+
   // Werbebudget-Sonderposten (nur TalentOne)
   if (brand === 'talentone' && totals.ad_budget_monthly > 0) {
     items.push(makePosition({
@@ -125,7 +145,10 @@ export function buildEasybillOfferPayload({
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)
-  const guarantee      = findTemplate(templates, 'guarantee');
+  // Garantie: bevorzugt der pro Angebot gepflegte guarantee_note-Text; sonst Template.
+  const guaranteeFromNote = (guarantee_note && guarantee_note.trim()) || null;
+  const guaranteeFromTpl  = findTemplate(templates, 'guarantee');
+  const guarantee = guaranteeFromNote || guaranteeFromTpl;
   const guaranteeLabel = findTemplate(templates, 'guarantee_label')
                        || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand]
                        || 'Garantie';

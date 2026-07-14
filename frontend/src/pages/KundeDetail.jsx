@@ -1630,9 +1630,9 @@ function ProjektInfoCards({ projekte, schritteItems = [], kundeId }) {
                 </span>
               )}
               {p.garantie ? (
-                <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 6 }}
-                  title={p.garantie_details || ''}>
-                  ✓ Garantie{p.garantie_details ? `: ${p.garantie_details}` : ''}
+                <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: 6, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={p.garantie_details || 'Garantie aktiv'}>
+                  🛡️ Garantie{p.garantie_details ? `: ${p.garantie_details}` : ''}
                 </span>
               ) : (
                 <span style={{ background: '#f3f4f6', color: '#6b7280', padding: '2px 8px', borderRadius: 6 }}>
