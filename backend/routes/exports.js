@@ -126,8 +126,14 @@ router.post('/jobs/:id/export/email', async (req, res) => {
       .select('id, runde, status')
       .eq('job_id', job.id)
       .order('runde', { ascending: false }).limit(1).maybeSingle();
-    const istNeueRunde = !!(latestReview && latestReview.status === 'aenderungen');
-    const neueRundeNr = istNeueRunde ? (Number(latestReview.runde || 1) + 1) : 1;
+    // Neue Runde wird geoeffnet, sobald die letzte Review bereits eine
+    // Reaktion des Kunden hat (aenderungen ODER freigegeben) — beim erneuten
+    // Versand soll der Kunde immer eine frische, offene Runde sehen und
+    // wieder kommentieren koennen. Wenn latestReview.status noch offen ist,
+    // bleiben wir in derselben Runde.
+    const abgeschlossenerStatus = new Set(['aenderungen', 'freigegeben']);
+    const istNeueRunde = !!(latestReview && abgeschlossenerStatus.has(latestReview.status));
+    const neueRundeNr = istNeueRunde ? (Number(latestReview.runde || 1) + 1) : (Number(latestReview?.runde) || 1);
 
     // Bei neuer Runde: leere Review-Row anlegen, damit der Kunde beim
     // Öffnen der Review-URL direkt eine frische Runde ohne Kommentare sieht.
@@ -701,6 +707,75 @@ router.post('/kunden/:id/termin-einladung', async (req, res) => {
   } catch (err) {
     console.error('[kunde/termin-einladung]', err.message);
     res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/export/review-reset
+   Team-Aktion: Kunde hat versehentlich freigegeben oder moechte doch
+   noch kommentieren. Legt eine frische offene Runde an (runde = max+1),
+   ohne dass wir neu senden muessen. Der Kunde sieht beim naechsten
+   Oeffnen der Review-URL wieder das Formular. */
+router.post('/jobs/:id/export/review-reset', async (req, res) => {
+  try {
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, kunde_id, review_token').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+    // Aktueller Review-Stand
+    const { data: latest } = await supabase.from('talentone_reviews')
+      .select('id, runde, status').eq('job_id', job.id)
+      .order('runde', { ascending: false }).limit(1).maybeSingle();
+    const neueRundeNr = (Number(latest?.runde) || 0) + 1;
+
+    // review_token sicherstellen
+    let token = job.review_token;
+    if (!token) {
+      const { randomUUID } = await import('node:crypto');
+      token = randomUUID();
+      await supabase.from('talentone_jobs').update({ review_token: token }).eq('id', job.id);
+    }
+
+    // Neue offene Runde einfuegen
+    const { data: created, error } = await supabase.from('talentone_reviews').insert({
+      job_id: job.id, token, status: null,
+      kommentare: null, kommentare_snapshot: null,
+      runde: neueRundeNr,
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Kanban-Projekt zurueck auf 'feedbackschleife' setzen, falls es
+    // auf 'go' stand — damit der Wechsel sichtbar ist.
+    (async () => {
+      try {
+        const { data: kunde } = await supabase.from('talentone_kunden')
+          .select('id, close_lead_id, email').eq('id', job.kunde_id).maybeSingle();
+        const { data: projekt } = await supabase.from('talentone_projekte')
+          .select('id, status').eq('kunde_id', job.kunde_id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt && projekt.status === 'go') {
+          await supabase.from('talentone_projekte')
+            .update({ status: 'feedbackschleife', updated_at: new Date().toISOString() })
+            .eq('id', projekt.id);
+        }
+        if (projekt) {
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor: req.user?.email || 'System',
+            text: `🔓 Kommentierung wieder freigeschaltet (Runde ${neueRundeNr}) — Kunde kann erneut Feedback geben.`,
+            quelle: 'system',
+          });
+        }
+        if (kunde) {
+          notifyKunde(kunde, `🔓 Kommentierung wieder freigeschaltet (Runde ${neueRundeNr}) am ${new Date().toLocaleDateString('de-DE')}`)
+            .catch(err => console.warn('[review-reset close-note]', err.message));
+        }
+      } catch (err) { console.warn('[review-reset sync]', err.message); }
+    })();
+
+    res.json({ ok: true, review: created });
+  } catch (err) {
+    console.error('[review-reset]', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

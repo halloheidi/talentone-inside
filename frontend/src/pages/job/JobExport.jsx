@@ -400,7 +400,23 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
       {review && (review.status === 'freigegeben' || review.status === 'aenderungen') && (
         <div className={`review-status review-status-${review.status}`}>
           {review.status === 'freigegeben' ? (
-            <strong>✅ Kunde hat freigegeben (Runde {review.runde || 1}) am {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong>✅ Kunde hat freigegeben (Runde {review.runde || 1}) am {new Date(review.updated_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong>
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                onClick={async () => {
+                  if (!confirm('Kommentierung wieder freischalten? Der Kunde sieht beim nächsten Öffnen der Review-URL wieder ein leeres Kommentarfeld einer neuen Runde. Für den Fall, dass er versehentlich freigegeben hat.')) return;
+                  try {
+                    await api(`/jobs/${job.id}/export/review-reset`, { method: 'POST' });
+                    api(`/jobs/${job.id}/export/review`).then(r => { setReview(r.review); setRunden(r.runden || []); }).catch(() => {});
+                    api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+                    alert('Kommentierung wieder freigeschaltet. Der Kunde kann jetzt erneut Feedback geben.');
+                  } catch (err) { alert(err.message); }
+                }}
+                title="Legt eine frische offene Review-Runde an — der Kunde kann wieder kommentieren"
+              >🔓 Kommentierung wieder freischalten</button>
+            </div>
           ) : (
             <>
               <div className="review-status-head">

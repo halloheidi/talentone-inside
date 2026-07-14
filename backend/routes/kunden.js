@@ -861,6 +861,22 @@ router.post('/:id/anfrage', async (req, res) => {
       customText,
       agentur: kunde.agentur,
     });
+    // Versand-Historie am erstbesten Job protokollieren — damit die
+    // naechste-schritte-Logik "Fotos anfragen" auf "Wartet auf Fotos" umschalten
+    // kann. Bisher fehlte dieser Eintrag komplett.
+    const { data: firstJob } = await supabase.from('talentone_jobs')
+      .select('id').eq('kunde_id', kunde.id)
+      .order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (firstJob) {
+      await supabase.from('talentone_versand').insert({
+        job_id: firstJob.id,
+        empfaenger: kunde.email,
+        betreff: 'Foto- & Logo-Anfrage',
+        gesendet_von: req.user?.email || null,
+        typ: 'anfrage',
+        inhalte: { customText: customText || null, upload_url: uploadUrl },
+      });
+    }
     notifyKunde(kunde, `📸 Foto- & Logo-Anfrage an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
       .catch(err => console.warn('[anfrage close-note]', err.message));
     res.json({ ok: true, uploadUrl });

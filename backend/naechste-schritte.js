@@ -15,6 +15,7 @@ import { supabase } from './supabase.js';
 const REGELN = [
   { key: 'wartet_formular',      icon: '⏳', label: 'Wartet auf Formular',        color: 'grau',   tab: 'stelle' },
   { key: 'fotos_anfragen',       icon: '📸', label: 'Fotos anfragen',             color: 'farbig', tab: 'stelle' },
+  { key: 'wartet_fotos',         icon: '⏳', label: 'Wartet auf Fotos',           color: 'grau',   tab: 'stelle' },
   { key: 'creatives_erstellen',  icon: '🎨', label: 'Creatives erstellen',        color: 'farbig', tab: 'creatives' },
   { key: 'adcopies_erstellen',   icon: '✍️', label: 'Ad Copies erstellen',        color: 'farbig', tab: 'adcopies' },
   { key: 'funnel_verbinden',     icon: '🔗', label: 'Funnel verbinden',           color: 'farbig', tab: 'funnel' },
@@ -40,12 +41,13 @@ function kurznameFor(stelle) {
 
 /**
  * Ermittelt den nächsten Schritt für einen einzelnen Job.
- * ctx = { kunde, projekt, refbilderCount, versandTypen(Set), creativesCount,
+ * ctx = { kunde, projekt, refbilderCount, versandTypen(Set),
+ *         anfrageDatum (ISO oder null), creativesCount,
  *         adcopiesCount, funnels, review, letzterEntwurfsversandDatum }
  */
 function berechneSchritt(ctx) {
-  const { kunde, projekt, refbilderCount, versandTypen, creativesCount,
-          adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
+  const { kunde, projekt, refbilderCount, versandTypen, anfrageDatum,
+          creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
 
   // Pausiert/Abgeschlossen kommen vom Projekt-Status
   if (projekt?.status === 'pausiert') return { ...REGEL_BY_KEY.pausiert };
@@ -66,9 +68,27 @@ function berechneSchritt(ctx) {
     return { ...REGEL_BY_KEY.live };
   }
 
-  // 2. Keine Fotos UND noch keine Fotos-Anfrage
-  if (refbilderCount === 0 && !versandTypen.has('anfrage')) {
-    return { ...REGEL_BY_KEY.fotos_anfragen };
+  // 2. Foto-Logik — mit Skip-Regel bei bereits vorhandenen Creatives:
+  //   a) Wenn Creatives existieren → Foto-Schritt komplett überspringen
+  //      (wir haben ja offensichtlich ohne Kundenfotos gearbeitet).
+  //   b) Sonst: keine Fotos + noch keine Anfrage → 📸 Fotos anfragen
+  //   c) Sonst: keine Fotos + Anfrage bereits raus → ⏳ Wartet auf Fotos ({Datum})
+  if (creativesCount === 0 && refbilderCount === 0) {
+    // Anfrage-Nachweis: entweder Versand-Log ODER upload_token am Kunden
+    // (der Token wird nur beim ersten anfrage-Aufruf generiert — deckt
+    // Bestandsdaten ab, wo Versand-Log noch nicht mitgeschrieben wurde).
+    const anfrageRaus = versandTypen.has('anfrage') || !!kunde?.upload_token;
+    if (!anfrageRaus) {
+      return { ...REGEL_BY_KEY.fotos_anfragen };
+    }
+    const wartet = { ...REGEL_BY_KEY.wartet_fotos };
+    if (anfrageDatum) {
+      const datum = new Date(anfrageDatum).toLocaleDateString('de-DE');
+      wartet.label = `Wartet auf Fotos (angefragt ${datum})`;
+      const tage = Math.floor((Date.now() - new Date(anfrageDatum).getTime()) / 86400000);
+      if (tage >= 5) { wartet.icon = '⚠️'; wartet.color = 'rot'; }
+    }
+    return wartet;
   }
 
   // 3. Keine Creatives
@@ -111,7 +131,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
 
   // Bulk-Loads
   const [kundenRes, projekteRes, jobsRes, refbilderRes] = await Promise.all([
-    supabase.from('talentone_kunden').select('id, status, agentur').in('id', ids),
+    supabase.from('talentone_kunden').select('id, status, agentur, upload_token').in('id', ids),
     supabase.from('talentone_projekte')
       .select('id, kunde_id, status, start_phase1, live_seit, created_at')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
@@ -165,11 +185,16 @@ export async function ermittleNaechsteSchritte(kundeIds) {
   for (const f of (funnelsRes.data || [])) (funnelsByJob[f.job_id] ||= []).push(f);
   const versandByJob = {};
   const entwurfsversandDatumByJob = {};
+  const anfrageDatumByJob = {};
   for (const v of (versandRes.data || [])) {
     (versandByJob[v.job_id] ||= []).push(v);
     if ((v.typ || '').startsWith('entwurf_runde_')) {
       const d = entwurfsversandDatumByJob[v.job_id];
       if (!d || v.created_at > d) entwurfsversandDatumByJob[v.job_id] = v.created_at;
+    }
+    if (v.typ === 'anfrage') {
+      const d = anfrageDatumByJob[v.job_id];
+      if (!d || v.created_at > d) anfrageDatumByJob[v.job_id] = v.created_at;
     }
   }
   const reviewTopByJob = {};
@@ -205,6 +230,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
         kunde, projekt,
         refbilderCount,
         versandTypen,
+        anfrageDatum: anfrageDatumByJob[job.id] || null,
         creativesCount: creativesCountByJob[job.id] || 0,
         adcopiesCount: adcopyCountByJob[job.id] || 0,
         funnels: funnelsByJob[job.id] || [],

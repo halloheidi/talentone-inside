@@ -68,6 +68,17 @@ export default function PublicReview() {
   }
 
   async function submit(status) {
+    // Sicherheits-Confirm vor der Freigabe — verhindert versehentliche Klicks.
+    // Bei Aenderungswuenschen ist eine Nachfrage nicht noetig (Kunde hat ja
+    // schon Text im Feld).
+    if (status === 'freigegeben') {
+      const ok = window.confirm(
+        'Möchtest du wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
+        'Danach wird sofort mit der Umsetzung gestartet. Falls du noch Änderungen möchtest, ' +
+        'klick stattdessen auf "Änderungswünsche senden".'
+      );
+      if (!ok) return;
+    }
     setBusy(status);
     try {
       // Leere Kommentare rausfiltern
