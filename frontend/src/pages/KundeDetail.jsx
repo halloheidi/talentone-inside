@@ -566,7 +566,7 @@ export default function KundeDetail() {
                     }}
                     className="btn-ghost btn-sm"
                   >Kopieren</button>
-                  <a href={`${getBrandBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">
+                  <a href={`${window.location.origin}/portal/${kunde.portal_token}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm" title="Öffnet mit deiner Mitarbeiter-Session (kein Kunden-Login nötig)">
                     Öffnen ↗
                   </a>
                 </div>
