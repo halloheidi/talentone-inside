@@ -174,7 +174,12 @@ const RECRUITER_STATUS_LABELS = {
 };
 function RecruiterSyncSection({ sync, brandName }) {
   if (!sync) return null;
-  const hasData = sync.recruiter_status || sync.vg_vereinbart_am || (sync.eingestellt && sync.eingestellt !== 'offen') || sync.kunde_kontaktiert;
+  const vqWerte = sync.vorqualifizierung_werte && typeof sync.vorqualifizierung_werte === 'object'
+    ? Object.entries(sync.vorqualifizierung_werte).filter(([, v]) => v != null && String(v).trim() !== '')
+    : [];
+  const hasData = sync.recruiter_status || sync.vg_vereinbart_am || (sync.eingestellt && sync.eingestellt !== 'offen')
+    || sync.kunde_kontaktiert || sync.vorqual_gehaltswunsch || sync.vorqual_verfuegbarkeit
+    || sync.vorqual_notiz || vqWerte.length > 0;
   if (!hasData) return null;
   return (
     <section className="pub-recruiter-sync">
@@ -184,9 +189,23 @@ function RecruiterSyncSection({ sync, brandName }) {
         {sync.kunde_kontaktiert && <><dt>Sie kontaktiert</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
         {sync.vg_vereinbart_am && <><dt>VG vereinbart</dt><dd>{new Date(sync.vg_vereinbart_am).toLocaleString('de-DE')}</dd></>}
         {sync.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
+        {sync.vorqual_gehaltswunsch && <><dt>Gehaltswunsch</dt><dd>{sync.vorqual_gehaltswunsch}</dd></>}
+        {sync.vorqual_verfuegbarkeit && <><dt>Verfügbarkeit</dt><dd>{sync.vorqual_verfuegbarkeit}</dd></>}
+        {vqWerte.map(([k, v]) => (
+          <FragmentRow key={k} label={k} value={String(v)} />
+        ))}
       </dl>
+      {sync.vorqual_notiz && (
+        <div style={{ marginTop: 10, padding: '10px 12px', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#78350f', marginBottom: 4 }}>Notiz aus dem Vorqualifizierungs-Gespräch</div>
+          <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{sync.vorqual_notiz}</div>
+        </div>
+      )}
     </section>
   );
+}
+function FragmentRow({ label, value }) {
+  return (<><dt>{label}</dt><dd>{value}</dd></>);
 }
 
 /* ─── Slide-Over für Bewerber-Detail ─── */

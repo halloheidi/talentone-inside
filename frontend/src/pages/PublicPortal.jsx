@@ -306,6 +306,7 @@ function LeadsSection({ job, token, primary, primaryInk, anfragen, onReload }) {
       {selected && (
         <LeadSlideOver
           anfrage={selected} stufen={stufen} token={token}
+          felderConfig={Array.isArray(job.anfragen_felder) ? job.anfragen_felder : null}
           onClose={() => setSelected(null)} onReload={onReload}
         />
       )}
@@ -364,21 +365,38 @@ function PipelineKanban({ stufen, anfragen, token, onOpen, onReload }) {
             <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9a9994' }}>{(grouped[s.id] || []).length}</span>
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
-            {(grouped[s.id] || []).map(a => (
-              <div key={a.id}
-                draggable
-                onDragStart={() => setDragId(a.id)}
-                onDragEnd={() => setDragId(null)}
-                onClick={() => onOpen(a)}
-                style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 8, padding: 10, fontSize: 12, cursor: 'grab' }}
-              >
-                <div style={{ fontWeight: 600 }}>{a.name || '—'}</div>
-                {a.telefon && <div style={{ color: '#5a5955' }}>{a.telefon}</div>}
-                {a.email && <div style={{ color: '#5a5955', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.email}</div>}
-                {a.daten?.groesse && <div style={{ color: '#0a0a0a', marginTop: 4 }}>📐 {a.daten.groesse}</div>}
-                <div style={{ color: '#9a9994', fontSize: 10, marginTop: 4 }}>{new Date(a.created_at).toLocaleDateString('de-DE')}</div>
-              </div>
-            ))}
+            {(grouped[s.id] || []).map(a => {
+              const d = a.daten || {};
+              const pick = (...keys) => { for (const k of keys) { const v = d[k]; if (v != null && String(v).trim() !== '') return String(v); } return null; };
+              const projektname = pick('Projektname', 'projektname');
+              const standort    = pick('Standort Freiflaeche', 'Standort Freifläche', 'Adresse', 'standort');
+              const groesse     = pick('Groesse der Flaeche', 'Größe der Fläche', 'größe', 'groesse');
+              const anmerkung   = pick('Anmerkung', 'bemerkung');
+              const gemeinde    = pick('Gemeinde', 'gemeinde');
+              const plz         = pick('Postleitzahl', 'plz');
+              const title = projektname || a.name || '—';
+              return (
+                <div key={a.id}
+                  draggable
+                  onDragStart={() => setDragId(a.id)}
+                  onDragEnd={() => setDragId(null)}
+                  onClick={() => onOpen(a)}
+                  style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 8, padding: 10, fontSize: 12, cursor: 'grab' }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>{title}</div>
+                  {projektname && a.name && <div style={{ fontSize: 11, color: '#5a5955' }}>👤 {a.name}</div>}
+                  {a.telefon && <div style={{ color: '#5a5955' }}>📞 {a.telefon}</div>}
+                  {standort && <div style={{ color: '#5a5955', marginTop: 2 }}>📍 {[plz, gemeinde].filter(Boolean).join(' ') || standort}</div>}
+                  {groesse && <div style={{ color: '#0a0a0a', marginTop: 2, fontWeight: 500 }}>📐 {groesse}</div>}
+                  {anmerkung && (
+                    <div style={{ color: '#5a5955', marginTop: 4, fontSize: 11, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      „{anmerkung}"
+                    </div>
+                  )}
+                  <div style={{ color: '#9a9994', fontSize: 10, marginTop: 6 }}>{new Date(a.created_at).toLocaleDateString('de-DE')}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -474,7 +492,7 @@ function LeadsTabelle({ stufen, anfragen, token, onOpen, onReload }) {
 const thStyle = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', cursor: 'pointer', whiteSpace: 'nowrap' };
 const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'top' };
 
-function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
+function LeadSlideOver({ anfrage, stufen, token, felderConfig, onClose, onReload }) {
   const [status, setStatus] = useState(anfrage.status || '');
   const [notizen, setNotizen] = useState(anfrage.notizen || '');
   const [zustaendiger, setZustaendiger] = useState(anfrage.daten?.zustaendiger || '');
@@ -567,20 +585,46 @@ function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
           </button>
         </div>
         <div style={{ display: 'grid', gap: 6 }}>
-          {Object.keys(datenLocal).length === 0 && (
-            <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Keine zusätzlichen Details. Über „+ Feld hinzufügen" kannst du eigene Felder anlegen (Adresse, Größe, Bundesland, …).</p>
-          )}
-          {Object.entries(datenLocal).map(([k, v]) => (
-            <div key={k} style={{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: 4, alignItems: 'center' }}>
-              <label style={{ fontSize: 11, color: '#5a5955', fontWeight: 600 }} title={k}>{k}</label>
-              <input value={v ?? ''}
-                onChange={e => setDatenLocal(prev => ({ ...prev, [k]: e.target.value }))}
-                onBlur={e => e.target.value !== (anfrage.daten?.[k] ?? '') && saveDatenField(k, e.target.value)}
-                style={{ ...inputStyle, marginBottom: 0 }} />
-              <button type="button" title="Feld entfernen" onClick={() => removeDatenField(k)}
-                style={{ background: 'transparent', border: 'none', color: '#c1272d', fontSize: 15, cursor: 'pointer', width: 24 }}>×</button>
-            </div>
-          ))}
+          {(() => {
+            const configKeys = new Set((felderConfig || []).map(f => f.key));
+            const configured = (felderConfig || []);
+            const extras = Object.keys(datenLocal).filter(k => !configKeys.has(k) && k !== '_airtable_id');
+            const items = [
+              ...configured.map(f => ({ ...f, custom: false })),
+              ...extras.map(k => ({ key: k, label: k, typ: 'text', custom: true })),
+            ];
+            if (items.length === 0) return (
+              <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Keine zusätzlichen Details. Über „+ Feld hinzufügen" kannst du eigene Felder anlegen (Adresse, Größe, Bundesland, …).</p>
+            );
+            return items.map(f => {
+              const v = datenLocal[f.key] ?? '';
+              const commit = e => e.target.value !== (anfrage.daten?.[f.key] ?? '') && saveDatenField(f.key, e.target.value);
+              const set = val => setDatenLocal(prev => ({ ...prev, [f.key]: val }));
+              return (
+                <div key={f.key} style={{ display: 'grid', gridTemplateColumns: '140px 1fr auto', gap: 4, alignItems: 'start' }}>
+                  <label style={{ fontSize: 11, color: '#5a5955', fontWeight: 600, paddingTop: 8 }} title={f.key}>{f.label || f.key}</label>
+                  {f.typ === 'textarea' ? (
+                    <textarea rows={2} value={v} onChange={e => set(e.target.value)} onBlur={commit}
+                      style={{ ...inputStyle, marginBottom: 0, resize: 'vertical', fontFamily: 'inherit' }} />
+                  ) : f.typ === 'select' && Array.isArray(f.optionen) ? (
+                    <select value={v} onChange={e => { set(e.target.value); saveDatenField(f.key, e.target.value); }}
+                      style={{ ...inputStyle, marginBottom: 0 }}>
+                      <option value="">— nicht angegeben —</option>
+                      {f.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : f.typ === 'date' ? (
+                    <input type="date" value={v} onChange={e => set(e.target.value)} onBlur={commit} style={{ ...inputStyle, marginBottom: 0 }} />
+                  ) : (
+                    <input value={v} onChange={e => set(e.target.value)} onBlur={commit} style={{ ...inputStyle, marginBottom: 0 }} />
+                  )}
+                  {f.custom ? (
+                    <button type="button" title="Feld entfernen" onClick={() => removeDatenField(f.key)}
+                      style={{ background: 'transparent', border: 'none', color: '#c1272d', fontSize: 15, cursor: 'pointer', width: 24 }}>×</button>
+                  ) : <span style={{ width: 24 }} />}
+                </div>
+              );
+            });
+          })()}
         </div>
 
         <label style={labelStyle}>Notizen</label>

@@ -637,7 +637,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
       supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, ampel, updated_at')
+        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, ampel, updated_at, gehaltswunsch, verfuegbarkeit, notizen, vorqualifizierung_werte')
         .in('bewerbung_id', ids),
     ]);
     for (const f of fb.data || []) feedback[f.bewerbung_id] = f;
@@ -653,6 +653,12 @@ router.get('/bewerbungen/:token', async (req, res) => {
         kunde_kontaktiert: r.kunde_kontaktiert,
         ampel: r.ampel,
         updated_at: r.updated_at,
+        // Vorqualifizierungs-Ergebnisse (kundenrelevant). NICHT durchgereicht:
+        // bewertung (interne Sterne), anrufversuche, naechste_aktion, nw_kontaktiert.
+        vorqual_gehaltswunsch: r.gehaltswunsch || null,
+        vorqual_verfuegbarkeit: r.verfuegbarkeit || null,
+        vorqual_notiz: r.notizen || null,
+        vorqualifizierung_werte: r.vorqualifizierung_werte || null,
       };
     }
   }
@@ -1102,7 +1108,7 @@ router.get('/portal/:token', async (req, res) => {
     if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
 
     const { data: jobs = [] } = await supabase.from('talentone_jobs')
-      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_token, bewerbungen_token, created_at')
+      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_felder, anfragen_token, bewerbungen_token, created_at')
       .eq('kunde_id', kunde.id)
       .order('created_at', { ascending: true });
 
@@ -1158,6 +1164,7 @@ router.get('/portal/:token', async (req, res) => {
         projekttyp: j.projekttyp,
         neukunden_daten: j.neukunden_daten,
         pipeline_stufen: pipeline,
+        anfragen_felder: Array.isArray(j.anfragen_felder) ? j.anfragen_felder : null,
         funnel_url: funnelUrlByJob[j.id] || null,
         anfragen_token: j.anfragen_token,
         bewerbungen_token: j.bewerbungen_token,

@@ -20,6 +20,16 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
+    // Bei abgelaufener Session: sauber ausloggen + Login-Prompt statt stummer Save-Fehler.
+    if (res.status === 401) {
+      try { await supabase.auth.signOut(); } catch {}
+      const msg = 'Deine Session ist abgelaufen. Bitte melde dich neu an.';
+      if (typeof window !== 'undefined') {
+        alert(msg);
+        window.location.href = '/login';
+      }
+      throw new Error(msg);
+    }
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
