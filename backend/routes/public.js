@@ -823,17 +823,14 @@ router.get('/anfragen/:token', async (req, res) => {
 });
 
 // PATCH /api/public/anfragen/:token/:anfrageId  body: { status?, notizen? }
+// Status ist jetzt eine frei konfigurierbare Pipeline-Stufe (String-ID
+// aus job.pipeline_stufen) — keine Whitelist mehr.
 router.patch('/anfragen/:token/:anfrageId', async (req, res) => {
   const job = await loadJobByAnfragenToken(req.params.token);
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
   const { status, notizen } = req.body || {};
   const patch = {};
-  if (status !== undefined) {
-    if (!['neu', 'kontaktiert', 'termin', 'gewonnen', 'verloren'].includes(status)) {
-      return res.status(400).json({ error: 'status ungültig.' });
-    }
-    patch.status = status;
-  }
+  if (status !== undefined) patch.status = String(status);
   if (notizen !== undefined) patch.notizen = notizen == null ? null : String(notizen);
   const { data, error } = await supabase.from('talentone_anfragen')
     .update(patch).eq('id', req.params.anfrageId).eq('job_id', job.id)
@@ -959,5 +956,259 @@ async function logFeedbackToProjekt({ kunde, job, status, kommentare, creatives,
     } catch (err) { console.warn('[review-projekt-sync] mention-mail:', err.message); }
   }
 }
+
+/* ════════════════════ Portal — gebuendeltes Kunden-Dashboard ════════════════════
+ * Token = talentone_kunden.portal_token. Liefert Kunde + Jobs + Anfragen +
+ * Bewerbungen + Creatives + Funnel-Link + Pipeline-Stufen. Alle Sub-Aktionen
+ * (Status setzen, Notizen, Kommentare, Pipeline anpassen, Ueberarbeitungs-
+ * wunsch) laufen ebenfalls ueber /portal/:token/... */
+
+const DEFAULT_PIPELINE = [
+  { id: 'neu',       name: 'Neu',       farbe: '#6b7280', reihenfolge: 10 },
+  { id: 'aktiv',     name: 'Aktiv',     farbe: '#3b82f6', reihenfolge: 20 },
+  { id: 'angebot',   name: 'Angebot',   farbe: '#f59e0b', reihenfolge: 30 },
+  { id: 'gewonnen',  name: 'Gewonnen',  farbe: '#16a34a', reihenfolge: 40 },
+  { id: 'verloren',  name: 'Verloren',  farbe: '#dc2626', reihenfolge: 50 },
+];
+
+async function loadKundeByPortalToken(token) {
+  const { data } = await supabase.from('talentone_kunden').select('*')
+    .eq('portal_token', token).maybeSingle();
+  return data;
+}
+
+// GET /api/public/portal/:token — komplettes Dashboard
+router.get('/portal/:token', async (req, res) => {
+  try {
+    const kunde = await loadKundeByPortalToken(req.params.token);
+    if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_token, bewerbungen_token, created_at')
+      .eq('kunde_id', kunde.id)
+      .order('created_at', { ascending: true });
+
+    const jobIds = jobs.map(j => j.id);
+    const [anfragenRes, bewerbungenRes, creativesRes, adcopiesRes, funnelsRes] = await Promise.all([
+      jobIds.length
+        ? supabase.from('talentone_anfragen').select('*').in('job_id', jobIds).order('created_at', { ascending: false })
+        : { data: [] },
+      jobIds.length
+        ? supabase.from('talentone_bewerbungen').select('*').in('job_id', jobIds).order('created_at', { ascending: false })
+        : { data: [] },
+      jobIds.length
+        ? supabase.from('talentone_creatives')
+            .select('id, job_id, format, typ, bild_url, bild_ohne_logo_url, created_at, archiviert')
+            .in('job_id', jobIds)
+            .neq('archiviert', true)
+            .order('created_at', { ascending: false })
+        : { data: [] },
+      jobIds.length
+        ? supabase.from('talentone_adcopies').select('*').in('job_id', jobIds)
+        : { data: [] },
+      jobIds.length
+        ? supabase.from('talentone_funnels').select('*').in('job_id', jobIds).order('created_at', { ascending: false })
+        : { data: [] },
+    ]);
+
+    // Kommentare zu allen Anfragen bulk-laden
+    const anfragen = anfragenRes.data || [];
+    const anfrageIds = anfragen.map(a => a.id);
+    const kommentareByAnfrage = {};
+    if (anfrageIds.length) {
+      const { data: komm = [] } = await supabase.from('talentone_anfragen_kommentare')
+        .select('*').in('anfrage_id', anfrageIds).order('created_at', { ascending: true });
+      for (const k of komm) (kommentareByAnfrage[k.anfrage_id] ||= []).push(k);
+    }
+
+    // Pro Job den Funnel-URL bauen (extern > intern-veroeffentlicht)
+    const funnelUrlByJob = {};
+    for (const f of (funnelsRes.data || [])) {
+      if (funnelUrlByJob[f.job_id]) continue;
+      const url = (f.extern && f.extern_url) ? f.extern_url
+                : (f.veroeffentlicht ? `${getPublicBaseUrl(kunde.agentur)}/f/${f.id}` : null);
+      if (url) funnelUrlByJob[f.job_id] = url;
+    }
+
+    // Pipeline-Stufen normalisieren
+    const jobsOut = jobs.map(j => {
+      let pipeline = Array.isArray(j.pipeline_stufen) && j.pipeline_stufen.length
+        ? j.pipeline_stufen : DEFAULT_PIPELINE;
+      pipeline = [...pipeline].sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
+      return {
+        id: j.id, stelle: j.stelle, region: j.region,
+        projekttyp: j.projekttyp,
+        neukunden_daten: j.neukunden_daten,
+        pipeline_stufen: pipeline,
+        funnel_url: funnelUrlByJob[j.id] || null,
+        anfragen_token: j.anfragen_token,
+        bewerbungen_token: j.bewerbungen_token,
+      };
+    });
+
+    const anfragenOut = anfragen.map(a => ({
+      ...a, kommentare: kommentareByAnfrage[a.id] || [],
+    }));
+
+    res.json({
+      kunde: {
+        id: kunde.id, firmenname: kunde.firmenname, ansprechpartner: kunde.ansprechpartner,
+        email: kunde.email, agentur: kunde.agentur || 'nowagwirth',
+        logo_url: kunde.logo_url, farben: kunde.farben,
+      },
+      jobs: jobsOut,
+      anfragen: anfragenOut,
+      bewerbungen: bewerbungenRes.data || [],
+      creatives: creativesRes.data || [],
+      adcopies: adcopiesRes.data || [],
+    });
+  } catch (err) {
+    console.error('[portal/get]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/public/portal/:token/anfrage/:id  body: { status?, notizen?, zustaendiger? }
+router.patch('/portal/:token/anfrage/:id', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  // Anfrage muss zu einem Job des Kunden gehoeren
+  const { data: anfrage } = await supabase.from('talentone_anfragen')
+    .select('id, job_id').eq('id', req.params.id).maybeSingle();
+  if (!anfrage) return res.status(404).json({ error: 'Anfrage nicht gefunden.' });
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('kunde_id').eq('id', anfrage.job_id).maybeSingle();
+  if (!job || job.kunde_id !== kunde.id) return res.status(403).json({ error: 'Anfrage gehört nicht zu diesem Portal.' });
+
+  const patch = {};
+  if (req.body?.status !== undefined) patch.status = String(req.body.status);
+  if (req.body?.notizen !== undefined) patch.notizen = req.body.notizen == null ? null : String(req.body.notizen);
+  if (req.body?.zustaendiger !== undefined) {
+    // In daten jsonb schreiben
+    const { data: current } = await supabase.from('talentone_anfragen')
+      .select('daten').eq('id', anfrage.id).maybeSingle();
+    const daten = current?.daten || {};
+    daten.zustaendiger = req.body.zustaendiger || null;
+    patch.daten = daten;
+  }
+  patch.updated_at = new Date().toISOString();
+  const { data, error } = await supabase.from('talentone_anfragen')
+    .update(patch).eq('id', anfrage.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ anfrage: data });
+});
+
+// POST /api/public/portal/:token/anfrage/:id/kommentar  body: { text, autor? }
+router.post('/portal/:token/anfrage/:id/kommentar', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Text fehlt.' });
+  const { data: anfrage } = await supabase.from('talentone_anfragen')
+    .select('id, job_id').eq('id', req.params.id).maybeSingle();
+  if (!anfrage) return res.status(404).json({ error: 'Anfrage nicht gefunden.' });
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('kunde_id').eq('id', anfrage.job_id).maybeSingle();
+  if (!job || job.kunde_id !== kunde.id) return res.status(403).json({ error: 'Anfrage gehört nicht zu diesem Portal.' });
+
+  const autor = String(req.body?.autor || kunde.firmenname || 'Kunde').slice(0, 120);
+  const { data, error } = await supabase.from('talentone_anfragen_kommentare')
+    .insert({ anfrage_id: anfrage.id, autor, text, quelle: 'portal' })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ kommentar: data });
+});
+
+// PUT /api/public/portal/:token/pipeline/:jobId  body: { stufen: [...] }
+router.put('/portal/:token/pipeline/:jobId', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id').eq('id', req.params.jobId).maybeSingle();
+  if (!job || job.kunde_id !== kunde.id) return res.status(403).json({ error: 'Job gehört nicht zu diesem Portal.' });
+  const stufen = Array.isArray(req.body?.stufen) ? req.body.stufen : null;
+  if (!stufen || !stufen.length) return res.status(400).json({ error: 'stufen fehlt.' });
+  // Normalisieren: id/name Pflicht
+  const normalized = stufen.map((s, i) => ({
+    id: String(s.id || `stufe_${i + 1}`).slice(0, 60),
+    name: String(s.name || 'Neue Stufe').slice(0, 60),
+    farbe: String(s.farbe || '#6b7280').slice(0, 20),
+    reihenfolge: Number.isFinite(+s.reihenfolge) ? +s.reihenfolge : (i + 1) * 10,
+  }));
+  const { data, error } = await supabase.from('talentone_jobs')
+    .update({ pipeline_stufen: normalized })
+    .eq('id', job.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ job: data });
+});
+
+// POST /api/public/portal/:token/creative/:id/ueberarbeitung
+//    body: { text }  — Kunde wuenscht Ueberarbeitung eines Creatives.
+router.post('/portal/:token/creative/:id/ueberarbeitung', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Text fehlt.' });
+
+  const { data: creative } = await supabase.from('talentone_creatives')
+    .select('id, job_id, format').eq('id', req.params.id).maybeSingle();
+  if (!creative) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id').eq('id', creative.job_id).maybeSingle();
+  if (!job || job.kunde_id !== kunde.id) return res.status(403).json({ error: 'Creative gehört nicht zu diesem Portal.' });
+
+  // Aktuelle Runde ermitteln + aenderungen-Status setzen. Analog zum
+  // Public-Review-Endpoint, aber ueber Portal-Weg.
+  const { data: existingReview } = await supabase.from('talentone_reviews')
+    .select('id, runde, kommentare').eq('job_id', job.id)
+    .order('runde', { ascending: false }).limit(1).maybeSingle();
+  const key = `creative_${creative.id}`;
+  const mergedKommentare = { ...(existingReview?.kommentare || {}), [key]: text };
+  const runde = existingReview?.runde || 1;
+
+  let saved;
+  if (existingReview) {
+    const { data, error } = await supabase.from('talentone_reviews')
+      .update({ status: 'aenderungen', kommentare: mergedKommentare, updated_at: new Date().toISOString() })
+      .eq('id', existingReview.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    saved = data;
+  } else {
+    // Braucht ein review_token — sicherstellen
+    let token = job.review_token;
+    if (!token) {
+      const { randomUUID } = await import('node:crypto');
+      token = randomUUID();
+      await supabase.from('talentone_jobs').update({ review_token: token }).eq('id', job.id);
+    }
+    const { data, error } = await supabase.from('talentone_reviews')
+      .insert({ job_id: job.id, token, status: 'aenderungen', runde, kommentare: mergedKommentare })
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    saved = data;
+  }
+
+  // Kanban-Sync + Team-Benachrichtigung analog Review-Endpoint (best-effort)
+  (async () => {
+    try {
+      const [{ data: kundeFull }, { data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
+        supabase.from('talentone_kunden').select('*').eq('id', kunde.id).maybeSingle(),
+        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+        supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
+      ]);
+      const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}/jobs/${job.id}/export`;
+      await sendReviewBenachrichtigung({
+        kunde: kundeFull, job, status: 'aenderungen',
+        kommentare: mergedKommentare, jobUrl, creatives, adcopies, snapshot: {},
+      });
+      await logFeedbackToProjekt({
+        kunde: kundeFull, job, status: 'aenderungen',
+        kommentare: mergedKommentare, creatives, adcopies,
+      });
+    } catch (err) { console.warn('[portal/ueberarbeitung sync]', err.message); }
+  })();
+
+  res.json({ ok: true, review: saved });
+});
 
 export default router;

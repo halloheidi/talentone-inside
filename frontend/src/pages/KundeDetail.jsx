@@ -545,6 +545,31 @@ export default function KundeDetail() {
                   📅 Termin-Einladung senden
                 </button>
               </div>
+              {kunde.portal_token && (
+                <div style={{
+                  marginTop: 10, padding: '10px 12px', background: '#f0fdf4', border: '1px solid #86efac',
+                  borderRadius: 8, display: 'flex', gap: 10, alignItems: 'center', fontSize: 13,
+                }}>
+                  <span>🔗</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: '#166534', fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}>Kunden-Dashboard-Link</div>
+                    <code style={{ fontSize: 11, color: '#0a0a0a', wordBreak: 'break-all' }}>
+                      {`${window.location.origin}/portal/${kunde.portal_token}`}
+                    </code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}/portal/${kunde.portal_token}`;
+                      navigator.clipboard.writeText(url).then(() => alert('Portal-Link kopiert'));
+                    }}
+                    className="btn-ghost btn-sm"
+                  >Kopieren</button>
+                  <a href={`/portal/${kunde.portal_token}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">
+                    Öffnen ↗
+                  </a>
+                </div>
+              )}
             </>
           ) : (
             <div className="kunde-edit">

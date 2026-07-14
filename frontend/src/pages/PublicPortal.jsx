@@ -1,0 +1,623 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import Lightbox from '../components/Lightbox.jsx';
+
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+
+const BRAND = {
+  talentone:  { name: 'TalentOne',    primary: '#0a0a0a', accent: '#d4ff00', accentInk: '#0a0a0a' },
+  nowagwirth: { name: 'Nowag & Wirth', primary: '#0a0a0a', accent: '#980000', accentInk: '#ffffff' },
+};
+
+async function api(path, init = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Fehler');
+  return res.json();
+}
+
+export default function PublicPortal() {
+  const { token } = useParams();
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [activeJobId, setActiveJobId] = useState(null);
+
+  useEffect(() => {
+    api(`/public/portal/${token}`).then(setData).catch(e => setError(e.message));
+  }, [token]);
+
+  useEffect(() => {
+    if (data?.jobs?.length && !activeJobId) setActiveJobId(data.jobs[0].id);
+  }, [data, activeJobId]);
+
+  if (error) return <FullMsg text={error} />;
+  if (!data) return <FullMsg text="Lade dein Dashboard…" />;
+
+  const brand = BRAND[data.kunde?.agentur] || BRAND.nowagwirth;
+  const primary = data.kunde?.farben?.primaer || brand.accent;
+  const primaryInk = brand.accentInk;
+
+  const activeJob = data.jobs.find(j => j.id === activeJobId) || data.jobs[0];
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f7f6f2', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
+      <header style={{ background: brand.primary, color: '#fff', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+        {data.kunde?.logo_url && (
+          <img src={data.kunde.logo_url} alt="" height={44} style={{ background: '#fff', borderRadius: 8, padding: '4px 8px' }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{brand.name}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {data.kunde?.firmenname || 'Dein Dashboard'}
+          </div>
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.75, textAlign: 'right' }}>
+          <div>Dein Kampagnen-Dashboard</div>
+          <div>Live-Daten · aktualisiert vor wenigen Sekunden</div>
+        </div>
+      </header>
+
+      {data.jobs.length > 1 && (
+        <nav style={{ display: 'flex', gap: 4, padding: '10px 20px', background: '#fff', borderBottom: '1px solid #ececea', overflowX: 'auto' }}>
+          {data.jobs.map(j => {
+            const aktiv = j.id === activeJobId;
+            return (
+              <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
+                background: aktiv ? primary : 'transparent',
+                color: aktiv ? primaryInk : '#0a0a0a',
+                border: 'none', padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                {j.projekttyp === 'neukundengewinnung' ? '🎯' : '👥'} {j.stelle || 'Projekt'}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
+      <main style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 20px 40px' }}>
+        {activeJob && (
+          <JobBlock
+            key={activeJob.id}
+            job={activeJob}
+            token={token}
+            brand={brand}
+            primary={primary}
+            primaryInk={primaryInk}
+            anfragen={data.anfragen.filter(a => a.job_id === activeJob.id)}
+            bewerbungen={data.bewerbungen.filter(b => b.job_id === activeJob.id)}
+            creatives={data.creatives.filter(c => c.job_id === activeJob.id)}
+            adcopies={data.adcopies.filter(a => a.job_id === activeJob.id)}
+            onReload={() => api(`/public/portal/${token}`).then(setData).catch(() => {})}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function FullMsg({ text }) {
+  return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', fontFamily: '-apple-system, sans-serif' }}>{text}</div>;
+}
+
+/* ══════════════════════ JobBlock ══════════════════════ */
+
+function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbungen, creatives, adcopies, onReload }) {
+  const istNeukunden = job.projekttyp === 'neukundengewinnung';
+  return (
+    <section style={{ display: 'grid', gap: 20 }}>
+      {job.funnel_url && (
+        <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span>🔗</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: '#5a5955', fontWeight: 600, letterSpacing: 0.03, textTransform: 'uppercase' }}>Deine Landingpage</div>
+            <a href={job.funnel_url} target="_blank" rel="noreferrer" style={{ color: '#0a0a0a', wordBreak: 'break-all', fontSize: 13 }}>{job.funnel_url}</a>
+          </div>
+          <button onClick={() => navigator.clipboard.writeText(job.funnel_url).catch(() => {})}
+            style={{ background: '#f4f3f0', border: '1px solid #ececea', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+            Kopieren
+          </button>
+        </div>
+      )}
+
+      {istNeukunden ? (
+        <LeadsSection
+          job={job} token={token} primary={primary} primaryInk={primaryInk}
+          anfragen={anfragen} onReload={onReload}
+        />
+      ) : (
+        <BewerbungenSection job={job} bewerbungen={bewerbungen} primary={primary} primaryInk={primaryInk} />
+      )}
+
+      {creatives.length > 0 && (
+        <CreativesSection
+          creatives={creatives} token={token} primary={primary} primaryInk={primaryInk}
+          onSaved={onReload}
+        />
+      )}
+    </section>
+  );
+}
+
+/* ══════════════════════ Lead-Pipeline (Neukunden) ══════════════════════ */
+
+function LeadsSection({ job, token, primary, primaryInk, anfragen, onReload }) {
+  const [view, setView] = useState('pipeline'); // 'pipeline' | 'tabelle'
+  const [selected, setSelected] = useState(null);
+  const [showPipelineEdit, setShowPipelineEdit] = useState(false);
+  const stufen = job.pipeline_stufen || [];
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
+        <h2 style={{ margin: 0, fontSize: 18 }}>🎯 Deine Anfragen ({anfragen.length})</h2>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <button onClick={() => setView('pipeline')}
+            style={pillStyle(view === 'pipeline', primary, primaryInk)}>Pipeline</button>
+          <button onClick={() => setView('tabelle')}
+            style={pillStyle(view === 'tabelle', primary, primaryInk)}>Tabelle</button>
+          <button onClick={() => setShowPipelineEdit(true)}
+            style={{ background: 'transparent', border: '1px solid #ececea', padding: '5px 10px', borderRadius: 100, cursor: 'pointer', fontSize: 12 }}>
+            ⚙ Pipeline anpassen
+          </button>
+        </div>
+      </div>
+
+      {anfragen.length === 0 ? (
+        <div style={{ padding: 30, textAlign: 'center', color: '#9a9994' }}>Noch keine Anfragen eingegangen.</div>
+      ) : view === 'pipeline' ? (
+        <PipelineKanban stufen={stufen} anfragen={anfragen} token={token} onOpen={setSelected} onReload={onReload} />
+      ) : (
+        <LeadsTabelle stufen={stufen} anfragen={anfragen} token={token} onOpen={setSelected} onReload={onReload} />
+      )}
+
+      {selected && (
+        <LeadSlideOver
+          anfrage={selected} stufen={stufen} token={token}
+          onClose={() => setSelected(null)} onReload={onReload}
+        />
+      )}
+
+      {showPipelineEdit && (
+        <PipelineEditor
+          job={job} token={token}
+          onClose={() => setShowPipelineEdit(false)}
+          onSaved={() => { setShowPipelineEdit(false); onReload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function pillStyle(aktiv, primary, primaryInk) {
+  return {
+    background: aktiv ? primary : 'transparent',
+    color: aktiv ? primaryInk : '#0a0a0a',
+    border: '1px solid ' + (aktiv ? primary : '#ececea'),
+    padding: '5px 12px', borderRadius: 100, cursor: 'pointer',
+    fontSize: 12, fontWeight: 600,
+  };
+}
+
+function PipelineKanban({ stufen, anfragen, token, onOpen, onReload }) {
+  const [dragId, setDragId] = useState(null);
+  const grouped = {};
+  for (const s of stufen) grouped[s.id] = [];
+  const catchAllKey = stufen[0]?.id || 'neu';
+  for (const a of anfragen) {
+    const bucket = stufen.find(s => s.id === a.status) ? a.status : catchAllKey;
+    (grouped[bucket] ||= []).push(a);
+  }
+
+  async function move(anfrageId, stufeId) {
+    try {
+      await api(`/public/portal/${token}/anfrage/${anfrageId}`, {
+        method: 'PATCH', body: JSON.stringify({ status: stufeId }),
+      });
+      onReload();
+    } catch (err) { alert(err.message); }
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `repeat(${stufen.length}, minmax(180px, 1fr))`, overflowX: 'auto' }}>
+      {stufen.map(s => (
+        <div key={s.id}
+          onDragOver={e => e.preventDefault()}
+          onDrop={() => dragId && move(dragId, s.id)}
+          style={{ background: '#fafaf8', borderRadius: 8, padding: 8, minHeight: 200 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 100, background: s.farbe }} />
+            <strong style={{ fontSize: 12, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955' }}>{s.name}</strong>
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9a9994' }}>{(grouped[s.id] || []).length}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {(grouped[s.id] || []).map(a => (
+              <div key={a.id}
+                draggable
+                onDragStart={() => setDragId(a.id)}
+                onDragEnd={() => setDragId(null)}
+                onClick={() => onOpen(a)}
+                style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 8, padding: 10, fontSize: 12, cursor: 'grab' }}
+              >
+                <div style={{ fontWeight: 600 }}>{a.name || '—'}</div>
+                {a.telefon && <div style={{ color: '#5a5955' }}>{a.telefon}</div>}
+                {a.email && <div style={{ color: '#5a5955', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.email}</div>}
+                {a.daten?.groesse && <div style={{ color: '#0a0a0a', marginTop: 4 }}>📐 {a.daten.groesse}</div>}
+                <div style={{ color: '#9a9994', fontSize: 10, marginTop: 4 }}>{new Date(a.created_at).toLocaleDateString('de-DE')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LeadsTabelle({ stufen, anfragen, token, onOpen, onReload }) {
+  const dynKeys = useMemo(() => {
+    const s = new Set();
+    for (const a of anfragen) for (const k of Object.keys(a.daten || {})) if (k !== 'zustaendiger') s.add(k);
+    return Array.from(s).slice(0, 8);
+  }, [anfragen]);
+  const [sortBy, setSortBy] = useState('created_at');
+  const sorted = useMemo(() => {
+    return [...anfragen].sort((a, b) => {
+      const av = a[sortBy] || a.daten?.[sortBy] || '';
+      const bv = b[sortBy] || b.daten?.[sortBy] || '';
+      return String(bv).localeCompare(String(av));
+    });
+  }, [anfragen, sortBy]);
+
+  async function setStatus(id, status) {
+    try {
+      await api(`/public/portal/${token}/anfrage/${id}`, {
+        method: 'PATCH', body: JSON.stringify({ status }),
+      });
+      onReload();
+    } catch (err) { alert(err.message); }
+  }
+
+  function exportCsv() {
+    const headers = ['datum', 'name', 'telefon', 'email', 'status', 'notizen', 'zustaendiger', ...dynKeys];
+    const rows = sorted.map(a => [
+      new Date(a.created_at).toISOString().slice(0, 10),
+      a.name || '', a.telefon || '', a.email || '', a.status || '',
+      (a.notizen || '').replace(/\n/g, ' '),
+      a.daten?.zustaendiger || '',
+      ...dynKeys.map(k => String(a.daten?.[k] ?? '')),
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
+        <button onClick={exportCsv} style={{ background: '#f4f3f0', border: '1px solid #ececea', padding: '5px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+          ⬇ CSV-Export
+        </button>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
+              <th onClick={() => setSortBy('created_at')} style={thStyle}>Datum</th>
+              <th onClick={() => setSortBy('name')} style={thStyle}>Name</th>
+              <th style={thStyle}>Telefon</th>
+              <th style={thStyle}>E-Mail</th>
+              <th style={thStyle}>Status</th>
+              {dynKeys.map(k => <th key={k} style={thStyle}>{k}</th>)}
+              <th style={thStyle}>Zuständig</th>
+              <th style={thStyle}>Notizen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(a => (
+              <tr key={a.id} onClick={() => onOpen(a)} style={{ borderBottom: '1px solid #ececea', cursor: 'pointer' }}>
+                <td style={tdStyle}>{new Date(a.created_at).toLocaleDateString('de-DE')}</td>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>{a.name || '—'}</td>
+                <td style={tdStyle}>{a.telefon || '—'}</td>
+                <td style={tdStyle}>{a.email || '—'}</td>
+                <td style={tdStyle} onClick={e => e.stopPropagation()}>
+                  <select value={a.status || ''} onChange={e => setStatus(a.id, e.target.value)}
+                    style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 4, padding: '3px 6px', fontSize: 12 }}>
+                    {stufen.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </td>
+                {dynKeys.map(k => <td key={k} style={tdStyle}>{String(a.daten?.[k] ?? '—').slice(0, 40)}</td>)}
+                <td style={tdStyle}>{a.daten?.zustaendiger || '—'}</td>
+                <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.notizen || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+const thStyle = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', cursor: 'pointer', whiteSpace: 'nowrap' };
+const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'top' };
+
+function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
+  const [status, setStatus] = useState(anfrage.status || '');
+  const [notizen, setNotizen] = useState(anfrage.notizen || '');
+  const [zustaendiger, setZustaendiger] = useState(anfrage.daten?.zustaendiger || '');
+  const [neuerKomm, setNeuerKomm] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function save(patch) {
+    setSaving(true);
+    try {
+      await api(`/public/portal/${token}/anfrage/${anfrage.id}`, {
+        method: 'PATCH', body: JSON.stringify(patch),
+      });
+      onReload();
+    } catch (err) { alert(err.message); } finally { setSaving(false); }
+  }
+  async function addKomm() {
+    const text = neuerKomm.trim();
+    if (!text) return;
+    try {
+      await api(`/public/portal/${token}/anfrage/${anfrage.id}/kommentar`, {
+        method: 'POST', body: JSON.stringify({ text }),
+      });
+      setNeuerKomm('');
+      onReload();
+    } catch (err) { alert(err.message); }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', width: 480, maxWidth: '100%', height: '100%', overflowY: 'auto', padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+          <h2 style={{ margin: 0 }}>{anfrage.name || 'Lead'}</h2>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', fontSize: 22, cursor: 'pointer' }}>×</button>
+        </div>
+        <p style={{ color: '#9a9994', fontSize: 12, margin: '0 0 14px' }}>
+          Eingegangen {new Date(anfrage.created_at).toLocaleString('de-DE')}
+        </p>
+
+        <div style={{ display: 'grid', gap: 8, marginBottom: 14, fontSize: 14 }}>
+          {anfrage.email && <div><strong>E-Mail:</strong> <a href={`mailto:${anfrage.email}`}>{anfrage.email}</a></div>}
+          {anfrage.telefon && <div><strong>Telefon:</strong> <a href={`tel:${anfrage.telefon}`}>{anfrage.telefon}</a></div>}
+        </div>
+
+        {anfrage.daten && Object.keys(anfrage.daten).length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', letterSpacing: 0.05, marginBottom: 6 }}>Details</div>
+            <div style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+              {Object.entries(anfrage.daten).filter(([k]) => k !== 'zustaendiger').map(([k, v]) => (
+                <div key={k}><strong style={{ color: '#5a5955' }}>{k}:</strong> {String(v)}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <label style={labelStyle}>Status</label>
+        <select value={status} onChange={e => { setStatus(e.target.value); save({ status: e.target.value }); }}
+          disabled={saving} style={inputStyle}>
+          {stufen.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+
+        <label style={labelStyle}>Zuständiger Vertriebler</label>
+        <input value={zustaendiger} onChange={e => setZustaendiger(e.target.value)}
+          onBlur={() => save({ zustaendiger })} placeholder="Name" style={inputStyle} />
+
+        <label style={labelStyle}>Notizen</label>
+        <textarea rows={4} value={notizen} onChange={e => setNotizen(e.target.value)}
+          onBlur={() => save({ notizen })} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', letterSpacing: 0.05, marginBottom: 6 }}>Kommentare</div>
+          <div style={{ display: 'grid', gap: 8, maxHeight: 260, overflowY: 'auto', marginBottom: 10 }}>
+            {(anfrage.kommentare || []).map(k => (
+              <div key={k.id} style={{ padding: 10, background: '#fafaf8', borderRadius: 8, fontSize: 13 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                  <strong>{k.autor}</strong>
+                  <span style={{ fontSize: 10, color: '#9a9994' }}>{new Date(k.created_at).toLocaleString('de-DE')}</span>
+                  {k.quelle === 'airtable_import' && (
+                    <span style={{ marginLeft: 'auto', fontSize: 10, background: '#fef3c7', color: '#78350f', padding: '1px 6px', borderRadius: 4 }}>
+                      Aus Airtable
+                    </span>
+                  )}
+                </div>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{k.text}</div>
+              </div>
+            ))}
+            {(!anfrage.kommentare || anfrage.kommentare.length === 0) && (
+              <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Noch keine Kommentare.</p>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <textarea rows={2} value={neuerKomm} onChange={e => setNeuerKomm(e.target.value)}
+              placeholder="Neuer Kommentar…" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
+            <button onClick={addKomm} disabled={!neuerKomm.trim()}
+              style={{ background: '#0a0a0a', color: '#fff', border: 'none', padding: '0 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
+              Senden
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+const labelStyle = { display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', letterSpacing: 0.05, marginBottom: 4, marginTop: 12 };
+const inputStyle = { width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 8, fontSize: 13, marginBottom: 4, background: '#fff' };
+
+function PipelineEditor({ job, token, onClose, onSaved }) {
+  const [stufen, setStufen] = useState(() => JSON.parse(JSON.stringify(job.pipeline_stufen || [])));
+  const [saving, setSaving] = useState(false);
+  function move(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= stufen.length) return;
+    const copy = [...stufen];
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+    copy.forEach((s, k) => s.reihenfolge = (k + 1) * 10);
+    setStufen(copy);
+  }
+  function add() {
+    const id = `stufe_${Date.now().toString(36)}`;
+    setStufen([...stufen, { id, name: 'Neue Stufe', farbe: '#6b7280', reihenfolge: (stufen.length + 1) * 10 }]);
+  }
+  async function save() {
+    setSaving(true);
+    try {
+      await api(`/public/portal/${token}/pipeline/${job.id}`, {
+        method: 'PUT', body: JSON.stringify({ stufen }),
+      });
+      onSaved();
+    } catch (err) { alert(err.message); } finally { setSaving(false); }
+  }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 20, width: 520, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h2 style={{ marginTop: 0 }}>⚙ Pipeline anpassen</h2>
+        <p style={{ fontSize: 13, color: '#5a5955' }}>Stufen umbenennen, hinzufügen, umsortieren. Änderungen gelten sofort für dieses Projekt.</p>
+        <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+          {stufen.map((s, i) => (
+            <div key={s.id} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 6, background: '#fafaf8', borderRadius: 6 }}>
+              <input type="color" value={s.farbe} onChange={e => { const c = [...stufen]; c[i].farbe = e.target.value; setStufen(c); }}
+                style={{ width: 28, height: 28, border: 'none', background: 'transparent', cursor: 'pointer' }} />
+              <input value={s.name} onChange={e => { const c = [...stufen]; c[i].name = e.target.value; setStufen(c); }}
+                style={{ flex: 1, padding: '5px 8px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
+              <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}>↑</button>
+              <button onClick={() => move(i, +1)} disabled={i === stufen.length - 1} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}>↓</button>
+              <button onClick={() => setStufen(stufen.filter((_, k) => k !== i))}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: '#dc2626' }}>×</button>
+            </div>
+          ))}
+        </div>
+        <button onClick={add} style={{ background: 'transparent', border: '1px dashed #d4d4d0', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12, width: '100%', marginBottom: 12 }}>
+          + Stufe hinzufügen
+        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #ececea', padding: '8px 14px', borderRadius: 8, cursor: 'pointer' }}>Abbrechen</button>
+          <button onClick={save} disabled={saving || stufen.length === 0}
+            style={{ background: '#0a0a0a', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer' }}>
+            {saving ? 'Speichere…' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════ Bewerbungen (Recruiting) ══════════════════════ */
+
+function BewerbungenSection({ job, bewerbungen }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 Deine Bewerbungen ({bewerbungen.length})</h2>
+      {bewerbungen.length === 0 ? (
+        <p style={{ color: '#9a9994' }}>Noch keine Bewerbungen eingegangen.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
+                <th style={thStyle}>Datum</th>
+                <th style={thStyle}>Name</th>
+                <th style={thStyle}>E-Mail</th>
+                <th style={thStyle}>Telefon</th>
+                <th style={thStyle}>Quelle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bewerbungen.map(b => (
+                <tr key={b.id} style={{ borderBottom: '1px solid #ececea', opacity: b.ko_kriterium ? 0.55 : 1 }}>
+                  <td style={tdStyle}>{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                  <td style={{ ...tdStyle, fontWeight: 600 }}>{b.name || '—'}</td>
+                  <td style={tdStyle}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
+                  <td style={tdStyle}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
+                  <td style={tdStyle}>{b.quelle || 'funnel'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {job.bewerbungen_token && (
+        <div style={{ marginTop: 10, fontSize: 12, color: '#5a5955' }}>
+          Detail-Ansicht: <a href={`/bewerbungen/${job.bewerbungen_token}`}>öffnen ↗</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════ Creatives-Galerie ══════════════════════ */
+
+function CreativesSection({ creatives, token, onSaved }) {
+  const [lightbox, setLightbox] = useState(null);
+  const [ueberarbeit, setUeberarbeit] = useState(null); // { creative, text }
+
+  async function submitUeberarbeitung() {
+    if (!ueberarbeit?.creative || !ueberarbeit.text.trim()) return;
+    try {
+      await api(`/public/portal/${token}/creative/${ueberarbeit.creative.id}/ueberarbeitung`, {
+        method: 'POST', body: JSON.stringify({ text: ueberarbeit.text.trim() }),
+      });
+      alert('Danke — dein Änderungswunsch ist beim Team.');
+      setUeberarbeit(null);
+      onSaved();
+    } catch (err) { alert(err.message); }
+  }
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>🎨 Deine Creatives</h2>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+        {creatives.map((c, i) => (
+          <div key={c.id} style={{ background: '#000', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
+            <button onClick={() => setLightbox(i)} title="Groß-Ansicht"
+              style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1' }}>
+              {c.typ === 'video'
+                ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+            </button>
+            <button onClick={() => setUeberarbeit({ creative: c, text: '' })}
+              style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 100, fontSize: 10, cursor: 'pointer' }}>
+              ✏ Änderung wünschen
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {lightbox !== null && (
+        <Lightbox items={creatives} index={Math.max(0, Math.min(lightbox, creatives.length - 1))}
+          onClose={() => setLightbox(null)} onNavigate={setLightbox}
+          filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`} />
+      )}
+
+      {ueberarbeit && (
+        <div onClick={() => setUeberarbeit(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 12, padding: 20, width: 460, maxWidth: '100%' }}>
+            <h3 style={{ marginTop: 0 }}>✏ Änderungswunsch</h3>
+            <p style={{ fontSize: 13, color: '#5a5955', margin: '0 0 10px' }}>
+              Was soll bei diesem Creative angepasst werden? Der Wunsch landet direkt beim Team.
+            </p>
+            <img src={ueberarbeit.creative.bild_url} alt="" style={{ width: 120, borderRadius: 8, marginBottom: 10 }} />
+            <textarea rows={5} value={ueberarbeit.text}
+              onChange={e => setUeberarbeit(u => ({ ...u, text: e.target.value }))}
+              placeholder="z. B. „Text unten links kleiner, Farbe des Buttons in gelb"
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button onClick={() => setUeberarbeit(null)}
+                style={{ background: 'transparent', border: '1px solid #ececea', padding: '8px 14px', borderRadius: 8, cursor: 'pointer' }}>Abbrechen</button>
+              <button onClick={submitUeberarbeitung} disabled={!ueberarbeit.text.trim()}
+                style={{ background: '#0a0a0a', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: 8, cursor: 'pointer' }}>Senden</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
