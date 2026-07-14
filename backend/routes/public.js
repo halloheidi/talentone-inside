@@ -977,11 +977,104 @@ async function loadKundeByPortalToken(token) {
   return data;
 }
 
+// Prueft ob dieser Zugriff auf das Portal berechtigt ist. Bei portal_zugang=link
+// reicht der Token; bei 'account' braucht es einen gueltigen Session-Cookie.
+async function requirePortalAccess(kunde, req) {
+  if (kunde.portal_zugang !== 'account') return { ok: true, session: null };
+  const { readSessionCookie } = await import('../portal-auth.js');
+  const session = readSessionCookie(req, kunde.id);
+  if (!session || session.kunde_id !== kunde.id) {
+    return { ok: false, error: 'login_required' };
+  }
+  return { ok: true, session };
+}
+
+/* ── Login / Logout / Passwort setzen — laufen VOR dem Auth-Gate ── */
+
+// POST /api/public/portal/:token/login  body: { email, password }
+router.post('/portal/:token/login', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  if (kunde.portal_zugang !== 'account') return res.status(400).json({ error: 'Portal benötigt keinen Login.' });
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  if (!email || !password) return res.status(400).json({ error: 'E-Mail und Passwort sind Pflicht.' });
+
+  const { data: account } = await supabase.from('talentone_portal_accounts')
+    .select('*').eq('kunde_id', kunde.id).eq('aktiv', true)
+    .ilike('email', email).maybeSingle();
+  if (!account?.password_hash) return res.status(401).json({ error: 'E-Mail oder Passwort ist falsch.' });
+
+  const { verifyPassword, setSessionCookie } = await import('../portal-auth.js');
+  const ok = await verifyPassword(password, account.password_hash);
+  if (!ok) return res.status(401).json({ error: 'E-Mail oder Passwort ist falsch.' });
+
+  await supabase.from('talentone_portal_accounts')
+    .update({ letzter_login: new Date().toISOString() }).eq('id', account.id);
+  setSessionCookie(res, kunde.id, {
+    kunde_id: kunde.id, account_id: account.id,
+    email: account.email, name: account.name,
+  });
+  res.json({ ok: true, account: { id: account.id, email: account.email, name: account.name } });
+});
+
+// POST /api/public/portal/:token/logout
+router.post('/portal/:token/logout', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const { clearSessionCookie } = await import('../portal-auth.js');
+  clearSessionCookie(res, kunde.id);
+  res.json({ ok: true });
+});
+
+// POST /api/public/portal/:token/passwort-setzen
+//   body: { einladungs_token, password }
+router.post('/portal/:token/passwort-setzen', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const einladung = String(req.body?.einladungs_token || '').trim();
+  const password = String(req.body?.password || '');
+  if (!einladung || password.length < 8) {
+    return res.status(400).json({ error: 'Einladungs-Token fehlt oder Passwort zu kurz (min. 8 Zeichen).' });
+  }
+  const { data: account } = await supabase.from('talentone_portal_accounts')
+    .select('*').eq('kunde_id', kunde.id).eq('einladungs_token', einladung).maybeSingle();
+  if (!account) return res.status(404).json({ error: 'Einladungs-Link ist ungültig oder wurde bereits verwendet.' });
+
+  const { hashPassword, setSessionCookie } = await import('../portal-auth.js');
+  const hash = await hashPassword(password);
+  const now = new Date().toISOString();
+  await supabase.from('talentone_portal_accounts').update({
+    password_hash: hash,
+    passwort_gesetzt_at: now,
+    letzter_login: now,
+    einladungs_token: null,  // verbrauchen, damit der Link nicht wiederverwendet werden kann
+  }).eq('id', account.id);
+
+  setSessionCookie(res, kunde.id, {
+    kunde_id: kunde.id, account_id: account.id,
+    email: account.email, name: account.name,
+  });
+  res.json({ ok: true, account: { id: account.id, email: account.email, name: account.name } });
+});
+
+// GET /api/public/portal/:token/whoami — Session-Info (fuer Frontend-Reload)
+router.get('/portal/:token/whoami', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  if (kunde.portal_zugang !== 'account') return res.json({ mode: 'link' });
+  const { readSessionCookie } = await import('../portal-auth.js');
+  const s = readSessionCookie(req, kunde.id);
+  res.json({ mode: 'account', signed_in: !!s, account: s ? { email: s.email, name: s.name } : null });
+});
+
 // GET /api/public/portal/:token — komplettes Dashboard
 router.get('/portal/:token', async (req, res) => {
   try {
     const kunde = await loadKundeByPortalToken(req.params.token);
     if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+    const gate = await requirePortalAccess(kunde, req);
+    if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
 
     const { data: jobs = [] } = await supabase.from('talentone_jobs')
       .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_token, bewerbungen_token, created_at')
@@ -1072,6 +1165,7 @@ router.get('/portal/:token', async (req, res) => {
 router.patch('/portal/:token/anfrage/:id', async (req, res) => {
   const kunde = await loadKundeByPortalToken(req.params.token);
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  { const g = await requirePortalAccess(kunde, req); if (!g.ok) return res.status(401).json({ error: g.error, mode: 'account' }); }
   // Anfrage muss zu einem Job des Kunden gehoeren
   const { data: anfrage } = await supabase.from('talentone_anfragen')
     .select('id, job_id').eq('id', req.params.id).maybeSingle();
@@ -1102,6 +1196,7 @@ router.patch('/portal/:token/anfrage/:id', async (req, res) => {
 router.post('/portal/:token/anfrage/:id/kommentar', async (req, res) => {
   const kunde = await loadKundeByPortalToken(req.params.token);
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  { const g = await requirePortalAccess(kunde, req); if (!g.ok) return res.status(401).json({ error: g.error, mode: 'account' }); }
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Text fehlt.' });
   const { data: anfrage } = await supabase.from('talentone_anfragen')
@@ -1123,6 +1218,7 @@ router.post('/portal/:token/anfrage/:id/kommentar', async (req, res) => {
 router.put('/portal/:token/pipeline/:jobId', async (req, res) => {
   const kunde = await loadKundeByPortalToken(req.params.token);
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  { const g = await requirePortalAccess(kunde, req); if (!g.ok) return res.status(401).json({ error: g.error, mode: 'account' }); }
   const { data: job } = await supabase.from('talentone_jobs')
     .select('id, kunde_id').eq('id', req.params.jobId).maybeSingle();
   if (!job || job.kunde_id !== kunde.id) return res.status(403).json({ error: 'Job gehört nicht zu diesem Portal.' });
@@ -1147,6 +1243,7 @@ router.put('/portal/:token/pipeline/:jobId', async (req, res) => {
 router.post('/portal/:token/creative/:id/ueberarbeitung', async (req, res) => {
   const kunde = await loadKundeByPortalToken(req.params.token);
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  { const g = await requirePortalAccess(kunde, req); if (!g.ok) return res.status(401).json({ error: g.error, mode: 'account' }); }
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'Text fehlt.' });
 

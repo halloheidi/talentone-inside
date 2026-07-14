@@ -570,6 +570,7 @@ export default function KundeDetail() {
                   </a>
                 </div>
               )}
+              <PortalAccountsSection kunde={kunde} onKundeUpdated={setKunde} />
             </>
           ) : (
             <div className="kunde-edit">
@@ -1672,6 +1673,114 @@ function ProjektStatusRow({ projekte }) {
           </Link>
         );
       })}
+    </div>
+  );
+}
+
+
+function PortalAccountsSection({ kunde, onKundeUpdated }) {
+  const [accounts, setAccounts] = useState([]);
+  const [neu, setNeu] = useState({ email: '', name: '' });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  async function load() {
+    try {
+      const res = await api(`/kunden/${kunde.id}/portal-accounts`);
+      setAccounts(res.accounts || []);
+    } catch (err) { setMsg(err.message); }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [kunde.id]);
+
+  async function toggleMode() {
+    const neuerModus = kunde.portal_zugang === 'account' ? 'link' : 'account';
+    try {
+      await api(`/kunden/${kunde.id}/portal-zugang`, { method: 'PATCH', body: { modus: neuerModus } });
+      onKundeUpdated({ ...kunde, portal_zugang: neuerModus });
+    } catch (err) { alert(err.message); }
+  }
+
+  async function create(e) {
+    e.preventDefault();
+    if (!neu.email.trim()) return;
+    setBusy(true); setMsg('');
+    try {
+      await api(`/kunden/${kunde.id}/portal-accounts`, {
+        method: 'POST', body: { email: neu.email.trim(), name: neu.name.trim() || null },
+      });
+      setNeu({ email: '', name: '' });
+      if (kunde.portal_zugang !== 'account') onKundeUpdated({ ...kunde, portal_zugang: 'account' });
+      load();
+      alert('Einladung verschickt.');
+    } catch (err) { setMsg(err.message); } finally { setBusy(false); }
+  }
+
+  async function resend(a) {
+    try {
+      await api(`/kunden/${kunde.id}/portal-accounts/${a.id}/einladung-neu`, { method: 'POST' });
+      load(); alert('Einladung neu verschickt.');
+    } catch (err) { alert(err.message); }
+  }
+  async function remove(a) {
+    if (!confirm(`Zugang für ${a.email} entfernen?`)) return;
+    try {
+      await api(`/kunden/${kunde.id}/portal-accounts/${a.id}`, { method: 'DELETE' });
+      load();
+    } catch (err) { alert(err.message); }
+  }
+
+  const istAccount = kunde.portal_zugang === 'account';
+  return (
+    <div style={{ marginTop: 12, padding: 12, background: '#fafaf8', border: '1px solid #ececea', borderRadius: 10 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+        <strong style={{ fontSize: 13 }}>🔑 Portal-Zugänge</strong>
+        <span style={{ fontSize: 11, color: '#5a5955' }}>
+          {istAccount ? 'Login mit E-Mail + Passwort aktiv' : 'Nur Token-Link (kein Login)'}
+        </span>
+        <button onClick={toggleMode} className="btn-ghost btn-sm" style={{ marginLeft: 'auto' }}>
+          {istAccount ? 'Auf Nur-Link umstellen' : 'Auf Login umstellen'}
+        </button>
+      </div>
+
+      {istAccount && (
+        <>
+          <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+            {accounts.length === 0 && (
+              <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Noch kein Zugang angelegt.</p>
+            )}
+            {accounts.map(a => (
+              <div key={a.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 10px', background: '#fff', border: '1px solid #ececea', borderRadius: 8, fontSize: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{a.name || a.email}</div>
+                  <div style={{ color: '#5a5955' }}>
+                    {a.email}
+                    {' · '}
+                    {a.passwort_gesetzt_at
+                      ? `zuletzt eingeloggt: ${a.letzter_login ? new Date(a.letzter_login).toLocaleString('de-DE') : '–'}`
+                      : a.einladung_gesendet_at
+                        ? `Einladung geschickt am ${new Date(a.einladung_gesendet_at).toLocaleDateString('de-DE')} — noch kein Passwort gesetzt`
+                        : 'Kein Passwort'}
+                  </div>
+                </div>
+                <button onClick={() => resend(a)} className="btn-ghost btn-sm">Einladung neu</button>
+                <button onClick={() => remove(a)} className="btn-ghost btn-sm btn-danger">×</button>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={create} style={{ display: 'flex', gap: 6 }}>
+            <input placeholder="Name (optional)" value={neu.name}
+              onChange={e => setNeu({ ...neu, name: e.target.value })}
+              style={{ flex: 1, padding: '6px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 12 }} />
+            <input type="email" placeholder="E-Mail-Adresse" value={neu.email}
+              onChange={e => setNeu({ ...neu, email: e.target.value })}
+              style={{ flex: 2, padding: '6px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 12 }} />
+            <button type="submit" disabled={busy || !neu.email.trim()} className="btn-primary btn-sm">
+              {busy ? '…' : '+ Einladen'}
+            </button>
+          </form>
+          {msg && <div style={{ color: '#c1272d', fontSize: 12, marginTop: 6 }}>{msg}</div>}
+        </>
+      )}
     </div>
   );
 }

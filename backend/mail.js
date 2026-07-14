@@ -975,6 +975,57 @@ export async function sendTerminEinladung({
   return await response.json();
 }
 
+/* ════════════════════ Portal-Einladung — Kunden-Mail ════════════════════
+   Erste Einrichtung eines Portal-Accounts: der Kunde bekommt einen Link
+   mit Einladungs-Token, ueber den er sein Passwort setzt. Danach kann er
+   sich mit E-Mail + Passwort einloggen. */
+export async function sendPortalEinladung({ to, name, portalUrl, setupUrl, kundenname, agentur }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agentur);
+  const gruss = name || 'zusammen';
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔑 Dein Zugang zum Kunden-Dashboard</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">
+        wir haben für dich bei <strong>${escape(kundenname || '')}</strong> einen Zugang zum Kampagnen-Dashboard eingerichtet. Dort siehst du alle Leads, kannst Notizen hinzufügen und die Pipeline pflegen.
+      </p>
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">
+        Klick auf den Button unten, um dein Passwort zu setzen. Danach kannst du dich jederzeit mit deiner E-Mail-Adresse (<code>${escape(to)}</code>) und deinem Passwort einloggen.
+      </p>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(setupUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Passwort setzen &amp; loslegen</a>
+      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Dieser Link ist einmalig gültig.</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Später-Zugang: <a href="${escape(portalUrl)}">${escape(portalUrl)}</a></p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `Hallo ${gruss},\n\nwir haben für dich einen Zugang zum Kampagnen-Dashboard eingerichtet.\n\nPasswort setzen: ${setupUrl}\n\nSpaeter kannst du dich jederzeit mit deiner E-Mail-Adresse (${to}) und deinem Passwort einloggen.\n\nDein ${brand.name}-Team`;
+
+  const recipients = Array.isArray(to) ? to : [to];
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getMailReplyTo(brand),
+      subject: `Dein Zugang zum ${brand.name}-Portal`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, customText }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);

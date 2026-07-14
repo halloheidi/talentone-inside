@@ -886,4 +886,119 @@ router.post('/:id/anfrage', async (req, res) => {
   }
 });
 
+/* ═══════════ Portal-Accounts (echter Login pro Kunde) ═══════════ */
+
+// GET /api/kunden/:id/portal-accounts — Liste (ohne Passwort-Hash)
+router.get('/:id/portal-accounts', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_portal_accounts')
+    .select('id, email, name, einladung_gesendet_at, passwort_gesetzt_at, letzter_login, aktiv, created_at')
+    .eq('kunde_id', req.params.id).order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ accounts: data || [] });
+});
+
+// POST /api/kunden/:id/portal-accounts  body: { email, name }
+// Legt Account an + generiert Einladungs-Token + schickt Einladungs-Mail.
+router.post('/:id/portal-accounts', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const name = String(req.body?.name || '').trim() || null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Gültige E-Mail-Adresse erforderlich.' });
+  }
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, agentur, portal_token, portal_zugang').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  const { data: account, error } = await supabase.from('talentone_portal_accounts').insert({
+    kunde_id: kunde.id, email, name,
+  }).select().single();
+  if (error) {
+    if (String(error.message || '').includes('duplicate')) {
+      return res.status(409).json({ error: 'Für diese E-Mail existiert bereits ein Account.' });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+
+  // Wenn Portal-Zugang noch auf 'link' steht: automatisch auf 'account' umstellen
+  if (kunde.portal_zugang !== 'account') {
+    await supabase.from('talentone_kunden').update({ portal_zugang: 'account' }).eq('id', kunde.id);
+  }
+
+  // Einladungs-Mail — best-effort
+  try {
+    const { getPublicBaseUrl } = await import('../branding.js');
+    const { sendPortalEinladung } = await import('../mail.js');
+    const portalUrl = `${getPublicBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`;
+    const setupUrl = `${portalUrl}?einladung=${account.einladungs_token}`;
+    await sendPortalEinladung({
+      to: email, name, portalUrl, setupUrl,
+      kundenname: kunde.firmenname, agentur: kunde.agentur,
+    });
+    await supabase.from('talentone_portal_accounts')
+      .update({ einladung_gesendet_at: new Date().toISOString() }).eq('id', account.id);
+  } catch (err) {
+    console.warn('[portal-account/create] Mail:', err.message);
+  }
+
+  res.status(201).json({
+    account: { id: account.id, email: account.email, name: account.name },
+  });
+});
+
+// POST /api/kunden/:id/portal-accounts/:accId/einladung-neu — Einladung neu senden
+router.post('/:id/portal-accounts/:accId/einladung-neu', async (req, res) => {
+  const { data: account } = await supabase.from('talentone_portal_accounts')
+    .select('*').eq('id', req.params.accId).eq('kunde_id', req.params.id).maybeSingle();
+  if (!account) return res.status(404).json({ error: 'Account nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, agentur, portal_token').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  // Neuen Einladungs-Token generieren + Passwort loeschen (falls schon gesetzt)
+  const { randomUUID } = await import('node:crypto');
+  const neuerToken = randomUUID();
+  await supabase.from('talentone_portal_accounts').update({
+    einladungs_token: neuerToken,
+    password_hash: null,
+    passwort_gesetzt_at: null,
+  }).eq('id', account.id);
+
+  try {
+    const { getPublicBaseUrl } = await import('../branding.js');
+    const { sendPortalEinladung } = await import('../mail.js');
+    const portalUrl = `${getPublicBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`;
+    const setupUrl = `${portalUrl}?einladung=${neuerToken}`;
+    await sendPortalEinladung({
+      to: account.email, name: account.name, portalUrl, setupUrl,
+      kundenname: kunde.firmenname, agentur: kunde.agentur,
+    });
+    await supabase.from('talentone_portal_accounts')
+      .update({ einladung_gesendet_at: new Date().toISOString() }).eq('id', account.id);
+  } catch (err) {
+    return res.status(503).json({ error: `Mail-Versand fehlgeschlagen: ${err.message}` });
+  }
+  res.json({ ok: true });
+});
+
+// DELETE /api/kunden/:id/portal-accounts/:accId
+router.delete('/:id/portal-accounts/:accId', async (req, res) => {
+  const { error } = await supabase.from('talentone_portal_accounts')
+    .delete().eq('id', req.params.accId).eq('kunde_id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// PATCH /api/kunden/:id/portal-zugang  body: { modus: 'link' | 'account' }
+router.patch('/:id/portal-zugang', async (req, res) => {
+  const modus = String(req.body?.modus || '').trim();
+  if (!['link', 'account'].includes(modus)) {
+    return res.status(400).json({ error: 'modus muss "link" oder "account" sein.' });
+  }
+  const { data, error } = await supabase.from('talentone_kunden')
+    .update({ portal_zugang: modus }).eq('id', req.params.id)
+    .select('id, portal_zugang').single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ kunde: data });
+});
+
 export default router;

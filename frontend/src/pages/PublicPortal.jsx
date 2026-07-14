@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -11,27 +11,49 @@ const BRAND = {
 
 async function api(path, init = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Fehler');
-  return res.json();
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(body.error || 'Fehler');
+    err.status = res.status; err.body = body;
+    throw err;
+  }
+  return body;
 }
 
 export default function PublicPortal() {
   const { token } = useParams();
+  const [search, setSearch] = useSearchParams();
+  const einladungsToken = search.get('einladung');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [activeJobId, setActiveJobId] = useState(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
 
-  useEffect(() => {
-    api(`/public/portal/${token}`).then(setData).catch(e => setError(e.message));
-  }, [token]);
+  async function load() {
+    try {
+      const res = await api(`/public/portal/${token}`);
+      setData(res); setNeedsLogin(false); setError('');
+    } catch (err) {
+      if (err.status === 401) { setNeedsLogin(true); setData(null); setError(''); }
+      else setError(err.message);
+    }
+  }
 
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
   useEffect(() => {
     if (data?.jobs?.length && !activeJobId) setActiveJobId(data.jobs[0].id);
   }, [data, activeJobId]);
 
+  // Wenn Einladungs-Token in der URL: Setup-Modus zeigen (unabhaengig von needsLogin)
+  if (einladungsToken) {
+    return <PasswortSetzen token={token} einladung={einladungsToken}
+      onDone={() => { setSearch({}); load(); }} />;
+  }
+  if (needsLogin) return <LoginForm token={token} onLogin={load} />;
   if (error) return <FullMsg text={error} />;
   if (!data) return <FullMsg text="Lade dein Dashboard…" />;
 
@@ -57,6 +79,15 @@ export default function PublicPortal() {
           <div>Dein Kampagnen-Dashboard</div>
           <div>Live-Daten · aktualisiert vor wenigen Sekunden</div>
         </div>
+        <button
+          onClick={async () => {
+            try { await api(`/public/portal/${token}/logout`, { method: 'POST' }); } catch {}
+            setData(null); setNeedsLogin(true);
+          }}
+          style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
+                   padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+          title="Abmelden"
+        >Abmelden</button>
       </header>
 
       {data.jobs.length > 1 && (
@@ -100,6 +131,89 @@ export default function PublicPortal() {
 
 function FullMsg({ text }) {
   return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', fontFamily: '-apple-system, sans-serif' }}>{text}</div>;
+}
+
+function AuthCard({ title, subtitle, children }) {
+  return (
+    <div style={{ minHeight: '100vh', background: '#f7f6f2', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: '-apple-system, sans-serif' }}>
+      <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: 420, maxWidth: '100%', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <h1 style={{ margin: '0 0 6px', fontSize: 22 }}>{title}</h1>
+        {subtitle && <p style={{ color: '#5a5955', margin: '0 0 20px', fontSize: 14 }}>{subtitle}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LoginForm({ token, onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setMsg('');
+    try {
+      await api(`/public/portal/${token}/login`, {
+        method: 'POST', body: JSON.stringify({ email, password }),
+      });
+      onLogin();
+    } catch (err) { setMsg(err.message); } finally { setBusy(false); }
+  }
+  return (
+    <AuthCard title="🔑 Anmeldung Kunden-Portal" subtitle="Melde dich mit deiner E-Mail-Adresse und deinem Passwort an.">
+      <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
+        <input type="email" required placeholder="E-Mail" value={email} onChange={e => setEmail(e.target.value)}
+          autoFocus style={{ padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14 }} />
+        <input type="password" required placeholder="Passwort" value={password} onChange={e => setPassword(e.target.value)}
+          style={{ padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14 }} />
+        {msg && <div style={{ color: '#c1272d', fontSize: 13 }}>{msg}</div>}
+        <button type="submit" disabled={busy || !email || !password}
+          style={{ background: '#0a0a0a', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+          {busy ? 'Prüfe…' : 'Anmelden'}
+        </button>
+        <p style={{ fontSize: 12, color: '#5a5955', margin: 0 }}>
+          Kein Zugang? Frag dein Team, es kann eine Einladung schicken.
+        </p>
+      </form>
+    </AuthCard>
+  );
+}
+
+function PasswortSetzen({ token, einladung, onDone }) {
+  const [pwd1, setPwd1] = useState('');
+  const [pwd2, setPwd2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  async function submit(e) {
+    e.preventDefault();
+    if (pwd1.length < 8) { setMsg('Mindestens 8 Zeichen.'); return; }
+    if (pwd1 !== pwd2) { setMsg('Passwörter stimmen nicht überein.'); return; }
+    setBusy(true); setMsg('');
+    try {
+      await api(`/public/portal/${token}/passwort-setzen`, {
+        method: 'POST', body: JSON.stringify({ einladungs_token: einladung, password: pwd1 }),
+      });
+      onDone();
+    } catch (err) { setMsg(err.message); } finally { setBusy(false); }
+  }
+  return (
+    <AuthCard title="🔑 Passwort setzen" subtitle="Willkommen! Setz dir ein Passwort — danach bist du direkt eingeloggt.">
+      <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
+        <input type="password" required placeholder="Neues Passwort (min. 8 Zeichen)"
+          value={pwd1} onChange={e => setPwd1(e.target.value)} autoFocus
+          style={{ padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14 }} />
+        <input type="password" required placeholder="Passwort wiederholen"
+          value={pwd2} onChange={e => setPwd2(e.target.value)}
+          style={{ padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14 }} />
+        {msg && <div style={{ color: '#c1272d', fontSize: 13 }}>{msg}</div>}
+        <button type="submit" disabled={busy || !pwd1 || !pwd2}
+          style={{ background: '#0a0a0a', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+          {busy ? 'Speichere…' : 'Passwort setzen & einloggen'}
+        </button>
+      </form>
+    </AuthCard>
+  );
 }
 
 /* ══════════════════════ JobBlock ══════════════════════ */
