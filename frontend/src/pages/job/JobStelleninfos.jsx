@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { fileToBase64 } from '../../lib/files.js';
@@ -42,6 +43,14 @@ function reiseFromJob(job, fd) {
 
 export default function JobStelleninfos() {
   const { job, kunde, reload } = useJob();
+  const navigate = useNavigate();
+  async function handleDeleteJob() {
+    if (!confirm(`Projekt "${job.stelle || 'Unbenannt'}" wirklich löschen?\n\nZugehörige Creatives, Ad Copies, Funnel und Bewerbungen werden mitgelöscht. Der Projekt-Eintrag in der Projektübersicht wird ebenfalls entfernt.`)) return;
+    try {
+      await api(`/jobs/${job.id}`, { method: 'DELETE' });
+      navigate(kunde?.id ? `/kunden/${kunde.id}` : '/kunden');
+    } catch (err) { alert('Löschen fehlgeschlagen: ' + err.message); }
+  }
   // Weiche: bei Neukundengewinnung eigene Ansicht „Produkt & Zielgruppe".
   if (job?.projekttyp === 'neukundengewinnung') {
     return <NeukundenProduktTab job={job} kunde={kunde} reload={reload} />;
@@ -496,6 +505,13 @@ export default function JobStelleninfos() {
           {busy ? 'Speichere…' : 'Änderungen speichern'}
         </button>
       </div>
+
+      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #ececea', display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={handleDeleteJob}
+          style={{ background: 'transparent', color: '#c1272d', border: '1px solid #f0c9cb', padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+          🗑 Projekt löschen
+        </button>
+      </div>
     </form>
   );
 }
@@ -542,6 +558,14 @@ function AnalyseView({ analyse }) {
    (Projekte-Liste, Kanban-Karten) mit einer sinnvollen Bezeichnung arbeiten. */
 
 function NeukundenProduktTab({ job, kunde, reload }) {
+  const navigate = useNavigate();
+  async function handleDelete() {
+    if (!confirm(`Projekt "${job.stelle || 'Unbenannt'}" wirklich löschen?\n\nZugehörige Creatives, Ad Copies, Funnel und Bewerbungen/Leads werden mitgelöscht. Der Projekt-Eintrag in der Projektübersicht wird ebenfalls entfernt.`)) return;
+    try {
+      await api(`/jobs/${job.id}`, { method: 'DELETE' });
+      navigate(kunde?.id ? `/kunden/${kunde.id}` : '/kunden');
+    } catch (err) { alert('Löschen fehlgeschlagen: ' + err.message); }
+  }
   const nk = job.neukunden_daten || {};
   const [form, setForm] = useState({
     produkt:       nk.produkt || job.stelle || '',
@@ -672,9 +696,13 @@ function NeukundenProduktTab({ job, kunde, reload }) {
         </label>
       </fieldset>
 
-      <div style={{ marginTop: 14 }}>
+      <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button type="submit" className="btn-primary" disabled={busy || !form.produkt.trim()}>
           {busy ? 'Speichere…' : 'Speichern'}
+        </button>
+        <button type="button" onClick={handleDelete}
+          style={{ background: 'transparent', color: '#c1272d', border: '1px solid #f0c9cb', padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+          🗑 Projekt löschen
         </button>
       </div>
     </form>

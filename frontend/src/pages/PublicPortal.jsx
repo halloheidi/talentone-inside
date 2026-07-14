@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
+import { supabase } from '../lib/supabase.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+
+// Wenn ein interner Mitarbeiter das Portal oeffnet, ist er in Supabase eingeloggt.
+// Wir schicken den Access-Token als Bearer mit, damit das Backend den Kunden-Login
+// ueberspringen kann. Wichtig: fuer echte externe Kunden ist keine Session da.
+async function getStaffBearer() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch { return null; }
+}
 
 const BRAND = {
   talentone:  { name: 'TalentOne',    primary: '#0a0a0a', accent: '#d4ff00', accentInk: '#0a0a0a' },
@@ -10,10 +21,15 @@ const BRAND = {
 };
 
 async function api(path, init = {}) {
+  const bearer = await getStaffBearer();
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      ...(init.headers || {}),
+    },
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -108,7 +124,7 @@ export default function PublicPortal() {
         </nav>
       )}
 
-      <main style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 20px 40px' }}>
+      <main style={{ width: '100%', padding: '20px 24px 40px' }}>
         {activeJob && (
           <JobBlock
             key={activeJob.id}
@@ -462,8 +478,18 @@ function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
   const [status, setStatus] = useState(anfrage.status || '');
   const [notizen, setNotizen] = useState(anfrage.notizen || '');
   const [zustaendiger, setZustaendiger] = useState(anfrage.daten?.zustaendiger || '');
+  const [name, setName] = useState(anfrage.name || '');
+  const [email, setEmail] = useState(anfrage.email || '');
+  const [telefon, setTelefon] = useState(anfrage.telefon || '');
   const [neuerKomm, setNeuerKomm] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Alle daten-Felder ausser "zustaendiger" (dafuer eigenes Feld)
+  const [datenLocal, setDatenLocal] = useState(() => {
+    const d = { ...(anfrage.daten || {}) };
+    delete d.zustaendiger;
+    return d;
+  });
 
   async function save(patch) {
     setSaving(true);
@@ -473,6 +499,22 @@ function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
       });
       onReload();
     } catch (err) { alert(err.message); } finally { setSaving(false); }
+  }
+
+  function saveDatenField(key, value) {
+    setDatenLocal(prev => ({ ...prev, [key]: value }));
+    save({ daten_patch: { [key]: value } });
+  }
+  function removeDatenField(key) {
+    if (!confirm(`Feld "${key}" wirklich entfernen?`)) return;
+    setDatenLocal(prev => { const c = { ...prev }; delete c[key]; return c; });
+    save({ daten_patch: { [key]: '__delete__' } });
+  }
+  function addDatenField() {
+    const key = (prompt('Neuer Feldname (z. B. "Adresse", "Größe der Fläche"):') || '').trim();
+    if (!key) return;
+    if (datenLocal[key] !== undefined) { alert('Feld existiert bereits.'); return; }
+    setDatenLocal(prev => ({ ...prev, [key]: '' }));
   }
   async function addKomm() {
     const text = neuerKomm.trim();
@@ -497,21 +539,15 @@ function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
           Eingegangen {new Date(anfrage.created_at).toLocaleString('de-DE')}
         </p>
 
-        <div style={{ display: 'grid', gap: 8, marginBottom: 14, fontSize: 14 }}>
-          {anfrage.email && <div><strong>E-Mail:</strong> <a href={`mailto:${anfrage.email}`}>{anfrage.email}</a></div>}
-          {anfrage.telefon && <div><strong>Telefon:</strong> <a href={`tel:${anfrage.telefon}`}>{anfrage.telefon}</a></div>}
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', letterSpacing: 0.05, marginBottom: 6 }}>Kontakt</div>
+        <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+          <input placeholder="Name" value={name} onChange={e => setName(e.target.value)}
+            onBlur={() => name !== (anfrage.name || '') && save({ name })} style={inputStyle} />
+          <input type="tel" placeholder="Telefon" value={telefon} onChange={e => setTelefon(e.target.value)}
+            onBlur={() => telefon !== (anfrage.telefon || '') && save({ telefon })} style={inputStyle} />
+          <input type="email" placeholder="E-Mail" value={email} onChange={e => setEmail(e.target.value)}
+            onBlur={() => email !== (anfrage.email || '') && save({ email })} style={inputStyle} />
         </div>
-
-        {anfrage.daten && Object.keys(anfrage.daten).length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', letterSpacing: 0.05, marginBottom: 6 }}>Details</div>
-            <div style={{ display: 'grid', gap: 4, fontSize: 13 }}>
-              {Object.entries(anfrage.daten).filter(([k]) => k !== 'zustaendiger').map(([k, v]) => (
-                <div key={k}><strong style={{ color: '#5a5955' }}>{k}:</strong> {String(v)}</div>
-              ))}
-            </div>
-          </div>
-        )}
 
         <label style={labelStyle}>Status</label>
         <select value={status} onChange={e => { setStatus(e.target.value); save({ status: e.target.value }); }}
@@ -522,6 +558,30 @@ function LeadSlideOver({ anfrage, stufen, token, onClose, onReload }) {
         <label style={labelStyle}>Zuständiger Vertriebler</label>
         <input value={zustaendiger} onChange={e => setZustaendiger(e.target.value)}
           onBlur={() => save({ zustaendiger })} placeholder="Name" style={inputStyle} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 4 }}>
+          <span style={{ ...labelStyle, marginTop: 0, marginBottom: 0, flex: 1 }}>Details</span>
+          <button type="button" onClick={addDatenField}
+            style={{ background: '#fafaf8', border: '1px solid #ececea', padding: '3px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+            + Feld hinzufügen
+          </button>
+        </div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          {Object.keys(datenLocal).length === 0 && (
+            <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Keine zusätzlichen Details. Über „+ Feld hinzufügen" kannst du eigene Felder anlegen (Adresse, Größe, Bundesland, …).</p>
+          )}
+          {Object.entries(datenLocal).map(([k, v]) => (
+            <div key={k} style={{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: 4, alignItems: 'center' }}>
+              <label style={{ fontSize: 11, color: '#5a5955', fontWeight: 600 }} title={k}>{k}</label>
+              <input value={v ?? ''}
+                onChange={e => setDatenLocal(prev => ({ ...prev, [k]: e.target.value }))}
+                onBlur={e => e.target.value !== (anfrage.daten?.[k] ?? '') && saveDatenField(k, e.target.value)}
+                style={{ ...inputStyle, marginBottom: 0 }} />
+              <button type="button" title="Feld entfernen" onClick={() => removeDatenField(k)}
+                style={{ background: 'transparent', border: 'none', color: '#c1272d', fontSize: 15, cursor: 'pointer', width: 24 }}>×</button>
+            </div>
+          ))}
+        </div>
 
         <label style={labelStyle}>Notizen</label>
         <textarea rows={4} value={notizen} onChange={e => setNotizen(e.target.value)}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { fileToBase64, downloadFromUrl } from '../lib/files.js';
+import { getBrandBaseUrl } from '../lib/branding.js';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import Lightbox from '../components/Lightbox.jsx';
@@ -554,18 +555,18 @@ export default function KundeDetail() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, color: '#166534', fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}>Kunden-Dashboard-Link</div>
                     <code style={{ fontSize: 11, color: '#0a0a0a', wordBreak: 'break-all' }}>
-                      {`${window.location.origin}/portal/${kunde.portal_token}`}
+                      {`${getBrandBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`}
                     </code>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      const url = `${window.location.origin}/portal/${kunde.portal_token}`;
+                      const url = `${getBrandBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`;
                       navigator.clipboard.writeText(url).then(() => alert('Portal-Link kopiert'));
                     }}
                     className="btn-ghost btn-sm"
                   >Kopieren</button>
-                  <a href={`/portal/${kunde.portal_token}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">
+                  <a href={`${getBrandBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`} target="_blank" rel="noreferrer" className="btn-ghost btn-sm">
                     Öffnen ↗
                   </a>
                 </div>
@@ -822,16 +823,34 @@ export default function KundeDetail() {
       ) : (
         <div className="grid-cards">
           {jobs.map(j => (
-            <Link key={j.id} to={`/kunden/${kundeId}/jobs/${j.id}`} className="job-card">
-              <div className="job-card-name">{j.stelle || 'Unbenanntes Projekt'}</div>
-              <div className="job-card-meta">
-                {j.region && <span>{j.region}</span>}
-                {j.gehalt && <span>{j.gehalt}</span>}
-              </div>
-              <div className="job-card-foot">
-                Angelegt {new Date(j.created_at).toLocaleDateString('de-DE')}
-              </div>
-            </Link>
+            <div key={j.id} style={{ position: 'relative' }}>
+              <Link to={`/kunden/${kundeId}/jobs/${j.id}`} className="job-card">
+                <div className="job-card-name">{j.stelle || 'Unbenanntes Projekt'}</div>
+                <div className="job-card-meta">
+                  {j.region && <span>{j.region}</span>}
+                  {j.gehalt && <span>{j.gehalt}</span>}
+                </div>
+                <div className="job-card-foot">
+                  Angelegt {new Date(j.created_at).toLocaleDateString('de-DE')}
+                </div>
+              </Link>
+              <button
+                title="Projekt löschen"
+                onClick={async (e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  if (!confirm(`Projekt "${j.stelle || 'Unbenannt'}" wirklich löschen?\n\nZugehörige Creatives, Ad Copies, Funnel und Bewerbungen werden mitgelöscht. Der Projekt-Eintrag in der Projektübersicht wird ebenfalls entfernt.`)) return;
+                  try {
+                    await api(`/jobs/${j.id}`, { method: 'DELETE' });
+                    load();
+                  } catch (err) { alert('Löschen fehlgeschlagen: ' + err.message); }
+                }}
+                style={{
+                  position: 'absolute', top: 8, right: 8, width: 26, height: 26,
+                  borderRadius: 6, border: '1px solid #ececea', background: '#fff',
+                  color: '#c1272d', fontSize: 15, lineHeight: 1, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>×</button>
+            </div>
           ))}
         </div>
       )}

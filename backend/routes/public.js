@@ -978,9 +978,21 @@ async function loadKundeByPortalToken(token) {
 }
 
 // Prueft ob dieser Zugriff auf das Portal berechtigt ist. Bei portal_zugang=link
-// reicht der Token; bei 'account' braucht es einen gueltigen Session-Cookie.
+// reicht der Token; bei 'account' braucht es einen gueltigen Session-Cookie
+// ODER eine gueltige interne Mitarbeiter-Session (Supabase-Bearer-Token).
 async function requirePortalAccess(kunde, req) {
   if (kunde.portal_zugang !== 'account') return { ok: true, session: null };
+
+  // 1) Interner Mitarbeiter: gueltiger Bearer-Token in Authorization-Header
+  const auth = req.headers?.authorization || '';
+  if (auth.startsWith('Bearer ')) {
+    try {
+      const { data } = await supabase.auth.getUser(auth.slice(7));
+      if (data?.user) return { ok: true, session: { staff: true, email: data.user.email } };
+    } catch {}
+  }
+
+  // 2) Externer Kunde: Session-Cookie
   const { readSessionCookie } = await import('../portal-auth.js');
   const session = readSessionCookie(req, kunde.id);
   if (!session || session.kunde_id !== kunde.id) {
@@ -1063,6 +1075,19 @@ router.get('/portal/:token/whoami', async (req, res) => {
   const kunde = await loadKundeByPortalToken(req.params.token);
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
   if (kunde.portal_zugang !== 'account') return res.json({ mode: 'link' });
+
+  // Mitarbeiter-Bypass: gueltiger Supabase-Bearer-Token durchreichen als "staff"
+  const auth = req.headers?.authorization || '';
+  if (auth.startsWith('Bearer ')) {
+    try {
+      const { data } = await supabase.auth.getUser(auth.slice(7));
+      if (data?.user) {
+        return res.json({ mode: 'account', signed_in: true, staff: true,
+          account: { email: data.user.email, name: data.user.user_metadata?.name || null } });
+      }
+    } catch {}
+  }
+
   const { readSessionCookie } = await import('../portal-auth.js');
   const s = readSessionCookie(req, kunde.id);
   res.json({ mode: 'account', signed_in: !!s, account: s ? { email: s.email, name: s.name } : null });
@@ -1177,12 +1202,26 @@ router.patch('/portal/:token/anfrage/:id', async (req, res) => {
   const patch = {};
   if (req.body?.status !== undefined) patch.status = String(req.body.status);
   if (req.body?.notizen !== undefined) patch.notizen = req.body.notizen == null ? null : String(req.body.notizen);
-  if (req.body?.zustaendiger !== undefined) {
-    // In daten jsonb schreiben
+  if (req.body?.name !== undefined) patch.name = req.body.name == null ? null : String(req.body.name);
+  if (req.body?.email !== undefined) patch.email = req.body.email == null ? null : String(req.body.email);
+  if (req.body?.telefon !== undefined) patch.telefon = req.body.telefon == null ? null : String(req.body.telefon);
+
+  // Beliebige daten-Felder aktualisieren: entweder gezielt (body.daten_patch) oder Zustaendiger.
+  const datenPatch = req.body?.daten_patch && typeof req.body.daten_patch === 'object' ? req.body.daten_patch : null;
+  const wantsZustaendiger = req.body?.zustaendiger !== undefined;
+  if (datenPatch || wantsZustaendiger) {
     const { data: current } = await supabase.from('talentone_anfragen')
       .select('daten').eq('id', anfrage.id).maybeSingle();
-    const daten = current?.daten || {};
-    daten.zustaendiger = req.body.zustaendiger || null;
+    const daten = { ...(current?.daten || {}) };
+    if (datenPatch) {
+      for (const [k, v] of Object.entries(datenPatch)) {
+        const key = String(k).trim();
+        if (!key) continue;
+        if (v === null || v === '__delete__') delete daten[key];
+        else daten[key] = typeof v === 'string' ? v : String(v);
+      }
+    }
+    if (wantsZustaendiger) daten.zustaendiger = req.body.zustaendiger || null;
     patch.daten = daten;
   }
   patch.updated_at = new Date().toISOString();

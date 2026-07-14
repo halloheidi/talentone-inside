@@ -224,7 +224,32 @@ router.patch('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const { error } = await supabase.from('talentone_jobs').delete().eq('id', req.params.id);
+  const jobId = req.params.id;
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id, stelle').eq('id', jobId).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+  // Storage-Dateien der Creatives einsammeln (best-effort — Löschen darf schiefgehen).
+  try {
+    const { deleteFromBucket } = await import('../storage.js');
+    const { data: creatives } = await supabase.from('talentone_creatives')
+      .select('image_url, video_url').eq('job_id', jobId);
+    for (const c of creatives || []) {
+      if (c.image_url) await deleteFromBucket('creatives', c.image_url).catch(() => {});
+      if (c.video_url) await deleteFromBucket('creatives', c.video_url).catch(() => {});
+    }
+  } catch (e) { console.warn('[jobs/delete] storage cleanup failed:', e.message); }
+
+  // Bewerbungen haben FK ON DELETE SET NULL — Kundenwunsch: mitlöschen.
+  await supabase.from('talentone_bewerbungen').delete().eq('job_id', jobId);
+
+  // Zugehöriges Projekt in talentone_projekte finden (Match kunde_id + Stelle) + löschen.
+  if (job.kunde_id && job.stelle) {
+    await supabase.from('talentone_projekte').delete()
+      .eq('kunde_id', job.kunde_id).eq('projekt', job.stelle);
+  }
+
+  const { error } = await supabase.from('talentone_jobs').delete().eq('id', jobId);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
