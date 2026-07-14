@@ -46,6 +46,10 @@ function GlobalNav({ isAdmin }) {
             <Icon name="users" />
             <span>Angebots-Katalog</span>
           </NavLink>
+          <NavLink to="/admin/stilvorlagen" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+            <Icon name="users" />
+            <span>🎨 Stilvorlagen</span>
+          </NavLink>
         </>
       )}
     </nav>

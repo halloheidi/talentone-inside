@@ -228,7 +228,7 @@ router.post('/spruch-verbessern', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id } = req.body || {};
   console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten} spruch="${(spruch||'').slice(0,40)}"`);
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
@@ -261,6 +261,19 @@ router.post('/generate', async (req, res) => {
     return res.status(404).json({ error: 'Hintergrund-Foto nicht gefunden.' });
   }
 
+  // Stilvorlage laden (optional). Wenn keine gewählt: default = "Job-Block unten"
+  // (die erste aktive nach reihenfolge). Fallback = null → alter Standard-Prompt.
+  let stilvorlage = null;
+  if (stilvorlage_id) {
+    const { data } = await supabase.from('talentone_stilvorlagen')
+      .select('*').eq('id', stilvorlage_id).maybeSingle();
+    stilvorlage = data || null;
+  } else {
+    const { data } = await supabase.from('talentone_stilvorlagen')
+      .select('*').eq('aktiv', true).order('reihenfolge', { ascending: true }).limit(1).maybeSingle();
+    stilvorlage = data || null;
+  }
+
   const expected = n * 2; // jede Variante × 2 Formate
   // Alte Fehlermeldung clearen damit das Frontend nicht den Fehler vom letzten Run sieht
   clearGenError(job_id);
@@ -272,7 +285,7 @@ router.post('/generate', async (req, res) => {
     console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
@@ -283,6 +296,7 @@ router.post('/generate', async (req, res) => {
           job_id, format, typ: 'bild', bild_url: bildUrl,
           bild_ohne_logo_url: bildOhneLogoUrl || null,
           prompt, status: 'fertig',
+          stilvorlage_id: stilvorlage?.id || null,
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
         if (insErr) {
@@ -309,7 +323,7 @@ router.post('/generate', async (req, res) => {
    body: { motiv?, mode='ki'|'foto', personenfoto_id?, foto_id? }
    Altes Creative löschen + neu im selben Format. */
 router.post('/:id/regenerate', async (req, res) => {
-  const { motiv, mode = 'ki', personenfoto_id, foto_id } = req.body || {};
+  const { motiv, mode = 'ki', personenfoto_id, foto_id, stilvorlage_id } = req.body || {};
   if (!['ki', 'foto'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki" oder "foto" sein.' });
   if (mode === 'ki' && !motiv?.trim()) return res.status(400).json({ error: 'motiv ist Pflicht in Modus "ki".' });
   if (mode === 'foto' && !foto_id) return res.status(400).json({ error: 'foto_id ist Pflicht in Modus "foto".' });
@@ -336,9 +350,18 @@ router.post('/:id/regenerate', async (req, res) => {
       return res.status(404).json({ error: 'Hintergrund-Foto nicht gefunden.' });
     }
 
+    // Stilvorlage: explizit gewaehlt > vorherige des Creatives > NULL
+    const vorlageId = stilvorlage_id !== undefined ? stilvorlage_id : existing.stilvorlage_id;
+    let stilvorlage = null;
+    if (vorlageId) {
+      const { data } = await supabase.from('talentone_stilvorlagen')
+        .select('*').eq('id', vorlageId).maybeSingle();
+      stilvorlage = data || null;
+    }
+
     const { generateOneCreative } = await import('../imagegen.js');
     const result = await generateOneCreative({
-      job, kunde, motiv, mode, format: existing.format, referenceImages,
+      job, kunde, motiv, mode, format: existing.format, referenceImages, stilvorlage,
     });
 
     // Erst neues Creative anlegen, dann altes löschen (Storage + DB)
@@ -352,6 +375,7 @@ router.post('/:id/regenerate', async (req, res) => {
         bild_ohne_logo_url: result.bildOhneLogoUrl || null,
         prompt: result.prompt,
         status: 'fertig',
+        stilvorlage_id: stilvorlage?.id || null,
       })
       .select()
       .single();

@@ -40,6 +40,10 @@ export default function JobCreatives() {
   const logoInputRef = useRef(null);
   const [showCreativeUpload, setShowCreativeUpload] = useState(false);
 
+  // Stilvorlagen
+  const [stilvorlagen, setStilvorlagen] = useState([]);
+  const [stilvorlageId, setStilvorlageId] = useState(null);
+
   // Generation
   const [varianten, setVarianten] = useState(1);
   const [generating, setGenerating] = useState(false);
@@ -142,6 +146,18 @@ export default function JobCreatives() {
       .finally(() => setLoadingGalerie(false));
   }
   useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id, showArchived]);
+
+  // Stilvorlagen einmalig laden
+  useEffect(() => {
+    api('/stilvorlagen')
+      .then(res => {
+        const list = res.stilvorlagen || [];
+        setStilvorlagen(list);
+        if (list.length && !stilvorlageId) setStilvorlageId(list[0].id);
+      })
+      .catch(() => setStilvorlagen([]));
+    // eslint-disable-next-line
+  }, []);
 
   /* ───── Kunden-Kommentare aus Review laden ───── */
   const [reviewKommentare, setReviewKommentare] = useState({}); // { 'creative_<id>': text, ... }
@@ -346,8 +362,8 @@ export default function JobCreatives() {
     try {
       const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch }
-        : { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch };
+        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined }
+        : { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
       setExpected(exp);
@@ -716,6 +732,53 @@ export default function JobCreatives() {
           />
         </div>
       </section>
+
+      {/* ───────── Stil-Auswahl (Vorlagen) ───────── */}
+      {stilvorlagen.length > 0 && (
+        <section className="card-form" style={{ marginTop: 18 }}>
+          <div className="form-section-title" style={{ marginBottom: 8 }}>Stil-Vorlage</div>
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', padding: '4px 2px 8px' }}>
+            {stilvorlagen.map(v => {
+              const aktiv = stilvorlageId === v.id;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setStilvorlageId(v.id)}
+                  title={v.beschreibung || v.name}
+                  style={{
+                    flex: '0 0 180px',
+                    border: aktiv ? '2px solid var(--accent, #16a34a)' : '1px solid var(--line)',
+                    borderRadius: 10,
+                    background: aktiv ? '#f0fdf4' : '#fff',
+                    padding: 0, cursor: 'pointer',
+                    textAlign: 'left', overflow: 'hidden',
+                    display: 'flex', flexDirection: 'column',
+                  }}
+                >
+                  <div style={{
+                    aspectRatio: '1/1', background: '#f4f3f0',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#9a9994', fontSize: 32,
+                  }}>
+                    {v.vorschau_url
+                      ? <img src={v.vorschau_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : '🎨'}
+                  </div>
+                  <div style={{ padding: '8px 10px' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{v.name}</div>
+                    {v.beschreibung && (
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 3, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {v.beschreibung}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ───────── Generate-Bar ───────── */}
       <section className="card-form" style={{ marginTop: 18 }}>

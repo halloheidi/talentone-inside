@@ -245,6 +245,49 @@ function cleanOrt(region) {
  * Baut den FESTEN unteren Job-Block — gleiches Layout bei jedem Creative,
  * unser Wiedererkennungsmerkmal. Wird in beide Prompts (KI + Foto) eingesetzt.
  */
+/**
+ * Rendert den layout_prompt einer Stilvorlage mit den job-spezifischen
+ * Werten. Ersetzt Platzhalter der Form {schluessel} — unbekannte bleiben
+ * unangetastet, damit User-Fehler nicht die ganze Generierung sprengen.
+ */
+export function renderLayoutPrompt(template, ctx) {
+  if (!template) return '';
+  return String(template).replace(/\{(\w+)\}/g, (m, key) =>
+    Object.prototype.hasOwnProperty.call(ctx, key) ? String(ctx[key] ?? '') : m
+  );
+}
+
+function buildLayoutCtx({ job, kunde, hasLogo, spruch }) {
+  const firmenname = kunde?.firmenname || '';
+  const benefits = pickBenefits(job);
+  const benefitsListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
+  const farbenHinweis = buildFarbenHinweis(kunde);
+  const hatFarben = !!farbenHinweis;
+  const stelleGross = stelleClean(job.stelle).toUpperCase();
+  const metaLeiste = buildMetaLeiste(job);
+  const hookAnweisung = spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden — nutze GENAU diese Wörter. Mehrzeilig OK (2-3 Wörter pro Zeile)`
+    : `Kurzer, emotionaler Recruiting-Spruch (max. 5-6 Wörter, 2-3 Wörter pro Zeile). KEIN "Wir suchen dich"-Klischee`;
+  const logoPlatzierung = hasLogo
+    ? 'LOGO wird NACHTRÄGLICH per Code oben rechts eingefügt — den Bereich oben rechts (ca. 22% Breite × 18% Höhe) VÖLLIG FREI halten, kein Firmenname-Text im Bild'
+    : `FIRMENNAME-SCHRIFTZUG dezent oben: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element`;
+
+  return {
+    stelle_gross:                             stelleGross,
+    meta_leiste:                              metaLeiste,
+    benefits_liste:                           benefitsListe,
+    firmenname,
+    hook_anweisung:                           hookAnweisung,
+    logo_platzierung:                         logoPlatzierung,
+    meta_leiste_farbe_hinweis:                hatFarben
+      ? 'der Markenfarbe als Hintergrund (kontrastreich)' : 'dunklem Hintergrund (#0a0a0a)',
+    stellenbereich_farb_hinweis:              hatFarben
+      ? 'in Markenfarbe als Hintergrund mit weißer/kontrastreicher Schrift' : 'in einer kräftigen Akzentfarbe (lime/orange/türkis) mit dunkler Schrift',
+    stellenbereich_farb_hinweis_alternative:  hatFarben
+      ? 'in Markenfarbe oder Anthrazit' : 'in Anthrazit',
+  };
+}
+
 function buildFixerJobBlock({ stelleGross, metaLeiste, farben, slogan }) {
   return `═══════════════════════════════════════════════════════════════
 FESTER UNTERER JOB-BLOCK (PFLICHT — IMMER GLEICHER AUFBAU, ca. unteres Drittel der Bildhöhe):
@@ -273,7 +316,7 @@ Der untere Job-Block ist optisch klar vom oberen Bild abgegrenzt (entweder durch
 }
 
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
-function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
+function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
@@ -299,21 +342,11 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch }) {
 
   const stelleGross = stelleClean(job.stelle).toUpperCase();
   const metaLeiste = buildMetaLeiste(job);
-  const fbJobBlock = buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben });
 
-  return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur (Pinselstrich-/Spritzer-Elemente in Markenfarbe als gestalterisches Mittel).
-
-${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
-${motiv}
-- Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
-- Branche: ${branche}
-- Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
-
-═══════════════════════════════════════════════════════════════
-WICHTIG: DAS LAYOUT BESTEHT AUS 2 BEREICHEN — FESTER UNTERER BEREICH (Job-Block) + FLEXIBLER OBERER BEREICH
-═══════════════════════════════════════════════════════════════
-
-${fbJobBlock}
+  // Layout-Block: entweder aus Stilvorlage rendern, sonst Default (Job-Block unten)
+  const layoutBlock = stilvorlage?.layout_prompt
+    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch }))
+    : `${buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben })}
 
 ═══════════════════════════════════════════════════════════════
 FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung darfst du variieren):
@@ -333,19 +366,28 @@ FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung 
     : `FIRMENNAME-SCHRIFTZUG dezent oben oder im Header-Bereich: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element.`}
 
 • Person/Hauptmotiv-Anordnung frei (links, rechts, mittig, ggf. freigestellt)
-• Pinselstrich- oder Farbspritzer-Elemente in Markenfarbe als gestalterische Akzente (organisch, nicht überladen)
+• Pinselstrich- oder Farbspritzer-Elemente in Markenfarbe als gestalterische Akzente (organisch, nicht überladen)`;
+
+  return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur.
+
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
+${motiv}
+- Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
+- Branche: ${branche}
+- Authentisch, Person(en) selbstbewusst und zufrieden — keine gestellten Stock-Fotos${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur in dieser Szene.' : ''}
+
+${layoutBlock}
 
 DESIGN-REGELN:
-- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
-- ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot) und nutze sie für Pinselstriche, Meta-Leiste und Stellen-Bereich.'}
+- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
+- ${farben ? 'Markenfarben konsequent.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot).'}
 - Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine QR-Codes, keine Rahmen ums ganze Bild
-- Stil: hochwertige Recruiting-Agentur-Anzeige (nicht Stock-Foto-Klischee)
 - Muss auf dem Handy sofort ins Auge springen und Scroll-Stop erzeugen`;
 }
 
 // Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
-function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
+function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const firmenname = kunde?.firmenname || '';
@@ -362,37 +404,34 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch }) {
 
   const stelleGross = stelleClean(job.stelle).toUpperCase();
   const metaLeiste = buildMetaLeiste(job);
-  const fbJobBlock = buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben });
 
-  return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im Stil einer hochwertigen Recruiting-Agentur (Pinselstrich-/Spritzer-Elemente in Markenfarbe als gestalterisches Mittel).
-
-${refLines}
-
-${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
-
-═══════════════════════════════════════════════════════════════
-WICHTIG: DAS OVERLAY HAT 2 BEREICHE — FESTER UNTERER BEREICH (Job-Block) + FLEXIBLER OBERER BEREICH
-═══════════════════════════════════════════════════════════════
-
-${fbJobBlock}
+  const layoutBlock = stilvorlage?.layout_prompt
+    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch }))
+    : `${buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben })}
 
 ═══════════════════════════════════════════════════════════════
 FLEXIBLER BEREICH OBEN (ca. obere 65% — du wählst Stil & Anordnung der Overlay-Elemente):
 ═══════════════════════════════════════════════════════════════
 
-• HOOK / HAUPTSPRUCH (Position frei — z.B. im oberen Drittel oder mittig):
-  ${spruch?.trim()
-    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden — nutze GENAU diese Wörter. GROSS, fett, sofort fesselnd; gerne auf einem PINSELSTRICH-Banner in Markenfarbe gesetzt (ungleichmäßige Kanten).`
-    : 'Kurzer Recruiting-Spruch (max. 5-6 Wörter, 2-3 Wörter pro Zeile). Setze ihn gerne auf einen PINSELSTRICH-Banner in Markenfarbe. KEIN "Wir suchen dich"-Klischee.'}
+• HOOK / HAUPTSPRUCH: ${spruch?.trim()
+    ? `Verwende EXAKT diesen Wortlaut: "${spruch.trim()}". KEINEN eigenen Spruch erfinden — nutze GENAU diese Wörter. GROSS, fett, sofort fesselnd.`
+    : 'Kurzer Recruiting-Spruch (max. 5-6 Wörter). KEIN "Wir suchen dich"-Klischee.'}
 
-• BENEFIT-BADGES (Position frei): 3-4 RUNDE Icon-Badges (Kreise, ca. 60-90px Durchmesser) mit Icon + kurzer Beschriftung: ${benefitListe}
-  Kompakte Begriffe wie "Firmenwagen", "Tankkarte", "30 Tage Urlaub". Anordnung frei.
+• BENEFIT-BADGES: 3-4 RUNDE Icon-Badges (Kreise, ca. 60-90px) mit Icon + kurzer Beschriftung: ${benefitListe}
 
 • ${hasLogo
-    ? `LOGO wird NACHTRÄGLICH oben rechts als Overlay eingefügt — der Bereich oben rechts (ca. 22% Breite × 15% Höhe, mit Abstand zum Rand) bleibt VÖLLIG FREI. Zeichne dort NICHTS: kein Logo, kein Signet, kein Firmenname-Text, keine Marken-Grafik. Falls das Hintergrundfoto in diesem Bereich Bildinhalt hat, den Bereich mit einem dezenten dunklen Verlauf abdunkeln — sonst nichts.`
+    ? `LOGO wird NACHTRÄGLICH oben rechts als Overlay eingefügt — der Bereich oben rechts (ca. 22% Breite × 15% Höhe) bleibt VÖLLIG FREI. Zeichne dort NICHTS.`
     : `FIRMENNAME-SCHRIFTZUG dezent oben: "${firmenname}" als sauberer Text-Schriftzug, klein. KEIN Logo-Element.`}
 
-• Pinselstrich- oder Farbspritzer-Akzente in Markenfarbe (organisch, nicht überladen)
+• Pinselstrich- oder Farbspritzer-Akzente in Markenfarbe (organisch, nicht überladen)`;
+
+  return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im Stil einer hochwertigen Recruiting-Agentur.
+
+${refLines}
+
+${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
+
+${layoutBlock}
 
 DESIGN-REGELN:
 - HIERARCHIE der Größen: STELLENBEZEICHNUNG (formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
@@ -407,12 +446,12 @@ DESIGN-REGELN:
 // Wrapper — wählt den passenden Prompt anhand des Projekttyps und Modus.
 // Projekttyp „neukundengewinnung" → Lead-Gen-Layout (Produkt/Ergebnis im Fokus,
 // CTA „Kostenloses Angebot", keine Stellenbezeichnung). Sonst Recruiting.
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch }) {
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage }) {
   if (job?.projekttyp === 'neukundengewinnung') {
     return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
   }
-  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch });
-  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch });
+  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage });
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage });
 }
 
 // Prompt für Neukundengewinnung (Lead-Gen-Ad).
@@ -561,7 +600,7 @@ function bufferToFile(buf, name, type) {
 //   mode='ki'   → komplett neu generieren (optional mit Person als Vorlage)
 //   mode='foto' → Foto als Hintergrund übernehmen, nur Overlay (Foto MUSS in referenceImages enthalten sein)
 // referenceImages-Reihenfolge: Logo (isLogo:true) IMMER zuerst falls vorhanden, dann Person/Foto.
-export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch }) {
+export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch, stilvorlage }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
@@ -572,7 +611,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const refs = await loadReferenceImages(referenceImages);
   const hasLogo = !!referenceImages[0]?.isLogo;
   const person = referenceImages.find(r => !r.isLogo) || null;
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage });
 
   let response;
   if (refs.length > 0) {
@@ -687,10 +726,10 @@ async function ensureTransparentLogo(kunde, originalLogoBuffer) {
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch }) {
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage }) {
   const formats = ['quadrat', 'story'];
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
