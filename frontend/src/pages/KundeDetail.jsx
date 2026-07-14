@@ -8,6 +8,7 @@ import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
+import { ItemBadge } from '../components/NaechsterSchrittBadge.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
 import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
 
@@ -106,6 +107,7 @@ export default function KundeDetail() {
   const [offers, setOffers] = useState([]);
   const [activity, setActivity] = useState([]);
   const [projekte, setProjekte] = useState([]);
+  const [schritteItems, setSchritteItems] = useState([]);
   const [sendOfferPreview, setSendOfferPreview] = useState(null);
   const [sendOrderPreview, setSendOrderPreview] = useState(null);
   const [billingOffer, setBillingOffer] = useState(null);
@@ -262,6 +264,10 @@ export default function KundeDetail() {
     api(`/projekte?kunde_id=${kundeId}`)
       .then(res => setProjekte(res.projekte || []))
       .catch(() => setProjekte([]));
+    // Naechste-Schritte-Badges pro Job des Kunden nachladen
+    api(`/kunden/naechste-schritte?ids=${kundeId}`)
+      .then(r => setSchritteItems((r.schritte || {})[kundeId] || []))
+      .catch(() => setSchritteItems([]));
   }
 
   async function syncInvoicesNow() {
@@ -763,7 +769,7 @@ export default function KundeDetail() {
       </div>
 
       <ProjektStatusRow projekte={projekte} />
-      <ProjektInfoCards projekte={projekte} />
+      <ProjektInfoCards projekte={projekte} schritteItems={schritteItems} kundeId={kundeId} />
 
       <div className="section-head">
         <div>
@@ -1519,12 +1525,16 @@ const PROJEKT_STATUS_META = {
 // Kompakte Karten mit den Kern-Vertragsdaten pro Projekt — direkt sichtbar
 // unterhalb der Status-Chip-Row, damit man beim Öffnen des Kunden sofort
 // die Vertragslage sieht (Migration 025 Felder + Status + Live-Termin).
-function ProjektInfoCards({ projekte }) {
+function ProjektInfoCards({ projekte, schritteItems = [], kundeId }) {
   if (!projekte?.length) return null;
   return (
     <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 14 }}>
       {projekte.map(p => {
         const meta = PROJEKT_STATUS_META[p.status] || { emoji: '·', label: p.status || '—', bg: '#e5e7eb', color: '#374151' };
+        // Passenden Naechster-Schritt-Badge zum Projekt finden (best-effort ueber gesuchte_positionen)
+        const badge = schritteItems.find(it =>
+          it.stelle && p.gesuchte_positionen && it.stelle.trim() === p.gesuchte_positionen.trim()
+        ) || (schritteItems.length === 1 ? schritteItems[0] : null);
         return (
           <Link key={p.id} to="/projekte"
             style={{
@@ -1543,6 +1553,11 @@ function ProjektInfoCards({ projekte }) {
                 background: meta.bg, color: meta.color,
               }}>{meta.emoji} {meta.label}</span>
             </div>
+            {badge && (
+              <div onClick={e => e.stopPropagation()}>
+                <ItemBadge item={badge} kundeId={kundeId} compact />
+              </div>
+            )}
             {p.projektart && (
               <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{p.projektart}</div>
             )}

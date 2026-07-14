@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import QuickCreateModal from '../components/QuickCreateModal.jsx';
+import NaechsterSchrittStapel from '../components/NaechsterSchrittBadge.jsx';
 
 const VIEW_KEY = 'kundenList.view';
 
@@ -14,6 +15,7 @@ export default function KundenList() {
   const [search, setSearch] = useState('');
   const [agenturFilter, setAgenturFilter] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [schritteMap, setSchritteMap] = useState({});
   const [view, setView] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'cards'; } catch (e) { return 'cards'; }
   });
@@ -27,7 +29,19 @@ export default function KundenList() {
     setLoading(true);
     const q = showArchived ? '?only_archived=1' : '';
     api(`/kunden${q}`)
-      .then(res => setKunden(res.kunden || []))
+      .then(res => {
+        const list = res.kunden || [];
+        setKunden(list);
+        // Danach die Schritt-Badges nachladen (best-effort, blockt nicht)
+        if (list.length) {
+          const ids = list.map(k => k.id).join(',');
+          api(`/kunden/naechste-schritte?ids=${ids}`)
+            .then(r => setSchritteMap(r.schritte || {}))
+            .catch(() => setSchritteMap({}));
+        } else {
+          setSchritteMap({});
+        }
+      })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
@@ -127,13 +141,17 @@ export default function KundenList() {
               <div className="kunde-card-body">
                 <div className="kunde-card-name">
                   {k.firmenname || k.email || '—'}
-                  {k.status === 'wartend' && <span className="status-badge status-wartend">Wartet auf Formular</span>}
                 </div>
                 <div className="kunde-card-meta">
                   {k.branche && <span>{k.branche}</span>}
                   {k.ansprechpartner && <span>{k.ansprechpartner}</span>}
                   {k.status === 'wartend' && !k.firmenname && k.email && <span>{k.email}</span>}
                 </div>
+                {schritteMap[k.id] && (
+                  <div style={{ marginTop: 8 }}>
+                    <NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={3} />
+                  </div>
+                )}
               </div>
             </Link>
           ))}
@@ -152,7 +170,7 @@ export default function KundenList() {
                 <th>E-Mail</th>
                 <th>Telefon</th>
                 <th>Agentur</th>
-                <th>Status</th>
+                <th style={{ minWidth: 260 }}>Nächster Schritt</th>
               </tr>
             </thead>
             <tbody>
@@ -171,10 +189,8 @@ export default function KundenList() {
                   <td>{k.email ? <a href={`mailto:${k.email}`} onClick={e => e.stopPropagation()}>{k.email}</a> : '—'}</td>
                   <td>{k.telefon ? <a href={`tel:${k.telefon}`} onClick={e => e.stopPropagation()}>{k.telefon}</a> : '—'}</td>
                   <td>{k.agentur === 'nowagwirth' ? 'Nowag & Wirth' : k.agentur === 'talentone' ? 'TalentOne' : '—'}</td>
-                  <td>
-                    {k.status === 'wartend'
-                      ? <span className="status-badge status-wartend">Wartet auf Formular</span>
-                      : <span style={{ color: 'var(--ink-3)' }}>—</span>}
+                  <td onClick={e => e.stopPropagation()}>
+                    <NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={3} />
                   </td>
                 </tr>
               ))}

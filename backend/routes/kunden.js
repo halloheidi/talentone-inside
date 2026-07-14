@@ -200,6 +200,25 @@ router.get('/', async (req, res) => {
   res.json({ kunden: data });
 });
 
+/* GET /api/kunden/naechste-schritte?ids=a,b,c — Badge-Daten fuer die Liste.
+   Wenn ids leer: alle nicht-archivierten. */
+router.get('/naechste-schritte', async (req, res) => {
+  try {
+    let ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!ids.length) {
+      const { data } = await supabase.from('talentone_kunden')
+        .select('id').eq('archiviert', false);
+      ids = (data || []).map(k => k.id);
+    }
+    const { ermittleNaechsteSchritte } = await import('../naechste-schritte.js');
+    const map = await ermittleNaechsteSchritte(ids);
+    res.json({ schritte: map });
+  } catch (err) {
+    console.error('[naechste-schritte]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* GET /api/kunden/dubletten-check?q=Firmenname
    Liefert ähnliche Kunden + Projekte für die Dubletten-Warnung beim Anlegen.
    Trifft auf ilike-Match (case-insensitive, Teilstring) — bewusst großzügig. */
