@@ -62,12 +62,26 @@ function berechneSchritt(ctx) {
   // arbeiten.
   // ══════════════════════════════════════════════════════════════════════
   if (projekt?.status === 'live') {
-    const start = projekt.start_phase1 || projekt.live_seit;
+    const start = projekt.start_phase1;
+    const ende  = projekt.ende_phase1;
     if (start) {
       const tag = Math.floor((Date.now() - new Date(start).getTime()) / 86400000);
-      const label = `Live — Tag ${tag} von 30`;
-      const warn = tag >= 28;
-      return { ...REGEL_BY_KEY.live, label, tagX: tag, color: warn ? 'rot' : 'gruen' };
+      const heute = new Date(); heute.setHours(0, 0, 0, 0);
+      const endeDate = ende ? new Date(ende) : null;
+      const ueberfaellig = endeDate ? heute > endeDate : false;
+      const endeStr = endeDate ? endeDate.toLocaleDateString('de-DE') : null;
+      let label, color, icon;
+      if (ueberfaellig) {
+        label = `Live seit ${tag} Tagen — Laufzeit überschritten${endeStr ? ` (bis ${endeStr})` : ''}`;
+        color = 'gelb'; icon = '🟡';
+      } else if (endeStr) {
+        label = `Live seit ${tag} Tagen (bis ${endeStr})`;
+        color = 'gruen'; icon = '🟢';
+      } else {
+        label = `Live seit ${tag} Tagen`;
+        color = 'gruen'; icon = '🟢';
+      }
+      return { ...REGEL_BY_KEY.live, label, tagX: tag, color, icon };
     }
     return { ...REGEL_BY_KEY.live };
   }
@@ -143,7 +157,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
   const [kundenRes, projekteRes, jobsRes, refbilderRes] = await Promise.all([
     supabase.from('talentone_kunden').select('id, status, agentur, upload_token').in('id', ids),
     supabase.from('talentone_projekte')
-      .select('id, kunde_id, status, start_phase1, live_seit, created_at')
+      .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
     supabase.from('talentone_jobs')
       .select('id, kunde_id, stelle, created_at').in('kunde_id', ids)
@@ -180,9 +194,16 @@ export async function ermittleNaechsteSchritte(kundeIds) {
 
   // Indexieren
   const kundeById = Object.fromEntries(kunden.map(k => [k.id, k]));
+  // Primaeres Projekt pro Kunde: Live/Pausiert/Abgeschlossen/Go > alles andere.
+  // Innerhalb der gleichen Prio: juengstes zuerst (bereits per created_at DESC sortiert).
+  const STATUS_PRIO = { live: 0, pausiert: 1, go: 2, abgeschlossen: 3 };
   const primaeresProjektByKunde = {};
   for (const p of projekte) {
-    if (!primaeresProjektByKunde[p.kunde_id]) primaeresProjektByKunde[p.kunde_id] = p;
+    const cur = primaeresProjektByKunde[p.kunde_id];
+    if (!cur) { primaeresProjektByKunde[p.kunde_id] = p; continue; }
+    const curPrio = STATUS_PRIO[cur.status] ?? 99;
+    const newPrio = STATUS_PRIO[p.status]  ?? 99;
+    if (newPrio < curPrio) primaeresProjektByKunde[p.kunde_id] = p;
   }
   const refCountByKunde = {};
   for (const r of refbilder) refCountByKunde[r.kunde_id] = (refCountByKunde[r.kunde_id] || 0) + 1;
