@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import Login from './pages/Login.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
 import PublicUpload from './pages/PublicUpload.jsx';
 import PublicFormular from './pages/PublicFormular.jsx';
 import PublicFunnel from './pages/PublicFunnel.jsx';
@@ -46,6 +47,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-passwort" element={<ResetPassword />} />
       <Route path="/upload/:token" element={<PublicUpload />} />
       <Route path="/formular/:token" element={<PublicFormular />} />
       <Route path="/f/:funnelId" element={<PublicFunnel />} />

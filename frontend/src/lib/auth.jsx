@@ -35,6 +35,24 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
   }
 
+  // Passwort-Reset anstoßen. redirectTo IMMER explizit auf das Inside-Tool setzen,
+  // damit der Rücksprung im richtigen Tool landet — das Supabase-Projekt wird von
+  // mehreren Apps geteilt, die Site URL zeigt woanders hin. Der Wert muss in Supabase
+  // unter Auth → URL Configuration → Additional Redirect URLs erlaubt sein.
+  async function resetPassword(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-passwort`,
+    });
+    if (error) throw error;
+  }
+
+  // Neues Passwort setzen — funktioniert innerhalb der Recovery-Session, die
+  // supabase-js aus dem Link-Token aufbaut (detectSessionInUrl).
+  async function updatePassword(newPassword) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  }
+
   return (
     <AuthContext.Provider value={{
       session,
@@ -44,6 +62,8 @@ export function AuthProvider({ children }) {
       isAdmin: !!me?.is_admin,
       signIn,
       signOut,
+      resetPassword,
+      updatePassword,
     }}>
       {children}
     </AuthContext.Provider>
