@@ -75,7 +75,7 @@ function findField(fields, candidates) {
 function extractContact(fields) {
   const eigentuemer = findField(fields, ['Eigentümer', 'Eigentuemer', 'Name', 'Ansprechpartner']);
   const telefon = findField(fields, ['Telefon (Mobil)', 'Telefon', 'Handy', 'Mobil']);
-  const email = findField(fields, ['E-Mail', 'Email', 'Mail']);
+  const email = findField(fields, ['E-Mail Adresse', 'E-Mail', 'Email', 'Mail']);
   return {
     name: typeof eigentuemer === 'string' ? eigentuemer.trim() : (eigentuemer?.name || null),
     telefon: typeof telefon === 'string' ? telefon.trim() : null,
@@ -176,7 +176,7 @@ async function main() {
   for (const r of records) {
     const contact = extractContact(r.fields || {});
     const daten = { ...r.fields, _airtable_id: r.id };
-    delete daten.Eigentümer; delete daten['Telefon (Mobil)']; delete daten['E-Mail'];
+    delete daten.Eigentümer; delete daten['Telefon (Mobil)']; delete daten['E-Mail']; delete daten['E-Mail Adresse'];
     const status = extractStatus(r.fields || {});
     const notizen = findField(r.fields || {}, ['Anmerkung', 'Notiz', 'Notizen']);
     const createdAt = r.createdTime || null;
