@@ -24,14 +24,14 @@ Im Recruifly-Projekt (`fhvkbnbjnorsmsvrjizl`):
 
 ```bash
 # auf dem VPS
-cd /opt
+cd /root
 git clone git@github.com:halloheidi/talentone-inside.git
 cd talentone-inside
 ```
 
 ## 4. Secrets eintragen
 
-`/opt/talentone-inside/backend/.env.local`:
+`/root/talentone-inside/backend/.env.local`:
 
 ```
 SUPABASE_URL=https://fhvkbnbjnorsmsvrjizl.supabase.co
@@ -40,7 +40,7 @@ ALLOWED_ORIGINS=https://inside.talent-one.de
 PORT=3001
 ```
 
-`/opt/talentone-inside/.env` (für docker-compose Build-Args):
+`/root/talentone-inside/.env` (für docker-compose Build-Args):
 
 ```
 VITE_SUPABASE_URL=https://fhvkbnbjnorsmsvrjizl.supabase.co
@@ -60,8 +60,8 @@ Heißt das Netz nicht `traefik`, in `docker-compose.yml` umbenennen (3× `networ
 Variante A — als eigenständiges Compose:
 
 ```bash
-cd /opt/talentone-inside
-docker compose up -d --build
+cd /root/talentone-inside
+docker compose up -d --build --force-recreate
 docker compose logs -f
 ```
 
@@ -79,7 +79,19 @@ Browser auf `https://inside.talent-one.de` → Login-Maske → Anmeldung mit dem
 ## Updates
 
 ```bash
-cd /opt/talentone-inside
+cd /root/talentone-inside
 git pull
-docker compose up -d --build
+docker compose up -d --build --force-recreate
 ```
+
+> **Wichtig — `--force-recreate` nicht weglassen.** `docker compose up -d --build`
+> baut zwar neue Images, schaltet die *laufenden* Container hier aber nicht
+> zuverlässig auf das neue Image um (Container hängt am alten Image-ID, Uptime
+> läuft weiter). Ohne `--force-recreate` bleibt ein Code-Deploy dann *leise
+> wirkungslos*. Kontrolle nach dem Deploy:
+>
+> ```bash
+> docker ps --filter name=talentone-inside   # Uptime muss frisch (Sekunden) sein
+> curl -sI https://inside.talent-one.de | head -1          # HTTP/2 200
+> curl -s  https://inside.talent-one.de/api/health         # {"status":"ok",...}
+> ```
