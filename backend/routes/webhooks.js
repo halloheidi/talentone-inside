@@ -31,6 +31,91 @@ function pickValue(node) {
   return node;
 }
 
+/**
+ * onepage.io schickt POST body {type:'lead.created', data:{fields:[{step,label,value,fieldType},...]}}.
+ * Wir extrahieren Kontakt-Felder aus fieldType und Detail-Felder ueber
+ * ein Mapping auf step/label-Text. Alles Nicht-Zuordenbare landet unter
+ * "step -> label" als Key im daten-jsonb — nichts wird verworfen.
+ * Der ORIGINAL-Payload wird immer zusaetzlich als daten._raw abgelegt.
+ */
+function extractOnepage(body) {
+  const fields = body?.data?.fields;
+  if (!Array.isArray(fields) || fields.length === 0) return null;
+
+  const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // step-basiertes Mapping (Fragetext -> Ziel-Feldname)
+  const stepMap = [
+    { re: /fläche haben/i,            target: 'Flächenart' },
+    { re: /groß.*freifläche|freifläche.*groß|wie groß/i, target: 'Größe der Fläche' },
+    { re: /wofür.*genutzt|aktuelle.*nutzung/i,           target: 'Aktuelle Flächennutzung' },
+    { re: /eigentümer.*fläche/i,      target: 'Eigentümer der Fläche' },
+    { re: /plz.*ort|adresse.*fläche/i, target: 'Standort Freifläche' },
+    { re: /weitere flächeninfor/i,    target: 'Flächeninformationen' },
+  ];
+  // label-basiertes Mapping (falls step generisch wie "2-Minuten-Flächen-Check")
+  const labelMap = [
+    { re: /beste erreichbar/i,        target: 'Beste Erreichbarkeit' },
+    { re: /nachricht.*uns/i,          target: 'Anmerkung' },
+  ];
+
+  let vorname = null, nachname = null, email = null, telefon = null;
+  const daten = {};
+  let groesseValue = null;
+
+  for (const f of fields) {
+    const ftype = norm(f.fieldType);
+    const step  = String(f.step  || '').trim();
+    const label = String(f.label || '').trim();
+    const val   = f.value == null ? '' : String(f.value).trim();
+    if (!val) continue;  // Leere Antworten uebersprungen
+
+    // Kontakt-Felder per fieldType
+    if (ftype === 'fname')     { vorname  = val; continue; }
+    if (ftype === 'lname')     { nachname = val; continue; }
+    if (ftype === 'email')     { email    = val; continue; }
+    if (ftype === 'phone' || ftype === 'tel' || ftype === 'telephone' || ftype === 'mobile') {
+      telefon = val; continue;
+    }
+
+    // step-Mapping zuerst
+    let target = null;
+    for (const m of stepMap) if (m.re.test(step)) { target = m.target; break; }
+    // Falls step nicht griff: label
+    if (!target) {
+      for (const m of labelMap) if (m.re.test(label)) { target = m.target; break; }
+    }
+    // Fallback: konservativer Freiform-Key
+    if (!target) target = label || step || 'Antwort';
+
+    // Bei Groesse den Wert merken fuer Projektname-Auto-Generierung
+    if (target === 'Größe der Fläche') {
+      // Einheit an den Wert haengen (label kann "Hektar" oder "m²" sein).
+      const einheit = /hektar|ha\b/i.test(label) ? ' ha'
+                    : /m²|qm|m2/i.test(label)     ? ' m²'
+                    : label && !/^(auswähl|select)/i.test(label) ? ` ${label}` : '';
+      const displayVal = `${val}${einheit}`;
+      daten[target] = displayVal;
+      groesseValue = displayVal;
+      continue;
+    }
+
+    daten[target] = val;
+  }
+
+  const name = [vorname, nachname].filter(Boolean).join(' ').trim() || null;
+
+  // Auto-generierter Projektname: "[Nachname] - [Größe]" (Airtable-Muster)
+  if (nachname && groesseValue && !daten['Projektname']) {
+    daten['Projektname'] = `${nachname} - ${groesseValue}`;
+  }
+
+  // Roh-Payload immer mitspeichern — nichts geht verloren.
+  daten._raw = body;
+
+  return { name, email, telefon, daten };
+}
+
 function extractContact(body) {
   if (!body || typeof body !== 'object') {
     return { name: null, email: null, telefon: null, antworten: [] };
@@ -190,30 +275,33 @@ router.post('/leads', async (req, res) => {
       .from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
 
-    const contact = extractContact(req.body);
-    // Rest-Felder = alles außer den Kontakt-/Meta-Feldern in einem jsonb-Dump.
-    const restDaten = {};
-    for (const [k, v] of Object.entries(req.body || {})) {
-      const lk = String(k).toLowerCase();
-      if (META_KEYS.has(lk) || FLAT_CONTACT_KEYS.has(lk)) continue;
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-        restDaten[k] = v;
-      } else if (v && typeof v === 'object') {
-        restDaten[k] = v;
+    // Zuerst onepage.io-Format probieren (data.fields[]), sonst Perspective/flat.
+    const onepage = extractOnepage(req.body);
+    let name, email, telefon, daten;
+    if (onepage) {
+      ({ name, email, telefon, daten } = onepage);
+      console.log(`[webhooks/leads] onepage.io Payload erkannt — name=${name} email=${email} felder=${Object.keys(daten).length}`);
+    } else {
+      const contact = extractContact(req.body);
+      const restDaten = {};
+      for (const [k, v] of Object.entries(req.body || {})) {
+        const lk = String(k).toLowerCase();
+        if (META_KEYS.has(lk) || FLAT_CONTACT_KEYS.has(lk)) continue;
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') restDaten[k] = v;
+        else if (v && typeof v === 'object') restDaten[k] = v;
       }
-    }
-    // Wenn kein Rest-Feld extrahierbar war: alle Perspective-artigen Antworten mitschreiben
-    if (Object.keys(restDaten).length === 0 && contact.antworten?.length) {
-      for (const a of contact.antworten) restDaten[a.frage || 'antwort'] = a.antwort;
+      if (Object.keys(restDaten).length === 0 && contact.antworten?.length) {
+        for (const a of contact.antworten) restDaten[a.frage || 'antwort'] = a.antwort;
+      }
+      // Auch hier Roh-Payload speichern, damit nichts verloren geht.
+      restDaten._raw = req.body;
+      name = contact.name; email = contact.email; telefon = contact.telefon; daten = restDaten;
     }
 
     const { data: anfrage, error: insErr } = await supabase
       .from('talentone_anfragen').insert({
         job_id: job.id,
-        name:    contact.name,
-        email:   contact.email,
-        telefon: contact.telefon,
-        daten:   restDaten,
+        name, email, telefon, daten,
         quelle:  'webhook',
         status:  'neu',
       }).select().single();
