@@ -891,10 +891,24 @@ router.post('/:id/anfrage', async (req, res) => {
 // GET /api/kunden/:id/portal-accounts — Liste (ohne Passwort-Hash)
 router.get('/:id/portal-accounts', async (req, res) => {
   const { data, error } = await supabase.from('talentone_portal_accounts')
-    .select('id, email, name, einladung_gesendet_at, passwort_gesetzt_at, letzter_login, aktiv, created_at')
+    .select('id, email, name, einladung_gesendet_at, passwort_gesetzt_at, letzter_login, aktiv, benachrichtige_leads, created_at')
     .eq('kunde_id', req.params.id).order('created_at', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ accounts: data || [] });
+});
+
+// PATCH /api/kunden/:id/portal-accounts/:accId  body: { benachrichtige_leads?, aktiv?, name? }
+router.patch('/:id/portal-accounts/:accId', async (req, res) => {
+  const patch = {};
+  if (req.body?.benachrichtige_leads !== undefined) patch.benachrichtige_leads = !!req.body.benachrichtige_leads;
+  if (req.body?.aktiv !== undefined) patch.aktiv = !!req.body.aktiv;
+  if (req.body?.name !== undefined) patch.name = req.body.name == null ? null : String(req.body.name).trim() || null;
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Keine änderbaren Felder im Body.' });
+  const { data, error } = await supabase.from('talentone_portal_accounts')
+    .update(patch).eq('id', req.params.accId).eq('kunde_id', req.params.id)
+    .select('id, email, name, aktiv, benachrichtige_leads').single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ account: data });
 });
 
 // POST /api/kunden/:id/portal-accounts  body: { email, name }

@@ -307,18 +307,39 @@ router.post('/leads', async (req, res) => {
       }).select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
 
-    // Best-Effort-Mail an den Kunden (blockt niemals die Response)
+    // Best-Effort-Mail: alle aktiven Portal-Accounts mit benachrichtige_leads=true
+    // + Kunden-Haupt-Mail als Fallback, plus INTERNAL_BCC. Blockt niemals die Response.
     (async () => {
       try {
         const { data: kunde } = await supabase
           .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
-        if (!kunde?.email) return;
+        if (!kunde) return;
+
+        const { data: accounts = [] } = await supabase.from('talentone_portal_accounts')
+          .select('email, benachrichtige_leads, aktiv')
+          .eq('kunde_id', kunde.id)
+          .eq('aktiv', true)
+          .eq('benachrichtige_leads', true);
+        const emails = new Set(accounts.map(a => (a.email || '').trim().toLowerCase()).filter(Boolean));
+
+        // Kunden-Haupt-Mail nur als Fallback wenn keine Portal-Accounts benachrichtigt werden
+        // sollen — verhindert doppelte Zustellung wenn der Kunde die Haupt-Adresse
+        // auch als Portal-Account angelegt hat.
+        if (emails.size === 0 && kunde.email) emails.add(kunde.email.trim().toLowerCase());
+
+        const recipients = Array.from(emails);
+        if (recipients.length === 0) {
+          console.log(`[leads-mail] kein Empfaenger fuer kunde=${kunde.id.slice(0,8)} — Mail skipped`);
+          return;
+        }
+
         const { sendAnfrageMail } = await import('../mail.js');
         const { getPublicBaseUrl } = await import('../branding.js');
         const anfragenUrl = job.anfragen_token
           ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${job.anfragen_token}`
           : null;
-        await sendAnfrageMail({ to: kunde.email, kunde, job, anfrage, anfragenUrl });
+        await sendAnfrageMail({ to: recipients, kunde, job, anfrage, anfragenUrl });
+        console.log(`[leads-mail] ${recipients.length} Empfaenger benachrichtigt (${recipients.join(', ')}) + INTERNAL_BCC`);
       } catch (err) { console.warn('[leads-mail]', err.message); }
     })().catch(err => console.error('[leads-mail-uncaught]', err.message));
 

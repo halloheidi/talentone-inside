@@ -1814,6 +1814,18 @@ function PortalAccountsSection({ kunde, onKundeUpdated }) {
                         : 'Kein Passwort'}
                   </div>
                 </div>
+                <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 11, color: '#5a5955', cursor: 'pointer' }}
+                  title="Erhält E-Mail bei neuen Anfragen/Leads">
+                  <input type="checkbox" checked={a.benachrichtige_leads !== false}
+                    onChange={async e => {
+                      const v = e.target.checked;
+                      try {
+                        await api(`/kunden/${kunde.id}/portal-accounts/${a.id}`, { method: 'PATCH', body: { benachrichtige_leads: v } });
+                        setAccounts(prev => prev.map(x => x.id === a.id ? { ...x, benachrichtige_leads: v } : x));
+                      } catch (err) { alert(err.message); }
+                    }} />
+                  📥 Leads
+                </label>
                 <button onClick={() => resend(a)} className="btn-ghost btn-sm">Einladung neu</button>
                 <button onClick={() => remove(a)} className="btn-ghost btn-sm btn-danger">×</button>
               </div>
