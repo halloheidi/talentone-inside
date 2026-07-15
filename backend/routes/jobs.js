@@ -378,4 +378,49 @@ router.post('/:id/create-projekt', async (req, res) => {
   res.status(201).json({ projekt: created, already_existed: false });
 });
 
+/* POST /api/jobs/:id/send-creative-auftrag
+   Manueller Auslöser aus dem Creatives-Tab. Ignoriert das Idempotenz-Flag
+   (der Nutzer will explizit erneut senden), aktualisiert das Flag danach
+   trotzdem als "zuletzt versendet" und schreibt einen Versand-Log-Eintrag. */
+router.post('/:id/send-creative-auftrag', async (req, res) => {
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('*').eq('id', req.params.id).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('*').eq('id', job.kunde_id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  const { data: projekt } = await supabase.from('talentone_projekte')
+    .select('id, live_termin, creative_auftrag_gesendet_at').eq('kunde_id', kunde.id)
+    .order('created_at', { ascending: true }).limit(1).maybeSingle();
+  const { count: fotoCount } = await supabase.from('talentone_referenzbilder')
+    .select('id', { count: 'exact', head: true }).eq('kunde_id', kunde.id);
+
+  const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+  const creativesUrl = `${insideBase}/kunden/${kunde.id}/jobs/${job.id}/creatives`;
+
+  try {
+    const { sendCreativeAuftragMail } = await import('../mail.js');
+    await sendCreativeAuftragMail({
+      kunde, job, projekt: projekt || {},
+      fotosVorhanden: (fotoCount || 0) > 0,
+      creativesUrl,
+      manuell: true,
+    });
+    if (projekt?.id) {
+      await supabase.from('talentone_projekte')
+        .update({ creative_auftrag_gesendet_at: new Date().toISOString() })
+        .eq('id', projekt.id);
+    }
+    // Versand-Log
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id, typ: 'creative_auftrag',
+      empfaenger: 'laura.mueller@nowagwirth.de, info@nowagwirth.de',
+    }).select().maybeSingle();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[send-creative-auftrag]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

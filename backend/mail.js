@@ -825,6 +825,74 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
   return await response.json();
 }
 
+/* ════════════════════ Creative-Auftrag: reiche Team-Mail ════════════════════
+   Empfaenger: laura.mueller@nowagwirth.de + info@nowagwirth.de.
+   Zeigt Kunde, Stelle, Briefing-Zusammenfassung, Fotos-Status, Live-Termin
+   und einen Direkt-Link in den Creatives-Tab. Wird sowohl automatisch beim
+   Erreichen der Creative-Stufe als auch manuell aus dem Creatives-Tab ausgeloest. */
+export async function sendCreativeAuftragMail({ kunde, job, projekt, fotosVorhanden, creativesUrl, manuell = false }) {
+  if (!process.env.RESEND_API_KEY) return null;
+  const to = ['laura.mueller@nowagwirth.de', 'info@nowagwirth.de'];
+  const brand = getBranding(kunde?.agentur || 'nowagwirth');
+  const firma = kunde?.firmenname || 'Kunde';
+  const stelle = job?.stelle || 'Stelle';
+  const fd = job?.formdata_komplett || {};
+  const benefits = Array.isArray(job?.benefits) ? job.benefits.filter(Boolean) : [];
+  const usp = fd.unterschied || fd.usp || null;
+  const besonderheiten = job?.besonderheiten || fd.besonderheiten || null;
+  const arbeitshinweise = job?.arbeitshinweise || null;
+  const liveTermin = projekt?.live_termin ? new Date(projekt.live_termin).toLocaleDateString('de-DE') : null;
+
+  const briefingRows = [
+    benefits.length && `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;width:170px;">Benefits</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:#0a0a0a;">${escape(benefits.slice(0, 8).join(' · '))}</td></tr>`,
+    usp && `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;">USP</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:#0a0a0a;">${escape(String(usp).slice(0, 300))}</td></tr>`,
+    besonderheiten && `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;">Besonderheiten</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:#0a0a0a;">${escape(String(besonderheiten).slice(0, 300))}</td></tr>`,
+    arbeitshinweise && `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;">Arbeitshinweis</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:#b45309;font-weight:600;">⚠️ ${escape(String(arbeitshinweise).slice(0, 300))}</td></tr>`,
+    `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;">Fotos vom Kunden</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:${fotosVorhanden ? '#166534' : '#b45309'};font-weight:600;">${fotosVorhanden ? '✓ Vorhanden' : '✗ Keine Fotos hochgeladen'}</td></tr>`,
+    liveTermin && `<tr><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:12px;color:#5a5955;">Live-Termin</td><td style="padding:6px 12px;border-bottom:1px solid #f0efed;font-size:13px;color:#0a0a0a;">📅 ${escape(liveTermin)}</td></tr>`,
+  ].filter(Boolean).join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🎨 Creative-Auftrag${manuell ? ' · manuell' : ''}</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${escape(firma)}</h1>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Stelle: <strong>${escape(stelle)}</strong></p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #f0efed;border-bottom:1px solid #f0efed;">${briefingRows}</table>
+    </td></tr>
+    ${creativesUrl ? `<tr><td align="center" style="padding:16px 32px 24px;">
+      <a href="${escape(creativesUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:100px;">→ Zum Creatives-Tab</a>
+    </td></tr>` : ''}`;
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = [
+    `Creative-Auftrag${manuell ? ' (manuell)' : ''}: ${firma}`,
+    `Stelle: ${stelle}`,
+    ``,
+    benefits.length ? `Benefits: ${benefits.slice(0, 8).join(' · ')}` : null,
+    usp ? `USP: ${String(usp).slice(0, 300)}` : null,
+    besonderheiten ? `Besonderheiten: ${String(besonderheiten).slice(0, 300)}` : null,
+    arbeitshinweise ? `Arbeitshinweis: ${String(arbeitshinweise).slice(0, 300)}` : null,
+    `Fotos: ${fotosVorhanden ? 'vorhanden' : 'nicht hochgeladen'}`,
+    liveTermin ? `Live-Termin: ${liveTermin}` : null,
+    creativesUrl ? `\nCreatives-Tab: ${creativesUrl}` : null,
+  ].filter(Boolean).join('\n');
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: INTERNAL_FROM, to,
+      subject: `🎨 Creatives können erstellt werden: ${firma} — ${stelle}`,
+      html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    console.warn(`[creative-auftrag] Resend ${response.status}: ${body.slice(0, 200)}`);
+    return null;
+  }
+  return await response.json();
+}
+
 /* ════════════════════ Team-Alert (intern, keine Kunden-Adresse) ════════════════════
    Kompakte HTML-Mail an das Kreativ-Team — z. B. für den 2-Tage-Reminder
    vorm Go-Live oder für „neuer Kunde, Creatives können erstellt werden".

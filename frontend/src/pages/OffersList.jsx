@@ -100,7 +100,15 @@ export default function OffersList() {
     setBusyId(offerId);
     setRowError(r => ({ ...r, [offerId]: '' }));
     try {
-      await api(`/offers/${offerId}/create-easybill`, { method: 'POST' });
+      try {
+        await api(`/offers/${offerId}/create-easybill`, { method: 'POST' });
+      } catch (e) {
+        if (e.status === 409 && e.body?.warning === 'guarantee_bewerbungen') {
+          const ok = window.confirm(`⚠️ ${e.body.message}\n\nGefundene Formulierung:\n„${e.body.sample || '(nicht extrahierbar)'}"\n\nTrotzdem senden?`);
+          if (!ok) throw new Error('Abgebrochen — bitte Garantie-Text korrigieren.');
+          await api(`/offers/${offerId}/create-easybill`, { method: 'POST', body: { confirm_guarantee_warning: true } });
+        } else { throw e; }
+      }
       load();
     } catch (e) {
       setRowError(r => ({ ...r, [offerId]: e.message }));

@@ -353,24 +353,24 @@ router.post('/formular/:token/submit', async (req, res) => {
       notifyKunde(updated, `✅ Kunde hat das Briefing-Formular ausgefüllt am ${new Date().toLocaleDateString('de-DE')}`)
         .catch(err => console.warn('[formular-bg close-note]', err.message));
 
-      // Kreativ-Team-Alert: „🎨 Neuer Kunde — Creatives können erstellt werden".
+      // Kreativ-Team-Alert: reiche Mail mit Briefing + Foto-Status + Link.
       // Idempotent per creative_auftrag_gesendet_at am verknüpften Projekt.
-      // Wir markieren am ersten passenden Projekt des Kunden — reicht als Guard.
       try {
         const { data: projekt } = await supabase
           .from('talentone_projekte')
-          .select('id, creative_auftrag_gesendet_at')
+          .select('id, live_termin, creative_auftrag_gesendet_at')
           .eq('kunde_id', kunde.id)
           .is('creative_auftrag_gesendet_at', null)
           .limit(1).maybeSingle();
         if (projekt) {
           const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
-          await sendTeamAlertMail({
-            subject:   `🎨 Neuer Kunde ${updated.firmenname} — Creatives können erstellt werden`,
-            headline:  `Neuer Kunde: ${updated.firmenname}`,
-            lead:      `${updated.firmenname} hat das Onboarding-Formular ausgefüllt und wurde auf status='aktiv' gesetzt. Bereit für Creative-Erstellung.`,
-            linkUrl:   `${insideBase}/projekte?open=${projekt.id}`,
-            linkLabel: 'Zum Projekt',
+          const { data: refCount } = await supabase.from('talentone_referenzbilder')
+            .select('id', { count: 'exact', head: true }).eq('kunde_id', kunde.id);
+          const fotosVorhanden = (refCount?.length ?? refCount ?? 0) > 0;
+          const { sendCreativeAuftragMail } = await import('../mail.js');
+          await sendCreativeAuftragMail({
+            kunde: updated, job, projekt, fotosVorhanden,
+            creativesUrl: `${insideBase}/kunden/${kunde.id}/jobs/${job.id}/creatives`,
           });
           await supabase.from('talentone_projekte')
             .update({ creative_auftrag_gesendet_at: new Date().toISOString() })

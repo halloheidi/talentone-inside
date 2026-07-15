@@ -697,6 +697,37 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
+/**
+ * Preflight: prueft ob der finale Garantie-Text (aus offer.guarantee_note
+ * ODER template guarantee) unser Nicht-Versprechen verletzt — sprich eine
+ * Bewerbungsanzahl zusichert. Unsere Garantie ist "kostenlose Weiterarbeit
+ * bis zur Einstellung", NIE eine Bewerbungszahl.
+ *
+ * @returns {null|{issue:string,message:string,sample:string}} null wenn ok
+ */
+function checkGuaranteeWarning({ offer, templateText }) {
+  if (!offer || Number(offer.guarantee_period_days || 0) <= 0) return null;
+  const text = (offer.guarantee_note && offer.guarantee_note.trim())
+    || templateText
+    || '';
+  if (!text) return null;
+  // Trigger-Muster: "X Bewerbungen", "[X] Bewerbungen", "garantiert...bewerbung"
+  const patterns = [
+    /\d+\s*(qualifizierte\s+)?bewerbunge?n/i,
+    /\[?\s*x\s*\]?\s*(qualifizierte\s+)?bewerbunge?n/i,
+    /bewerbungsanzahl|anzahl\s+bewerbungen/i,
+    /bewerbungen\s+garantiert|garantierte?\s+(anzahl\s+)?bewerbungen/i,
+  ];
+  const match = patterns.find(r => r.test(text));
+  if (!match) return null;
+  return {
+    issue: 'guarantee_bewerbungen',
+    message: 'Die Garantie-Formulierung verspricht eine Bewerbungsanzahl. Unsere Garantie bezieht sich auf kostenlose Weiterarbeit bis zur ersten Einstellung — nicht auf Bewerbungszahlen.',
+    sample: text.match(/.{0,80}(bewerbungs?anzahl|\d+\s*(qualifizierte\s+)?bewerbunge?n|\[?\s*x\s*\]?\s*bewerbunge?n|garantierte?\s+(anzahl\s+)?bewerbungen)[^\n\.]{0,80}/i)?.[0]?.trim()
+      || text.slice(0, 160),
+  };
+}
+
 /* POST /api/offers/:id/create-easybill
    Nimmt einen Draft, baut das easybill-Payload deterministisch (serverseitige
    Neuberechnung — Frontend kann Summen nicht manipulieren), sendet an
@@ -721,6 +752,13 @@ router.post('/:id/create-easybill', async (req, res) => {
       supabase.from('talentone_offer_products').select('*').eq('brand', offer.brand).eq('active', true),
       supabase.from('talentone_offer_templates').select('key, text').eq('brand', offer.brand),
     ]);
+
+    // Preflight: Garantie-Text darf keine Bewerbungsanzahl versprechen.
+    const guaranteeTpl = (templates || []).find(t => t.key === 'guarantee')?.text || null;
+    const gWarn = checkGuaranteeWarning({ offer, templateText: guaranteeTpl });
+    if (gWarn && !req.body?.confirm_guarantee_warning) {
+      return res.status(409).json({ error: gWarn.message, warning: gWarn.issue, sample: gWarn.sample });
+    }
 
     // Payload deterministisch bauen — Summen recomputed, kein Trust auf DB-Werte
     const { items } = buildEasybillOfferPayload({
@@ -802,6 +840,13 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       supabase.from('talentone_offer_templates').select('key, text').eq('brand', offer.brand),
     ]);
 
+    // Preflight (Direkt-AB): Garantie-Text darf keine Bewerbungsanzahl versprechen.
+    const guaranteeTplAb = (templates || []).find(t => t.key === 'guarantee')?.text || null;
+    const gWarnAb = checkGuaranteeWarning({ offer, templateText: guaranteeTplAb });
+    if (gWarnAb && !req.body?.confirm_guarantee_warning) {
+      return res.status(409).json({ error: gWarnAb.message, warning: gWarnAb.issue, sample: gWarnAb.sample });
+    }
+
     const { items } = buildEasybillOfferPayload({
       brand: offer.brand,
       products: products || [],
@@ -810,6 +855,9 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       ad_budget_monthly: offer.ad_budget_monthly,
       vat_rate: Number(offer.vat_rate) || 19,
       templates: templates || [],
+      discount_type: offer.discount_type || null,
+      discount_value: Number(offer.discount_value) || 0,
+      guarantee_note: offer.guarantee_note || null,
     });
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
 

@@ -211,18 +211,28 @@ export default function OfferWizard() {
     try {
       const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
       draftId = draftRes.offer.id;
-      const easyRes = await api(`/offers/${draftId}/create-easybill`, { method: 'POST' });
-      // easybill hat Angebotsnummer geliefert — direkt in die Liste, PDF ist im Row-Link
+      let easyRes;
+      try {
+        easyRes = await api(`/offers/${draftId}/create-easybill`, { method: 'POST' });
+      } catch (err) {
+        if (err.status === 409 && err.body?.warning === 'guarantee_bewerbungen') {
+          if (!confirmGuaranteeWarning(err.body)) throw new Error('Erzeugung abgebrochen — bitte Garantie-Text korrigieren.');
+          easyRes = await api(`/offers/${draftId}/create-easybill`, { method: 'POST', body: { confirm_guarantee_warning: true } });
+        } else { throw err; }
+      }
       navigate(`/angebote?created=${easyRes.offer.id}`);
     } catch (err) {
-      // Draft ist entstanden aber easybill schlug fehl → zurück in die Liste,
-      // damit der User später erneut versuchen kann.
       if (draftId) {
         setError(`easybill-Erzeugung fehlgeschlagen: ${err.message} — Der Entwurf wurde gespeichert. Du kannst ihn in der Angebotsliste erneut erzeugen.`);
       } else {
         setError(err.message);
       }
     } finally { setCreatingOffer(false); }
+  }
+  function confirmGuaranteeWarning(body) {
+    return window.confirm(
+      `⚠️ ${body.message}\n\nGefundene Formulierung:\n„${body.sample || '(nicht extrahierbar)'}"\n\nTrotzdem senden?`
+    );
   }
 
   /* Direkt-Auftragsbestätigung — im Gespräch abgeschlossen.
@@ -242,7 +252,15 @@ export default function OfferWizard() {
     try {
       const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
       draftId = draftRes.offer.id;
-      const easyRes = await api(`/offers/${draftId}/create-easybill-order`, { method: 'POST' });
+      let easyRes;
+      try {
+        easyRes = await api(`/offers/${draftId}/create-easybill-order`, { method: 'POST' });
+      } catch (err) {
+        if (err.status === 409 && err.body?.warning === 'guarantee_bewerbungen') {
+          if (!confirmGuaranteeWarning(err.body)) throw new Error('AB abgebrochen — bitte Garantie-Text korrigieren.');
+          easyRes = await api(`/offers/${draftId}/create-easybill-order`, { method: 'POST', body: { confirm_guarantee_warning: true } });
+        } else { throw err; }
+      }
       navigate(`/angebote?accepted=${easyRes.offer.id}`);
     } catch (err) {
       if (draftId) {

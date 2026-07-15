@@ -30,7 +30,10 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
       }
       throw new Error(msg);
     }
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const e = new Error(err.error || `HTTP ${res.status}`);
+    e.status = res.status;
+    e.body = err;
+    throw e;
   }
   return res.json();
 }

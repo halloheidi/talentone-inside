@@ -868,6 +868,19 @@ export default function JobCreatives() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button
+              className="btn-ghost btn-sm"
+              onClick={async () => {
+                if (!confirm('Creative-Auftrag jetzt an Laura + info@nowagwirth.de schicken?\n\nDie Mail enthält Kunde, Stelle, Briefing (Benefits, USP), Foto-Status und den Link zum Creatives-Tab.')) return;
+                try {
+                  await api(`/jobs/${job.id}/send-creative-auftrag`, { method: 'POST' });
+                  alert('✓ Creative-Auftrag verschickt.');
+                } catch (err) { alert('Fehler: ' + err.message); }
+              }}
+              title="Reiche Team-Mail mit Briefing an laura.mueller + info@nowagwirth.de"
+            >
+              📧 Creative-Auftrag an Team senden
+            </button>
+            <button
               className={`btn-ghost btn-sm ${showArchived ? 'is-active' : ''}`}
               onClick={() => setShowArchived(v => !v)}
               title="Archivierte Creatives anzeigen (wiederherstellbar)"
