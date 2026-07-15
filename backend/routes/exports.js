@@ -27,7 +27,9 @@ async function loadFullJob(jobId) {
   const { data: kunde } = await supabase
     .from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
   const { data: creatives = [] } = await supabase
-    .from('talentone_creatives').select('*').eq('job_id', jobId).order('created_at', { ascending: false });
+    .from('talentone_creatives').select('*').eq('job_id', jobId)
+    .neq('archiviert', true)
+    .order('created_at', { ascending: false });
   const { data: adcopies = [] } = await supabase
     .from('talentone_adcopies').select('*').eq('job_id', jobId);
   const { data: funnel } = await supabase

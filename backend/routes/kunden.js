@@ -737,6 +737,46 @@ router.post('/:id/referenzbilder', async (req, res) => {
   }
 });
 
+// POST /api/kunden/referenzbilder/:id/verbessern
+// body: { optionen: string[], hintergrund_setting?: string }
+// Rueckgabe: { preview_url, angewendete_optionen } — persistiert NICHT.
+router.post('/referenzbilder/:id/verbessern', async (req, res) => {
+  try {
+    const { generateVerbesserung } = await import('../photo-enhance.js');
+    const { preview_url, angewendete_optionen } = await generateVerbesserung({
+      referenzbildId: req.params.id,
+      optionen: req.body?.optionen,
+      hintergrund_setting: req.body?.hintergrund_setting,
+    });
+    res.json({ preview_url, angewendete_optionen });
+  } catch (err) {
+    console.error('[referenzbild/verbessern]', err.message);
+    const status = /keine_ki_bilder/i.test(err.message) ? 403
+                 : /nicht gefunden/i.test(err.message)  ? 404
+                 : /mindestens eine/i.test(err.message) ? 400
+                 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// POST /api/kunden/referenzbilder/:id/verbessern/save
+// body: { preview_url, angewendete_optionen }
+// Persistiert die generierte Version als neue Referenzbild-Row.
+router.post('/referenzbilder/:id/verbessern/save', async (req, res) => {
+  try {
+    const { saveVerbesserung } = await import('../photo-enhance.js');
+    const neu = await saveVerbesserung({
+      referenzbildId: req.params.id,
+      preview_url: req.body?.preview_url,
+      angewendete_optionen: req.body?.angewendete_optionen,
+    });
+    res.status(201).json({ referenzbild: neu });
+  } catch (err) {
+    console.error('[referenzbild/verbessern/save]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/kunden/referenzbilder/:id  body: { beschreibung }
 router.patch('/referenzbilder/:id', async (req, res) => {
   const { beschreibung } = req.body || {};

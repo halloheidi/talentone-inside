@@ -482,6 +482,7 @@ router.get('/review/:token', async (req, res) => {
     .eq('id', job.kunde_id).maybeSingle();
   const { data: creatives = [] } = await supabase
     .from('talentone_creatives').select('*').eq('job_id', job.id)
+    .neq('archiviert', true)
     .order('created_at', { ascending: false });
   const { data: adcopies = [] } = await supabase
     .from('talentone_adcopies').select('*').eq('job_id', job.id);
@@ -533,7 +534,7 @@ router.post('/review/:token', async (req, res) => {
   // Snapshot der referenzierten Creatives + Adcopies zum Zeitpunkt des Reviews
   // → bleibt erhalten auch wenn Creatives später regeneriert/gelöscht werden.
   const [{ data: creativesNow = [] }, { data: adcopiesNow = [] }] = await Promise.all([
-    supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+    supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
     supabase.from('talentone_adcopies').select('id, stil').eq('job_id', job.id),
   ]);
   const kommentare_snapshot = {};
@@ -574,7 +575,7 @@ router.post('/review/:token', async (req, res) => {
         .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
       // Creatives + Adcopies laden, damit die Mail Thumbnails + Style-Labels zeigen kann
       const [{ data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
-        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
         supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
@@ -1336,7 +1337,7 @@ router.post('/portal/:token/creative/:id/ueberarbeitung', async (req, res) => {
     try {
       const [{ data: kundeFull }, { data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
         supabase.from('talentone_kunden').select('*').eq('id', kunde.id).maybeSingle(),
-        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id),
+        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
         supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}/jobs/${job.id}/export`;

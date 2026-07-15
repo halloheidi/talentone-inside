@@ -39,6 +39,7 @@ export default function JobCreatives() {
   const [personen, setPersonen] = useState([]);
   const [personId, setPersonId] = useState(null);     // ausgewählte Person (Modus KI)
   const [fotoId, setFotoId] = useState(null);         // ausgewähltes Hintergrund-Foto (Modus Foto)
+  const [verbessernFoto, setVerbessernFoto] = useState(null); // r-Objekt für Modal
 
   // Upload
   const [logoUploading, setLogoUploading] = useState(false);
@@ -732,6 +733,7 @@ export default function JobCreatives() {
           )}
           {personen.map(r => {
             const selected = aktiveAuswahlId === r.id;
+            const istVerbessert = !!r.verbessert_von;
             return (
               <button
                 key={r.id}
@@ -742,12 +744,28 @@ export default function JobCreatives() {
               >
                 <img src={r.bild_url} alt="" />
                 {r.uploaded_via === 'kunde' && <span className="ref-badge">Kunde</span>}
+                {istVerbessert && (
+                  <span className="ref-badge" style={{ background: '#7c3aed', color: '#fff', top: 4, right: 4, left: 'auto' }}
+                    title={`Verbessert: ${r.verbesserung_preset}`}>✨</span>
+                )}
                 <button
                   type="button"
                   className="ref-del"
                   title="Löschen"
                   onClick={e => { e.stopPropagation(); deletePerson(r.id); }}
                 >×</button>
+                {!istVerbessert && !kunde?.keine_ki_bilder && (
+                  <button
+                    type="button"
+                    title="Foto mit KI verbessern (Qualität, Setting, Hintergrund, Perspektive)"
+                    onClick={e => { e.stopPropagation(); setVerbessernFoto(r); }}
+                    style={{
+                      position: 'absolute', bottom: 4, right: 4,
+                      background: '#0a0a0a', color: '#d4ff00', border: 'none',
+                      padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                      cursor: 'pointer', letterSpacing: 0.03, textTransform: 'uppercase',
+                    }}>✨ Verbessern</button>
+                )}
                 <div className="ref-caption">
                   {r.beschreibung || <em style={{ color: 'var(--ink-4)' }}>ohne Beschreibung</em>}
                 </div>
@@ -1071,6 +1089,162 @@ export default function JobCreatives() {
         onClose={() => setLogoPosTarget(null)}
         onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
       />
+
+      {verbessernFoto && (
+        <VerbessernModal
+          foto={verbessernFoto}
+          onClose={() => setVerbessernFoto(null)}
+          onDone={(neu) => {
+            setPersonen(prev => [neu, ...prev]);
+            setVerbessernFoto(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const VERBESSERN_OPTIONS = [
+  { k: 'qualitaet',     t: '📸 Qualität verbessern',            d: 'Beleuchtung, Kontrast, Schärfe, Farben, weniger Rauschen. Personen und Szene bleiben unverändert.' },
+  { k: 'hg_aufraeumen', t: '🧹 Hintergrund aufräumen',          d: 'Chaos im Hintergrund beruhigen oder dezent tauschen (Werkstatt-Chaos → aufgeräumte Werkstatt). Person bleibt authentisch.' },
+  { k: 'hg_ersetzen',   t: '🌆 Hintergrund komplett ersetzen',  d: 'Person freistellen und in ein neues Setting stellen. Setting frei eingeben — für Fälle mit unbrauchbarem Original.' },
+  { k: 'ausschnitt',    t: '📐 Ausschnitt & Perspektive optimieren', d: 'Besserer Ausschnitt, schiefe Aufnahmen begradigen, störende Bildränder entfernen.' },
+];
+
+function VerbessernModal({ foto, onClose, onDone }) {
+  const [selected, setSelected] = useState(() => new Set(['qualitaet']));
+  const [setting, setSetting] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [appliedOpts, setAppliedOpts] = useState([]);
+
+  function toggle(k) {
+    setSelected(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  }
+
+  async function generate() {
+    if (selected.size === 0) { setErr('Bitte mindestens eine Verbesserungs-Option wählen.'); return; }
+    if (selected.has('hg_ersetzen') && !setting.trim()) {
+      setErr('Bei „Hintergrund komplett ersetzen" bitte das gewünschte Setting eingeben.');
+      return;
+    }
+    setBusy(true); setErr(''); setPreviewUrl(null);
+    try {
+      const optionen = Array.from(selected);
+      const body = { optionen };
+      if (selected.has('hg_ersetzen')) body.hintergrund_setting = setting.trim();
+      const res = await api(`/kunden/referenzbilder/${foto.id}/verbessern`, { method: 'POST', body });
+      setPreviewUrl(res.preview_url);
+      setAppliedOpts(res.angewendete_optionen || optionen);
+    } catch (e) {
+      setErr(e.message);
+    } finally { setBusy(false); }
+  }
+
+  async function save() {
+    setSaving(true); setErr('');
+    try {
+      const res = await api(`/kunden/referenzbilder/${foto.id}/verbessern/save`, {
+        method: 'POST', body: { preview_url: previewUrl, angewendete_optionen: appliedOpts },
+      });
+      onDone(res.referenzbild);
+    } catch (e) { setErr(e.message); setSaving(false); }
+  }
+
+  const optListStr = appliedOpts.map(k => VERBESSERN_OPTIONS.find(o => o.k === k)?.t || k).join(' · ');
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, padding: 22, width: previewUrl ? 820 : 620, maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
+          <img src={foto.bild_url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #ececea', flexShrink: 0 }} />
+          <div>
+            <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>✨ Foto mit KI verbessern</h2>
+            <p style={{ margin: 0, fontSize: 12, color: '#5a5955' }}>
+              Mehrere Optionen kombinierbar. Gesichter und Personen bleiben authentisch — keine Beautify.
+              Bearbeitung dauert ~30–60 Sekunden.
+            </p>
+          </div>
+        </div>
+
+        {!previewUrl && (
+          <>
+            <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+              {VERBESSERN_OPTIONS.map(o => (
+                <label key={o.k} style={{
+                  display: 'flex', gap: 10, alignItems: 'flex-start',
+                  padding: '10px 12px', border: `1px solid ${selected.has(o.k) ? '#0a0a0a' : '#ececea'}`,
+                  borderRadius: 10, cursor: 'pointer', background: selected.has(o.k) ? '#fafaf8' : '#fff',
+                }}>
+                  <input type="checkbox" checked={selected.has(o.k)} onChange={() => toggle(o.k)} style={{ marginTop: 3 }} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{o.t}</div>
+                    <div style={{ fontSize: 11, color: '#5a5955' }}>{o.d}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {selected.has('hg_ersetzen') && (
+              <div style={{ marginBottom: 12, padding: 10, background: '#fafaf8', borderRadius: 8 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>
+                  Neues Setting beschreiben
+                </label>
+                <input value={setting} onChange={e => setSetting(e.target.value)}
+                  placeholder='z.B. "moderner Heizungskeller", "Baustelle bei Sonnenlicht", "aufgeräumtes Büro mit Tageslicht"'
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
+              </div>
+            )}
+          </>
+        )}
+
+        {previewUrl && (
+          <>
+            <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 8 }}>
+              Angewendet: <strong>{optListStr}</strong>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>Vorher (Original)</div>
+                <img src={foto.bild_url} alt="Original" style={{ width: '100%', borderRadius: 8, border: '1px solid #ececea', display: 'block' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#0a0a0a', marginBottom: 4 }}>Nachher ✨</div>
+                <img src={previewUrl} alt="Verbessert" style={{ width: '100%', borderRadius: 8, border: '2px solid #7c3aed', display: 'block' }} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {err && <div style={{ color: '#c1272d', fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button onClick={onClose} disabled={busy || saving}
+            style={{ background: 'transparent', border: '1px solid #ececea', padding: '8px 16px', borderRadius: 8, cursor: 'pointer' }}>
+            Abbrechen
+          </button>
+          {!previewUrl && (
+            <button onClick={generate} disabled={busy || selected.size === 0}
+              style={{ background: '#0a0a0a', color: '#d4ff00', border: 'none', padding: '8px 20px', borderRadius: 8, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
+              {busy ? '⏳ Erzeuge Vorschau…' : '✨ Vorschau erzeugen'}
+            </button>
+          )}
+          {previewUrl && (
+            <>
+              <button onClick={generate} disabled={busy || saving}
+                style={{ background: 'transparent', border: '1px solid #ececea', padding: '8px 16px', borderRadius: 8, cursor: busy ? 'wait' : 'pointer' }}>
+                {busy ? '⏳ Neuer Versuch…' : '🔄 Neu versuchen'}
+              </button>
+              <button onClick={save} disabled={busy || saving}
+                style={{ background: '#0a0a0a', color: '#d4ff00', border: 'none', padding: '8px 20px', borderRadius: 8, cursor: saving ? 'wait' : 'pointer', fontWeight: 600 }}>
+                {saving ? '⏳ Speichere…' : '✓ Übernehmen'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
