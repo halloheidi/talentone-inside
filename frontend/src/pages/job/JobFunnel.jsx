@@ -243,13 +243,6 @@ export default function JobFunnel() {
   if (loading || initBusy) {
     return <div className="card empty">{initBusy ? 'KI generiert die Funnel-Texte… (~10–20 Sekunden)' : 'Lade Funnel…'}</div>;
   }
-
-  // Neukundengewinnung: kein interner Funnel-Builder — externe Landingpage
-  // (onepage.io o. Ä.) + Webhook + interne Anfragen-Liste.
-  if (job?.projekttyp === 'neukundengewinnung') {
-    return <NeukundenFunnelTab job={job} kunde={kunde} />;
-  }
-
   if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
 
   const brandBase = getBrandBaseUrl(kunde?.agentur);
@@ -275,6 +268,8 @@ export default function JobFunnel() {
           )}
         </div>
       )}
+
+      <PerspectiveSection job={job} kunde={kunde} />
 
       {/* Toggle: Eigener vs. externer Funnel */}
       <div className="funnel-mode-toggle">
@@ -842,6 +837,320 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
 
 /* ═════════════════════ Webhook-Info Box (Perspective) ═════════════════════ */
 
+/* ═══════════════════════ Perspective-Integration ═══════════════════════ */
+function PerspectiveSection({ job, kunde }) {
+  const [funnelRow, setFunnelRow] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
+  const [showUpdate, setShowUpdate] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Vorhandenen Perspective-Funnel dieses Jobs laden
+  async function load() {
+    try {
+      const res = await api(`/funnels?job_id=${job.id}`);
+      const row = (res.funnels || []).find(f => !!f.perspective_job_id) || null;
+      setFunnelRow(row);
+    } catch (e) { console.warn('[perspective/load]', e.message); }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
+
+  // Polling wenn Status polling/creating
+  useEffect(() => {
+    if (!funnelRow?.id) return;
+    if (!['polling', 'creating'].includes(funnelRow.perspective_status)) return;
+    let timer;
+    async function tick() {
+      try {
+        const res = await api(`/perspective/status/${funnelRow.id}`);
+        if (res.status === 'completed') {
+          await load();
+          return;
+        }
+        if (res.status === 'error') { setErr(res.error || 'Fehler in Perspective'); await load(); return; }
+      } catch (e) { /* stay polling */ }
+      timer = setTimeout(tick, 8000);
+    }
+    timer = setTimeout(tick, 5000);
+    return () => timer && clearTimeout(timer);
+  }, [funnelRow?.id, funnelRow?.perspective_status]);
+
+  async function toggleChecklist(field, value) {
+    try {
+      const res = await api(`/perspective/checklist/${funnelRow.id}`, { method: 'PATCH', body: { [field]: value } });
+      setFunnelRow(res.funnel);
+    } catch (e) { alert(e.message); }
+  }
+
+  return (
+    <fieldset className="formular-section" style={{ borderColor: '#7c3aed' }}>
+      <legend style={{ color: '#7c3aed', fontWeight: 700 }}>🚀 Perspective-Funnel (automatisch erstellen)</legend>
+      {!funnelRow && (
+        <>
+          <p className="pane-hint">Perspective baut den Funnel per KI aus deinen Job-Daten. Der Funnel bleibt Draft, bis du ihn hier veröffentlichst.</p>
+          <button className="btn-primary" onClick={() => setShowCreate(true)}>🚀 Perspective-Funnel erstellen</button>
+        </>
+      )}
+      {funnelRow && (
+        <>
+          {(funnelRow.perspective_status === 'creating' || funnelRow.perspective_status === 'polling') && (
+            <div style={{ padding: 14, background: '#f5f3ff', borderRadius: 8, marginBottom: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>⏳ Funnel wird generiert…</div>
+              <div style={{ fontSize: 12, color: '#5a5955' }}>Perspective braucht 3–8 Minuten. Der Status aktualisiert sich automatisch — du kannst weiterarbeiten.</div>
+            </div>
+          )}
+          {funnelRow.perspective_status === 'error' && (
+            <div style={{ padding: 14, background: '#fee2e2', color: '#991b1b', borderRadius: 8, marginBottom: 12 }}>
+              <strong>Fehler:</strong> {funnelRow.perspective_last_error || err || 'Unbekannt'}
+              <button className="btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => setShowCreate(true)}>Neu versuchen</button>
+            </div>
+          )}
+          {funnelRow.perspective_status === 'completed' && (
+            <>
+              <div style={{ padding: 14, background: '#dcfce7', borderRadius: 8, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>✅ Perspective-Funnel erstellt</div>
+                <div style={{ fontSize: 12, marginBottom: 8 }}>
+                  {funnelRow.perspective_editor_url && (
+                    <>Editor: <a href={funnelRow.perspective_editor_url} target="_blank" rel="noreferrer">{funnelRow.perspective_editor_url}</a></>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {!funnelRow.extern_url && (
+                    <button className="btn-primary btn-sm" onClick={() => setShowPublish(true)}>📤 Funnel veröffentlichen</button>
+                  )}
+                  <button className="btn-ghost btn-sm" onClick={() => setShowUpdate(true)}>✏️ Funnel anpassen</button>
+                </div>
+              </div>
+
+              {funnelRow.extern_url && (
+                <div style={{ padding: 12, background: '#eff6ff', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+                  <strong>Live:</strong> <a href={funnelRow.extern_url} target="_blank" rel="noreferrer">{funnelRow.extern_url}</a>
+                </div>
+              )}
+
+              <ManuellChecklist funnelRow={funnelRow} onToggle={toggleChecklist} jobId={job.id} />
+            </>
+          )}
+        </>
+      )}
+
+      {showCreate && (
+        <CreateModal
+          job={job} kunde={kunde}
+          onClose={() => setShowCreate(false)}
+          onDone={(row) => { setFunnelRow(row); setShowCreate(false); }}
+        />
+      )}
+      {showPublish && funnelRow && (
+        <PublishModal
+          funnelRow={funnelRow} kunde={kunde}
+          onClose={() => setShowPublish(false)}
+          onDone={(updated) => { setFunnelRow(updated); setShowPublish(false); }}
+        />
+      )}
+      {showUpdate && funnelRow && (
+        <UpdateModal
+          funnelRow={funnelRow}
+          onClose={() => setShowUpdate(false)}
+          onDone={() => { setShowUpdate(false); load(); }}
+        />
+      )}
+    </fieldset>
+  );
+}
+
+function ManuellChecklist({ funnelRow, onToggle, jobId }) {
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/leads?job_id=${jobId}`;
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={{ padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#78350f', marginBottom: 6 }}>⚠️ Noch manuell in Perspective erledigen:</div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+        <input type="checkbox" checked={!!funnelRow.manual_pixel_done}
+          onChange={e => onToggle('manual_pixel_done', e.target.checked)} />
+        Meta Pixel + CAPI im Funnel hinterlegen
+      </label>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+        <input type="checkbox" checked={!!funnelRow.manual_webhook_done}
+          onChange={e => onToggle('manual_webhook_done', e.target.checked)} />
+        Webhook einrichten (Event „Funnel komplettiert"):
+      </label>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 24 }}>
+        <code style={{ fontSize: 11, background: '#fff', padding: '3px 8px', borderRadius: 4, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{webhookUrl}</code>
+        <button className="btn-ghost btn-sm" onClick={() => { navigator.clipboard.writeText(webhookUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}>
+          {copied ? '✓' : 'Kopieren'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CreateModal({ job, kunde, onClose, onDone }) {
+  const [schema, setSchema] = useState('lang');
+  const [domain, setDomain] = useState(kunde?.website_domain || kunde?.website_url || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [];
+
+  async function run() {
+    setBusy(true); setErr('');
+    try {
+      const res = await api('/perspective/create', {
+        method: 'POST',
+        body: { job_id: job.id, schema, website_domain: domain.trim() || null },
+      });
+      // Nach Anlegen: erste Row-Version zurueckziehen
+      const { funnels } = await api(`/funnels?job_id=${job.id}`);
+      const row = (funnels || []).find(f => f.id === res.funnel_row_id) || (funnels || [])[0];
+      onDone(row);
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 22, width: 620, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <h2 style={{ margin: '0 0 12px' }}>🚀 Perspective-Funnel erstellen</h2>
+        <div style={{ padding: 12, background: '#fafaf8', borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+          <div><strong>Firma:</strong> {kunde?.firmenname}</div>
+          <div><strong>Stelle:</strong> {job.stelle || '—'} · <strong>Region:</strong> {job.region || '—'}</div>
+          <div><strong>Branche:</strong> {kunde?.branche || '—'}</div>
+          <div><strong>Benefits:</strong> {benefits.length ? benefits.slice(0, 5).join(' · ') : '—'}</div>
+        </div>
+
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>Kunden-Website (für Brand-Erstellung)</div>
+          <input type="url" value={domain} onChange={e => setDomain(e.target.value)}
+            placeholder="https://www.beispiel-firma.de"
+            style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
+        </label>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 6 }}>Funnel-Schema</div>
+          <label style={{ display: 'flex', gap: 8, padding: 10, border: `1px solid ${schema === 'lang' ? '#0a0a0a' : '#ececea'}`, borderRadius: 8, marginBottom: 6, cursor: 'pointer' }}>
+            <input type="radio" checked={schema === 'lang'} onChange={() => setSchema('lang')} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Langer Funnel (Standard)</div>
+              <div style={{ fontSize: 11, color: '#5a5955' }}>Hero → Vorteile → Aufgaben → 3 Quali-Fragen → Kontakt → Danke</div>
+            </div>
+          </label>
+          <label style={{ display: 'flex', gap: 8, padding: 10, border: `1px solid ${schema === 'kurz' ? '#0a0a0a' : '#ececea'}`, borderRadius: 8, cursor: 'pointer' }}>
+            <input type="radio" checked={schema === 'kurz'} onChange={() => setSchema('kurz')} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Kurzer Funnel</div>
+              <div style={{ fontSize: 11, color: '#5a5955' }}>Hero → Benefits kompakt → 1–2 Fragen → Kontakt</div>
+            </div>
+          </label>
+        </div>
+
+        {err && <div style={{ color: '#c1272d', fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} disabled={busy} className="btn-ghost">Abbrechen</button>
+          <button onClick={run} disabled={busy || !domain.trim()} className="btn-primary">
+            {busy ? '⏳ Starte…' : '🚀 Funnel erstellen'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublishModal({ funnelRow, kunde, onClose, onDone }) {
+  const [domains, setDomains] = useState(null);
+  const [domainId, setDomainId] = useState('');
+  const [slug, setSlug] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api('/perspective/domains').then(r => setDomains(r.domains || [])).catch(() => setDomains([]));
+    // Slug initial: firmenname-stelle (vom Backend nochmal slugified)
+    const s = [kunde?.firmenname, funnelRow?.perspective_schema].filter(Boolean).join('-')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    setSlug(s);
+  }, [funnelRow?.id]);
+
+  async function run() {
+    setBusy(true); setErr('');
+    try {
+      const res = await api('/perspective/publish', {
+        method: 'POST',
+        body: { funnel_row_id: funnelRow.id, domain_id: domainId || null, slug: slug.trim() },
+      });
+      onDone(res.funnel);
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 22, width: 520, maxWidth: '100%' }}>
+        <h2 style={{ margin: '0 0 12px' }}>📤 Funnel veröffentlichen</h2>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>Domain</div>
+          <select value={domainId} onChange={e => setDomainId(e.target.value)}
+            style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }}>
+            <option value="">
+              {kunde?.agentur === 'talentone' ? 'jobs.talent-one.de (Standard)' : 'Perspective-Standard-Domain'}
+            </option>
+            {(domains || []).map(d => (
+              <option key={d.id || d.name} value={d.id}>{d.name || d.domain || d.id}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>Slug (URL-Pfad)</div>
+          <input value={slug} onChange={e => setSlug(e.target.value)}
+            style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
+          <div style={{ fontSize: 11, color: '#5a5955', marginTop: 4 }}>Beispiel: <code>{slug || 'firmenname-stelle'}</code></div>
+        </label>
+
+        {err && <div style={{ color: '#c1272d', fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} disabled={busy} className="btn-ghost">Abbrechen</button>
+          <button onClick={run} disabled={busy || !slug.trim()} className="btn-primary">
+            {busy ? '⏳ Veröffentliche…' : '📤 Veröffentlichen'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UpdateModal({ funnelRow, onClose, onDone }) {
+  const [prompt, setPrompt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function run() {
+    setBusy(true); setErr('');
+    try {
+      await api('/perspective/update', { method: 'POST', body: { funnel_row_id: funnelRow.id, prompt: prompt.trim() } });
+      onDone();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: 22, width: 520, maxWidth: '100%' }}>
+        <h2 style={{ margin: '0 0 12px' }}>✏️ Funnel anpassen</h2>
+        <p style={{ fontSize: 13, color: '#5a5955', marginBottom: 10 }}>Beschreibe deine Änderungen in Freitext (z.B. „Headline auf X ändern", „Frage zur Verfügbarkeit ergänzen"). Perspective erzeugt einen neuen Draft — bitte danach im Editor prüfen und neu veröffentlichen.</p>
+        <textarea rows={5} value={prompt} onChange={e => setPrompt(e.target.value)}
+          placeholder="Was soll geändert werden?"
+          style={{ width: '100%', padding: 10, border: '1px solid #ececea', borderRadius: 6, fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} />
+
+        {err && <div style={{ color: '#c1272d', fontSize: 12, marginTop: 10 }}>{err}</div>}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+          <button onClick={onClose} disabled={busy} className="btn-ghost">Abbrechen</button>
+          <button onClick={run} disabled={busy || !prompt.trim()} className="btn-primary">
+            {busy ? '⏳ Aktualisiere…' : '✏️ Änderung senden'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WebhookInfo({ jobId }) {
   const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
@@ -997,167 +1306,6 @@ function ChipsEditor({ items = [], onChange, placeholder, max, vertical }) {
           <button type="button" className="btn-ghost btn-sm" onClick={add}>Hinzufügen</button>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ═════════════════════ Neukunden-Funnel-Tab ═════════════════════ */
-const STATUS_LABEL_NK = { neu: '🆕 Neu', kontaktiert: '📞 Kontaktiert', termin: '📅 Termin', gewonnen: '✅ Gewonnen', verloren: '❌ Verloren' };
-
-function NeukundenFunnelTab({ job, kunde }) {
-  const nk = job.neukunden_daten || {};
-  const [funnelUrl, setFunnelUrl] = useState(nk.funnel_url || '');
-  const [funnelBusy, setFunnelBusy] = useState(false);
-  const [funnelMsg, setFunnelMsg] = useState('');
-  const [anfragenToken, setAnfragenToken] = useState(job.anfragen_token || '');
-  const [anfragen, setAnfragen] = useState([]);
-  const [loadingAnfragen, setLoadingAnfragen] = useState(true);
-
-  useEffect(() => {
-    if (!anfragenToken) {
-      api(`/anfragen/token/ensure/${job.id}`, { method: 'POST' })
-        .then(r => setAnfragenToken(r.token || ''))
-        .catch(() => {});
-    }
-    api(`/anfragen?job_id=${job.id}`)
-      .then(r => setAnfragen(r.anfragen || []))
-      .catch(() => {})
-      .finally(() => setLoadingAnfragen(false));
-    // eslint-disable-next-line
-  }, [job.id]);
-
-  const apiBase = getApiBaseUrl();
-  const webhookUrl = `${apiBase}/api/webhooks/leads?job_id=${job.id}`;
-  const brandBase = getBrandBaseUrl(kunde?.agentur);
-  const anfragenListUrl = anfragenToken ? `${brandBase}/anfragen/${anfragenToken}` : null;
-
-  async function saveFunnelUrl() {
-    setFunnelBusy(true); setFunnelMsg('');
-    try {
-      await api(`/jobs/${job.id}`, { method: 'PATCH', body: { neukunden_daten: { ...nk, funnel_url: funnelUrl.trim() } } });
-      setFunnelMsg('Gespeichert.');
-    } catch (err) { setFunnelMsg('Fehler: ' + err.message); }
-    finally { setFunnelBusy(false); }
-  }
-
-  async function refreshAnfragen() {
-    setLoadingAnfragen(true);
-    try { const r = await api(`/anfragen?job_id=${job.id}`); setAnfragen(r.anfragen || []); }
-    finally { setLoadingAnfragen(false); }
-  }
-
-  async function updateAnfrage(id, patch) {
-    setAnfragen(prev => prev.map(a => a.id === id ? { ...a, ...patch } : a));
-    try { await api(`/anfragen/${id}`, { method: 'PATCH', body: patch }); }
-    catch (err) { alert('Speichern fehlgeschlagen: ' + err.message); refreshAnfragen(); }
-  }
-
-  function copyToClipboard(text) { navigator.clipboard.writeText(text).catch(() => {}); }
-
-  return (
-    <div style={{ display: 'grid', gap: 18, padding: '4px 0' }}>
-      <section className="card" style={{ padding: 16 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Externe Landingpage (onepage.io o. Ä.)</h3>
-        <p className="pane-hint" style={{ marginTop: 0 }}>Die URL, die in Ads / Ad-Copies verlinkt wird.</p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input type="url" value={funnelUrl} onChange={e => setFunnelUrl(e.target.value)}
-            placeholder="https://landingpage.example.com"
-            style={{ flex: 1, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }} />
-          <button className="btn-primary btn-sm" onClick={saveFunnelUrl} disabled={funnelBusy}>Speichern</button>
-        </div>
-        {funnelMsg && <div className="motiv-sub" style={{ marginTop: 6 }}>{funnelMsg}</div>}
-      </section>
-
-      <section className="card" style={{ padding: 16 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Webhook-URL für die Landingpage</h3>
-        <p className="pane-hint" style={{ marginTop: 0 }}>
-          In onepage.io als „Webhook / Zapier-URL" hinterlegen. Jede Anfrage POST hierher → landet in der Liste und geht als Mail an den Kunden.
-        </p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <code style={{ flex: 1, padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 6, fontSize: 12, wordBreak: 'break-all' }}>{webhookUrl}</code>
-          <button className="btn-ghost btn-sm" onClick={() => copyToClipboard(webhookUrl)}>Kopieren</button>
-        </div>
-        <details style={{ marginTop: 12, fontSize: 13 }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>So richtest du das in onepage.io ein</summary>
-          <ol style={{ marginTop: 8, paddingLeft: 20, color: 'var(--ink-3)', lineHeight: 1.6 }}>
-            <li>Formular-Block bearbeiten → „Integrationen / Nach Absenden" → „Webhook"</li>
-            <li>URL einfügen, Method POST, Content-Type application/json</li>
-            <li>Alle Formularfelder als Payload weitergeben — Name/E-Mail/Telefon werden automatisch erkannt</li>
-            <li>Testen: eine Test-Anfrage abschicken → sollte sofort in der Liste erscheinen</li>
-          </ol>
-        </details>
-      </section>
-
-      {anfragenListUrl && (
-        <section className="card" style={{ padding: 16 }}>
-          <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>Anfragen-Link für den Kunden</h3>
-          <p className="pane-hint" style={{ marginTop: 0 }}>Weitergeben — der Kunde sieht alle Anfragen in Echtzeit.</p>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <code style={{ flex: 1, padding: '8px 12px', background: 'var(--gray-50)', borderRadius: 6, fontSize: 12, wordBreak: 'break-all' }}>{anfragenListUrl}</code>
-            <button className="btn-ghost btn-sm" onClick={() => copyToClipboard(anfragenListUrl)}>Kopieren</button>
-            <a className="btn-ghost btn-sm" href={anfragenListUrl} target="_blank" rel="noreferrer">Öffnen</a>
-          </div>
-        </section>
-      )}
-
-      <section>
-        <div className="section-head">
-          <div>
-            <h2 className="section-title">Anfragen ({anfragen.length})</h2>
-            <p className="section-sub">Eingegangene Kundenanfragen — Status + Notiz editierbar.</p>
-          </div>
-          <button className="btn-ghost btn-sm" onClick={refreshAnfragen} disabled={loadingAnfragen}>
-            {loadingAnfragen ? 'Lade…' : '↻ Aktualisieren'}
-          </button>
-        </div>
-        {loadingAnfragen && anfragen.length === 0 ? (
-          <div className="card empty">Lade Anfragen…</div>
-        ) : anfragen.length === 0 ? (
-          <div className="card empty">
-            <h2>Noch keine Anfragen</h2>
-            <p>Sobald über den Webhook oben eine Anfrage eingeht, taucht sie hier auf.</p>
-          </div>
-        ) : (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table" style={{ margin: 0, width: '100%' }}>
-                <thead>
-                  <tr><th>Datum</th><th>Name</th><th>Kontakt</th><th>Weitere Felder</th><th>Status</th><th>Notizen</th></tr>
-                </thead>
-                <tbody>
-                  {anfragen.map(a => (
-                    <tr key={a.id} style={{ opacity: a.status === 'verloren' ? 0.55 : 1 }}>
-                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                      <td><strong>{a.name || '—'}</strong></td>
-                      <td style={{ fontSize: 12 }}>
-                        {a.email  && <div><a href={`mailto:${a.email}`}>{a.email}</a></div>}
-                        {a.telefon && <div><a href={`tel:${a.telefon}`}>{a.telefon}</a></div>}
-                      </td>
-                      <td style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                        {Object.entries(a.daten || {}).slice(0, 4).map(([k, v]) => (
-                          <div key={k}><strong>{k}:</strong> {String(v).slice(0, 60)}</div>
-                        ))}
-                      </td>
-                      <td>
-                        <select value={a.status} onChange={e => updateAnfrage(a.id, { status: e.target.value })}
-                          style={{ padding: '4px 8px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12 }}>
-                          {Object.entries(STATUS_LABEL_NK).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                        </select>
-                      </td>
-                      <td>
-                        <textarea rows={2} defaultValue={a.notizen || ''}
-                          onBlur={e => e.target.value !== (a.notizen || '') && updateAnfrage(a.id, { notizen: e.target.value || null })}
-                          placeholder="Notiz…"
-                          style={{ width: 200, padding: '4px 6px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, resize: 'vertical' }} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </section>
     </div>
   );
 }
