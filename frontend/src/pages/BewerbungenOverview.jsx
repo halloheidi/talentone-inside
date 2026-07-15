@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
+import { effektiveVorqualFelder } from '../lib/vorqual.js';
 
 const STATUS_OPTIONS = [
   { value: 'neu', label: 'Neu' },
@@ -165,9 +166,7 @@ export default function BewerbungenOverview() {
   const vorqualSpalten = useMemo(() => {
     const seen = new Map(); // name -> feld (typ, optionen)
     for (const b of data.bewerbungen) {
-      const felder = b.talentone_jobs?.vorqualifizierung_felder;
-      if (!Array.isArray(felder)) continue;
-      for (const f of felder) {
+      for (const f of effektiveVorqualFelder(b.talentone_jobs)) {
         if (f?.name && !seen.has(f.name)) seen.set(f.name, f);
       }
     }
@@ -175,8 +174,7 @@ export default function BewerbungenOverview() {
   }, [data.bewerbungen]);
 
   function jobHatFeld(job, feldName) {
-    return Array.isArray(job?.vorqualifizierung_felder) &&
-      job.vorqualifizierung_felder.some(f => f?.name === feldName);
+    return effektiveVorqualFelder(job).some(f => f?.name === feldName);
   }
 
   // Counter für die beiden Telefonisten-Toggles (auf Basis-Datenmenge, vor anderen Filtern)
@@ -555,12 +553,12 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
             </div>
           </section>
 
-          {/* 4b. Vorqualifizierungs-Felder (aus dem Job) */}
-          {Array.isArray(job?.vorqualifizierung_felder) && job.vorqualifizierung_felder.filter(f => f?.name).length > 0 && (
+          {/* 4b. Vorqualifizierungs-Felder (aus dem Job, inkl. Standard-Fallback) */}
+          {effektiveVorqualFelder(job).length > 0 && (
             <section>
               <h3>Vorqualifizierung</h3>
               <div className="slideover-form">
-                {job.vorqualifizierung_felder.filter(f => f?.name).map((feld, idx) => {
+                {effektiveVorqualFelder(job).map((feld, idx) => {
                   const wert = (note.vorqualifizierung_werte || {})[feld.name] || '';
                   const update = (v) => {
                     const next = { ...(note.vorqualifizierung_werte || {}), [feld.name]: v };

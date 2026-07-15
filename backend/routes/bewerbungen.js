@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
+import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 
 const router = Router();
 
@@ -72,16 +73,7 @@ router.patch('/:id/notiz', async (req, res) => {
 });
 
 /* ════════════════════ Vorqualifizierungs-Felder (KI-Vorschlag) ════════════════════ */
-
-const VORQUAL_STANDARD = [
-  { name: 'Ausbildung', typ: 'text' },
-  { name: 'Alter', typ: 'text' },
-  { name: 'Aktuelle Situation', typ: 'text' },
-  { name: 'Motivation / Wechselgrund', typ: 'text' },
-  { name: 'Gehaltsvorstellung (brutto)', typ: 'text' },
-  { name: 'Erreichbarkeit', typ: 'dropdown', optionen: ['Jederzeit', 'Vormittags', 'Mittags', 'Nachmittags', 'Abends'] },
-  { name: 'PLZ / Wohnort', typ: 'text' },
-];
+// VORQUAL_STANDARD lebt jetzt in ../vorqualifizierung.js (geteilt mit jobs.js + Migration).
 
 // POST /api/bewerbungen/job/:jobId/vorqualifizierung-vorschlaege
 // Liefert (und speichert) eine Liste von Vorqualifizierungs-Feldern basierend auf Stelle + Branche.

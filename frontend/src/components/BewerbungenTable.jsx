@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
+import { effektiveVorqualFelder } from '../lib/vorqual.js';
 
 /* Vordefinierte interne Spalten (schlanke Ansicht — wenn vorqualifizierung aus) */
 const INTERNE_SPALTEN_DEFS = {
@@ -320,10 +321,12 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
 
 export default function BewerbungenTable({ job, kunde, internalSpalten: internalSpaltenProp, onChangeInternalSpalten }) {
   const telefonistenMode = !!job?.vorqualifizierung;
-  const vorqualFelder = useMemo(() => {
-    const f = Array.isArray(job?.vorqualifizierung_felder) ? job.vorqualifizierung_felder : [];
-    return f.filter(x => x && x.name);
-  }, [job?.vorqualifizierung_felder]);
+  // Fallback aufs Standard-Set, falls Vorqualifizierung aktiv, aber (noch) kein Feld-Set
+  // konfiguriert ist — verhindert ein leeres/ausgegrautes Vorqual-Grid.
+  const vorqualFelder = useMemo(
+    () => effektiveVorqualFelder(job),
+    [job?.vorqualifizierung_felder, job?.vorqualifizierung]
+  );
 
   // Anruf-Spalten nur sichtbar wenn vorqualifizierung aktiv (für schlanke Ansicht)
   const internalSpalten = useMemo(() => {

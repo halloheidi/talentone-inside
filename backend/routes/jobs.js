@@ -6,6 +6,7 @@ import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
+import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 
 const router = Router();
 
@@ -213,6 +214,22 @@ router.patch('/:id', async (req, res) => {
   const patch = Object.fromEntries(
     Object.entries(req.body || {}).filter(([k]) => ALLOWED_JOB_FIELDS.includes(k))
   );
+
+  // Vorqualifizierung aktiviert, aber keine Felder mitgegeben → Standard-Set direkt
+  // schreiben, damit nie ein leeres/ausgegrautes Vorqual-Grid entsteht. KI-Vorschläge
+  // (vorqualifizierung-vorschlaege) können es später ergänzen/ersetzen.
+  if (patch.vorqualifizierung === true && patch.vorqualifizierung_felder === undefined) {
+    const { data: cur } = await supabase
+      .from('talentone_jobs')
+      .select('vorqualifizierung_felder')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    const curFelder = Array.isArray(cur?.vorqualifizierung_felder)
+      ? cur.vorqualifizierung_felder.filter(f => f && f.name)
+      : [];
+    if (curFelder.length === 0) patch.vorqualifizierung_felder = VORQUAL_STANDARD;
+  }
+
   const { data, error } = await supabase
     .from('talentone_jobs')
     .update(patch)
