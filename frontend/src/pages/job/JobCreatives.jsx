@@ -70,6 +70,7 @@ export default function JobCreatives() {
 
   // Lightbox
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [refLightboxIndex, setRefLightboxIndex] = useState(null); // Referenzbilder/Kundenfotos
 
   // Reel-Generierung pro Parent-Creative-ID (zeigt Loading-State)
   const [reelBusy, setReelBusy] = useState(() => new Set());
@@ -731,7 +732,7 @@ export default function JobCreatives() {
               <span>Ohne Person<br/><small>(KI generiert)</small></span>
             </button>
           )}
-          {personen.map(r => {
+          {personen.map((r, i) => {
             const selected = aktiveAuswahlId === r.id;
             const istVerbessert = !!r.verbessert_von;
             return (
@@ -743,6 +744,12 @@ export default function JobCreatives() {
                 title={r.beschreibung || 'Person'}
               >
                 <img src={r.bild_url} alt="" />
+                <button
+                  type="button"
+                  className="ref-zoom"
+                  title="In voller Größe ansehen"
+                  onClick={e => { e.stopPropagation(); setRefLightboxIndex(i); }}
+                >🔍</button>
                 {r.uploaded_via === 'kunde' && <span className="ref-badge">Kunde</span>}
                 {istVerbessert && (
                   <span className="ref-badge" style={{ background: '#7c3aed', color: '#fff', top: 4, right: 4, left: 'auto' }}
@@ -1027,6 +1034,16 @@ export default function JobCreatives() {
             onClose={() => setLightboxIndex(null)}
             onNavigate={setLightboxIndex}
             filenameFor={buildFilename}
+          />
+        )}
+
+        {refLightboxIndex !== null && personen.length > 0 && (
+          <Lightbox
+            items={personen}
+            index={Math.max(0, Math.min(refLightboxIndex, personen.length - 1))}
+            onClose={() => setRefLightboxIndex(null)}
+            onNavigate={setRefLightboxIndex}
+            filenameFor={r => `referenzbild-${(r.beschreibung || r.id).toString().replace(/[^\w-]+/g, '-').slice(0, 40)}.png`}
           />
         )}
 

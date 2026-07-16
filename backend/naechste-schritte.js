@@ -46,8 +46,12 @@ function kurznameFor(stelle) {
  *         adcopiesCount, funnels, review, letzterEntwurfsversandDatum }
  */
 function berechneSchritt(ctx) {
-  const { kunde, projekt, refbilderCount, versandTypen, anfrageDatum,
+  const { kunde, projekt, tabStatus, refbilderCount, versandTypen, anfrageDatum,
           creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
+
+  // Manuell abgehaktes Tab (tab_status[tab] === true) → zugehöriger Workflow-Schritt
+  // wird übersprungen (Schritt wurde ausserhalb des Tools erledigt).
+  const tabErledigt = (tab) => tabStatus && typeof tabStatus === 'object' && tabStatus[tab] === true;
 
   // ══════════════════════════════════════════════════════════════════════
   // PROJEKT-STATUS HAT VORRANG:
@@ -97,7 +101,7 @@ function berechneSchritt(ctx) {
   //      (wir haben ja offensichtlich ohne Kundenfotos gearbeitet).
   //   b) Sonst: keine Fotos + noch keine Anfrage → 📸 Fotos anfragen
   //   c) Sonst: keine Fotos + Anfrage bereits raus → ⏳ Wartet auf Fotos ({Datum})
-  if (creativesCount === 0 && refbilderCount === 0) {
+  if (!tabErledigt('stelle') && creativesCount === 0 && refbilderCount === 0) {
     // Anfrage-Nachweis: entweder Versand-Log ODER upload_token am Kunden
     // (der Token wird nur beim ersten anfrage-Aufruf generiert — deckt
     // Bestandsdaten ab, wo Versand-Log noch nicht mitgeschrieben wurde).
@@ -116,19 +120,19 @@ function berechneSchritt(ctx) {
   }
 
   // 3. Keine Creatives
-  if (creativesCount === 0) return { ...REGEL_BY_KEY.creatives_erstellen };
+  if (!tabErledigt('creatives') && creativesCount === 0) return { ...REGEL_BY_KEY.creatives_erstellen };
 
   // 4. Keine Ad Copies
-  if (adcopiesCount === 0) return { ...REGEL_BY_KEY.adcopies_erstellen };
+  if (!tabErledigt('adcopies') && adcopiesCount === 0) return { ...REGEL_BY_KEY.adcopies_erstellen };
 
   // 5. Kein Funnel
   const hatFunnel = funnels.some(f =>
     f.veroeffentlicht || (f.extern && f.extern_url));
-  if (!hatFunnel) return { ...REGEL_BY_KEY.funnel_verbinden };
+  if (!tabErledigt('funnel') && !hatFunnel) return { ...REGEL_BY_KEY.funnel_verbinden };
 
   // 6. Keine Entwürfe verschickt?
   const hatEntwurfsversand = [...versandTypen].some(t => t.startsWith('entwurf_runde_'));
-  if (!hatEntwurfsversand) return { ...REGEL_BY_KEY.entwuerfe_verschicken };
+  if (!tabErledigt('export') && !hatEntwurfsversand) return { ...REGEL_BY_KEY.entwuerfe_verschicken };
 
   // 7-9. Review-Status
   if (review?.status === 'aenderungen') return { ...REGEL_BY_KEY.ueberarbeitung };
@@ -160,7 +164,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
       .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
     supabase.from('talentone_jobs')
-      .select('id, kunde_id, stelle, created_at').in('kunde_id', ids)
+      .select('id, kunde_id, stelle, created_at, tab_status').in('kunde_id', ids)
       .order('created_at', { ascending: true }),
     supabase.from('talentone_referenzbilder')
       .select('kunde_id, typ').in('kunde_id', ids),
@@ -259,6 +263,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
       const versandTypen = new Set((versandByJob[job.id] || []).map(v => v.typ));
       const schritt = berechneSchritt({
         kunde, projekt,
+        tabStatus: job.tab_status,
         refbilderCount,
         versandTypen,
         anfrageDatum: anfrageDatumByJob[job.id] || null,

@@ -7,6 +7,7 @@ import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
 import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
+import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 
 const router = Router();
 
@@ -208,6 +209,8 @@ const ALLOWED_JOB_FIELDS = [
   'projekttyp', 'neukunden_daten',
   // Arbeitshinweise-Banner (Migration 023)
   'arbeitshinweise',
+  // Tab-Häkchen (manuelle Erledigt-Overrides pro Tab)
+  'tab_status',
 ];
 
 router.patch('/:id', async (req, res) => {
@@ -238,6 +241,35 @@ router.patch('/:id', async (req, res) => {
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ job: data });
+});
+
+// GET /api/jobs/:id/tab-status → { auto, manual, effective }
+// Auto-Erkennung pro Tab + manuelle Overrides (talentone_jobs.tab_status).
+router.get('/:id/tab-status', async (req, res) => {
+  const jobId = req.params.id;
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, stelle, region, benefits, gehalt, besonderheiten, tab_status')
+    .eq('id', jobId).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+
+  const [creativesRes, adcopiesRes, funnelsRes, versandRes] = await Promise.all([
+    supabase.from('talentone_creatives').select('id', { count: 'exact', head: true })
+      .eq('job_id', jobId).eq('archiviert', false),
+    supabase.from('talentone_adcopies').select('id', { count: 'exact', head: true }).eq('job_id', jobId),
+    supabase.from('talentone_funnels').select('veroeffentlicht, extern, extern_url').eq('job_id', jobId),
+    supabase.from('talentone_versand').select('typ').eq('job_id', jobId),
+  ]);
+
+  const hatEntwurfsversand = (versandRes.data || []).some(v => (v.typ || '').startsWith('entwurf_runde_'));
+  const auto = computeAutoTabStatus({
+    job,
+    creativesActiveCount: creativesRes.count || 0,
+    adcopiesCount: adcopiesRes.count || 0,
+    funnels: funnelsRes.data || [],
+    hatEntwurfsversand,
+  });
+  const manual = job.tab_status && typeof job.tab_status === 'object' ? job.tab_status : {};
+  res.json({ auto, manual, effective: effectiveTabStatus(auto, manual) });
 });
 
 router.delete('/:id', async (req, res) => {

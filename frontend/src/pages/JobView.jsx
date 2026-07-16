@@ -173,6 +173,24 @@ export default function JobView() {
   const [projekt, setProjekt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [tabStatus, setTabStatus] = useState(null); // { auto, manual, effective }
+
+  const loadTabStatus = useCallback(
+    () => api(`/jobs/${jobId}/tab-status`).then(setTabStatus).catch(() => {}),
+    [jobId],
+  );
+  useEffect(() => { loadTabStatus(); }, [loadTabStatus]);
+
+  async function toggleTab(tab) {
+    if (!tabStatus) return;
+    const next = !tabStatus.effective[tab];
+    const manual = { ...tabStatus.manual, [tab]: next };
+    setTabStatus(ts => ({ ...ts, manual, effective: { ...ts.effective, [tab]: next } })); // optimistisch
+    try {
+      await api(`/jobs/${jobId}`, { method: 'PATCH', body: { tab_status: manual } });
+    } catch (e) { /* ignore */ }
+    loadTabStatus();
+  }
 
   // Tracking von Hintergrund-Tasks (übersteht Tab-Wechsel innerhalb des Jobs)
   const [pendingCreatives, setPendingCreatives] = useState(0);    // # erwartete neue Bilder
@@ -181,6 +199,7 @@ export default function JobView() {
 
   // Lädt sowohl Job als auch Kunden neu — z.B. nach Logo-Upload, damit kunde.logo_url aktuell ist.
   function reload() {
+    loadTabStatus(); // Auto-Erkennung aktualisieren (Creatives/Funnel/Export können sich geändert haben)
     return Promise.all([
       api(`/jobs/${jobId}`).then(r => setJob(r.job)),
       api(`/kunden/${kundeId}`).then(r => setKunde(r.kunde)),
@@ -347,11 +366,27 @@ export default function JobView() {
       )}
 
       <div className="tabs">
-        {TABS.map(t => (
-          <NavLink key={t.to} to={t.to} className={({ isActive }) => `tab ${isActive ? 'is-active' : ''}`}>
-            {t.label}
-          </NavLink>
-        ))}
+        {TABS.map(t => {
+          const done = tabStatus?.effective?.[t.to] === true;
+          const manuell = typeof tabStatus?.manual?.[t.to] === 'boolean';
+          return (
+            <NavLink key={t.to} to={t.to} className={({ isActive }) => `tab ${isActive ? 'is-active' : ''}`}>
+              {t.label}
+              {tabStatus && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className={`tab-check ${done ? 'is-done' : ''} ${manuell ? 'is-manual' : ''}`}
+                  title={done
+                    ? `Erledigt${manuell ? ' (manuell)' : ' (automatisch erkannt)'} — Klick zum Zurücksetzen`
+                    : 'Als erledigt markieren'}
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); } }}
+                >{done ? '✓' : '○'}</span>
+              )}
+            </NavLink>
+          );
+        })}
       </div>
 
       <div className="tab-content">

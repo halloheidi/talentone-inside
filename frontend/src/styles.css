@@ -695,6 +695,25 @@ button { font-family: inherit; }
   border-bottom-color: var(--ink);
   font-weight: 600;
 }
+.tab-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  color: var(--ink-4);
+  transition: color 0.12s, background 0.12s;
+}
+.tab-check:hover { background: var(--line-2); color: var(--ink-2); }
+.tab-check.is-done { color: #16a34a; font-weight: 700; }
+.tab-check.is-done:hover { color: #15803d; background: rgba(22,163,74,0.12); }
+
 .tab-content { min-height: 200px; }
 
 /* ───────── Form-Grid (Modals + Stelleninfos) ───────── */
@@ -2084,6 +2103,24 @@ button { font-family: inherit; }
 }
 .ref-card:hover .ref-del { opacity: 1; }
 .ref-del:hover { background: var(--danger); }
+
+.ref-zoom {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 34px; height: 34px;
+  background: rgba(10,10,10,0.6);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.12s;
+}
+.ref-card:hover .ref-zoom { opacity: 1; }
+.ref-zoom:hover { background: rgba(10,10,10,0.9); }
 
 /* ───────── Kunde-Header Aktion + Referenz-Strip ───────── */
 .kunde-head-actions {
