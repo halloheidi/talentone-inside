@@ -11,6 +11,8 @@ import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
 import StandaloneAdBudgetModal from '../components/StandaloneAdBudgetModal.jsx';
+import AnredeAbfrage from '../components/AnredeAbfrage.jsx';
+import { anredeLabel, anredeOffen } from '../lib/anrede.js';
 import InvoicesSection, { SendInvoiceMailModal } from '../components/InvoicesSection.jsx';
 import { ItemBadge } from '../components/NaechsterSchrittBadge.jsx';
 import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
@@ -32,6 +34,7 @@ export default function KundeDetail() {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
+  const [showAnrede, setShowAnrede] = useState(false);
   const [showAnfrage, setShowAnfrage] = useState(false);
   const [showTermin, setShowTermin] = useState(false);
   const [anfrageUmfang, setAnfrageUmfang] = useState('beides'); // beides | logo | fotos
@@ -536,6 +539,13 @@ export default function KundeDetail() {
                 )}
                 {kunde.branche && <span><strong>Branche:</strong> {kunde.branche}</span>}
                 {kunde.ansprechpartner && <span><strong>Ansprechpartner:</strong> {kunde.ansprechpartner}</span>}
+                <span>
+                  <strong>Anrede:</strong>{' '}
+                  {anredeLabel(kunde) || <em style={{ color: 'var(--ink-4)' }}>noch nicht festgelegt</em>}{' '}
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => setShowAnrede(v => !v)}>
+                    {showAnrede ? 'Schließen' : (anredeLabel(kunde) ? 'Ändern' : 'Festlegen')}
+                  </button>
+                </span>
                 {kunde.email && <span><strong>E-Mail:</strong> <a href={`mailto:${kunde.email}`}>{kunde.email}</a></span>}
                 {kunde.telefon && <span><strong>Telefon:</strong> {kunde.telefon}</span>}
                 <span>
@@ -553,6 +563,11 @@ export default function KundeDetail() {
                   />
                 </span>
               </div>
+              {showAnrede && (
+                <div style={{ maxWidth: 460 }}>
+                  <AnredeAbfrage kunde={kunde} onSaved={k => { setKunde(k); setShowAnrede(false); }} />
+                </div>
+              )}
               {kunde.notizen && <p className="kunde-head-notes">{kunde.notizen}</p>}
               <div className="kunde-head-actions">
                 <button className="btn-ghost btn-sm" onClick={startEdit}>Bearbeiten</button>
@@ -991,7 +1006,7 @@ export default function KundeDetail() {
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowAnfrage(false)} disabled={anfrageBusy}>Abbrechen</button>
-            <button className="btn-primary" onClick={sendAnfrage} disabled={anfrageBusy || !kunde?.email}>
+            <button className="btn-primary" onClick={sendAnfrage} disabled={anfrageBusy || !kunde?.email || anredeOffen(kunde)}>
               {anfrageBusy ? 'Sende…' : `Mail an ${kunde?.email || '—'} senden`}
             </button>
           </>
@@ -1015,6 +1030,7 @@ export default function KundeDetail() {
           Wir verschicken eine Mail an <strong>{kunde?.email || '(keine Mail hinterlegt)'}</strong> mit einem persönlichen Upload-Link.
           Der Kunde kann dort {anfrageUmfang === 'logo' ? 'sein Logo' : anfrageUmfang === 'fotos' ? 'seine Fotos' : 'Logo und Fotos'} ohne Login hochladen — die Dateien tauchen automatisch hier oben auf.
         </p>
+        <AnredeAbfrage kunde={kunde} onSaved={k => setKunde(k)} />
         <CloseLeadWarnung kunde={kunde} onSaved={(k) => setKunde(k)} />
         <label className="field field-full">
           <span>Persönlicher Text (editierbar)</span>

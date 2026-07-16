@@ -424,8 +424,24 @@ router.post('/', async (req, res) => {
 
 router.patch('/:id', async (req, res) => {
   const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben', 'website_url', 'agentur',
-                   'paypal_enabled', 'campaign_payment_status', 'close_lead_id', 'keine_ki_bilder', 'funnel_stellen_mapping'];
+                   'paypal_enabled', 'campaign_payment_status', 'close_lead_id', 'keine_ki_bilder', 'funnel_stellen_mapping',
+                   'anrede_form', 'anrede_titel', 'nachname'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+
+  // Anrede validieren + konsistent halten: Titel gehört nur zur Sie-Form.
+  if (patch.anrede_form !== undefined) {
+    if (patch.anrede_form !== null && !['du', 'sie'].includes(patch.anrede_form)) {
+      return res.status(400).json({ error: 'anrede_form muss "du" oder "sie" sein.' });
+    }
+    if (patch.anrede_form === 'du') patch.anrede_titel = null;
+  }
+  if (patch.anrede_titel !== undefined && patch.anrede_titel !== null
+      && !['herr', 'frau'].includes(patch.anrede_titel)) {
+    return res.status(400).json({ error: 'anrede_titel muss "herr" oder "frau" sein.' });
+  }
+  if (patch.nachname !== undefined && patch.nachname !== null) {
+    patch.nachname = String(patch.nachname).trim() || null;
+  }
   if (patch.close_lead_id !== undefined) {
     if (patch.close_lead_id === '' || patch.close_lead_id === null) patch.close_lead_id = null;
     else if (!/^lead_/.test(patch.close_lead_id)) {

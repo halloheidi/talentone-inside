@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import Modal from './Modal.jsx';
 import Lightbox from './Lightbox.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
+import AnredeAbfrage from './AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 
 // Zwischenschritt vor dem Versenden der Entwürfe:
 // - Thumbnails der ausgewählten Creatives
@@ -17,7 +19,8 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
     if (open) { setLogoOk(false); setTextOk(false); setLightboxIndex(null); }
   }, [open]);
 
-  const canSend = logoOk && textOk;
+  // Anrede ist Pflicht vor jedem kundengerichteten Versand.
+  const canSend = logoOk && textOk && !anredeOffen(kunde);
 
   return (
     <Modal
@@ -39,7 +42,8 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
         Bitte prüfe die {creatives?.length || 0} ausgewählten Creative(s) und bestätige die beiden Punkte.
       </p>
 
-      {/* Close-Lead-Warnung */}
+      {/* Anrede (Pflicht, solange nicht festgelegt) + Close-Lead-Warnung */}
+      <AnredeAbfrage kunde={kunde} onSaved={onKundeUpdated} />
       <CloseLeadWarnung kunde={kunde} onSaved={onKundeUpdated} />
 
       {/* Thumbnails — Klick öffnet Groß-Ansicht mit Pfeilen zum Blättern */}

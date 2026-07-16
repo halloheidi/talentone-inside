@@ -9,11 +9,17 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import AnredeAbfrage from './AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 import { AdBudgetChips } from '../pages/OfferWizard.jsx';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
-export default function StandaloneAdBudgetModal({ open, kunde, onClose, onCreated, defaultLabel = '' }) {
+export default function StandaloneAdBudgetModal({ open, kunde: kundeProp, onClose, onCreated, defaultLabel = '' }) {
+  // Lokale Kopie, damit eine hier gesetzte Anrede sofort greift (der Aufrufer
+  // lädt den Kunden ggf. erst später neu).
+  const [kunde, setKunde] = useState(kundeProp);
+  useEffect(() => { setKunde(kundeProp); }, [kundeProp]);
   const [easybillQuery, setEasybillQuery] = useState('');
   const [easybillResults, setEasybillResults] = useState([]);
   const [easybillCustomer, setEasybillCustomer] = useState(null);
@@ -82,12 +88,15 @@ export default function StandaloneAdBudgetModal({ open, kunde, onClose, onCreate
       title={`Werbekosten-Rechnung — ${kunde?.firmenname || ''}`}
       footer={<>
         <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
-        <button className="btn-primary" onClick={create} disabled={busy || !easybillCustomer || !amountValid || !label.trim()}>
+        <button className="btn-primary" onClick={create}
+          disabled={busy || !easybillCustomer || !amountValid || !label.trim() || anredeOffen(kunde)}>
           {busy ? 'Erzeuge…' : `📄 Rechnung erzeugen (${eur.format(brutto)} brutto)`}
         </button>
       </>}
     >
       {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+      <AnredeAbfrage kunde={kunde} onSaved={setKunde} />
 
       <div style={{ display: 'grid', gap: 14 }}>
         <div>

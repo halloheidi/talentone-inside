@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Modal from './Modal.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
+import AnredeAbfrage from './AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 import { api } from '../lib/api.js';
 
 // Termin-Einladung senden. Kontext = Job (endpoint=/jobs/:id/export/termin-einladung)
@@ -94,7 +96,7 @@ export default function TerminEinladungModal({
         <>
           <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
           <button className="btn-primary" onClick={send}
-            disabled={busy || !terminKey || !personKey || !empfaenger.trim()}>
+            disabled={busy || !terminKey || !personKey || !empfaenger.trim() || anredeOffen(kunde)}>
             {busy ? 'Sende…' : 'Einladung senden'}
           </button>
         </>
@@ -104,6 +106,7 @@ export default function TerminEinladungModal({
         <p>Lade Termin-Katalog…</p>
       ) : (
         <>
+          <AnredeAbfrage kunde={kunde} onSaved={onKundeUpdated} />
           <CloseLeadWarnung kunde={kunde} onSaved={onKundeUpdated} />
 
           <div className="form-grid" style={{ marginBottom: 12 }}>

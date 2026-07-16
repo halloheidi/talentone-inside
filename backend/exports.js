@@ -7,6 +7,7 @@ import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
 import { getInternalBcc } from './mail.js';
+import { anrede, t, anredePromptHinweis } from './anrede.js';
 
 const VORQUAL_BCC = 'jessica.buchmueller@nowagwirth.de';
 
@@ -149,7 +150,13 @@ export async function streamAdCopiesPdf(res, { job, kunde, adcopies }) {
 
 export async function generateAnschreibensVorschlag(job, kunde) {
   const brand = getBranding(kunde?.agentur);
-  const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel, Review-Link zum Kommentieren). Sprache: Deutsch, Sie-Anrede, höflich aber locker (keine Floskeln wie "Sehr geehrte Damen und Herren").
+  // Anrede-Form kommt vom Kunden — vorher stand hier fest "Sie-Anrede", waehrend
+  // das Mail-Template duzt. Genau daraus entstand die Mischform
+  // ("Deine Entwuerfe" + "schicken wir Ihnen").
+  const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel, Review-Link zum Kommentieren). Sprache: Deutsch, ${anredePromptHinweis(kunde)} (keine Floskeln wie "Sehr geehrte Damen und Herren").
+
+WICHTIG: Verwende durchgängig NUR diese eine Anredeform — niemals mischen.
+Beginne exakt mit der Grußzeile "${anrede(kunde)}," (genau so, danach Leerzeile).
 
 Kontext:
 - Kunde: ${kunde?.firmenname || '-'}
@@ -376,7 +383,7 @@ ${sortedAdcopies.map(a => `
   const reviewHtml = reviewUrl ? `
 <div style="margin:32px 0 8px;padding:24px;background:${brand.accent}1a;border:1px solid #ececea;border-radius:14px;text-align:center;">
   <h2 style="font-size:17px;font-weight:700;color:${brand.primary};margin:0 0 6px;">Bereit für Feedback?</h2>
-  <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">Du kannst die Entwürfe direkt online kommentieren oder freigeben — alles in einer Übersicht.</p>
+  <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">${t(kunde, 'Du kannst die Entwürfe direkt online kommentieren oder freigeben', 'Sie können die Entwürfe direkt online kommentieren oder freigeben')} — alles in einer Übersicht.</p>
   <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">Entwürfe kommentieren &amp; freigeben →</a>
 </div>` : '';
 
@@ -433,7 +440,7 @@ ${sortedAdcopies.map(a => `
       to,
       bcc: getInternalBcc([], Array.isArray(to) ? to : [to]),
       reply_to: getMailReplyTo(brand),
-      subject: betreff || `${kunde?.firmenname || 'Ihre Kampagne'} — Entwürfe zur Freigabe`,
+      subject: betreff || t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'),
       html,
       text: textParts.join('\n'),
     }),
