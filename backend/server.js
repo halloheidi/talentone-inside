@@ -22,12 +22,21 @@ import offersRouter from './routes/offers.js';
 import invoicesRouter from './routes/invoices.js';
 import hiresRouter from './routes/hires.js';
 import controllingRouter from './routes/controlling.js';
+import brandAssetsRouter from './routes/brand-assets.js';
+import anfragenRouter from './routes/anfragen.js';
+import stilvorlagenRouter from './routes/stilvorlagen.js';
+import { ensureBucket } from './storage.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 import { startOfferSyncScheduler } from './offer-sync.js';
 import { startInvoiceSyncScheduler } from './invoice-sync.js';
 import { startBillingScheduler } from './billing-scheduler.js';
 import { startReminderScheduler } from './billing-reminder.js';
+import { startLiveTerminReminderScheduler } from './live-termin-reminder.js';
+import { startWeeklyCloseSummaryScheduler } from './weekly-close-summary.js';
+import { startEntwurfsReminderScheduler } from './entwurfs-reminder.js';
+import { startDailyBewerbungsReportScheduler } from './daily-bewerbungs-report.js';
+import { startWeeklyBewerbungsReportScheduler } from './weekly-bewerbungs-report.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -74,11 +83,14 @@ app.use('/api/zahlungen', requireAuth, zahlungenRouter);
 app.use('/api/projekte', requireAuth, projekteRouter);
 app.use('/api/analyse-funnel', requireAuth, analyseFunnelRouter);
 app.use('/api/offer-catalog', requireAuth, offerCatalogRouter);
+app.use('/api/offer-catalog/brand-assets', requireAuth, brandAssetsRouter);
 app.use('/api/easybill-customers', requireAuth, easybillCustomersRouter);
 app.use('/api/offers', requireAuth, offersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/hires', requireAuth, hiresRouter);
 app.use('/api/controlling', requireAuth, controllingRouter);
+app.use('/api/anfragen', requireAuth, anfragenRouter);
+app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
@@ -102,4 +114,10 @@ app.listen(PORT, () => {
   startInvoiceSyncScheduler();
   startBillingScheduler();
   startReminderScheduler();
+  startLiveTerminReminderScheduler();
+  startWeeklyCloseSummaryScheduler();
+  startEntwurfsReminderScheduler();
+  startDailyBewerbungsReportScheduler();
+  startWeeklyBewerbungsReportScheduler();
+  ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });
