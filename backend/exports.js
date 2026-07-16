@@ -312,7 +312,7 @@ function escape(s = '') {
     .replace(/"/g, '&quot;');
 }
 
-export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl }) {
+export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl, avvUrl }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
 
   const brand = getBranding(kunde?.agentur);
@@ -399,6 +399,10 @@ ${sortedAdcopies.map(a => `
     ${adcopiesHtml}
     ${funnelHtml}
     ${sheetHtml}
+    ${avvUrl ? `
+    <div style="margin:24px 0 0;padding:14px 16px;background:#fafaf8;border:1px solid #ececea;border-radius:10px;">
+      <p style="font-size:12px;line-height:1.6;color:#5a5955;margin:0;">📄 <strong style="color:#2a2a2a;">Bitte noch bestätigen:</strong> Für die Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags. <a href="${escape(avvUrl)}" style="color:${brand.primary};font-weight:600;">AVV ansehen &amp; akzeptieren →</a></p>
+    </div>` : ''}
   </td></tr>
   <tr><td style="padding:20px 32px;background:#fafaf8;border-top:1px solid #ececea;">
     <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Änderungswünschen kannst du direkt im <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> kommentieren oder einfach auf diese Mail antworten.</p>
@@ -419,6 +423,7 @@ ${sortedAdcopies.map(a => `
   }
   if (funnelUrl) textParts.push(`\nFunnel-Vorschau: ${funnelUrl}`);
   if (sheetUrl) textParts.push(`Google Sheet: ${sheetUrl}`);
+  if (avvUrl) textParts.push(`\n📄 Bitte noch bestätigen — AVV ansehen & akzeptieren: ${avvUrl}`);
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

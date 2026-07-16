@@ -146,6 +146,8 @@ export default function PublicFormular() {
   const [submitError, setSubmitError] = useState('');
   const logoInputRef = useRef(null);
   const fotosInputRef = useRef(null);
+  const [avv, setAvv] = useState(null);
+  const [avvChecked, setAvvChecked] = useState(false);
 
   useEffect(() => { loadMetaPixel(META_PIXEL_ID); }, []);
 
@@ -153,6 +155,7 @@ export default function PublicFormular() {
     publicApi(`/formular/${token}`)
       .then(res => {
         setInfo(res.kunde);
+        setAvv(res.avv || null);
         setProjekttyp(res.projekttyp || 'mitarbeitergewinnung');
         setForm(prev => ({
           ...prev,
@@ -311,6 +314,7 @@ export default function PublicFormular() {
     if (!form.stelle.trim()) { setSubmitError('Stellenbezeichnung ist Pflicht.'); return; }
     if (!form.unterschied.trim()) { setSubmitError('Bitte beschreibt, was euch von anderen unterscheidet.'); return; }
     if (!form.mitarbeiter_gerne.trim()) { setSubmitError('Bitte beantwortet, warum Mitarbeiter gerne bei euch sind.'); return; }
+    if (avv?.pdf_url && !avvChecked) { setSubmitError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.'); return; }
 
     setSubmitBusy(true);
     try {
@@ -345,6 +349,7 @@ export default function PublicFormular() {
             quereinsteiger: form.quereinsteiger,
           },
           formdata: form,
+          avv_akzeptiert: !!avvChecked,
           _fbp: getCookie('_fbp'),
           _fbc: getCookie('_fbc'),
         },
@@ -384,7 +389,7 @@ export default function PublicFormular() {
   // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante.
   if (projekttyp === 'neukundengewinnung') {
     return <NeukundenBriefingForm
-      token={token} info={info}
+      token={token} info={info} avv={avv}
       onDone={() => setDone(true)}
     />;
   }
@@ -617,6 +622,7 @@ export default function PublicFormular() {
           {submitError && <div className="alert alert-error" style={{ marginTop: 8 }}>{submitError}</div>}
 
           <div className="formular-submit">
+            <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
             <button type="submit" className="btn-primary" disabled={submitBusy}>
               {submitBusy ? 'Sende…' : 'Briefing absenden'}
             </button>
@@ -634,7 +640,22 @@ export default function PublicFormular() {
    Endpoints, schickt aber projekttyp='neukundengewinnung' mit und mapt die
    Felder in job.neukunden_daten. */
 
-function NeukundenBriefingForm({ token, info, onDone }) {
+// Pflicht-Checkbox: AVV lesen + im Namen der Firma akzeptieren.
+function AvvCheckbox({ avv, firmenname, checked, onChange }) {
+  if (!avv?.pdf_url) return null;
+  return (
+    <label className="avv-check">
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
+      <span>
+        Ich habe den{' '}
+        <a href={avv.pdf_url} target="_blank" rel="noreferrer">Auftragsverarbeitungsvertrag (PDF)</a>{' '}
+        gelesen und akzeptiere ihn im Namen von <strong>{(firmenname || '').trim() || 'unserem Unternehmen'}</strong>.
+      </span>
+    </label>
+  );
+}
+
+function NeukundenBriefingForm({ token, info, avv, onDone }) {
   const [mode, setMode] = useState('manual');
   const [extractUrl, setExtractUrl] = useState('');
   const [extractFile, setExtractFile] = useState(null);
@@ -666,6 +687,7 @@ function NeukundenBriefingForm({ token, info, onDone }) {
   const [submitError, setSubmitError] = useState('');
   const logoInputRef = useRef(null);
   const fotoInputRef = useRef(null);
+  const [avvChecked, setAvvChecked] = useState(false);
 
   function setF(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
   function addVorteil() {
@@ -785,12 +807,14 @@ function NeukundenBriefingForm({ token, info, onDone }) {
     setSubmitError('');
     if (!form.firmenname.trim()) return setSubmitError('Firmenname ist Pflicht.');
     if (!form.produkt.trim())    return setSubmitError('Produkt/Dienstleistung ist Pflicht.');
+    if (avv?.pdf_url && !avvChecked) return setSubmitError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.');
     setSubmitBusy(true);
     try {
       await publicApi(`/formular/${token}/submit`, {
         method: 'POST',
         body: {
           projekttyp: 'neukundengewinnung',
+          avv_akzeptiert: !!avvChecked,
           kunde: {
             firmenname:      form.firmenname.trim(),
             ansprechpartner: form.ansprechpartner.trim() || null,
@@ -980,6 +1004,7 @@ function NeukundenBriefingForm({ token, info, onDone }) {
           {submitError && <div className="alert alert-error" style={{ marginTop: 8 }}>{submitError}</div>}
 
           <div className="formular-submit">
+            <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
             <button type="submit" className="btn-primary" disabled={submitBusy || !form.firmenname.trim() || !form.produkt.trim()}>
               {submitBusy ? 'Sende…' : 'Briefing absenden'}
             </button>

@@ -108,6 +108,60 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
   return await response.json();
 }
 
+/* ─────────────────── AVV-Bestätigung (mit PDF-Anhang) ─────────────────── */
+export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am }) {
+  if (!process.env.RESEND_API_KEY) return null;
+  const brand = getBranding(kunde?.agentur);
+  const firma = escape(kunde?.firmenname || '');
+  const datum = new Date(akzeptiert_am || Date.now()).toLocaleString('de-DE', { dateStyle: 'long', timeStyle: 'short' });
+  const grußname = escape((akzeptiert_von || '').toString().split(' ')[0] || 'Sie');
+
+  const content = `
+    <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">Auftragsverarbeitungsvertrag bestätigt</h1>
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 22px;">Version ${escape(version.version)}</p>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">Hallo ${grußname},</p>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">vielen Dank — Sie haben den Auftragsverarbeitungsvertrag (AVV) im Namen von <strong>${firma}</strong> akzeptiert.</p>
+    <div style="margin:0 0 18px;padding:16px;background:#fafaf8;border:1px solid #ececea;border-radius:8px;font-size:13px;line-height:1.7;color:#2a2a2a;">
+      <div><strong>Akzeptiert von:</strong> ${escape(akzeptiert_von || '—')}</div>
+      <div><strong>Zeitpunkt:</strong> ${escape(datum)}</div>
+      <div><strong>Version:</strong> ${escape(version.version)}</div>
+    </div>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">Ihre Kopie des Vertrags finden Sie im Anhang dieser E-Mail — bitte für Ihre Unterlagen aufbewahren.</p>
+    <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+  `;
+  const html = brandedShell({ brand, contentHtml: content });
+
+  // PDF als Anhang laden (best-effort — ohne Anhang trotzdem senden).
+  let attachments;
+  try {
+    const r = await fetch(version.pdf_url);
+    if (r.ok) {
+      const buf = Buffer.from(await r.arrayBuffer());
+      const fn = `AVV_${brand.name.replace(/[^\w]+/g, '_')}_v${version.version}.pdf`;
+      attachments = [{ filename: fn, content: buf.toString('base64') }];
+    }
+  } catch (e) { console.warn('[avv-mail] PDF-Anhang:', e.message); }
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: [to].flat(),
+      bcc: getInternalBcc([], [to].flat()),
+      reply_to: getMailReplyTo(brand),
+      subject: `Ihre AVV-Kopie für die Unterlagen (${brand.name})`,
+      html,
+      ...(attachments ? { attachments } : {}),
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ─────────────────── Formular-Einladung an Kunde ─────────────────── */
 
 export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, customText, agentur, projekttyp }) {

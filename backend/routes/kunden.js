@@ -197,7 +197,20 @@ router.get('/', async (req, res) => {
   else if (!includeArchived) q = q.eq('archiviert', false);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ kunden: data });
+
+  // AVV-Status: aktive Kunden ohne Annahme markieren (dezentes ⚠️ in der Liste).
+  const ids = (data || []).map(k => k.id);
+  let mitAnnahme = new Set();
+  if (ids.length) {
+    const { data: ann } = await supabase.from('talentone_avv_annahmen')
+      .select('kunde_id').in('kunde_id', ids);
+    mitAnnahme = new Set((ann || []).map(a => a.kunde_id));
+  }
+  const kunden = (data || []).map(k => ({
+    ...k,
+    avv_offen: k.status === 'aktiv' && !mitAnnahme.has(k.id),
+  }));
+  res.json({ kunden });
 });
 
 /* GET /api/kunden/naechste-schritte?ids=a,b,c — Badge-Daten fuer die Liste.
@@ -253,7 +266,16 @@ router.get('/:id', async (req, res) => {
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
-  res.json({ kunde: data });
+  // AVV-Status mitliefern (für die Kunden-Detail-Anzeige).
+  let avv = null;
+  try {
+    const { getAnnahme, getAktuelleVersion } = await import('../avv.js');
+    const [annahme, aktuelle_version] = await Promise.all([
+      getAnnahme(data.id), getAktuelleVersion(data.agentur),
+    ]);
+    avv = { annahme, aktuelle_version };
+  } catch (e) { console.warn('[kunde/detail avv]', e.message); }
+  res.json({ kunde: data, avv });
 });
 
 /* GET /api/kunden/:id/activity — chronologische Timeline aus vorhandenen

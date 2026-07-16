@@ -40,6 +40,52 @@ async function api(path, init = {}) {
   return body;
 }
 
+// „Bevor es losgeht" — AVV-Annahme vor dem ersten Portal-Zugang (account-Modus).
+function AvvGate({ token, data, onDone }) {
+  const brand = BRAND[data.kunde?.agentur] || BRAND.nowagwirth;
+  const [name, setName] = useState(data.kunde?.ansprechpartner || '');
+  const [checked, setChecked] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function accept() {
+    setError('');
+    if (!name.trim()) { setError('Bitte Ihren Namen eingeben.'); return; }
+    if (!checked) { setError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.'); return; }
+    setBusy(true);
+    try {
+      await api(`/public/avv/${token}/akzeptieren`, { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+      onDone();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f7f6f2', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: 16, maxWidth: 560, width: '100%', padding: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 6px' }}>Bevor es losgeht</h1>
+        <p style={{ fontSize: 14, color: '#5a5955', margin: '0 0 18px', lineHeight: 1.6 }}>
+          Bitte bestätigen Sie einmalig den Auftragsverarbeitungsvertrag (AVV), damit wir mit Ihrer Kampagne starten dürfen.
+        </p>
+        {data.avv?.pdf_url && (
+          <div style={{ border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+            <iframe src={data.avv.pdf_url} title="Auftragsverarbeitungsvertrag" style={{ width: '100%', height: 360, border: 'none', display: 'block' }} />
+          </div>
+        )}
+        <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.5, cursor: 'pointer', marginBottom: 10 }}>
+          <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} style={{ marginTop: 3 }} />
+          <span>Ich habe den <a href={data.avv?.pdf_url} target="_blank" rel="noreferrer" style={{ color: brand.primary }}>Auftragsverarbeitungsvertrag (PDF)</a> gelesen und akzeptiere ihn im Namen von <strong>{data.kunde?.firmenname}</strong>.</span>
+        </label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Ihr Name (zur Bestätigung)"
+          style={{ width: '100%', padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', marginBottom: 10 }} />
+        {error && <div style={{ color: '#980000', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+        <button onClick={accept} disabled={busy} style={{ background: brand.accent, color: brand.accentInk, border: 'none', padding: '12px 20px', borderRadius: 100, fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>
+          {busy ? 'Wird bestätigt…' : 'Akzeptieren & fortfahren'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function PublicPortal() {
   const { token } = useParams();
   const [search, setSearch] = useSearchParams();
@@ -72,6 +118,7 @@ export default function PublicPortal() {
   if (needsLogin) return <LoginForm token={token} onLogin={load} />;
   if (error) return <FullMsg text={error} />;
   if (!data) return <FullMsg text="Lade dein Dashboard…" />;
+  if (data.avv?.erforderlich) return <AvvGate token={token} data={data} onDone={load} />;
 
   const brand = BRAND[data.kunde?.agentur] || BRAND.nowagwirth;
   const primary = data.kunde?.farben?.primaer || brand.accent;

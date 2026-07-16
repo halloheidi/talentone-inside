@@ -40,6 +40,7 @@ const DEFAULT_ANFRAGE = `wir bereiten gerade eure Recruiting-Kampagne vor und br
 export default function KundeDetail() {
   const { kundeId } = useParams();
   const [kunde, setKunde] = useState(null);
+  const [avv, setAvv] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -231,6 +232,7 @@ export default function KundeDetail() {
     Promise.all([api(`/kunden/${kundeId}`), api(`/jobs?kunde_id=${kundeId}`)])
       .then(([k, j]) => {
         setKunde(k.kunde);
+        setAvv(k.avv || null);
         setJobs(j.jobs || []);
         setFarben({
           primaer:   k.kunde?.farben?.primaer   || '',
@@ -500,6 +502,25 @@ export default function KundeDetail() {
                       }}>✅ Formular ausgefüllt · {datum}</span>
                   );
                 })()}
+                {avv?.annahme ? (
+                  <span title={`Auftragsverarbeitungsvertrag akzeptiert von ${avv.annahme.akzeptiert_von || '—'}`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      background: '#dcfce7', color: '#166534',
+                      padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+                    }}>
+                    ✅ AVV akzeptiert am {new Date(avv.annahme.akzeptiert_am).toLocaleDateString('de-DE')} von {avv.annahme.akzeptiert_von || '—'}{avv.annahme.version ? ` (Version ${avv.annahme.version})` : ''}
+                  </span>
+                ) : (kunde.status === 'aktiv' ? (
+                  <span title="Auftragsverarbeitungsvertrag noch nicht akzeptiert"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      background: '#fef3c7', color: '#92400e',
+                      padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+                    }}>
+                    ⚠️ AVV offen
+                  </span>
+                ) : null)}
               </h1>
               <div className="kunde-head-meta">
                 {kunde.agentur && (

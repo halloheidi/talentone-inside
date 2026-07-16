@@ -9,6 +9,7 @@ import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js
 import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { findMemberByName } from '../team.js';
+import { protokolliereAnnahme, getAktuelleVersion, getAnnahme } from '../avv.js';
 
 const router = Router();
 
@@ -123,6 +124,7 @@ router.get('/formular/:token', async (req, res) => {
     .eq('kunde_id', kunde.id)
     .contains('formdata_komplett', { _wartet_auf_briefing: true })
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  const avvVersion = await getAktuelleVersion(kunde.agentur);
   res.json({
     kunde: {
       firmenname: kunde.firmenname,
@@ -131,6 +133,7 @@ router.get('/formular/:token', async (req, res) => {
       agentur: kunde.agentur || 'talentone',
     },
     projekttyp: pendingJob?.projekttyp || 'mitarbeitergewinnung',
+    avv: { version: avvVersion?.version || null, pdf_url: avvVersion?.pdf_url || null },
   });
 });
 
@@ -233,6 +236,9 @@ router.post('/formular/:token/submit', async (req, res) => {
   if (istNeukunden && !(jobPatch.neukunden_daten?.produkt || '').trim()) {
     return res.status(400).json({ error: 'Produkt/Dienstleistung ist Pflicht.' });
   }
+  if (req.body?.avv_akzeptiert !== true) {
+    return res.status(400).json({ error: 'Bitte den Auftragsverarbeitungsvertrag akzeptieren.' });
+  }
 
   try {
     // Kunde aktualisieren
@@ -293,6 +299,17 @@ router.post('/formular/:token/submit', async (req, res) => {
         .from('talentone_jobs').insert(jobRow).select().single());
     }
     if (jErr) return res.status(500).json({ error: `Job speichern: ${jErr.message}` });
+
+    // AVV-Annahme protokollieren (Checkbox war Pflicht). Best-effort — bricht das
+    // Onboarding nicht ab, falls die Protokollierung mal scheitert.
+    try {
+      await protokolliereAnnahme({
+        kunde: updated,
+        akzeptiert_von: kundeUpdate.ansprechpartner || kundePatch.firmenname,
+        akzeptiert_email: req.body?.avv_email || updated.email,
+        req,
+      });
+    } catch (e) { console.warn('[formular/submit avv]', e.message); }
 
     // Antwort sofort raus
     res.status(201).json({ ok: true });
@@ -1097,7 +1114,49 @@ router.get('/portal/:token/whoami', async (req, res) => {
 
   const { readSessionCookie } = await import('../portal-auth.js');
   const s = readSessionCookie(req, kunde.id);
-  res.json({ mode: 'account', signed_in: !!s, account: s ? { email: s.email, name: s.name } : null });
+  const annahme = s ? await getAnnahme(kunde.id) : null;
+  res.json({
+    mode: 'account', signed_in: !!s,
+    account: s ? { email: s.email, name: s.name } : null,
+    avv_akzeptiert: !!annahme,
+  });
+});
+
+/* ── AVV (Auftragsverarbeitungsvertrag) — Public per portal_token ── */
+
+// GET /api/public/avv/:token — AVV-Info + Annahme-Status
+router.get('/avv/:token', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const version = await getAktuelleVersion(kunde.agentur);
+  const annahme = await getAnnahme(kunde.id);
+  res.json({
+    firmenname: kunde.firmenname,
+    agentur: kunde.agentur,
+    version: version?.version || null,
+    pdf_url: version?.pdf_url || null,
+    akzeptiert: !!annahme,
+    akzeptiert_am: annahme?.akzeptiert_am || null,
+    akzeptiert_von: annahme?.akzeptiert_von || null,
+  });
+});
+
+// POST /api/public/avv/:token/akzeptieren  body: { name, email? }
+router.post('/avv/:token/akzeptieren', async (req, res) => {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Bitte Ihren Namen eingeben.' });
+  try {
+    const r = await protokolliereAnnahme({
+      kunde, akzeptiert_von: name,
+      akzeptiert_email: req.body?.email || kunde.email, req,
+    });
+    res.json({ ok: true, version: r.version.version, ersteAnnahme: r.ersteAnnahme });
+  } catch (e) {
+    console.error('[avv/akzeptieren]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/public/portal/:token — komplettes Dashboard
@@ -1176,6 +1235,13 @@ router.get('/portal/:token', async (req, res) => {
       ...a, kommentare: kommentareByAnfrage[a.id] || [],
     }));
 
+    // AVV-Status: für echte Kunden-Accounts (nicht Staff-Bypass) erzwingen wir
+    // die Annahme vor dem Portal-Zugang. Der Public-Token für die AVV-Seite ist
+    // der portal_token (= :token).
+    const istStaff = !!gate.session?.staff;
+    const avvAngenommen = await getAnnahme(kunde.id);
+    const avvVersion = avvAngenommen ? null : await getAktuelleVersion(kunde.agentur);
+
     res.json({
       kunde: {
         id: kunde.id, firmenname: kunde.firmenname, ansprechpartner: kunde.ansprechpartner,
@@ -1187,6 +1253,12 @@ router.get('/portal/:token', async (req, res) => {
       bewerbungen: bewerbungenRes.data || [],
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
+      avv: {
+        erforderlich: kunde.portal_zugang === 'account' && !istStaff && !avvAngenommen,
+        akzeptiert: !!avvAngenommen,
+        pdf_url: avvAngenommen?.pdf_url || avvVersion?.pdf_url || null,
+        version: avvAngenommen?.version || avvVersion?.version || null,
+      },
     });
   } catch (err) {
     console.error('[portal/get]', err.message);

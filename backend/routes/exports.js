@@ -173,12 +173,24 @@ router.post('/jobs/:id/export/email', async (req, res) => {
       ? `Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:\n\n${anschreiben || ''}`.trim()
       : anschreiben;
 
+    // AVV-Fallback: falls der Kunde noch nicht akzeptiert hat, dezenten
+    // Bestätigungs-Link in die Entwürfe-Mail geben (Public-Token-Seite).
+    let avvUrl = null;
+    try {
+      const { getAnnahme } = await import('../avv.js');
+      if (!(await getAnnahme(kunde.id))) {
+        const { data: k } = await supabase.from('talentone_kunden')
+          .select('portal_token').eq('id', kunde.id).maybeSingle();
+        if (k?.portal_token) avvUrl = `${baseUrl}/avv/${k.portal_token}`;
+      }
+    } catch (e) { console.warn('[entwurf avv]', e.message); }
+
     await sendEntwurfsMail({
       to: to.trim(),
       betreff: finalBetreff, anschreiben: finalAnschreiben,
       job, kunde,
       creatives: selCreatives, adcopies: selAdcopies,
-      funnelUrl, sheetUrl, reviewUrl,
+      funnelUrl, sheetUrl, reviewUrl, avvUrl,
     });
 
     // Historie speichern (mit Runden-Marker)

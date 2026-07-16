@@ -141,6 +141,7 @@ export default function KundenList() {
               <div className="kunde-card-body">
                 <div className="kunde-card-name">
                   {k.firmenname || k.email || '—'}
+                  {k.avv_offen && <span className="avv-warn" title="AVV noch nicht akzeptiert">⚠️</span>}
                 </div>
                 <div className="kunde-card-meta">
                   {k.branche && <span>{k.branche}</span>}
@@ -183,7 +184,7 @@ export default function KundenList() {
                         : <span>{(k.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
                     </div>
                   </td>
-                  <td><strong>{k.firmenname || k.email || '—'}</strong></td>
+                  <td><strong>{k.firmenname || k.email || '—'}</strong>{k.avv_offen && <span className="avv-warn" title="AVV noch nicht akzeptiert">⚠️</span>}</td>
                   <td>{k.branche || '—'}</td>
                   <td>{k.ansprechpartner || '—'}</td>
                   <td>{k.email ? <a href={`mailto:${k.email}`} onClick={e => e.stopPropagation()}>{k.email}</a> : '—'}</td>
