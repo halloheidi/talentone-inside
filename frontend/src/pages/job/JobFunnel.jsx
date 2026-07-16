@@ -15,6 +15,9 @@ const TYPE_META = {
   contact:  { label: 'Kontakt',     icon: '📩', removable: false },
 };
 
+// Maximale Anzahl Antwort-Optionen pro Frage-Screen (inkl. KO-Kriterien).
+const MAX_ANTWORT_OPTIONEN = 10;
+
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
 
 function newScreen(type) {
@@ -810,7 +813,7 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
             </p>
             <OptionsEditor
               options={normalizeOptions(screen.options)}
-              onChange={items => patch({ options: items.slice(0, 4) })}
+              onChange={items => patch({ options: items.slice(0, MAX_ANTWORT_OPTIONEN) })}
             />
           </div>
         </div>
@@ -1332,7 +1335,7 @@ function OptionsEditor({ options = [], onChange }) {
   function add() {
     const v = draft.trim();
     if (!v) return;
-    if (options.length >= 4) return;
+    if (options.length >= MAX_ANTWORT_OPTIONEN) return;
     if (options.some(o => o.text === v)) { setDraft(''); return; }
     onChange([...options, { text: v }]);
     setDraft('');
@@ -1363,7 +1366,7 @@ function OptionsEditor({ options = [], onChange }) {
           <button type="button" className="chip-x" onClick={() => remove(i)}>×</button>
         </div>
       ))}
-      {options.length < 4 && (
+      {options.length < MAX_ANTWORT_OPTIONEN && (
         <div className="chip-add">
           <input
             type="text"
