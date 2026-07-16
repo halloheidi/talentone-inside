@@ -6,8 +6,23 @@ import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '.
 import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
+import { findVerwaisteAngeboteForKunde } from '../offer-linking.js';
 
 const router = Router();
+
+/* GET /api/kunden/suche?q= — schlanke Kundensuche (Firmenname/E-Mail).
+   MUSS vor GET /:id stehen. */
+router.get('/suche', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ kunden: [] });
+  const pattern = `%${q.replace(/[%_]/g, m => '\\' + m)}%`;
+  const { data } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, email, agentur, archiviert')
+    .or(`firmenname.ilike.${pattern},email.ilike.${pattern}`)
+    .eq('archiviert', false)
+    .order('firmenname', { ascending: true }).limit(20);
+  res.json({ kunden: data || [] });
+});
 
 import { getPublicBaseUrl } from '../branding.js';
 
@@ -276,6 +291,21 @@ router.get('/:id', async (req, res) => {
     avv = { annahme, aktuelle_version };
   } catch (e) { console.warn('[kunde/detail avv]', e.message); }
   res.json({ kunde: data, avv });
+});
+
+/* GET /api/kunden/:id/verwaiste-angebote — verwaiste Angebote (ohne customer_id),
+   die per E-Mail/Firmenname zu diesem Kunden passen. Für den Verknüpfungs-Hinweis
+   nach dem Anlegen eines Kunden. */
+router.get('/:id/verwaiste-angebote', async (req, res) => {
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, email').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  try {
+    const angebote = await findVerwaisteAngeboteForKunde(kunde);
+    res.json({ angebote });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* GET /api/kunden/:id/activity — chronologische Timeline aus vorhandenen

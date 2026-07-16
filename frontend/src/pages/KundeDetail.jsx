@@ -109,6 +109,8 @@ export default function KundeDetail() {
 
   // Angebote & Aufträge des Kunden + Aktivitäten-Timeline
   const [offers, setOffers] = useState([]);
+  const [verwaisteAngebote, setVerwaisteAngebote] = useState([]);
+  const [linkBusyId, setLinkBusyId] = useState(null);
   const [activity, setActivity] = useState([]);
   const [projekte, setProjekte] = useState([]);
   const [schritteItems, setSchritteItems] = useState([]);
@@ -259,6 +261,18 @@ export default function KundeDetail() {
     api(`/offers?customer_id=${kundeId}`)
       .then(res => setOffers(res.offers || []))
       .catch(() => setOffers([]));
+    api(`/kunden/${kundeId}/verwaiste-angebote`)
+      .then(res => setVerwaisteAngebote(res.angebote || []))
+      .catch(() => setVerwaisteAngebote([]));
+  }
+
+  async function linkOrphan(offer) {
+    setLinkBusyId(offer.id);
+    try {
+      await api(`/offers/${offer.id}/link-customer`, { method: 'POST', body: { customer_id: kundeId } });
+      loadOffers();
+    } catch (e) { alert(e.message); }
+    finally { setLinkBusyId(null); }
   }
   function loadActivity() {
     api(`/kunden/${kundeId}/activity`)
@@ -880,6 +894,30 @@ export default function KundeDetail() {
                 }}>×</button>
             </div>
           ))}
+        </div>
+      )}
+
+      {verwaisteAngebote.length > 0 && (
+        <div className="card" style={{ borderColor: '#f59e0b', background: '#fffbeb', marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            ⚠️ {verwaisteAngebote.length} nicht zugeordnete{verwaisteAngebote.length === 1 ? 's Angebot' : ' Angebote'} gefunden — jetzt verknüpfen?
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 10 }}>
+            Diese Angebote passen per E-Mail oder Firmenname zu diesem Kunden, sind aber noch keinem internen Kunden zugeordnet.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {verwaisteAngebote.map(o => (
+              <div key={o.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 10px', background: '#fff', border: '1px solid #fde68a', borderRadius: 8 }}>
+                <div style={{ fontSize: 13 }}>
+                  <strong>{o.customer_snapshot?.company_name || '—'}</strong>
+                  <span style={{ color: 'var(--ink-4)', marginLeft: 8 }}>{o.status} · {new Date(o.created_at).toLocaleDateString('de-DE')}</span>
+                </div>
+                <button className="btn-primary btn-sm" disabled={linkBusyId === o.id} onClick={() => linkOrphan(o)}>
+                  {linkBusyId === o.id ? 'Verknüpfe…' : 'Verknüpfen'}
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

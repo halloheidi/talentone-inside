@@ -730,6 +730,48 @@ button { font-family: inherit; }
 .avv-check input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; }
 .avv-check a { color: inherit; font-weight: 600; text-decoration: underline; }
 .avv-warn { margin-left: 6px; font-size: 12px; cursor: help; }
+
+/* ───────── Angebot ↔ Kunde Verknüpfung ───────── */
+.offer-orphan-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.offer-orphan-badge:hover { background: #fef3c7; }
+
+.kunde-picker { position: relative; }
+.kunde-picker-results {
+  margin-top: 6px;
+  border: 1px solid #ececea;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+}
+.kunde-picker-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid #f0efed;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.kunde-picker-row:last-child { border-bottom: none; }
+.kunde-picker-row:hover { background: #fafaf8; }
+.kunde-picker-row span { font-size: 11px; color: #9a9994; }
+.kunde-picker-empty { padding: 10px; font-size: 12px; color: #9a9994; }
 .avv-pdf-frame { margin-top: 14px; }
 .avv-pdf-frame iframe {
   width: 100%;

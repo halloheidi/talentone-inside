@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { supabase } from '../lib/supabase.js';
 import Modal from '../components/Modal.jsx';
+import KundePicker from '../components/KundePicker.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
 import { displayNameForEmail } from '../lib/team-display.js';
 
@@ -56,6 +57,8 @@ export default function OffersList() {
   const [sendOrderModal, setSendOrderModal] = useState(null); // dgl. für AB-Versand
   const [billingOffer, setBillingOffer] = useState(null); // Angebot fürs Abrechnungs-Modal
   const [declineOffer, setDeclineOffer] = useState(null); // Angebot fürs Decline-Modal
+  const [linkOffer, setLinkOffer] = useState(null); // verwaistes Angebot fürs Zuordnungs-Modal
+  const [linkBusy, setLinkBusy] = useState(false);
 
   async function pdfHref(offerId) {
     // Auth-Header ist Pflicht — Standard-Link würde 401 werfen.
@@ -205,7 +208,16 @@ export default function OffersList() {
                 return (
                   <tr key={o.id} style={{ background: highlighted ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : undefined }}>
                     <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(o.created_at).toLocaleDateString('de-DE')}</td>
-                    <td><strong>{snap.company_name || o.easybill_customer_id}</strong></td>
+                    <td>
+                      <strong>{snap.company_name || o.easybill_customer_id}</strong>
+                      {!o.customer_id && (
+                        <button type="button" className="avv-warn offer-orphan-badge"
+                          title="Dieses Angebot ist keinem internen Kunden zugeordnet — klicken zum Verknüpfen"
+                          onClick={() => setLinkOffer(o)}>
+                          ⚠️ Kein Kunde verknüpft
+                        </button>
+                      )}
+                    </td>
                     <td>{BRAND_LABEL[o.brand]}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{eur.format(o.setup_total)}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -321,6 +333,26 @@ export default function OffersList() {
         onClose={() => setDeclineOffer(null)}
         onDeclined={() => { setDeclineOffer(null); load(); }}
       />
+
+      <Modal open={!!linkOffer} onClose={() => setLinkOffer(null)}
+        title={`Angebot verknüpfen — ${linkOffer?.customer_snapshot?.company_name || linkOffer?.easybill_customer_id || ''}`}>
+        {linkOffer && (
+          <div style={{ minWidth: 380 }}>
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 0 }}>
+              Diesem Angebot ist noch kein interner Kunde zugeordnet. Wähle den passenden Kunden — die zugehörigen Rechnungen werden mit-zugeordnet.
+            </p>
+            <KundePicker autoFocus onPick={async (k) => {
+              setLinkBusy(true);
+              try {
+                await api(`/offers/${linkOffer.id}/link-customer`, { method: 'POST', body: { customer_id: k.id } });
+                setLinkOffer(null); load();
+              } catch (e) { alert(e.message); }
+              finally { setLinkBusy(false); }
+            }} />
+            {linkBusy && <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>Verknüpfe…</div>}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

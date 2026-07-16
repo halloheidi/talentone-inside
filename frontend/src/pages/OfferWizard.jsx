@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import Icon from '../components/Icon.jsx';
+import KundePicker from '../components/KundePicker.jsx';
 
 const eur  = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const num  = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -64,7 +65,7 @@ export default function OfferWizard() {
           (c.email || '').toLowerCase() === kunde.email.toLowerCase()
         ) || (sres.customers || [])[0];
         if (hit && !cancel) {
-          setCustomer({ ...hit, tool_kunde_id: kunde.id });
+          setCustomer({ ...hit, tool_kunde_id: kunde.id, tool_kunde_name: kunde.firmenname });
           setStep(2);
         }
       } catch { /* still auf Schritt 1 – User pickt manuell */ }
@@ -72,6 +73,42 @@ export default function OfferWizard() {
     return () => { cancel = true; };
     // eslint-disable-next-line
   }, [preselectKundeId]);
+
+  // Auto-Resolve interner Kunde, sobald ein easybill-Kunde gewählt ist und noch
+  // keine interne Verknüpfung existiert (globaler Einstieg ohne kunde_id).
+  const [kundeExistiertNicht, setKundeExistiertNicht] = useState(false);
+  useEffect(() => {
+    if (!customer || customer.tool_kunde_id || kundeExistiertNicht) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const p = new URLSearchParams({
+          easybill_customer_id: String(customer.easybill_id || ''),
+          email: customer.email || '', company_name: customer.company_name || '',
+        });
+        const res = await api(`/offers/resolve-kunde?${p}`);
+        if (!cancel && res.kunde) {
+          setCustomer(c => c ? ({ ...c, tool_kunde_id: res.kunde.id, tool_kunde_name: res.kunde.firmenname }) : c);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line
+  }, [customer?.easybill_id, kundeExistiertNicht]);
+
+  function pickInternerKunde(k) {
+    setCustomer(c => c ? ({ ...c, tool_kunde_id: k.id, tool_kunde_name: k.firmenname }) : c);
+    setKundeExistiertNicht(false);
+  }
+  function markKundeExistiertNicht() {
+    setCustomer(c => c ? ({ ...c, tool_kunde_id: null, tool_kunde_name: null }) : c);
+    setKundeExistiertNicht(true);
+  }
+  function resetInternerKunde() {
+    setCustomer(c => c ? ({ ...c, tool_kunde_id: null, tool_kunde_name: null }) : c);
+    setKundeExistiertNicht(false);
+  }
+
   // Schritt 2
   const [brand, setBrand] = useState(null);
   // Schritt 3
@@ -285,7 +322,9 @@ export default function OfferWizard() {
       {error && <div className="alert alert-error" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div className="card" style={{ padding: 22, marginBottom: 16 }}>
-        {step === 1 && <Step1Customer customer={customer} onSelect={setCustomer} alsoInTool={alsoInTool} setAlsoInTool={setAlsoInTool} />}
+        {step === 1 && <Step1Customer customer={customer} onSelect={setCustomer} alsoInTool={alsoInTool} setAlsoInTool={setAlsoInTool}
+          internerKundeName={customer?.tool_kunde_name} kundeExistiertNicht={kundeExistiertNicht}
+          onPickKunde={pickInternerKunde} onKundeExistiertNicht={markKundeExistiertNicht} onResetKunde={resetInternerKunde} />}
         {step === 2 && <Step2Brand brand={brand} onSelect={setBrand} />}
         {step === 3 && (
           <Step3Config
@@ -385,7 +424,7 @@ function StepIndicator({ step, labels }) {
 }
 
 // ─────────────────────── Step 1 ───────────────────────
-function Step1Customer({ customer, onSelect, alsoInTool, setAlsoInTool }) {
+function Step1Customer({ customer, onSelect, alsoInTool, setAlsoInTool, internerKundeName, kundeExistiertNicht, onPickKunde, onKundeExistiertNicht, onResetKunde }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -428,6 +467,11 @@ function Step1Customer({ customer, onSelect, alsoInTool, setAlsoInTool }) {
         setAlsoInTool={setAlsoInTool}
         onEdit={() => setEditing(true)}
         onChangeCustomer={() => onSelect(null)}
+        internerKundeName={internerKundeName}
+        kundeExistiertNicht={kundeExistiertNicht}
+        onPickKunde={onPickKunde}
+        onKundeExistiertNicht={onKundeExistiertNicht}
+        onResetKunde={onResetKunde}
       />
     );
   }
@@ -511,7 +555,7 @@ function Step1Customer({ customer, onSelect, alsoInTool, setAlsoInTool }) {
   );
 }
 
-function CustomerCard({ customer, alsoInTool, setAlsoInTool, onEdit, onChangeCustomer }) {
+function CustomerCard({ customer, alsoInTool, setAlsoInTool, onEdit, onChangeCustomer, internerKundeName, kundeExistiertNicht, onPickKunde, onKundeExistiertNicht, onResetKunde }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -536,7 +580,36 @@ function CustomerCard({ customer, alsoInTool, setAlsoInTool, onEdit, onChangeCus
         {customer.email && <><a href={`mailto:${customer.email}`}>{customer.email}</a><br /></>}
         {customer.phone_1}
       </div>
-      <div style={{ marginTop: 14, padding: 12, background: 'var(--gray-50)', borderRadius: 8, fontSize: 13 }}>
+      <div style={{ marginTop: 12, padding: 12, background: 'var(--gray-50)', borderRadius: 8, fontSize: 13 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 8 }}>
+          Interner Kunde (Tool)
+        </div>
+        {customer.tool_kunde_id ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ color: '#166534', fontWeight: 600 }}>✓ Verknüpft: {internerKundeName || 'Kunde'}</span>
+            {onResetKunde && <button type="button" className="btn-ghost btn-sm" onClick={onResetKunde}>Ändern</button>}
+          </div>
+        ) : kundeExistiertNicht ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ color: '#92400e' }}>⚠️ Kunde existiert noch nicht — das Angebot bleibt vorerst ohne interne Verknüpfung.</span>
+            {onResetKunde && <button type="button" className="btn-ghost btn-sm" onClick={onResetKunde}>Doch verknüpfen</button>}
+          </div>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 6px', color: 'var(--ink-3)', fontSize: 12 }}>
+              Damit das Angebot in der Kunden-Ansicht erscheint, mit dem internen Kunden verknüpfen:
+            </p>
+            {onPickKunde && <KundePicker onPick={onPickKunde} />}
+            {onKundeExistiertNicht && (
+              <button type="button" className="btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={onKundeExistiertNicht}>
+                Kunde existiert noch nicht
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      <div style={{ marginTop: 10, padding: 12, background: 'var(--gray-50)', borderRadius: 8, fontSize: 13 }}>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input type="checkbox" checked={alsoInTool} onChange={e => setAlsoInTool(e.target.checked)} />
           <span>Kunde auch im Tool anlegen (für Onboarding, Bewerber-Hub etc.)</span>

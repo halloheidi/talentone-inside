@@ -12,6 +12,7 @@ import { sendAngebotMail, sendAuftragMail } from '../mail.js';
 import { addNote as closeAddNote } from '../close.js';
 import { buildEckdatenBlock } from '../mail-eckdaten.js';
 import { ensureProjektForOffer } from '../auftrag-automation.js';
+import { resolveKundeIdForOffer, linkOfferToKunde } from '../offer-linking.js';
 
 const router = Router();
 
@@ -449,6 +450,20 @@ router.post('/calculate', async (req, res) => {
    customer_id: interne UUID des Kunden (talentone_kunden.id) — primäre Quelle
    easybill_customer_id: Fallback, wenn die interne Verknüpfung noch fehlt
    (z.B. bei Angeboten, die vor der ersten Verknüpfung angelegt wurden). */
+/* GET /api/offers/resolve-kunde?easybill_customer_id=&email=&company_name=
+   Schlägt den passenden internen Kunden vor (für den OfferWizard).
+   MUSS vor GET /:id stehen. */
+router.get('/resolve-kunde', async (req, res) => {
+  const kundeId = await resolveKundeIdForOffer({
+    easybill_customer_id: req.query.easybill_customer_id,
+    customer_snapshot: { email: req.query.email, company_name: req.query.company_name },
+  });
+  if (!kundeId) return res.json({ kunde: null });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, email, agentur').eq('id', kundeId).maybeSingle();
+  res.json({ kunde: kunde || null });
+});
+
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
@@ -570,19 +585,14 @@ router.post('/', async (req, res) => {
       ? Math.max(1, Math.min(10, Math.round(+b.hires_target)))
       : 1;
 
-    // Auto-Verknüpfung mit internem Kunden: wenn kein customer_id explizit
-    // mitkommt, versuchen wir via easybill_customer_id → E-Mail → interner
-    // Kunde zu matchen. So verhindert man dass Angebote "verwaist" bleiben.
-    let resolvedCustomerId = b.customer_id || null;
-    if (!resolvedCustomerId && b.easybill_customer_id) {
-      const { data: ebc } = await supabase.from('talentone_easybill_customers')
-        .select('email, company_name').eq('easybill_id', String(b.easybill_customer_id)).maybeSingle();
-      if (ebc?.email) {
-        const { data: k } = await supabase.from('talentone_kunden')
-          .select('id').eq('email', ebc.email).maybeSingle();
-        if (k?.id) resolvedCustomerId = k.id;
-      }
-    }
+    // Auto-Verknüpfung mit internem Kunden (gehärtet): expliziter customer_id →
+    // easybill-Cache-Email → Snapshot-Email → Snapshot-Firmenname (case-insensitiv).
+    // So bleiben Angebote seltener "verwaist".
+    const resolvedCustomerId = await resolveKundeIdForOffer({
+      customer_id: b.customer_id,
+      easybill_customer_id: b.easybill_customer_id,
+      customer_snapshot: b.customer_snapshot,
+    });
 
     const row = {
       brand:                       b.brand,
@@ -957,6 +967,22 @@ router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('talentone_offers').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+/* POST /api/offers/:id/link-customer  body: { customer_id }
+   Ordnet ein (verwaistes) Angebot einem internen Kunden zu — inkl. der
+   verwaisten Rechnungen des Angebots. */
+router.post('/:id/link-customer', async (req, res) => {
+  const kundeId = req.body?.customer_id;
+  if (!kundeId) return res.status(400).json({ error: 'customer_id ist Pflicht.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('id').eq('id', kundeId).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  try {
+    const offer = await linkOfferToKunde(req.params.id, kundeId);
+    res.json({ offer });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
