@@ -195,17 +195,22 @@ export default function JobExport() {
   }
 
   /* ───── Mail-Modal ───── */
-  // mode = 'new_round' | 'same_round'
-  function openMailModal(mode = 'new_round') {
+  // mode = 'first' | 'same_round' | 'new_round'
+  // Die drei Modi entsprechen den drei Mail-Varianten im Backend. Das Backend
+  // leitet die Variante zusaetzlich aus dem echten Zustand ab (Erstversand
+  // gewinnt, neue Runde nur mit echter Kundenreaktion) — der Modus hier ist nur
+  // die Absicht der UI, nicht die alleinige Wahrheit.
+  function openMailModal(mode = 'first') {
     const istResend = mode === 'same_round';
+    const istNeueRunde = mode === 'new_round';
     const anschreibenDefault = istResend
       ? `Hallo ${kunde?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`
       : '';
     setMailForm({
       to: kunde?.email || '',
-      betreff: istResend
-        ? `${kunde?.firmenname || 'Deine Kampagne'} — Entwürfe nochmal zur Freigabe`
-        : `${kunde?.firmenname || 'Ihre Recruiting-Kampagne'} — Entwürfe zur Freigabe`,
+      betreff: istNeueRunde
+        ? `Deine überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`
+        : 'Deine Entwürfe sind fertig 🎨',
       anschreiben: anschreibenDefault,
       include_funnel: !!data?.funnel_url,
       resend_mode: mode,
@@ -213,7 +218,7 @@ export default function JobExport() {
     setMailMsg('');
     setShowMail(true);
     if (!istResend) {
-      // KI-Anschreiben-Vorschlag nur bei neuer Runde
+      // KI-Anschreiben-Vorschlag für Erstversand + neue Runde
       setAnschreibensBusy(true);
       api(`/jobs/${job.id}/export/anschreiben`, { method: 'POST' })
         .then(r => setMailForm(prev => ({ ...prev, anschreiben: r.text || prev.anschreiben })))
@@ -615,8 +620,10 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
           const hatteVersand = !!letzterEntwurfsVersand;
           const hatKundenReaktion = review && (review.status === 'freigegeben' || review.status === 'aenderungen' || review.manuell_beantwortet);
           if (!hatteVersand) {
+            // Erstversand — eigener Modus, KEIN 'new_round' (sonst geht die Mail
+            // als "überarbeitete Entwürfe Runde 1" raus).
             return (
-              <button className="btn-primary" onClick={() => openMailModal('new_round')} disabled={!kunde?.email}>
+              <button className="btn-primary" onClick={() => openMailModal('first')} disabled={!kunde?.email}>
                 Entwürfe an Kunden senden
               </button>
             );
@@ -651,10 +658,6 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
             ? '↩️ Erneut senden = gleiche Runde, Kunde kann wieder kommentieren · 📤 Überarbeitete Runde = frische Runde nach Anpassungen'
             : ''}
         </span>
-        {/* Legacy-Button (verborgen halten, damit alte Ref weiter kompiliert) */}
-        <button style={{ display: 'none' }} onClick={() => openMailModal('new_round')}>
-          _legacy
-        </button>
       </div>
       {!kunde?.email && <div className="motiv-sub" style={{ marginTop: 6 }}>Kunden-E-Mail fehlt — bitte erst beim Kunden hinterlegen.</div>}
 

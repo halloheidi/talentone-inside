@@ -131,22 +131,43 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     const reviewUrl = `${baseUrl}/review/${reviewToken}`;
 
     const { data: latestReview } = await supabase.from('talentone_reviews')
-      .select('id, runde, status')
+      .select('id, runde, status, manuell_beantwortet')
       .eq('job_id', job.id)
       .order('runde', { ascending: false }).limit(1).maybeSingle();
-    const abgeschlossenerStatus = new Set(['aenderungen', 'freigegeben']);
-    const autoNeueRunde = !!(latestReview && abgeschlossenerStatus.has(latestReview.status));
 
-    // Modus bestimmen: explizit > Auto-Guess
-    const istNeueRunde = resend_mode
-      ? resend_mode === 'new_round'
-      : autoNeueRunde;
-    // Bei "same_round": aktuelle Runde behalten. Sonst: hochzaehlen wenn moeglich.
+    // ── Variante aus dem ECHTEN Zustand ableiten, nicht aus der Rundennummer ──
+    // Die Rundennummer allein sagt nichts: Runde 1 ist ein Erstversand, keine
+    // Ueberarbeitung. Massgeblich ist: (a) ging ueberhaupt schon mal ein Entwurf
+    // raus? (b) hat der Kunde darauf reagiert?
+    const { data: frueherVersand } = await supabase.from('talentone_versand')
+      .select('id').eq('job_id', job.id).like('typ', 'entwurf%').limit(1).maybeSingle();
+    const hatteVersand = !!frueherVersand;
+    const hatKundenReaktion = !!(latestReview && (
+      ['aenderungen', 'freigegeben'].includes(latestReview.status) || latestReview.manuell_beantwortet
+    ));
+
+    // 'erstversand' | 'resend' | 'neue_runde'
+    // Erstversand gewinnt IMMER, wenn noch nie etwas raus ist — egal was der
+    // Client schickt (verhindert "ueberarbeitete Entwuerfe Runde 1").
+    // Eine neue Runde setzt eine echte Kundenreaktion voraus.
+    const variante = !hatteVersand
+      ? 'erstversand'
+      : (resend_mode === 'new_round' && hatKundenReaktion) ? 'neue_runde'
+      : 'resend';
+
+    const istNeueRunde = variante === 'neue_runde';
     const neueRundeNr = istNeueRunde
       ? ((Number(latestReview?.runde) || 0) + 1)
       : (Number(latestReview?.runde) || 1);
 
-    if (istNeueRunde) {
+    if (variante === 'erstversand' && !latestReview) {
+      // Erstversand: offene Review-Row fuer Runde 1 anlegen
+      await supabase.from('talentone_reviews').insert({
+        job_id: job.id, token: reviewToken,
+        status: 'offen', kommentare: null, kommentare_snapshot: null,
+        runde: 1,
+      });
+    } else if (istNeueRunde) {
       // Frische offene Review-Row fuer die neue Runde
       await supabase.from('talentone_reviews').insert({
         job_id: job.id, token: reviewToken,
@@ -165,13 +186,30 @@ router.post('/jobs/:id/export/email', async (req, res) => {
         .eq('id', latestReview.id);
     }
 
+    // ── Drei klar getrennte Varianten ──
     const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
-    const finalBetreff = istNeueRunde
+    const standardBetreff = istNeueRunde
       ? `Deine überarbeiteten Entwürfe — Runde ${neueRundeNr}`
-      : (betreff || null);
-    const finalAnschreiben = istNeueRunde
-      ? `Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:\n\n${anschreiben || ''}`.trim()
-      : anschreiben;
+      : 'Deine Entwürfe sind fertig 🎨';
+
+    // Sicherheitsnetz: Ein Client (z. B. alter Cache) darf keinen
+    // "ueberarbeitet/Runde X"-Betreff auf einen Erstversand/Resend setzen.
+    const clientBetreff = (betreff || '').trim();
+    const betreffKlingtNachUeberarbeitung = /überarbeitet|ueberarbeitet|Runde\s*\d/i.test(clientBetreff);
+    const finalBetreff = istNeueRunde
+      ? standardBetreff
+      : (clientBetreff && !betreffKlingtNachUeberarbeitung ? clientBetreff : standardBetreff);
+
+    // Intro-Prefix ist variantengesteuert — nur die echte Feedback-Runde
+    // bedankt sich fuers Feedback.
+    const introPrefix = variante === 'neue_runde'
+      ? 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:'
+      : variante === 'resend'
+        ? 'Hier nochmal deine Entwürfe:'
+        : null; // Erstversand: kein Bezug auf Feedback/Vorrunde
+    const finalAnschreiben = introPrefix
+      ? `${introPrefix}\n\n${anschreiben || ''}`.trim()
+      : (anschreiben || null);
 
     // AVV-Fallback: falls der Kunde noch nicht akzeptiert hat, dezenten
     // Bestätigungs-Link in die Entwürfe-Mail geben (Public-Token-Seite).
@@ -196,14 +234,14 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     // Historie speichern (mit Runden-Marker)
     // Bei "same_round" markieren wir den Versand als 'entwurf_resend' — damit
     // die Timeline "↩️ Runde X erneut gesendet" sauber unterscheidet.
-    const historyTyp = istNeueRunde
-      ? `entwurf_runde_${neueRundeNr}`
-      : (resend_mode === 'same_round' ? `entwurf_resend_${neueRundeNr}` : `entwurf_runde_${neueRundeNr}`);
-    const historyBetreff = istNeueRunde
+    const historyTyp = variante === 'resend'
+      ? `entwurf_resend_${neueRundeNr}`
+      : `entwurf_runde_${neueRundeNr}`;
+    const historyBetreff = variante === 'neue_runde'
       ? `${rundePrefix}${finalBetreff || ''}`.trim() || null
-      : (resend_mode === 'same_round'
-          ? `↩️ Runde ${neueRundeNr} erneut gesendet — ${finalBetreff || ''}`.trim()
-          : (finalBetreff || null));
+      : variante === 'resend'
+        ? `↩️ Runde ${neueRundeNr} erneut gesendet — ${finalBetreff || ''}`.trim()
+        : (finalBetreff || null);
     const { error: insErr } = await supabase.from('talentone_versand').insert({
       job_id: job.id,
       empfaenger: to.trim(),
@@ -216,15 +254,19 @@ router.post('/jobs/:id/export/email', async (req, res) => {
         funnel_url: funnelUrl,
         anschreiben: finalAnschreiben,
         runde: neueRundeNr,
-        resend_mode: resend_mode || (istNeueRunde ? 'new_round' : 'same_round'),
+        variante,
+        resend_mode: resend_mode || null,
       },
     });
     if (insErr) console.warn('[export/email] Historie-Insert:', insErr.message);
 
     // Close-Note (best-effort)
-    const closeText = resend_mode === 'same_round'
-      ? `↩️ Runde ${neueRundeNr} erneut gesendet an ${to.trim()} · ${new Date().toLocaleDateString('de-DE')}`
-      : `📤 Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${new Date().toLocaleDateString('de-DE')}`;
+    const dateNow = new Date().toLocaleDateString('de-DE');
+    const closeText = variante === 'resend'
+      ? `↩️ Runde ${neueRundeNr} erneut gesendet an ${to.trim()} · ${dateNow}`
+      : variante === 'neue_runde'
+        ? `📤 Überarbeitete Entwürfe (Runde ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${dateNow}`
+        : `📤 Entwürfe an Kunden gesendet (Erstversand) — ${selCreatives.length} Creative(s), ${selAdcopies.length} Ad Copy(s) · ${dateNow}`;
     notifyKunde(kunde, closeText)
       .catch(err => console.warn('[export/email close-note]', err.message));
 
