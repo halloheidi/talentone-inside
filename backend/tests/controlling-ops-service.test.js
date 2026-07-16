@@ -39,6 +39,23 @@ test('computeAmpel: deutlich unter Soll → rot', () => {
   assert.equal(r.ampel, 'rot');
 });
 
+test('computeAmpel: frische Kampagne Tag 2 ohne Bewerbung → nicht rot (Karenz)', () => {
+  const r = computeAmpel({ ...base, liveTag: 2, letzteBewerbungTage: null, bewerbungenSeitLive: 0, letzte7: 0, vorwoche: 0 });
+  assert.equal(r.ampel, 'gruen');
+});
+
+test('computeAmpel: Tag 3 ohne jede Bewerbung → rot', () => {
+  const r = computeAmpel({ ...base, liveTag: 3, letzteBewerbungTage: null, bewerbungenSeitLive: 0, letzte7: 0, vorwoche: 0 });
+  assert.equal(r.ampel, 'rot');
+});
+
+test('computeAmpel: "unter Soll" erst ab Karenz-Tag (Tag 5 nicht, Tag 10 ja)', () => {
+  const early = computeAmpel({ ...base, liveTag: 5, letzteBewerbungTage: 1, bewerbungenSeitLive: 1, letzte7: 1, vorwoche: 1 });
+  assert.equal(early.ampel, 'gruen');
+  const late = computeAmpel({ ...base, liveTag: 10, letzteBewerbungTage: 1, bewerbungenSeitLive: 1, letzte7: 1, vorwoche: 1 });
+  assert.equal(late.ampel, 'rot');
+});
+
 test('computeAmpel: rückläufig (< 50% Vorwoche) → gelb', () => {
   const r = computeAmpel({ ...base, letzteBewerbungTage: 1, letzte7: 2, vorwoche: 10 });
   assert.equal(r.ampel, 'gelb');

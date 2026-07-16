@@ -7,6 +7,7 @@ export const AMPEL_CONFIG = {
   keineBewerbungTage:    3,    // 🔴 0 Bewerbungen in den letzten X Tagen
   sollBewerbungenProTag: 1,    // grobe Soll-Rate pro Live-Tag
   rotUnterSollFaktor:    0.5,  // < 50 % vom Soll seit Live-Start → 🔴 "deutlich unter Soll"
+  unterSollAbTag:        7,    // "unter Soll" erst ab X Live-Tagen bewerten (Karenz für frische Kampagnen)
   gelbRuecklaufFaktor:   0.5,  // aktuelle Woche < 50 % der Vorwoche → 🟡 rückläufig
   phase1TageDefault:     30,   // Phase-1-Ziel, wenn keine Projektdauer hinterlegt
 };
@@ -67,18 +68,23 @@ export function computeAmpel(m, cfg = AMPEL_CONFIG) {
 
   const gruende = [];
 
-  // 🔴 — 0 Bewerbungen in den letzten X Tagen ODER deutlich unter Soll
-  const keineBewerbung = m.letzteBewerbungTage == null || m.letzteBewerbungTage >= cfg.keineBewerbungTage;
+  // 🔴 — 0 Bewerbungen in den letzten X Tagen ODER deutlich unter Soll.
+  // Karenz: eine frische Kampagne (Tag < keineBewerbungTage) ohne Bewerbung ist
+  // NICHT sofort rot — es zählen die Tage ohne Eingang (bzw. die bisherige
+  // Live-Laufzeit, wenn noch nie eine Bewerbung kam).
+  const tageOhne = m.letzteBewerbungTage != null ? m.letzteBewerbungTage : m.liveTag;
+  const keineBewerbung = tageOhne != null && tageOhne >= cfg.keineBewerbungTage;
   if (keineBewerbung) {
     gruende.push(m.letzteBewerbungTage == null
-      ? 'Noch keine Bewerbung'
+      ? `Noch keine Bewerbung (Tag ${m.liveTag})`
       : `Seit ${m.letzteBewerbungTage} Tagen keine Bewerbung`);
   }
   const bewertbareLiveTage = m.liveTag != null
     ? Math.max(1, m.sollTage != null ? Math.min(m.liveTag + 1, m.sollTage) : m.liveTag + 1)
     : 0;
   const erwartet = cfg.sollBewerbungenProTag * bewertbareLiveTage;
-  const unterSoll = erwartet > 0
+  const unterSoll = (m.liveTag ?? 0) >= cfg.unterSollAbTag
+    && erwartet > 0
     && m.bewerbungenSeitLive != null
     && m.bewerbungenSeitLive < erwartet * cfg.rotUnterSollFaktor;
   if (unterSoll && !keineBewerbung) {
