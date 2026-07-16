@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
+import PageContainer from '../components/PageContainer.jsx';
 
 /* ─── Konstanten ─── */
 const STATUS_LABELS = {
@@ -233,12 +234,6 @@ export default function ProjekteOverview() {
   }
   useEffect(() => { load(); }, []);
 
-  // Full-width-Layout für Kanban — hebt .content max-width 1200px auf
-  useEffect(() => {
-    document.body.classList.add('proj-fullwidth');
-    return () => document.body.classList.remove('proj-fullwidth');
-  }, []);
-
   const verantworten = useMemo(() => Array.from(new Set(projekte.map(p => p.verantwortlich).filter(Boolean))).sort(), [projekte]);
   const arten = useMemo(() => Array.from(new Set(projekte.map(p => p.projektart).filter(Boolean))).sort(), [projekte]);
 
@@ -334,6 +329,7 @@ export default function ProjekteOverview() {
 
   return (
     <div className="bew-overview proj-overview">
+      <PageContainer wide />
       <header className="bew-overview-head">
         <h1>Projekte <span style={{ fontSize: 14, color: 'var(--ink-3)', fontWeight: 500 }}>({filtered.length} von {projekte.length})</span></h1>
         <div className="proj-view-toggle">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import PageContainer from '../components/PageContainer.jsx';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
@@ -96,7 +97,8 @@ export default function ControllingDashboard() {
     : (data?.charts?.per_tag || []);
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1200 }}>
+    <div style={{ padding: '24px 32px' }}>
+      <PageContainer wide />
       <header style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>📊 Controlling</h1>
         <p style={{ color: '#5a5955', fontSize: 14, margin: 0 }}>

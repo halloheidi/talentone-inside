@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import PageContainer from '../components/PageContainer.jsx';
 
 const PHASE1_DAYS = 30;
 
@@ -82,6 +83,7 @@ export default function LiveKampagnen() {
 
   return (
     <div style={{ padding: '24px 32px' }}>
+      <PageContainer wide />
       <header style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, marginBottom: 4 }}>Live-Kampagnen</h1>
         <p style={{ color: '#5a5955', fontSize: 14 }}>

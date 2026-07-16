@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
+import PageContainer from '../components/PageContainer.jsx';
 
 const STATUS_OPTIONS = [
   { value: 'neu', label: 'Neu' },
@@ -133,14 +134,6 @@ export default function BewerbungenOverview() {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [quelleFilter, ohneKo, vonFilter, bisFilter]);
 
-  // Full-width-Layout — hebt .content max-width 1200px auf. Wiederverwendet
-  // die Regel body.proj-fullwidth aus styles.css, damit sich die Tabelle
-  // über die gesamte verfügbare Breite ausbreiten kann.
-  useEffect(() => {
-    document.body.classList.add('proj-fullwidth');
-    return () => document.body.classList.remove('proj-fullwidth');
-  }, []);
-
   // Kunden + Jobs aus den Bewerbungen extrahieren (für Dropdowns)
   const kundenMap = useMemo(() => {
     const map = new Map();
@@ -269,6 +262,7 @@ export default function BewerbungenOverview() {
 
   return (
     <div className="bew-overview">
+      <PageContainer wide />
       <header className="bew-overview-head">
         <h1>Bewerbungen</h1>
         <div className="bew-overview-quickfilter">

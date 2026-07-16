@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { downloadFromUrl } from '../../lib/files.js';
@@ -7,6 +8,7 @@ import Lightbox from '../../components/Lightbox.jsx';
 import EntwurfPreflightModal from '../../components/EntwurfPreflightModal.jsx';
 import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../../components/TerminEinladungModal.jsx';
+import StandaloneAdBudgetModal from '../../components/StandaloneAdBudgetModal.jsx';
 import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
@@ -1014,8 +1016,7 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
   const [zahlungen, setZahlungen] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [createdInvoice, setCreatedInvoice] = useState(null); // Erfolgs-Hinweis nach Rechnungserstellung
   const [sendTarget, setSendTarget] = useState(null); // Zahlung für Send-Modal
 
   async function load() {
@@ -1028,50 +1029,8 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
 
-  // Form-State im Modal (Netto-Eingabe, automatische MwSt-Berechnung)
-  const defaultDesc = `Werbebudget ${job.stelle || 'Stelle'} — ${kunde?.firmenname || ''}`.trim();
-  const [betragNetto, setBetragNetto] = useState('');
-  const [kleinunternehmer, setKleinunternehmer] = useState(false);
-  const [leistungszeitraum, setLeistungszeitraum] = useState('');
-  const [beschreibung, setBeschreibung] = useState(defaultDesc);
-  const [faelligkeit, setFaelligkeit] = useState('');
-
-  function parseNettoCent(input) {
-    const s = String(input || '').replace(/\s+/g, '').replace(/€/g, '');
-    const num = Number(s.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(num) && num > 0 ? Math.round(num * 100) : 0;
-  }
-  const nettoCent  = parseNettoCent(betragNetto);
-  const mwstCent   = kleinunternehmer ? 0 : Math.round(nettoCent * 0.19);
-  const bruttoCent = nettoCent + mwstCent;
-  function fmtLive(c) { return (c / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
-
-  function openModal() {
-    setBetragNetto(''); setKleinunternehmer(false); setLeistungszeitraum('');
-    setBeschreibung(defaultDesc); setFaelligkeit('');
-    setError(''); setModalOpen(true);
-  }
-
-  async function createZahlung() {
-    setError(''); setBusy(true);
-    try {
-      const res = await api(`/zahlungen/job/${job.id}`, {
-        method: 'POST',
-        body: {
-          betrag_netto: betragNetto,
-          kleinunternehmer,
-          leistungszeitraum: leistungszeitraum || null,
-          beschreibung,
-          faelligkeit: faelligkeit || null,
-        },
-      });
-      setZahlungen(prev => [res.zahlung, ...prev]);
-      setModalOpen(false);
-      try { await navigator.clipboard.writeText(res.zahlung.pay_link); } catch { /* noop */ }
-    } catch (err) {
-      setError(err.message);
-    } finally { setBusy(false); }
-  }
+  // Vorbelegung fürs einheitliche Werbekosten-Modal
+  const defaultLabel = `Werbebudget ${job.stelle || 'Stelle'}`.trim();
 
   async function createEasybillManually(z) {
     if (!confirm('easybill-Rechnung jetzt erstellen?')) return;
@@ -1130,11 +1089,23 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
     <div className="zahlungen-section">
       <div className="zahlungen-head">
         <div>
-          <div className="zahlungen-title">💳 Zahlungen / Rechnungen (PayPal)</div>
-          <p className="zahlungen-hint">Erstelle Zahlungslinks und sende sie direkt an {kunde?.firmenname || 'den Kunden'}.</p>
+          <div className="zahlungen-title">💳 Werbekosten / Rechnungen</div>
+          <p className="zahlungen-hint">
+            Erzeugt eine easybill-Rechnung für {kunde?.firmenname || 'den Kunden'} — optional mit PayPal-Zahllink.
+            Die Rechnung erscheint danach unter „Rechnungen" auf der Kundenseite.
+          </p>
         </div>
-        <button className="btn-primary btn-sm" onClick={openModal}>+ Zahlungslink erstellen</button>
+        <button className="btn-primary btn-sm" onClick={() => { setCreatedInvoice(null); setModalOpen(true); }}>
+          + Werbekosten-Rechnung
+        </button>
       </div>
+
+      {createdInvoice && (
+        <div className="alert" style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#166534', marginBottom: 12 }}>
+          ✅ Rechnung erstellt{createdInvoice.easybill_invoice_number ? ` (${createdInvoice.easybill_invoice_number})` : ''}.{' '}
+          <Link to={`/kunden/${kunde?.id}`} style={{ color: '#166534', fontWeight: 600 }}>→ Zu den Rechnungen des Kunden</Link>
+        </div>
+      )}
 
       {loading ? <div className="muted">Lade…</div> : (
         zahlungen.length === 0
@@ -1190,69 +1161,15 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
           )
       )}
 
-      {modalOpen && (
-        <Modal
-          open={modalOpen}
-          onClose={() => !busy && setModalOpen(false)}
-          title="Zahlungslink erstellen"
-          footer={
-            <div className="zahlung-modal-actions">
-              <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)} disabled={busy}>
-                Abbrechen
-              </button>
-              <button type="button" className="btn-zahlung-cta" onClick={createZahlung} disabled={busy || !nettoCent}>
-                {busy ? '⏳ Erstelle…' : `💳 ${fmtLive(bruttoCent || 0)} anfordern`}
-              </button>
-            </div>
-          }
-        >
-          <div className="form-grid">
-            <label className="field field-full">
-              <span>Netto-Betrag *</span>
-              <input type="text" placeholder="z.B. 1500 oder 1.500,00" value={betragNetto} onChange={e => setBetragNetto(e.target.value)} autoFocus />
-            </label>
-
-            {/* Live-Brutto-Anzeige */}
-            <div className="field field-full">
-              <div className="brutto-box">
-                <div className="brutto-row">
-                  <span>Netto</span>
-                  <strong>{fmtLive(nettoCent)}</strong>
-                </div>
-                <div className="brutto-row">
-                  <span>+ 19% MwSt</span>
-                  <strong className={kleinunternehmer ? 'muted' : ''}>{kleinunternehmer ? '—' : fmtLive(mwstCent)}</strong>
-                </div>
-                <div className="brutto-row brutto-row-total">
-                  <span>= Brutto (PayPal)</span>
-                  <strong>{fmtLive(bruttoCent)}</strong>
-                </div>
-              </div>
-              <label className="checkbox-row" style={{ marginTop: 8 }}>
-                <input type="checkbox" checked={kleinunternehmer} onChange={e => setKleinunternehmer(e.target.checked)} />
-                <span>Kleinunternehmer §19 UStG (keine MwSt)</span>
-              </label>
-            </div>
-
-            <label className="field">
-              <span>Leistungszeitraum</span>
-              <input type="text" placeholder="z.B. Juni 2026" value={leistungszeitraum} onChange={e => setLeistungszeitraum(e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Fälligkeit (optional)</span>
-              <input type="date" value={faelligkeit} onChange={e => setFaelligkeit(e.target.value)} />
-            </label>
-            <label className="field field-full">
-              <span>Beschreibung</span>
-              <input type="text" value={beschreibung} onChange={e => setBeschreibung(e.target.value)} />
-            </label>
-          </div>
-          {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
-          <p className="pane-hint" style={{ marginTop: 14 }}>
-            Der PayPal-Zahlungslink wird über den <strong>Brutto-Betrag</strong> erstellt. Sobald der Kunde bezahlt hat, wird automatisch eine easybill-Rechnung erzeugt — du kannst sie dann als PDF herunterladen oder direkt an {kunde?.email || 'den Kunden'} versenden.
-          </p>
-        </Modal>
-      )}
+      {/* Einheitliches Werbekosten-Modal — identisch zur Kundenseite, hier nur
+          mit vorbelegtem Kontext (Kunde aus dem Job, Bezeichnung mit Stelle). */}
+      <StandaloneAdBudgetModal
+        open={modalOpen}
+        kunde={kunde}
+        defaultLabel={defaultLabel}
+        onClose={() => setModalOpen(false)}
+        onCreated={(invoice) => { setCreatedInvoice(invoice); setModalOpen(false); }}
+      />
 
       {/* Zahlungslink-Send-Modal mit Close-Lead-Warnung */}
       <Modal

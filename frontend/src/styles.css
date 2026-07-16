@@ -301,17 +301,20 @@ button { font-family: inherit; }
 .user-email { font-size: 13px; font-weight: 600; color: var(--ink); }
 .user-role { font-size: 11px; color: var(--ink-3); letter-spacing: 0.05em; text-transform: uppercase; }
 
+/* Standard-Content-Breite: begrenzt + zentriert. Gilt automatisch für JEDE
+   Seite — neue Seiten müssen dafür nichts tun. Seiten, die den Platz wirklich
+   brauchen (Kanban, Gantt, breite Tabellen, Dashboards), schalten über
+   <PageContainer wide> auf .is-wide um. Siehe components/PageContainer.jsx. */
 .content {
   flex: 1;
   padding: 32px 36px;
   width: 100%;
-  /* max-width entfernt 2026-07 — Tabellen-Listen (Kunden, Projekte, Zahlungen,
-     Angebote, Rechnungen, Bewerbungen) nutzen jetzt einheitlich die volle
-     verfügbare Breite. Für die alten schmalen Layouts wird selektiv per
-     .content-narrow zurückgekappt, wo Formulare o. Ä. lesbarer sind. */
+  max-width: 1360px;
+  margin: 0 auto;
 }
-.content-narrow {
-  max-width: 1200px;
+.content.is-wide {
+  max-width: none;
+  padding: 32px 24px;
 }
 
 /* Page Head */
@@ -4326,7 +4329,9 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .pub-count strong { font-size: 36px; font-weight: 700; display: block; line-height: 1; }
 .pub-count span { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; }
 
-.pub-main { max-width: 1600px; margin: 0 auto; padding: 24px 32px; width: 100%; box-sizing: border-box; flex: 1; }
+/* Portal-Bewerberliste: volle Breite — die Tabelle braucht den Platz
+   (scrollt intern über .bewerbungen-table-scroll). */
+.pub-main { max-width: none; margin: 0 auto; padding: 24px 32px; width: 100%; box-sizing: border-box; flex: 1; }
 .pub-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
 .pub-filter-group { display: flex; gap: 0; background: #fff; border-radius: 100px; padding: 4px; border: 1px solid #e8e7e3; }
 .pub-filter {
@@ -5188,11 +5193,8 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   border-radius: 100px; font-weight: 600; font-size: 12px;
 }
 
-/* ─── Projekte: Full-Width-Layout (hebt .content max-width auf) ─── */
-body.proj-fullwidth .content {
-  max-width: none;
-  padding: 32px 24px;
-}
+/* (Der frühere body.proj-fullwidth-Hack ist entfallen — Breite läuft jetzt
+   zentral über <PageContainer wide> / .content.is-wide.) */
 
 /* ─── Slide-Over: Sektionen als deutliche Karten ─── */
 .slideover-projekt .slideover-body { gap: 16px; }

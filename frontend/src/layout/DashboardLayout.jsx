@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useMatch, useParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
+import { PageWidthProvider } from '../components/PageContainer.jsx';
 
 function GlobalNav({ isAdmin }) {
   return (
@@ -113,6 +114,8 @@ export default function DashboardLayout() {
   const { user, signOut, isAdmin } = useAuth();
   const kundeMatch = useMatch('/kunden/:kundeId/*');
   const kundeId = kundeMatch?.params?.kundeId;
+  // Standard = begrenzte Lesebreite; Seiten schalten via <PageContainer wide> um.
+  const [wide, setWide] = useState(false);
 
   return (
     <div className="app-shell">
@@ -140,8 +143,10 @@ export default function DashboardLayout() {
             </button>
           </div>
         </header>
-        <section className="content">
-          <Outlet />
+        <section className={`content ${wide ? 'is-wide' : ''}`}>
+          <PageWidthProvider value={setWide}>
+            <Outlet />
+          </PageWidthProvider>
         </section>
       </main>
     </div>
