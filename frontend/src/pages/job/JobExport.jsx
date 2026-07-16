@@ -9,6 +9,7 @@ import EntwurfPreflightModal from '../../components/EntwurfPreflightModal.jsx';
 import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../../components/TerminEinladungModal.jsx';
 import StandaloneAdBudgetModal from '../../components/StandaloneAdBudgetModal.jsx';
+import InvoicesSection, { SendInvoiceMailModal } from '../../components/InvoicesSection.jsx';
 import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
@@ -1013,11 +1014,16 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
 /* ═══════════════════ Zahlungen / PayPal ═══════════════════ */
 
 function ZahlungenSection({ job, kunde, onKundeUpdated }) {
-  const [zahlungen, setZahlungen] = useState([]);
+  const [zahlungen, setZahlungen] = useState([]);   // Alt-Bestand (PayPal-Zahlungen)
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [createdInvoice, setCreatedInvoice] = useState(null); // Erfolgs-Hinweis nach Rechnungserstellung
-  const [sendTarget, setSendTarget] = useState(null); // Zahlung für Send-Modal
+  const [sendTarget, setSendTarget] = useState(null); // Alt-Zahlung für Send-Modal
+
+  // Rechnungen des verknüpften Kunden — gleiche Ansicht wie auf der Kundenseite
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesBusy, setInvoicesBusy] = useState(false);
+  const [invoicesSyncing, setInvoicesSyncing] = useState(false);
+  const [sendInvoiceModal, setSendInvoiceModal] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -1028,6 +1034,26 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
     finally { setLoading(false); }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
+
+  async function loadInvoices() {
+    if (!kunde?.id) return;
+    setInvoicesBusy(true);
+    try {
+      const res = await api(`/invoices?customer_id=${kunde.id}`);
+      setInvoices(res.invoices || []);
+    } catch (err) { console.error(err); }
+    finally { setInvoicesBusy(false); }
+  }
+  useEffect(() => { loadInvoices(); /* eslint-disable-next-line */ }, [kunde?.id]);
+
+  async function syncInvoicesNow() {
+    setInvoicesSyncing(true);
+    try {
+      await api('/invoices/sync', { method: 'POST' });
+      await loadInvoices();
+    } catch (err) { alert(err.message); }
+    finally { setInvoicesSyncing(false); }
+  }
 
   // Vorbelegung fürs einheitliche Werbekosten-Modal
   const defaultLabel = `Werbebudget ${job.stelle || 'Stelle'}`.trim();
@@ -1087,30 +1113,34 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
 
   return (
     <div className="zahlungen-section">
-      <div className="zahlungen-head">
-        <div>
-          <div className="zahlungen-title">💳 Werbekosten / Rechnungen</div>
-          <p className="zahlungen-hint">
-            Erzeugt eine easybill-Rechnung für {kunde?.firmenname || 'den Kunden'} — optional mit PayPal-Zahllink.
-            Die Rechnung erscheint danach unter „Rechnungen" auf der Kundenseite.
-          </p>
-        </div>
-        <button className="btn-primary btn-sm" onClick={() => { setCreatedInvoice(null); setModalOpen(true); }}>
-          + Werbekosten-Rechnung
-        </button>
-      </div>
+      {/* Rechnungen des verknüpften Kunden — dieselbe Komponente wie auf der
+          Kundenseite, nur kompakter. */}
+      <InvoicesSection
+        compact
+        kunde={kunde}
+        invoices={invoices}
+        busy={invoicesBusy}
+        syncing={invoicesSyncing}
+        onSync={syncInvoicesNow}
+        onCreateAdBudget={() => setModalOpen(true)}
+        onSendInvoice={inv => setSendInvoiceModal(inv)}
+      />
 
-      {createdInvoice && (
-        <div className="alert" style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#166534', marginBottom: 12 }}>
-          ✅ Rechnung erstellt{createdInvoice.easybill_invoice_number ? ` (${createdInvoice.easybill_invoice_number})` : ''}.{' '}
-          <Link to={`/kunden/${kunde?.id}`} style={{ color: '#166534', fontWeight: 600 }}>→ Zu den Rechnungen des Kunden</Link>
+      {!kunde?.id && (
+        <div className="muted" style={{ padding: '12px 0' }}>
+          Kein Kunde mit diesem Projekt verknüpft — Rechnungen können nicht geladen werden.
         </div>
       )}
 
-      {loading ? <div className="muted">Lade…</div> : (
-        zahlungen.length === 0
-          ? <div className="muted" style={{ padding: '12px 0' }}>Noch keine Zahlung angelegt.</div>
-          : (
+      {/* Alt-Bestand: PayPal-Zahlungen aus dem früheren Zahlungslink-Flow.
+          Bleiben inkl. aller Aktionen erhalten — hier hängen echte Zahlungsdaten dran. */}
+      {(loading || zahlungen.length > 0) && (
+        <details style={{ marginTop: 18 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--ink-3)' }}>
+            Ältere Zahlungen{zahlungen.length ? ` (${zahlungen.length})` : ''} — früherer PayPal-Zahlungslink-Flow
+          </summary>
+          <div style={{ marginTop: 10 }}>
+            {loading ? <div className="muted">Lade…</div> : (
             <table className="zahlungen-table">
               <thead><tr>
                 <th>Datum</th><th>Netto</th><th>MwSt</th><th>Brutto</th><th>Status</th><th>easybill</th><th>Aktionen</th>
@@ -1158,7 +1188,9 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
                 })}
               </tbody>
             </table>
-          )
+            )}
+          </div>
+        </details>
       )}
 
       {/* Einheitliches Werbekosten-Modal — identisch zur Kundenseite, hier nur
@@ -1168,7 +1200,17 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
         kunde={kunde}
         defaultLabel={defaultLabel}
         onClose={() => setModalOpen(false)}
-        onCreated={(invoice) => { setCreatedInvoice(invoice); setModalOpen(false); }}
+        onCreated={(invoice) => {
+          setModalOpen(false);
+          setInvoices(prev => [invoice, ...prev]);
+          setSendInvoiceModal(invoice); // sofort Versand-Option anbieten (wie auf der Kundenseite)
+        }}
+      />
+
+      <SendInvoiceMailModal
+        invoice={sendInvoiceModal}
+        onClose={() => setSendInvoiceModal(null)}
+        onSent={() => { setSendInvoiceModal(null); loadInvoices(); }}
       />
 
       {/* Zahlungslink-Send-Modal mit Close-Lead-Warnung */}
