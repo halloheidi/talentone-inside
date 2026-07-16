@@ -95,11 +95,23 @@ export async function ensureProjektForOffer(offer) {
   const firma = offer.customer_snapshot?.company_name || 'Kunde';
   const projektname = `${firma} — ${brandLabel}`.slice(0, 200);
 
-  const guaranteeActive = Number(offer.guarantee_period_days) > 0;
-  const guaranteeText = offer.guarantee_note
-    || (guaranteeActive
-      ? `Kostenlos weiterarbeiten, wenn nach ${offer.guarantee_period_days} Tagen keine Einstellung erfolgt ist.`
-      : null);
+  // Garantie 1:1 aus dem Angebot übernehmen — Zeitraum UND Beschreibungstext,
+  // nicht nur das Flag. Ist im Angebot ein Freitext (guarantee_note) gepflegt,
+  // wird dieser komplett übernommen; erwähnt er die Frist nicht, hängen wir sie
+  // an, damit im Projekt immer Frist + Text stehen. Ohne Freitext bauen wir den
+  // Standard-Erfolgsgarantie-Satz mit der Frist.
+  const guaranteeDays = Number(offer.guarantee_period_days) || 0;
+  const guaranteeActive = guaranteeDays > 0;
+  let guaranteeText = null;
+  if (guaranteeActive) {
+    const note = typeof offer.guarantee_note === 'string' ? offer.guarantee_note.trim() : '';
+    if (note) {
+      const nenntFrist = new RegExp(`\\b${guaranteeDays}\\s*Tag`, 'i').test(note);
+      guaranteeText = nenntFrist ? note : `${note} (Erfolgsgarantie-Frist: ${guaranteeDays} Tage)`;
+    } else {
+      guaranteeText = `Erfolgsgarantie ${guaranteeDays} Tage — kostenlose Weiterarbeit bis zur ersten Einstellung.`;
+    }
+  }
 
   const { data: created, error } = await supabase
     .from('talentone_projekte')

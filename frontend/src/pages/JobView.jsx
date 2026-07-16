@@ -5,6 +5,56 @@ import { api } from '../lib/api.js';
 const JobContext = createContext(null);
 export function useJob() { return useContext(JobContext); }
 
+// Debounced-Text mit Auto-Save (600 ms) — für inline editierbare Felder.
+function DebouncedInput({ value, onSave, placeholder }) {
+  const [local, setLocal] = useState(value ?? '');
+  const t = useRef(null);
+  const lastRef = useRef(value ?? '');
+  useEffect(() => { setLocal(value ?? ''); lastRef.current = value ?? ''; }, [value]);
+  function onChange(e) {
+    const val = e.target.value;
+    setLocal(val);
+    if (t.current) clearTimeout(t.current);
+    t.current = setTimeout(() => { if (val !== lastRef.current) { lastRef.current = val; onSave(val); } }, 600);
+  }
+  function flush() { if (t.current) clearTimeout(t.current); if (local !== lastRef.current) { lastRef.current = local; onSave(local); } }
+  return <input className="cell-input" type="text" value={local} placeholder={placeholder} onChange={onChange} onBlur={flush} />;
+}
+
+// Inline editierbare Garantie am Projekt (JobView-Header). Checkbox + Freitext,
+// Auto-Save direkt ans verknüpfte Projekt. Jederzeit manuell änderbar.
+function ProjektGarantieInline({ projekt, onSaved }) {
+  async function patch(body) {
+    try {
+      const res = await api(`/projekte/${projekt.id}`, { method: 'PATCH', body });
+      onSaved?.(res.projekt);
+    } catch (err) { console.error('[garantie-patch]', err.message); }
+  }
+  const aktiv = !!projekt.garantie;
+  return (
+    <div style={{
+      maxWidth: 340, padding: '6px 10px', borderRadius: 8, fontSize: 12,
+      background: aktiv ? '#dcfce7' : '#f3f4f6',
+      border: `1px solid ${aktiv ? '#86efac' : '#e5e7eb'}`,
+      color: aktiv ? '#166534' : '#6b7280',
+    }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
+        <input type="checkbox" checked={aktiv} onChange={e => patch({ garantie: e.target.checked })} />
+        🛡️ Garantie
+      </label>
+      {aktiv && (
+        <div style={{ marginTop: 6 }}>
+          <DebouncedInput
+            value={projekt.garantie_details || ''}
+            placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
+            onSave={val => patch({ garantie_details: val || null })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS = [
   { to: 'stelle', label: 'Stelle' },
   { to: 'creatives', label: 'Creatives' },
@@ -338,12 +388,7 @@ export default function JobView() {
         <div style={{ flex: 1 }}>
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
-        {projekt?.garantie && (
-          <div style={{ padding: '4px 10px', background: '#dcfce7', color: '#166534', borderRadius: 6, fontSize: 12, fontWeight: 600, maxWidth: 320 }}
-            title={projekt.garantie_details || 'Garantie aktiv'}>
-            🛡️ Garantie{projekt.garantie_details ? `: ${projekt.garantie_details.slice(0, 60)}${projekt.garantie_details.length > 60 ? '…' : ''}` : ''}
-          </div>
-        )}
+        {projekt && <ProjektGarantieInline projekt={projekt} onSaved={setProjekt} />}
         {projekt
           ? <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
