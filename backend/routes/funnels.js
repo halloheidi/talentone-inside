@@ -11,6 +11,28 @@ const ALLOWED = [
   'capi_access_token', 'extern', 'extern_url', 'extern_sheet_url',
 ];
 
+// Vordefinierte Meta-Pixel (Dataset-IDs) zur schnellen Auswahl in der
+// Funnel-Erstellung bzw. zum Kopieren in externe Funnel (Perspective).
+// CAPI-Tokens sind Secrets → NICHT im Code, sondern aus der Env
+// (backend/.env.local): META_CAPI_<KEY>. Fehlt die Env, bleibt der Token null.
+const PIXEL_PRESETS = [
+  { name: 'Elektriker + Photovoltaik', dataset_id: '320604426514508', capi_env: 'META_CAPI_ELEKTRIKER_PV' },
+  { name: 'Handwerker Allgemein',      dataset_id: '682693863186780', capi_env: 'META_CAPI_HANDWERKER' },
+  { name: 'KFZ',                       dataset_id: '867043814427952', capi_env: 'META_CAPI_KFZ' },
+  { name: 'SHK',                       dataset_id: '497660425380244', capi_env: 'META_CAPI_SHK' },
+];
+
+// GET /api/funnels/pixel-presets — vor /:id, sonst schluckt der Wildcard-Match.
+router.get('/pixel-presets', (req, res) => {
+  res.json({
+    presets: PIXEL_PRESETS.map(p => ({
+      name: p.name,
+      dataset_id: p.dataset_id,
+      capi_token: p.capi_env ? (process.env[p.capi_env] || null) : null,
+    })),
+  });
+});
+
 async function loadJobAndKunde(job_id) {
   const { data: job, error: jE } = await supabase
     .from('talentone_jobs').select('*').eq('id', job_id).single();

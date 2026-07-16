@@ -65,6 +65,11 @@ export default function JobFunnel() {
   const [externUrl, setExternUrl] = useState('');
   const [externSheetUrl, setExternSheetUrl] = useState('');
   const [bewerbungEmail, setBewerbungEmail] = useState('');
+  const [pixelPresets, setPixelPresets] = useState([]);
+
+  useEffect(() => {
+    api('/funnels/pixel-presets').then(r => setPixelPresets(r.presets || [])).catch(() => {});
+  }, []);
 
   function loadAll() {
     setLoading(true);
@@ -309,6 +314,7 @@ export default function JobFunnel() {
             </label>
           </div>
 
+          <PixelPresetCopyList presets={pixelPresets} />
           <WebhookInfo jobId={job.id} />
           <MultiStellenMapping kunde={kunde} />
         </fieldset>
@@ -423,6 +429,27 @@ export default function JobFunnel() {
               Der Pixel wird auf <strong>allen Funnel-Seiten</strong> geladen und feuert automatisch ein <code>PageView</code>.
               Das ausgewählte Conversion-Event wird ausgelöst, sobald der Bewerber auf der letzten Seite seine Kontaktdaten abschickt.
             </p>
+            {pixelPresets.length > 0 && (
+              <label className="field field-full" style={{ marginBottom: 10 }}>
+                <span>Pixel auswählen</span>
+                <select
+                  value={pixelPresets.find(p => p.dataset_id === pixelId)?.dataset_id || ''}
+                  onChange={e => {
+                    const p = pixelPresets.find(x => x.dataset_id === e.target.value);
+                    if (!p) return;
+                    setPixelId(p.dataset_id);
+                    if (p.capi_token) setCapiAccessToken(p.capi_token);
+                  }}
+                >
+                  <option value="">— vordefinierten Pixel wählen (oder unten manuell) —</option>
+                  {pixelPresets.map(p => (
+                    <option key={p.dataset_id} value={p.dataset_id}>
+                      {p.name} · {p.dataset_id}{p.capi_token ? ' · inkl. CAPI' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="form-grid">
               <label className="field">
                 <span>Meta Pixel ID</span>
@@ -692,6 +719,47 @@ function BewerbungenLink({ token, agentur }) {
         <a className="btn-ghost btn-sm" href={url} target="_blank" rel="noreferrer">Öffnen</a>
       </div>
       <p className="bewerbungen-link-hint">Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit. Status, Vorstellungsgespräch-Termin und Notizen kann der Kunde direkt eintragen.</p>
+    </div>
+  );
+}
+
+/* ═════════════════════ Pixel-Presets (Copy für externe Funnel) ═════════════════════ */
+
+function CopyChip({ value, label = 'Kopieren' }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* noop */ }
+  }
+  return (
+    <button type="button" className="btn-ghost btn-sm" onClick={copy}>
+      {copied ? '✓ Kopiert' : label}
+    </button>
+  );
+}
+
+// Copy-Liste der vordefinierten Pixel — zum Einfügen in Perspective o.ä.
+function PixelPresetCopyList({ presets }) {
+  if (!presets?.length) return null;
+  return (
+    <div className="bewerbungen-link-box" style={{ marginTop: 12 }}>
+      <div className="bewerbungen-link-title">Meta-Pixel zum Kopieren (für Perspective)</div>
+      <p className="bewerbungen-link-hint" style={{ marginTop: 0 }}>
+        Passenden Pixel wählen und die <strong>Dataset-/Pixel-ID</strong> in die Pixel-Einstellungen des Perspective-Funnels einfügen.
+      </p>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {presets.map(p => (
+          <div key={p.dataset_id} className="bewerbungen-link-row" style={{ flexWrap: 'wrap' }}>
+            <span style={{ minWidth: 150, fontSize: 13, fontWeight: 600 }}>{p.name}</span>
+            <code className="bewerbungen-link-url" style={{ flex: 1 }}>{p.dataset_id}</code>
+            <CopyChip value={p.dataset_id} label="ID kopieren" />
+            {p.capi_token && <CopyChip value={p.capi_token} label="CAPI-Token kopieren" />}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
