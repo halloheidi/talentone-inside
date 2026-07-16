@@ -256,6 +256,12 @@ button { font-family: inherit; }
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  /* Content-Spalte des App-Grids (sidebar 1fr). Ohne min-width:0 behält das
+     1fr-Track seine implizite min-width:auto und wird von breiten Kindern (z. B.
+     der horizontal scrollenden Bewerberliste) über die Displaybreite hinaus
+     aufgezogen. min-width:0 lässt Scroll-Container intern scrollen, statt die
+     ganze Seite breit zu machen. */
+  min-width: 0;
 }
 .topbar {
   height: var(--topbar-h);
@@ -3071,7 +3077,10 @@ button { font-family: inherit; }
 }
 @media (max-width: 1100px) { .funnel-editor-cols { grid-template-columns: 1fr; } }
 
-.funnel-editor-left { display: flex; flex-direction: column; gap: 18px; }
+/* min-width:0, damit die linke Editor-Spalte im 1fr-Track schrumpfen kann und
+   das 2-Spalten-Grid (1fr 380px) samt Live-Vorschau in die Displaybreite passt,
+   statt die Vorschau nach rechts aus dem Sichtbereich zu schieben. */
+.funnel-editor-left { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 
 .funnel-editor-right {
   position: sticky;
