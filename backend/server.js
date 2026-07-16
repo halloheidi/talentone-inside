@@ -22,6 +22,7 @@ import offersRouter from './routes/offers.js';
 import invoicesRouter from './routes/invoices.js';
 import hiresRouter from './routes/hires.js';
 import controllingRouter from './routes/controlling.js';
+import controllingOpsRouter from './routes/controlling-ops.js';
 import brandAssetsRouter from './routes/brand-assets.js';
 import anfragenRouter from './routes/anfragen.js';
 import stilvorlagenRouter from './routes/stilvorlagen.js';
@@ -89,6 +90,7 @@ app.use('/api/offers', requireAuth, offersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/hires', requireAuth, hiresRouter);
 app.use('/api/controlling', requireAuth, controllingRouter);
+app.use('/api/controlling-ops', requireAuth, controllingOpsRouter);
 app.use('/api/anfragen', requireAuth, anfragenRouter);
 app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...

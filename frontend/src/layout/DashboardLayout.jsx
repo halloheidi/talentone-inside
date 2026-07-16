@@ -27,6 +27,10 @@ function GlobalNav({ isAdmin }) {
         <Icon name="users" />
         <span>Live-Kampagnen</span>
       </NavLink>
+      <NavLink to="/controlling" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>📊 Controlling</span>
+      </NavLink>
       <NavLink to="/angebote" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
         <Icon name="users" />
         <span>Angebote</span>
@@ -38,9 +42,9 @@ function GlobalNav({ isAdmin }) {
       {isAdmin && (
         <>
           <div className="nav-section">Admin</div>
-          <NavLink to="/controlling" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+          <NavLink to="/admin/controlling" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
             <Icon name="users" />
-            <span>Controlling</span>
+            <span>Finanz-Controlling</span>
           </NavLink>
           <NavLink to="/admin/angebots-katalog" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
             <Icon name="users" />
