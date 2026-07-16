@@ -710,16 +710,22 @@ export default function JobCreatives() {
         )}
       </section>
 
-      {/* ───────── Personen-Sektion (nicht im Overlay-Modus) ───────── */}
-      {mode !== 'overlay' && (
+      {/* ───────── Personen-/Referenzfoto-Sektion ─────────
+          Auch im Overlay-Modus sichtbar: Kunden mit "keine KI-Bilder" landen
+          automatisch hier — sie sollen die hochgeladenen Referenzfotos trotzdem
+          sehen (als Vorlage fürs Canva-Overlay), nicht ins Leere blicken. */}
       <section className="card-form" style={{ marginTop: 18 }}>
         <div className="form-section-title" style={{ marginBottom: 4 }}>
-          {mode === 'ki' ? 'Personen-Referenz (optional)' : 'Hintergrund-Foto auswählen'}
+          {mode === 'ki' ? 'Personen-Referenz (optional)'
+            : mode === 'foto' ? 'Hintergrund-Foto auswählen'
+            : 'Referenzfotos des Kunden'}
         </div>
         <p className="pane-hint" style={{ margin: '0 0 12px' }}>
           {mode === 'ki'
             ? 'Foto eines echten Mitarbeiters / der Geschäftsführung. Die KI baut diese Person in die generierte Szene ein.'
-            : 'Foto auswählen, das als unveränderter Hintergrund verwendet wird.'}
+            : mode === 'foto'
+            ? 'Foto auswählen, das als unveränderter Hintergrund verwendet wird.'
+            : 'Die vom Kunden hochgeladenen Fotos. Im Overlay-Modus legst du das transparente Overlay in Canva über eines dieser Fotos.'}
         </p>
 
         <div className="ref-grid">
@@ -733,14 +739,14 @@ export default function JobCreatives() {
             </button>
           )}
           {personen.map((r, i) => {
-            const selected = aktiveAuswahlId === r.id;
+            const selected = mode !== 'overlay' && aktiveAuswahlId === r.id;
             const istVerbessert = !!r.verbessert_von;
             return (
               <button
                 key={r.id}
                 type="button"
                 className={`ref-card has-img ${selected ? 'is-active' : ''}`}
-                onClick={() => mode === 'ki' ? setPersonId(r.id) : setFotoId(r.id)}
+                onClick={() => mode === 'overlay' ? setRefLightboxIndex(i) : (mode === 'ki' ? setPersonId(r.id) : setFotoId(r.id))}
                 title={r.beschreibung || 'Person'}
               >
                 <img src={r.bild_url} alt="" />
@@ -790,7 +796,6 @@ export default function JobCreatives() {
           />
         </div>
       </section>
-      )}
 
       {/* ───────── Stil-Auswahl (Vorlagen) ───────── */}
       {stilvorlagen.length > 0 && (
