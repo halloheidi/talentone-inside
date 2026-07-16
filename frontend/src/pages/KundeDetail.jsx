@@ -35,7 +35,13 @@ const INVOICE_STATUS_META = {
   cancelled:       { label: 'Storniert',  bg: '#eeece7', color: '#5a5955' },
 };
 
-const DEFAULT_ANFRAGE = `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
+const ANFRAGE_TEXTE = {
+  beides: `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`,
+  logo: `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch euer Logo. Über den unten stehenden Link könnt ihr es ganz einfach hochladen.`,
+  fotos: `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link könnt ihr sie ganz einfach hochladen.`,
+};
+const ANFRAGE_DEFAULT_TEXTE = new Set(Object.values(ANFRAGE_TEXTE));
+const DEFAULT_ANFRAGE = ANFRAGE_TEXTE.beides;
 
 export default function KundeDetail() {
   const { kundeId } = useParams();
@@ -48,6 +54,7 @@ export default function KundeDetail() {
 
   const [showAnfrage, setShowAnfrage] = useState(false);
   const [showTermin, setShowTermin] = useState(false);
+  const [anfrageUmfang, setAnfrageUmfang] = useState('beides'); // beides | logo | fotos
   const [anfrageText, setAnfrageText] = useState(DEFAULT_ANFRAGE);
   const [anfrageBusy, setAnfrageBusy] = useState(false);
   const [anfrageMsg, setAnfrageMsg] = useState('');
@@ -429,11 +436,18 @@ export default function KundeDetail() {
       .catch(() => {});
   }, [kundeId]);
 
+  // Umfang wechseln: den Standard-Text mitziehen, solange der Nutzer den Text
+  // nicht selbst angepasst hat (aktueller Text ist noch einer der Defaults).
+  function changeAnfrageUmfang(next) {
+    setAnfrageUmfang(next);
+    setAnfrageText(prev => ANFRAGE_DEFAULT_TEXTE.has(prev.trim()) ? ANFRAGE_TEXTE[next] : prev);
+  }
+
   async function sendAnfrage() {
     setAnfrageBusy(true);
     setAnfrageMsg('');
     try {
-      await api(`/kunden/${kundeId}/anfrage`, { method: 'POST', body: { customText: anfrageText } });
+      await api(`/kunden/${kundeId}/anfrage`, { method: 'POST', body: { customText: anfrageText, umfang: anfrageUmfang } });
       setAnfrageMsg(`Mail an ${kunde.email} verschickt.`);
       setTimeout(() => { setShowAnfrage(false); setAnfrageMsg(''); }, 1500);
     } catch (err) {
@@ -993,7 +1007,7 @@ export default function KundeDetail() {
       <Modal
         open={showAnfrage}
         onClose={() => !anfrageBusy && setShowAnfrage(false)}
-        title="Fotos & Logo anfragen"
+        title={anfrageUmfang === 'logo' ? 'Logo anfragen' : anfrageUmfang === 'fotos' ? 'Fotos anfragen' : 'Fotos & Logo anfragen'}
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowAnfrage(false)} disabled={anfrageBusy}>Abbrechen</button>
@@ -1003,9 +1017,23 @@ export default function KundeDetail() {
           </>
         }
       >
+        <div className="field field-full" style={{ marginBottom: 10 }}>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Was anfragen?</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[['beides', 'Logo + Fotos'], ['logo', 'Nur Logo'], ['fotos', 'Nur Fotos']].map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                className={anfrageUmfang === val ? 'btn-primary btn-sm' : 'btn-ghost btn-sm'}
+                onClick={() => changeAnfrageUmfang(val)}
+                disabled={anfrageBusy}
+              >{label}</button>
+            ))}
+          </div>
+        </div>
         <p className="pane-hint">
           Wir verschicken eine Mail an <strong>{kunde?.email || '(keine Mail hinterlegt)'}</strong> mit einem persönlichen Upload-Link.
-          Der Kunde kann dort Logo und Fotos ohne Login hochladen — die Dateien tauchen automatisch hier oben auf.
+          Der Kunde kann dort {anfrageUmfang === 'logo' ? 'sein Logo' : anfrageUmfang === 'fotos' ? 'seine Fotos' : 'Logo und Fotos'} ohne Login hochladen — die Dateien tauchen automatisch hier oben auf.
         </p>
         <CloseLeadWarnung kunde={kunde} onSaved={(k) => setKunde(k)} />
         <label className="field field-full">

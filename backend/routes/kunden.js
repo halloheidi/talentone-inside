@@ -686,7 +686,12 @@ router.post('/:id/logo', async (req, res) => {
       }
     }
 
-    const update = { logo_url: publicUrl };
+    // logo_transparent_url synchron auf null: die transparente Version wird
+    // nur async/best-effort neu erzeugt. Ohne dieses Null-Setzen zeigt die
+    // gespeicherte URL im Zwischenfenster (oder bei Regen-Fehlschlag) noch aufs
+    // ALTE Logo — und die Creative-Generierung (ensureTransparentLogo) bevorzugt
+    // genau diese URL. So wird garantiert das AKTUELLE Logo kompositiert.
+    const update = { logo_url: publicUrl, logo_transparent_url: null };
     if (farbenUpdate) update.farben = farbenUpdate;
 
     const { data: updated, error: uErr } = await supabase
@@ -929,6 +934,10 @@ router.post('/formular-anlegen', async (req, res) => {
 // POST /api/kunden/:id/anfrage  body: { customText? } — schickt Mail mit Upload-Link
 router.post('/:id/anfrage', async (req, res) => {
   const { customText } = req.body || {};
+  const umfang = ['beides', 'logo', 'fotos'].includes(req.body?.umfang) ? req.body.umfang : 'beides';
+  const umfangLabel = umfang === 'logo' ? 'Logo-Anfrage'
+    : umfang === 'fotos' ? 'Foto-Anfrage'
+      : 'Foto- & Logo-Anfrage';
   const { data: kunde, error: kErr } = await supabase
     .from('talentone_kunden').select('*').eq('id', req.params.id).maybeSingle();
   if (kErr || !kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
@@ -953,6 +962,7 @@ router.post('/:id/anfrage', async (req, res) => {
       uploadUrl,
       customText,
       agentur: kunde.agentur,
+      umfang,
     });
     // Versand-Historie am erstbesten Job protokollieren — damit die
     // naechste-schritte-Logik "Fotos anfragen" auf "Wartet auf Fotos" umschalten
@@ -964,13 +974,13 @@ router.post('/:id/anfrage', async (req, res) => {
       await supabase.from('talentone_versand').insert({
         job_id: firstJob.id,
         empfaenger: kunde.email,
-        betreff: 'Foto- & Logo-Anfrage',
+        betreff: umfangLabel,
         gesendet_von: req.user?.email || null,
         typ: 'anfrage',
-        inhalte: { customText: customText || null, upload_url: uploadUrl },
+        inhalte: { customText: customText || null, upload_url: uploadUrl, umfang },
       });
     }
-    notifyKunde(kunde, `📸 Foto- & Logo-Anfrage an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+    notifyKunde(kunde, `📸 ${umfangLabel} an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
       .catch(err => console.warn('[anfrage close-note]', err.message));
     res.json({ ok: true, uploadUrl });
   } catch (err) {

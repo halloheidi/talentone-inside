@@ -58,13 +58,37 @@ function brandedShell({ brand, contentHtml }) {
 </body></html>`;
 }
 
-export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploadUrl, customText, agentur }) {
+// umfang: 'beides' (Logo + Fotos) | 'logo' (nur Logo) | 'fotos' (nur Fotos)
+export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploadUrl, customText, agentur, umfang = 'beides' }) {
   if (!process.env.RESEND_API_KEY) {
     throw new Error('RESEND_API_KEY nicht gesetzt.');
   }
   const brand = getBranding(agentur);
   const grußname = ansprechpartner || 'zusammen';
-  const intro = (customText || '').trim() || `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
+
+  const wantLogo  = umfang !== 'fotos';
+  const wantFotos = umfang !== 'logo';
+
+  const subject = umfang === 'logo'
+    ? 'Wir brauchen noch euer Logo für die Kampagne'
+    : umfang === 'fotos'
+      ? 'Wir brauchen noch ein paar Fotos für eure Kampagne'
+      : 'Wir brauchen noch Logo und Fotos für eure Kampagne';
+
+  const defaultIntro = umfang === 'logo'
+    ? `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch euer Logo. Über den unten stehenden Link könnt ihr es ganz einfach hochladen.`
+    : umfang === 'fotos'
+      ? `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link könnt ihr sie ganz einfach hochladen.`
+      : `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
+  const intro = (customText || '').trim() || defaultIntro;
+
+  const bulletLogo  = `<li><strong>Euer Logo</strong> in guter Qualität (PNG, JPG, SVG)</li>`;
+  const bulletFotos = `<li><strong>3–5 Fotos vom Arbeitsplatz, Team oder typische Tätigkeiten</strong> — gerne auch Handy-Schnappschüsse</li>`;
+  const bulletsHtml = [wantLogo && bulletLogo, wantFotos && bulletFotos].filter(Boolean).join('\n        ');
+
+  const ctaLabel = umfang === 'logo' ? '→ Logo hochladen'
+    : umfang === 'fotos' ? '→ Fotos hochladen'
+      : '→ Dateien hochladen';
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -72,12 +96,11 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n/g, '<br>')}</p>
       <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">Was wir uns wünschen würden:</p>
       <ul style="font-size:14px;line-height:1.7;color:#2a2a2a;margin:0 0 24px;padding-left:18px;">
-        <li><strong>Euer Logo</strong> in guter Qualität (PNG, JPG, SVG)</li>
-        <li><strong>3–5 Fotos vom Arbeitsplatz, Team oder typische Tätigkeiten</strong> — gerne auch Handy-Schnappschüsse</li>
+        ${bulletsHtml}
       </ul>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
-      <a href="${escape(uploadUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Dateien hochladen</a>
+      <a href="${escape(uploadUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">${ctaLabel}</a>
       <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link ist persönlich und nur für ${escape(kundenname)} gültig.</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
@@ -86,7 +109,11 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Hallo ${grußname},\n\n${intro}\n\nWas wir uns wünschen:\n• Euer Logo (PNG/JPG/SVG)\n• 3-5 Fotos vom Arbeitsplatz, Team oder typischen Tätigkeiten\n\nUpload-Link: ${uploadUrl}\n\n(Der Link ist persönlich und nur für ${kundenname} gültig.)\n\nVielen Dank!\nEuer ${brand.name}-Team`;
+  const textBullets = [
+    wantLogo && '• Euer Logo (PNG/JPG/SVG)',
+    wantFotos && '• 3-5 Fotos vom Arbeitsplatz, Team oder typischen Tätigkeiten',
+  ].filter(Boolean).join('\n');
+  const text = `Hallo ${grußname},\n\n${intro}\n\nWas wir uns wünschen:\n${textBullets}\n\nUpload-Link: ${uploadUrl}\n\n(Der Link ist persönlich und nur für ${kundenname} gültig.)\n\nVielen Dank!\nEuer ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
@@ -96,7 +123,7 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
       to,
       bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
-      subject: 'Wir brauchen noch Logo und Fotos für eure Kampagne',
+      subject,
       html,
       text,
     }),
