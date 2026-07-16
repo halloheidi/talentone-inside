@@ -232,4 +232,11 @@ router.patch('/checklist/:funnel_row_id', async (req, res) => {
   res.json({ funnel: data });
 });
 
+/** GET /api/perspective/config → { enabled }
+ *  Ob die Perspective-MCP-Integration scharf ist (Token gesetzt). Steuert im
+ *  Funnel-Tab, ob der Create-Button oder ein Hinweis (Claude-Workflow) erscheint. */
+router.get('/config', (req, res) => {
+  res.json({ enabled: !!process.env.PERSPECTIVE_MCP_TOKEN });
+});
+
 export default router;

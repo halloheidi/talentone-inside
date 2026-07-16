@@ -845,6 +845,14 @@ function PerspectiveSection({ job, kunde }) {
   const [showUpdate, setShowUpdate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Ist die Perspective-MCP-Integration scharf (Token gesetzt)? null = noch unbekannt.
+  const [perspectiveEnabled, setPerspectiveEnabled] = useState(null);
+
+  useEffect(() => {
+    api('/perspective/config')
+      .then(r => setPerspectiveEnabled(!!r.enabled))
+      .catch(() => setPerspectiveEnabled(false));
+  }, []);
 
   // Vorhandenen Perspective-Funnel dieses Jobs laden
   async function load() {
@@ -886,11 +894,17 @@ function PerspectiveSection({ job, kunde }) {
   return (
     <fieldset className="formular-section" style={{ borderColor: '#7c3aed' }}>
       <legend style={{ color: '#7c3aed', fontWeight: 700 }}>🚀 Perspective-Funnel (automatisch erstellen)</legend>
-      {!funnelRow && (
+      {!funnelRow && perspectiveEnabled === true && (
         <>
           <p className="pane-hint">Perspective baut den Funnel per KI aus deinen Job-Daten. Der Funnel bleibt Draft, bis du ihn hier veröffentlichst.</p>
           <button className="btn-primary" onClick={() => setShowCreate(true)}>🚀 Perspective-Funnel erstellen</button>
         </>
+      )}
+      {!funnelRow && perspectiveEnabled === false && (
+        <p className="pane-hint">
+          Perspective-Funnels werden aktuell über Claude erstellt — Funnel-URL nach dem Publish
+          hier als externe URL eintragen.
+        </p>
       )}
       {funnelRow && (
         <>
