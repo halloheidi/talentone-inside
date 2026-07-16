@@ -6,3 +6,9 @@ dist/
 
 # Lokale Daten/Dokumente (nicht ins Repo)
 /data/
+
+# Daten-Exporte / Leads niemals committen (auch ausserhalb /data/)
+*.csv
+*.xlsx
+*.xls
+*.tsv
