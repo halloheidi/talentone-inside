@@ -307,6 +307,7 @@ export default function JobFunnel() {
           </div>
 
           <WebhookInfo jobId={job.id} />
+          <MultiStellenMapping kunde={kunde} />
         </fieldset>
       )}
 
@@ -1161,6 +1162,103 @@ function UpdateModal({ funnelRow, onClose, onDone }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Multi-Stellen-Funnel: ein externer Funnel bedient mehrere Stellen des Kunden.
+// Kandidat wählt die Stelle → Webhook ordnet per Mapping zu. Config am Kunden.
+function MultiStellenMapping({ kunde }) {
+  const initial = (kunde?.funnel_stellen_mapping && typeof kunde.funnel_stellen_mapping === 'object') ? kunde.funnel_stellen_mapping : {};
+  const [aktiv, setAktiv] = useState(!!initial.aktiv);
+  const [regeln, setRegeln] = useState(Array.isArray(initial.regeln) ? initial.regeln : []);
+  const [defaultJobId, setDefaultJobId] = useState(initial.default_job_id || '');
+  const [jobs, setJobs] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+  const [copied, setCopied] = useState(false);
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?kunde_id=${kunde?.id}`;
+
+  useEffect(() => {
+    if (!kunde?.id) return;
+    api(`/jobs?kunde_id=${kunde.id}`).then(r => setJobs(r.jobs || [])).catch(() => setJobs([]));
+  }, [kunde?.id]);
+
+  function addRegel() { setRegeln(rs => [...rs, { enthaelt: '', job_id: '' }]); }
+  function updateRegel(i, patch) { setRegeln(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r)); }
+  function removeRegel(i) { setRegeln(rs => rs.filter((_, idx) => idx !== i)); }
+
+  async function save() {
+    setSaving(true); setSavedMsg('');
+    try {
+      const mapping = {
+        aktiv,
+        regeln: regeln.filter(r => r.enthaelt?.trim() && r.job_id).map(r => ({ enthaelt: r.enthaelt.trim(), job_id: r.job_id })),
+        default_job_id: defaultJobId || null,
+      };
+      await api(`/kunden/${kunde.id}`, { method: 'PATCH', body: { funnel_stellen_mapping: mapping } });
+      setSavedMsg('✓ Gespeichert');
+      setTimeout(() => setSavedMsg(''), 2000);
+    } catch (e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function copyUrl() {
+    try { await navigator.clipboard.writeText(webhookUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  }
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 600, fontSize: 14 }}>
+        <input type="checkbox" checked={aktiv} onChange={e => setAktiv(e.target.checked)} />
+        Dieser Funnel bedient mehrere Stellen
+      </label>
+      <p className="pane-hint" style={{ marginTop: 6 }}>
+        Der Kandidat wählt im Funnel die Stelle aus. Nutze die <strong>Kunden-Webhook-URL</strong> (statt der Job-URL oben) und ordne die Auswahl-Antworten den Stellen zu. Die Konfiguration gilt für alle Projekte dieses Kunden.
+      </p>
+      {aktiv && (
+        <>
+          <div className="webhook-info" style={{ marginTop: 10 }}>
+            <div className="webhook-info-title">Kunden-Webhook-URL (mehrere Stellen)</div>
+            <div className="webhook-info-row">
+              <code className="webhook-url">{webhookUrl}</code>
+              <button type="button" className="btn-ghost btn-sm" onClick={copyUrl}>{copied ? '✓ Kopiert' : 'Kopieren'}</button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 8 }}>Stellenauswahl → Stelle</div>
+            {regeln.length === 0 && <p className="pane-hint" style={{ margin: '0 0 8px' }}>Noch keine Regeln.</p>}
+            {regeln.map((r, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>Antwort enthält</span>
+                <input value={r.enthaelt} onChange={e => updateRegel(i, { enthaelt: e.target.value })}
+                  placeholder='z.B. "Elektroniker"' className="cell-input" style={{ flex: '1 1 160px' }} />
+                <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>→</span>
+                <select value={r.job_id} onChange={e => updateRegel(i, { job_id: e.target.value })} className="cell-input" style={{ flex: '1 1 160px' }}>
+                  <option value="">Stelle wählen…</option>
+                  {jobs.map(j => <option key={j.id} value={j.id}>{j.stelle || '(ohne Titel)'}</option>)}
+                </select>
+                <button type="button" className="btn-ghost btn-sm btn-danger" onClick={() => removeRegel(i)}>×</button>
+              </div>
+            ))}
+            <button type="button" className="btn-ghost btn-sm" onClick={addRegel} style={{ marginTop: 4 }}>+ Regel hinzufügen</button>
+          </div>
+
+          <label className="field" style={{ marginTop: 12, display: 'block', maxWidth: 420 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-4)' }}>Fallback bei keinem Treffer</span>
+            <select value={defaultJobId} onChange={e => setDefaultJobId(e.target.value)} className="cell-input">
+              <option value="">Ältester Job + „Zuordnung unklar" markieren (Warn-Mail)</option>
+              {jobs.map(j => <option key={j.id} value={j.id}>Default: {j.stelle || '(ohne Titel)'}</option>)}
+            </select>
+          </label>
+
+          <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button type="button" className="btn-primary btn-sm" onClick={save} disabled={saving}>{saving ? 'Speichere…' : 'Mapping speichern'}</button>
+            {savedMsg && <span style={{ color: '#16a34a', fontSize: 13 }}>{savedMsg}</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

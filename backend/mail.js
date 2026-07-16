@@ -279,6 +279,28 @@ async function sendInternalNotification({ subject, html, text }) {
   }
 }
 
+/* ── Warnung: Bewerbung ohne eindeutige Stellenzuordnung (Multi-Stellen-Funnel) ── */
+export async function sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText, alleAntworten }) {
+  const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+  const jobUrl = job ? `${insideBase}/kunden/${kunde?.id}/jobs/${job.id}/bewerbungen` : insideBase;
+  const antwortenHtml = (alleAntworten || [])
+    .map(a => `<li><strong>${escape(a.frage_text || '')}:</strong> ${escape(String(a.antwort || ''))}</li>`).join('');
+  const html = `
+    <div style="font-family:-apple-system,Arial,sans-serif;color:#0a0a0a;max-width:600px;">
+      <h2 style="margin:0 0 8px;">⚠️ Bewerbung konnte keiner Stelle zugeordnet werden</h2>
+      <p style="font-size:14px;line-height:1.6;">Kunde: <strong>${escape(kunde?.firmenname || '—')}</strong></p>
+      <p style="font-size:14px;line-height:1.6;">Stellenauswahl-Antwort: <strong>${escape(antwortText || '(keine erkannt)')}</strong></p>
+      <p style="font-size:14px;line-height:1.6;">Die Bewerbung wurde vorläufig dem Job „${escape(job?.stelle || '—')}" zugeordnet und ist als <em>Zuordnung unklar</em> markiert. Bitte in der Bewerberliste der richtigen Stelle zuordnen.</p>
+      <p><a href="${jobUrl}">→ Zur Bewerberliste</a></p>
+      ${antwortenHtml ? `<p style="font-size:13px;color:#5a5955;margin-top:16px;">Alle Antworten:</p><ul style="font-size:13px;color:#5a5955;">${antwortenHtml}</ul>` : ''}
+    </div>`;
+  const text = `⚠️ Bewerbung konnte keiner Stelle zugeordnet werden.\nKunde: ${kunde?.firmenname || '—'}\nStellenauswahl-Antwort: ${antwortText || '(keine erkannt)'}\nVorläufig zugeordnet zu: ${job?.stelle || '—'} (Zuordnung unklar).\n${jobUrl}`;
+  return sendInternalNotification({
+    subject: `⚠️ Bewerbung ohne Stellenzuordnung — ${kunde?.firmenname || 'Kunde'}`,
+    html, text,
+  });
+}
+
 /* ── Formular ausgefüllt — interne Mail mit allen Daten ── */
 
 export async function sendFormularEingang({ kunde, job, formdata, kundeUrl }) {

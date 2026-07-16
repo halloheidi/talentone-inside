@@ -166,7 +166,7 @@ function downloadCsv(filename, rows) {
 }
 
 /* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
-function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, kundenname, onPatch, onPatchAnrufversuche, onClose }) {
+function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
   if (!bewerbung) return null;
   const n = notiz || {};
   const fb = feedback || {};
@@ -201,6 +201,20 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
               </dd>
             </dl>
           </section>
+
+          {/* Stelle zuordnen (bei Multi-Stellen-Funnel) */}
+          {kundeJobs.length > 1 && (
+            <section>
+              <h3>Stelle{bewerbung?.zuordnung_unklar && <span className="avv-warn" style={{ marginLeft: 8 }}>⚠️ unklar</span>}</h3>
+              <select className="cell-input" defaultValue=""
+                onChange={e => { if (e.target.value) onReassign?.(e.target.value); }}>
+                <option value="">→ anderer Stelle zuordnen…</option>
+                {kundeJobs.filter(j => j.id !== currentJobId).map(j => (
+                  <option key={j.id} value={j.id}>{j.stelle || '(ohne Titel)'}</option>
+                ))}
+              </select>
+            </section>
+          )}
 
           {/* Anrufversuche */}
           <section className="slideover-anrufversuche">
@@ -340,6 +354,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
   const [showConfig, setShowConfig] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState('alle'); // alle | offen | erledigt
+  const [kundeJobs, setKundeJobs] = useState([]); // alle Stellen des Kunden (für Umzuordnung)
 
   async function loadAll() {
     setLoading(true);
@@ -357,6 +372,21 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
     }
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
+
+  useEffect(() => {
+    const kid = kunde?.id || job?.kunde_id;
+    if (!kid) return;
+    api(`/jobs?kunde_id=${kid}`).then(r => setKundeJobs(r.jobs || [])).catch(() => setKundeJobs([]));
+  }, [kunde?.id, job?.kunde_id]);
+
+  async function reassign(bewId, zielJobId) {
+    if (!zielJobId || zielJobId === job.id) return;
+    try {
+      await api(`/bewerbungen/${bewId}/zuordnen`, { method: 'PATCH', body: { job_id: zielJobId } });
+      setSelectedId(null);
+      loadAll();
+    } catch (e) { alert(e.message); }
+  }
 
   /* Normalisierte Bewerbungen */
   const normalized = useMemo(() => {
@@ -628,7 +658,21 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                       </td>
                     )}
                     <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                    <td className="td-name"><strong>{norm.name || '—'}</strong></td>
+                    <td className="td-name">
+                      <strong>{norm.name || '—'}</strong>
+                      {b.zuordnung_unklar && kundeJobs.length > 1 && (
+                        <div onClick={e => e.stopPropagation()} style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span className="avv-warn" title="Konnte keiner Stelle eindeutig zugeordnet werden">⚠️ Stelle unklar</span>
+                          <select className="cell-input" style={{ maxWidth: 200 }} defaultValue=""
+                            onChange={e => { if (e.target.value) reassign(b.id, e.target.value); }}>
+                            <option value="">→ anderer Stelle zuordnen…</option>
+                            {kundeJobs.filter(j => j.id !== job.id).map(j => (
+                              <option key={j.id} value={j.id}>{j.stelle || '(ohne Titel)'}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </td>
                     {telefonistenMode && (
                       <td onClick={e => e.stopPropagation()}>
                         <select className={`cell-input status-cell-${n.status || 'neu'}`} value={n.status || 'neu'} onChange={e => updateNotiz(b.id, { status: e.target.value })}>
@@ -728,6 +772,9 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
           feedback={data.feedback[selected.id]}
           vorqualFelder={vorqualFelder}
           kundenname={kunde?.firmenname}
+          kundeJobs={kundeJobs}
+          currentJobId={job.id}
+          onReassign={(zielJobId) => reassign(selected.id, zielJobId)}
           onPatch={patch => updateNotiz(selected.id, patch)}
           onPatchAnrufversuche={arr => updateNotiz(selected.id, { anrufversuche: arr })}
           onClose={() => setSelectedId(null)}

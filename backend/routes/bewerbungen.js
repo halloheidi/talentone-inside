@@ -72,6 +72,36 @@ router.patch('/:id/notiz', async (req, res) => {
   res.json({ notiz: data });
 });
 
+// PATCH /api/bewerbungen/:id/zuordnen  body: { job_id }
+// Ordnet eine Bewerbung einer anderen Stelle DES SELBEN KUNDEN zu (Multi-Stellen-
+// Funnel: Mapping danebengegriffen oder Kandidat umentschieden). Setzt zuordnung_unklar zurück.
+router.patch('/:id/zuordnen', async (req, res) => {
+  const zielJobId = req.body?.job_id;
+  if (!zielJobId) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+
+  const { data: bew } = await supabase.from('talentone_bewerbungen')
+    .select('id, job_id, talentone_jobs!inner(kunde_id)').eq('id', req.params.id).maybeSingle();
+  if (!bew) return res.status(404).json({ error: 'Bewerbung nicht gefunden.' });
+  const aktuellerKunde = bew.talentone_jobs?.kunde_id;
+
+  const { data: zielJob } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id').eq('id', zielJobId).maybeSingle();
+  if (!zielJob) return res.status(404).json({ error: 'Ziel-Stelle nicht gefunden.' });
+  if (aktuellerKunde && zielJob.kunde_id !== aktuellerKunde) {
+    return res.status(400).json({ error: 'Ziel-Stelle gehört zu einem anderen Kunden.' });
+  }
+
+  // Funnel-Referenz auf den Ziel-Job nachziehen (falls vorhanden).
+  const { data: zielFunnel } = await supabase.from('talentone_funnels')
+    .select('id').eq('job_id', zielJobId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+  const { data, error } = await supabase.from('talentone_bewerbungen')
+    .update({ job_id: zielJobId, funnel_id: zielFunnel?.id || null, zuordnung_unklar: false })
+    .eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ bewerbung: data });
+});
+
 /* ════════════════════ Vorqualifizierungs-Felder (KI-Vorschlag) ════════════════════ */
 // VORQUAL_STANDARD lebt jetzt in ../vorqualifizierung.js (geteilt mit jobs.js + Migration).
 
