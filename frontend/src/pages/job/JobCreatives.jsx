@@ -1126,11 +1126,13 @@ const VERBESSERN_OPTIONS = [
   { k: 'hg_aufraeumen', t: '🧹 Hintergrund aufräumen',          d: 'Chaos im Hintergrund beruhigen oder dezent tauschen (Werkstatt-Chaos → aufgeräumte Werkstatt). Person bleibt authentisch.' },
   { k: 'hg_ersetzen',   t: '🌆 Hintergrund komplett ersetzen',  d: 'Person freistellen und in ein neues Setting stellen. Setting frei eingeben — für Fälle mit unbrauchbarem Original.' },
   { k: 'ausschnitt',    t: '📐 Ausschnitt & Perspektive optimieren', d: 'Besserer Ausschnitt, schiefe Aufnahmen begradigen, störende Bildränder entfernen.' },
+  { k: 'atmosphaere',   t: '🎬 Atmosphäre & Look verbessern',    d: 'Für gute Fotos mit langweiliger Stimmung — macht aus dem Schnappschuss ein Kampagnen-Bild. Inhalt bleibt unverändert.' },
 ];
 
 function VerbessernModal({ foto, onClose, onDone }) {
   const [selected, setSelected] = useState(() => new Set(['qualitaet']));
   const [setting, setSetting] = useState('');
+  const [atmosphaereSetting, setAtmosphaereSetting] = useState('');
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
@@ -1152,6 +1154,7 @@ function VerbessernModal({ foto, onClose, onDone }) {
       const optionen = Array.from(selected);
       const body = { optionen };
       if (selected.has('hg_ersetzen')) body.hintergrund_setting = setting.trim();
+      if (selected.has('atmosphaere') && atmosphaereSetting.trim()) body.atmosphaere_setting = atmosphaereSetting.trim();
       const res = await api(`/kunden/referenzbilder/${foto.id}/verbessern`, { method: 'POST', body });
       setPreviewUrl(res.preview_url);
       setAppliedOpts(res.angewendete_optionen || optionen);
@@ -1211,6 +1214,17 @@ function VerbessernModal({ foto, onClose, onDone }) {
                 </label>
                 <input value={setting} onChange={e => setSetting(e.target.value)}
                   placeholder='z.B. "moderner Heizungskeller", "Baustelle bei Sonnenlicht", "aufgeräumtes Büro mit Tageslicht"'
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
+              </div>
+            )}
+
+            {selected.has('atmosphaere') && (
+              <div style={{ marginBottom: 12, padding: 10, background: '#fafaf8', borderRadius: 8 }}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#5a5955', marginBottom: 4 }}>
+                  Gewünschte Stimmung (optional)
+                </label>
+                <input value={atmosphaereSetting} onChange={e => setAtmosphaereSetting(e.target.value)}
+                  placeholder='z.B. "Sonnenuntergang", "kraftvoll & energiegeladen", "früher Morgen"'
                   style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 13 }} />
               </div>
             )}

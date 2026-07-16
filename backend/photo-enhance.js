@@ -21,6 +21,7 @@ const OPTION_LABELS = {
   hg_aufraeumen: 'Hintergrund aufräumen',
   hg_ersetzen:   'Hintergrund komplett ersetzen',
   ausschnitt:    'Ausschnitt & Perspektive optimieren',
+  atmosphaere:   'Atmosphäre & Look',
 };
 
 const OPTION_PROMPTS = {
@@ -33,23 +34,35 @@ const OPTION_PROMPTS = {
     'Hintergrund tauschen (z.B. Werkstatt-Chaos -> geordnete Werkstatt derselben Branche). ' +
     'Die urspruengliche Umgebung bleibt vom Charakter her erkennbar.',
   hg_ersetzen:
-    (setting) =>
+    (s) =>
       `- Hintergrund komplett ersetzen: Personen freistellen und in ein neues Setting stellen. ` +
-      `Neues Setting: ${setting || 'moderne, zur Branche passende Umgebung mit weichem Tageslicht'}. ` +
+      `Neues Setting: ${s.hintergrund_setting || 'moderne, zur Branche passende Umgebung mit weichem Tageslicht'}. ` +
       `Der Uebergang muss natuerlich wirken (gleiche Lichtstimmung, konsistenter Schattenwurf, ` +
       `identische Perspektive der Personen).`,
   ausschnitt:
     '- Ausschnitt/Perspektive optimieren: besseren Bildausschnitt waehlen, schiefe Horizonte ' +
     'begradigen, stoerende Randobjekte entfernen. Personen bleiben im Zentrum und komplett ' +
     'im Bild — nichts wird angeschnitten.',
+  atmosphaere:
+    (s) =>
+      `- Atmosphaere & Look (KINOREIFER MACHEN): Veraendere AUSSCHLIESSLICH Licht, Farbe, Himmel ` +
+      `und Bildstimmung — der gesamte Bildinhalt bleibt exakt gleich. ` +
+      `Warmes, goldenes Licht (Richtung golden hour), weichere Schatten, mehr Tiefe im Bild. ` +
+      `Himmel dramatischer und interessanter gestalten (statt ausgewaschen weiss-grau) — ` +
+      `nur die Himmelsflaeche, keine neuen Objekte. ` +
+      `Farbtiefe und Kontrast-Grading wie bei professioneller Werbefotografie. ` +
+      `Leichte Tiefenwirkung/Fokus-Fuehrung auf die Personen bzw. die Aktion. ` +
+      `WICHTIG: KEINE Personen, Gesichter, Kleidung, Objekte, Szene oder Bildausschnitt veraendern, ` +
+      `nichts hinzufuegen oder entfernen — es aendert sich nur Licht, Farbe, Himmel und Stimmung.` +
+      (s.atmosphaere_setting ? ` Gewuenschte Stimmung: ${s.atmosphaere_setting}.` : ''),
 };
 
-function buildPrompt(optionen, settingText) {
+function buildPrompt(optionen, settings = {}) {
   const uniq = Array.from(new Set((optionen || []).filter(k => OPTION_PROMPTS[k])));
   if (!uniq.length) throw new Error('Mindestens eine Verbesserungs-Option waehlen.');
   const zeilen = uniq.map(k => {
     const v = OPTION_PROMPTS[k];
-    return typeof v === 'function' ? v(settingText) : v;
+    return typeof v === 'function' ? v(settings) : v;
   }).join('\n');
   return (
     `Bearbeite dieses Foto in mehreren Schritten und liefere EIN einziges Ergebnisbild:\n${zeilen}\n\n` +
@@ -72,10 +85,11 @@ function bufferToFile(buf, name, contentType) {
  *
  * @param {object} p
  * @param {string} p.referenzbildId
- * @param {string[]} p.optionen  z.B. ['qualitaet', 'hg_aufraeumen']
+ * @param {string[]} p.optionen  z.B. ['qualitaet', 'hg_aufraeumen', 'atmosphaere']
  * @param {string} [p.hintergrund_setting]  nur bei 'hg_ersetzen'
+ * @param {string} [p.atmosphaere_setting]  optionale Stimmung, nur bei 'atmosphaere'
  */
-export async function generateVerbesserung({ referenzbildId, optionen, hintergrund_setting }) {
+export async function generateVerbesserung({ referenzbildId, optionen, hintergrund_setting, atmosphaere_setting }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
 
   const { data: original, error: eGet } = await supabase.from('talentone_referenzbilder')
@@ -93,7 +107,7 @@ export async function generateVerbesserung({ referenzbildId, optionen, hintergru
     throw new Error('Kunde hat KI-Bildbearbeitung deaktiviert (keine_ki_bilder=true).');
   }
 
-  const prompt = buildPrompt(optionen, hintergrund_setting);
+  const prompt = buildPrompt(optionen, { hintergrund_setting, atmosphaere_setting });
   const { buffer } = await fetchAsBuffer(original.bild_url);
 
   // OpenAI /images/edits akzeptiert nur PNG/JPEG/WebP in RGB, <50MB, max 4096px.

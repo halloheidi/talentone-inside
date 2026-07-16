@@ -760,7 +760,7 @@ router.post('/:id/referenzbilder', async (req, res) => {
 });
 
 // POST /api/kunden/referenzbilder/:id/verbessern
-// body: { optionen: string[], hintergrund_setting?: string }
+// body: { optionen: string[], hintergrund_setting?: string, atmosphaere_setting?: string }
 // Rueckgabe: { preview_url, angewendete_optionen } — persistiert NICHT.
 router.post('/referenzbilder/:id/verbessern', async (req, res) => {
   try {
@@ -769,6 +769,7 @@ router.post('/referenzbilder/:id/verbessern', async (req, res) => {
       referenzbildId: req.params.id,
       optionen: req.body?.optionen,
       hintergrund_setting: req.body?.hintergrund_setting,
+      atmosphaere_setting: req.body?.atmosphaere_setting,
     });
     res.json({ preview_url, angewendete_optionen });
   } catch (err) {
