@@ -705,7 +705,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
   const vorqualSpalten = kundenVorqualSpalten({
     felder,
     werte: Object.values(recruiterSync).map(r => r?.vorqualifizierung_werte || {}),
-    kriterien: kriterien.map(k => k.kriterium),
+    kriterien,
   });
 
   res.json({
@@ -1269,7 +1269,7 @@ router.get('/portal/:token', async (req, res) => {
           felder: effektiveVorqualFelder(j),
           werte: (bewerbungenRes.data || []).filter(b => b.job_id === j.id)
             .map(b => vorqualWerteByBew[b.id] || {}),
-          kriterien: normalizeKriterien(j.wichtige_kriterien).map(k => k.kriterium),
+          kriterien: normalizeKriterien(j.wichtige_kriterien),
         }),
       };
     });

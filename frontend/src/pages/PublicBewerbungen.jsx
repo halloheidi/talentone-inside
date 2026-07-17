@@ -550,8 +550,13 @@ export default function PublicBewerbungen() {
                     {/* Vorqualifizierung: befüllte Felder + die als wichtig
                         markierten Kriterien (die immer, auch wenn noch leer). */}
                     {(data.vorqual_spalten || []).map(s => (
-                      <th key={`vq-${s.name}`} className="pub-th-vorqual" title={s.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung'}>
-                        {s.wichtig ? '⭐ ' : ''}{s.name}
+                      <th key={`vq-${s.name}`} className="pub-th-vorqual"
+                        title={[
+                          s.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung',
+                          s.anforderung ? `Anforderung: ${s.anforderung}` : null,
+                          s.pflicht ? 'Pflicht (ohne das geht es nicht)' : null,
+                        ].filter(Boolean).join(' · ')}>
+                        {s.wichtig ? '⭐ ' : ''}{s.name}{s.pflicht ? ' ❗' : ''}
                       </th>
                     ))}
                     {(data.spalten || []).map(s => <th key={s.id} className="pub-th-custom">{s.name}</th>)}

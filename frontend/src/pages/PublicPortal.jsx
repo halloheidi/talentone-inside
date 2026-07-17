@@ -885,8 +885,12 @@ function BewerbungenSection({ job, bewerbungen }) {
                 {/* Vorqualifizierung: befüllte Felder + wichtige Kriterien (immer) */}
                 {(job.vorqual_spalten || []).map(sp => (
                   <th key={`vq-${sp.name}`} style={{ ...thStyle, background: '#f4f7ff', whiteSpace: 'nowrap' }}
-                    title={sp.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung'}>
-                    {sp.wichtig ? '⭐ ' : ''}{sp.name}
+                    title={[
+                      sp.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung',
+                      sp.anforderung ? `Anforderung: ${sp.anforderung}` : null,
+                      sp.pflicht ? 'Pflicht' : null,
+                    ].filter(Boolean).join(' · ')}>
+                    {sp.wichtig ? '⭐ ' : ''}{sp.name}{sp.pflicht ? ' ❗' : ''}
                   </th>
                 ))}
               </tr>
