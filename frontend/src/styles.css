@@ -4572,6 +4572,11 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 }
 .pub-spalten-chip button:hover { color: #80201f; }
 
+/* Vorqualifizierungs-Spalten in der Kunden-Ansicht (befüllte Felder + die als
+   wichtig markierten Prüf-Kriterien, die immer sichtbar sind). */
+.pub-th-vorqual { background: #f4f7ff !important; min-width: 140px; white-space: nowrap; }
+.pub-td-vorqual { background: #fbfcff; min-width: 140px; font-size: 12.5px; }
+
 .pub-th-custom { background: #fafff0 !important; min-width: 160px; }
 .pub-td-custom { background: #fafff0; min-width: 160px; padding: 4px !important; }
 .pub-td-custom input, .pub-td-custom textarea {

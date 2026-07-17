@@ -3,6 +3,8 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { effektiveVorqualFelder } from '../vorqualifizierung.js';
+import { normalizeKriterien, kundenVorqualSpalten } from '../kriterien.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -626,7 +628,10 @@ const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingeste
 async function loadJobByToken(token) {
   const { data } = await supabase
     .from('talentone_jobs')
-    .select('id, stelle, region, kunde_id, bewerbungen_token')
+    // vorqualifizierung* + wichtige_kriterien werden fuer die Vorqual-Spalten
+    // der Kunden-Ansicht gebraucht — fehlten hier bisher, deshalb konnte die
+    // Tabelle sie gar nicht rendern.
+    .select('id, stelle, region, kunde_id, bewerbungen_token, vorqualifizierung, vorqualifizierung_felder, wichtige_kriterien')
     .eq('bewerbungen_token', token)
     .maybeSingle();
   return data;
@@ -693,14 +698,29 @@ router.get('/bewerbungen/:token', async (req, res) => {
     .eq('sichtbar_fuer', 'kunde')
     .order('reihenfolge', { ascending: true });
 
+  // Vorqual-Spalten fuer den Kunden: befuellte Felder + IMMER die wichtigen
+  // Kriterien (auch leer). Berechnung zentral in kriterien.js.
+  const felder = effektiveVorqualFelder(job);
+  const kriterien = normalizeKriterien(job.wichtige_kriterien);
+  const vorqualSpalten = kundenVorqualSpalten({
+    felder,
+    werte: Object.values(recruiterSync).map(r => r?.vorqualifizierung_werte || {}),
+    kriterien: kriterien.map(k => k.kriterium),
+  });
+
   res.json({
-    job: { id: job.id, stelle: job.stelle, region: job.region },
+    job: {
+      id: job.id, stelle: job.stelle, region: job.region,
+      vorqualifizierung: !!job.vorqualifizierung,
+    },
     kunde: kunde ? { firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url } : null,
     bewerbungen: bewerbungen || [],
     feedback,
     spalten: spalten || [],
     werte,
     recruiter_sync: recruiterSync,
+    vorqual_spalten: vorqualSpalten,
+    wichtige_kriterien: kriterien,
   });
 });
 
@@ -1172,7 +1192,7 @@ router.get('/portal/:token', async (req, res) => {
     if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
 
     const { data: jobs = [] } = await supabase.from('talentone_jobs')
-      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_felder, anfragen_token, bewerbungen_token, created_at')
+      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_felder, anfragen_token, bewerbungen_token, created_at, vorqualifizierung, vorqualifizierung_felder, wichtige_kriterien')
       .eq('kunde_id', kunde.id)
       .order('created_at', { ascending: true });
 
@@ -1198,6 +1218,15 @@ router.get('/portal/:token', async (req, res) => {
         ? supabase.from('talentone_funnels').select('*').in('job_id', jobIds).order('created_at', { ascending: false })
         : { data: [] },
     ]);
+
+    // Vorqualifizierungs-Werte der Bewerbungen (fuer die Vorqual-Spalten im Portal)
+    const bewIds = (bewerbungenRes.data || []).map(b => b.id);
+    const vorqualWerteByBew = {};
+    if (bewIds.length) {
+      const { data: notizen = [] } = await supabase.from('talentone_bewerber_notizen')
+        .select('bewerbung_id, vorqualifizierung_werte').in('bewerbung_id', bewIds);
+      for (const n of notizen) vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
+    }
 
     // Kommentare zu allen Anfragen bulk-laden
     const anfragen = anfragenRes.data || [];
@@ -1232,6 +1261,16 @@ router.get('/portal/:token', async (req, res) => {
         funnel_url: funnelUrlByJob[j.id] || null,
         anfragen_token: j.anfragen_token,
         bewerbungen_token: j.bewerbungen_token,
+        vorqualifizierung: !!j.vorqualifizierung,
+        wichtige_kriterien: normalizeKriterien(j.wichtige_kriterien),
+        // Befuellte Vorqual-Felder + wichtige Kriterien (immer) — gleiche
+        // Spaltenlogik wie in der Public-Bewerberliste.
+        vorqual_spalten: kundenVorqualSpalten({
+          felder: effektiveVorqualFelder(j),
+          werte: (bewerbungenRes.data || []).filter(b => b.job_id === j.id)
+            .map(b => vorqualWerteByBew[b.id] || {}),
+          kriterien: normalizeKriterien(j.wichtige_kriterien).map(k => k.kriterium),
+        }),
       };
     });
 
@@ -1254,7 +1293,7 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: bewerbungenRes.data || [],
+      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {} })),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {

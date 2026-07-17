@@ -20,3 +20,14 @@ export const VORQUAL_STANDARD = [
   { name: 'Führerschein', typ: 'dropdown', optionen: ['Ja', 'Nein', 'Aktuell nicht'] },
   { name: 'Verfügbarkeit', typ: 'text' },
 ];
+
+// Effektive Vorqual-Felder eines Jobs: das konfigurierte Set, sonst — wenn
+// Vorqualifizierung aktiv aber leer — das Standard-Set als Fallback.
+// Spiegel von frontend/src/lib/vorqual.js:effektiveVorqualFelder.
+export function effektiveVorqualFelder(job) {
+  const felder = Array.isArray(job?.vorqualifizierung_felder)
+    ? job.vorqualifizierung_felder.filter(f => f && f.name)
+    : [];
+  if (felder.length === 0 && job?.vorqualifizierung) return VORQUAL_STANDARD;
+  return felder;
+}

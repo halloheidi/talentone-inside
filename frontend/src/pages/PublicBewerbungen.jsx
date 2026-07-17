@@ -172,30 +172,42 @@ const RECRUITER_STATUS_LABELS = {
   neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessiert',
   abgesagt: 'Abgesagt', weitergeleitet: 'Weitergeleitet',
 };
-function RecruiterSyncSection({ sync, brandName }) {
-  if (!sync) return null;
-  const vqWerte = sync.vorqualifizierung_werte && typeof sync.vorqualifizierung_werte === 'object'
-    ? Object.entries(sync.vorqualifizierung_werte).filter(([, v]) => v != null && String(v).trim() !== '')
-    : [];
-  const hasData = sync.recruiter_status || sync.vg_vereinbart_am || (sync.eingestellt && sync.eingestellt !== 'offen')
-    || sync.kunde_kontaktiert || sync.vorqual_gehaltswunsch || sync.vorqual_verfuegbarkeit
-    || sync.vorqual_notiz || vqWerte.length > 0;
+function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [] }) {
+  const werte = sync?.vorqualifizierung_werte && typeof sync.vorqualifizierung_werte === 'object'
+    ? sync.vorqualifizierung_werte : {};
+  // Reihenfolge + Sichtbarkeit kommen zentral vom Backend (vorqual_spalten):
+  // befüllte Felder + wichtige Kriterien immer (auch leer → "—").
+  const vqZeilen = vorqualSpalten.length
+    ? vorqualSpalten.map(s => {
+        const v = werte[s.name];
+        const hat = v != null && String(v).trim() !== '';
+        return { name: s.name, wert: hat ? String(v) : null, wichtig: s.wichtig };
+      })
+    : Object.entries(werte)
+        .filter(([, v]) => v != null && String(v).trim() !== '')
+        .map(([k, v]) => ({ name: k, wert: String(v), wichtig: false }));
+  const hatVqWert = vqZeilen.some(z => z.wert);
+  if (!sync && !vqZeilen.length) return null;
+  const hasData = sync?.recruiter_status || sync?.vg_vereinbart_am || (sync?.eingestellt && sync.eingestellt !== 'offen')
+    || sync?.kunde_kontaktiert || sync?.vorqual_gehaltswunsch || sync?.vorqual_verfuegbarkeit
+    || sync?.vorqual_notiz || hatVqWert || vqZeilen.some(z => z.wichtig);
   if (!hasData) return null;
   return (
     <section className="pub-recruiter-sync">
       <h3>Vom {brandName || 'Recruiter'}</h3>
       <dl className="pub-slideover-dl">
-        {sync.recruiter_status && <><dt>Status</dt><dd>{RECRUITER_STATUS_LABELS[sync.recruiter_status] || sync.recruiter_status}</dd></>}
-        {sync.kunde_kontaktiert && <><dt>Sie kontaktiert</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
-        {sync.vg_vereinbart_am && <><dt>VG vereinbart</dt><dd>{new Date(sync.vg_vereinbart_am).toLocaleString('de-DE')}</dd></>}
-        {sync.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
-        {sync.vorqual_gehaltswunsch && <><dt>Gehaltswunsch</dt><dd>{sync.vorqual_gehaltswunsch}</dd></>}
-        {sync.vorqual_verfuegbarkeit && <><dt>Verfügbarkeit</dt><dd>{sync.vorqual_verfuegbarkeit}</dd></>}
-        {vqWerte.map(([k, v]) => (
-          <FragmentRow key={k} label={k} value={String(v)} />
+        {sync?.recruiter_status && <><dt>Status</dt><dd>{RECRUITER_STATUS_LABELS[sync.recruiter_status] || sync.recruiter_status}</dd></>}
+        {sync?.kunde_kontaktiert && <><dt>Sie kontaktiert</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
+        {sync?.vg_vereinbart_am && <><dt>VG vereinbart</dt><dd>{new Date(sync.vg_vereinbart_am).toLocaleString('de-DE')}</dd></>}
+        {sync?.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
+        {sync?.vorqual_gehaltswunsch && <><dt>Gehaltswunsch</dt><dd>{sync.vorqual_gehaltswunsch}</dd></>}
+        {sync?.vorqual_verfuegbarkeit && <><dt>Verfügbarkeit</dt><dd>{sync.vorqual_verfuegbarkeit}</dd></>}
+        {vqZeilen.map(z => (
+          <FragmentRow key={z.name} label={`${z.wichtig ? '⭐ ' : ''}${z.name}`}
+            value={z.wert ?? '—'} muted={!z.wert} />
         ))}
       </dl>
-      {sync.vorqual_notiz && (
+      {sync?.vorqual_notiz && (
         <div style={{ marginTop: 10, padding: '10px 12px', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#78350f', marginBottom: 4 }}>Notiz aus dem Vorqualifizierungs-Gespräch</div>
           <div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{sync.vorqual_notiz}</div>
@@ -204,12 +216,12 @@ function RecruiterSyncSection({ sync, brandName }) {
     </section>
   );
 }
-function FragmentRow({ label, value }) {
-  return (<><dt>{label}</dt><dd>{value}</dd></>);
+function FragmentRow({ label, value, muted = false }) {
+  return (<><dt>{label}</dt><dd className={muted ? 'pub-muted' : undefined}>{value}</dd></>);
 }
 
 /* ─── Slide-Over für Bewerber-Detail ─── */
-function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, onPatchFeedback, onSetWert, onClose }) {
+function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], onPatchFeedback, onSetWert, onClose }) {
   if (!bewerbung) return null;
   const norm = normalized || {};
   const fb = feedback || {};
@@ -242,7 +254,7 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
           </section>
 
           {/* Vom Recruiter (sync) */}
-          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} />
+          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} vorqualSpalten={vorqualSpalten} />
 
           {/* Funnel-Antworten */}
           {norm.antworten?.length > 0 && (
@@ -535,6 +547,13 @@ export default function PublicBewerbungen() {
                     <th>Telefon</th>
                     <th>KO</th>
                     {frageSpalten.map(f => <th key={f}>{f}</th>)}
+                    {/* Vorqualifizierung: befüllte Felder + die als wichtig
+                        markierten Kriterien (die immer, auch wenn noch leer). */}
+                    {(data.vorqual_spalten || []).map(s => (
+                      <th key={`vq-${s.name}`} className="pub-th-vorqual" title={s.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung'}>
+                        {s.wichtig ? '⭐ ' : ''}{s.name}
+                      </th>
+                    ))}
                     {(data.spalten || []).map(s => <th key={s.id} className="pub-th-custom">{s.name}</th>)}
                   </tr>
                 </thead>
@@ -567,6 +586,15 @@ export default function PublicBewerbungen() {
                         <td>{norm.telefon ? <a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a> : '—'}</td>
                         <td>{b.ko_kriterium ? <span className="pub-ko-badge">KO</span> : ''}</td>
                         {frageSpalten.map(f => <td key={f} className="pub-td-antwort">{antwortFor(b.id, f) || <span className="pub-muted">—</span>}</td>)}
+                        {(data.vorqual_spalten || []).map(s => {
+                          const v = data.recruiter_sync?.[b.id]?.vorqualifizierung_werte?.[s.name];
+                          const hat = v != null && String(v).trim() !== '';
+                          return (
+                            <td key={`vq-${s.name}`} className="pub-td-vorqual">
+                              {hat ? String(v) : <span className="pub-muted">—</span>}
+                            </td>
+                          );
+                        })}
                         {(data.spalten || []).map(s => (
                           <td key={s.id} className="pub-td-custom" onClick={e => e.stopPropagation()}>
                             <CustomFieldCell
@@ -649,6 +677,7 @@ export default function PublicBewerbungen() {
         spalten={data.spalten || []}
         werte={selected ? data.werte?.[selected.id] : null}
         recruiterSync={selected ? data.recruiter_sync?.[selected.id] : null}
+        vorqualSpalten={data.vorqual_spalten || []}
         brandName={brand.name}
         onPatchFeedback={body => selected && patchFeedback(selected.id, body)}
         onSetWert={(spalteId, v) => selected && setSpalteWert(selected.id, spalteId, v)}

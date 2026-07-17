@@ -791,6 +791,13 @@ function BewerbungenSection({ job, bewerbungen }) {
                 <th style={thStyle}>E-Mail</th>
                 <th style={thStyle}>Telefon</th>
                 <th style={thStyle}>Quelle</th>
+                {/* Vorqualifizierung: befüllte Felder + wichtige Kriterien (immer) */}
+                {(job.vorqual_spalten || []).map(sp => (
+                  <th key={`vq-${sp.name}`} style={{ ...thStyle, background: '#f4f7ff', whiteSpace: 'nowrap' }}
+                    title={sp.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung'}>
+                    {sp.wichtig ? '⭐ ' : ''}{sp.name}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -801,6 +808,15 @@ function BewerbungenSection({ job, bewerbungen }) {
                   <td style={tdStyle}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
                   <td style={tdStyle}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
                   <td style={tdStyle}>{b.quelle || 'funnel'}</td>
+                  {(job.vorqual_spalten || []).map(sp => {
+                    const v = b.vorqualifizierung_werte?.[sp.name];
+                    const hat = v != null && String(v).trim() !== '';
+                    return (
+                      <td key={`vq-${sp.name}`} style={{ ...tdStyle, background: '#fbfcff', color: hat ? undefined : '#9a9994' }}>
+                        {hat ? String(v) : '—'}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
