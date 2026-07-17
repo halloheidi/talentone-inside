@@ -533,6 +533,7 @@ router.post('/jobs/:id/export/entwurf-reminder', async (req, res) => {
     const reviewUrl = `${getPublicBaseUrl(kunde?.agentur)}/review/${token}`;
 
     await sendEntwurfReminder({
+      kunde,
       to: recipient,
       ansprechpartner: kunde?.ansprechpartner,
       reviewUrl, customText,
@@ -678,6 +679,7 @@ router.post('/jobs/:id/export/termin-einladung', async (req, res) => {
     if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
 
     await sendTerminEinladung({
+      kunde,
       to: recipient,
       ansprechpartner: kunde?.ansprechpartner,
       agentur: kunde?.agentur,
@@ -745,6 +747,7 @@ router.post('/kunden/:id/termin-einladung', async (req, res) => {
     if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
 
     await sendTerminEinladung({
+      kunde,
       to: recipient,
       ansprechpartner: kunde.ansprechpartner,
       agentur: kunde.agentur,

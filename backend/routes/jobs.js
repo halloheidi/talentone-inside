@@ -76,6 +76,7 @@ router.post('/quick-create', async (req, res) => {
     try {
       await sendFormularEinladung({
         to: kunde.email,
+        kunde,
         ansprechpartner: kunde.ansprechpartner,
         formularUrl,
         customText,

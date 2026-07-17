@@ -3,6 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { anrede } from '../anrede.js';
 import { calculateOfferTotals, validateAdBudget } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized } from '../easybill.js';
@@ -36,9 +37,13 @@ function fillMergeTags(text, ctx) {
   });
 }
 
-function buildOfferMergeCtx(offer) {
+// kunde (optional) traegt die Anrede-Felder; ohne ihn faellt {{anrede}} auf den
+// Snapshot-Namen in Du-Form zurueck.
+function buildOfferMergeCtx(offer, kunde = null) {
   const snap = offer.customer_snapshot || {};
+  const anredeKunde = kunde || { ansprechpartner: [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim() };
   return {
+    anrede:          anrede(anredeKunde),
     ansprechpartner: [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim() || 'zusammen',
     firma:           snap.company_name || '',
     setup:           eur.format(Number(offer.setup_total || 0)),
@@ -46,6 +51,16 @@ function buildOfferMergeCtx(offer) {
     monat_1:         eur.format(Number(offer.first_month_total || 0)),
     werbebudget:     offer.ad_budget_monthly ? eur.format(Number(offer.ad_budget_monthly)) : '',
   };
+}
+
+
+// Laedt den verknuepften Kunden (fuer die Anrede) — best-effort.
+async function loadAnredeKunde(offer) {
+  if (!offer?.customer_id) return null;
+  const { data } = await supabase.from('talentone_kunden')
+    .select('ansprechpartner, anrede_form, anrede_titel, nachname')
+    .eq('id', offer.customer_id).maybeSingle();
+  return data || null;
 }
 
 /**
@@ -104,7 +119,7 @@ router.get('/:id/email-preview', async (req, res) => {
   if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
 
   const tpl = await loadOfferEmailTemplate(offer.brand);
-  const ctx = buildOfferMergeCtx(offer);
+  const ctx = buildOfferMergeCtx(offer, await loadAnredeKunde(offer));
   ctx.eckdaten = await buildEckdatenForOffer(offer);
   const subject = fillMergeTags(tpl.subject, ctx);
   const body    = fillMergeTags(tpl.body, ctx);
@@ -232,7 +247,7 @@ router.get('/:id/order-email-preview', async (req, res) => {
   }
 
   const tpl = await loadOrderEmailTemplate(offer.brand);
-  const ctx = buildOfferMergeCtx(offer);
+  const ctx = buildOfferMergeCtx(offer, await loadAnredeKunde(offer));
   ctx.eckdaten = await buildEckdatenForOffer(offer);
   const subject = fillMergeTags(tpl.subject, ctx);
   const body    = fillMergeTags(tpl.body, ctx);

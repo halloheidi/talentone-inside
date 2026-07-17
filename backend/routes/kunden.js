@@ -930,6 +930,7 @@ router.post('/formular-anlegen', async (req, res) => {
   const formularUrl = `${getPublicBaseUrl(kunde.agentur)}/formular/${token}`;
   try {
     await sendFormularEinladung({
+      kunde,
       to: kunde.email, ansprechpartner: kunde.ansprechpartner,
       formularUrl, customText, agentur: kunde.agentur, projekttyp: pt,
     });
@@ -973,6 +974,7 @@ router.post('/:id/anfrage', async (req, res) => {
   try {
     await sendUploadAnfrage({
       to: kunde.email,
+      kunde,
       kundenname: kunde.firmenname || 'euer Team',
       ansprechpartner: kunde.ansprechpartner,
       uploadUrl,
@@ -1064,6 +1066,7 @@ router.post('/:id/portal-accounts', async (req, res) => {
     const portalUrl = `${getPublicBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`;
     const setupUrl = `${portalUrl}?einladung=${account.einladungs_token}`;
     await sendPortalEinladung({
+      kunde,
       to: email, name, portalUrl, setupUrl,
       kundenname: kunde.firmenname, agentur: kunde.agentur,
     });
@@ -1102,6 +1105,7 @@ router.post('/:id/portal-accounts/:accId/einladung-neu', async (req, res) => {
     const portalUrl = `${getPublicBaseUrl(kunde.agentur)}/portal/${kunde.portal_token}`;
     const setupUrl = `${portalUrl}?einladung=${neuerToken}`;
     await sendPortalEinladung({
+      kunde,
       to: account.email, name: account.name, portalUrl, setupUrl,
       kundenname: kunde.firmenname, agentur: kunde.agentur,
     });

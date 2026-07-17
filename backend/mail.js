@@ -2,6 +2,7 @@
 // Branding pro Agentur via getBranding() / getMailFrom() / getMailReplyTo().
 
 import { getBranding, getMailFrom, getMailReplyTo, getOfferMailFrom, getOfferMailReplyTo, agenturForOfferBrand } from './branding.js';
+import { anrede, t } from './anrede.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 
@@ -59,30 +60,35 @@ function brandedShell({ brand, contentHtml }) {
 }
 
 // umfang: 'beides' (Logo + Fotos) | 'logo' (nur Logo) | 'fotos' (nur Fotos)
-export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploadUrl, customText, agentur, umfang = 'beides' }) {
+export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner, uploadUrl, customText, agentur, umfang = 'beides' }) {
   if (!process.env.RESEND_API_KEY) {
     throw new Error('RESEND_API_KEY nicht gesetzt.');
   }
   const brand = getBranding(agentur);
-  const grußname = ansprechpartner || 'zusammen';
+  // Anrede zentral — kunde traegt anrede_form/anrede_titel/nachname.
+  const k = kunde || { ansprechpartner };
+  const grusszeile = anrede(k);
 
   const wantLogo  = umfang !== 'fotos';
   const wantFotos = umfang !== 'logo';
 
   const subject = umfang === 'logo'
-    ? 'Wir brauchen noch euer Logo für die Kampagne'
+    ? t(k, 'Wir brauchen noch euer Logo für die Kampagne', 'Wir brauchen noch Ihr Logo für die Kampagne')
     : umfang === 'fotos'
-      ? 'Wir brauchen noch ein paar Fotos für eure Kampagne'
-      : 'Wir brauchen noch Logo und Fotos für eure Kampagne';
+      ? t(k, 'Wir brauchen noch ein paar Fotos für eure Kampagne', 'Wir brauchen noch ein paar Fotos für Ihre Kampagne')
+      : t(k, 'Wir brauchen noch Logo und Fotos für eure Kampagne', 'Wir brauchen noch Logo und Fotos für Ihre Kampagne');
 
   const defaultIntro = umfang === 'logo'
-    ? `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch euer Logo. Über den unten stehenden Link könnt ihr es ganz einfach hochladen.`
+    ? t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch euer Logo. Über den unten stehenden Link könnt ihr es ganz einfach hochladen.`,
+          `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür noch Ihr Logo. Über den unten stehenden Link können Sie es ganz einfach hochladen.`)
     : umfang === 'fotos'
-      ? `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link könnt ihr sie ganz einfach hochladen.`
-      : `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`;
+      ? t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link könnt ihr sie ganz einfach hochladen.`,
+            `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link können Sie sie ganz einfach hochladen.`)
+      : t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`,
+            `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von Ihnen. Über den unten stehenden Link können Sie ganz einfach Ihr Logo und Fotos vom Team / Arbeitsplatz hochladen.`);
   const intro = (customText || '').trim() || defaultIntro;
 
-  const bulletLogo  = `<li><strong>Euer Logo</strong> in guter Qualität (PNG, JPG, SVG)</li>`;
+  const bulletLogo  = `<li><strong>${t(k, 'Euer Logo', 'Ihr Logo')}</strong> in guter Qualität (PNG, JPG, SVG)</li>`;
   const bulletFotos = `<li><strong>3–5 Fotos vom Arbeitsplatz, Team oder typische Tätigkeiten</strong> — gerne auch Handy-Schnappschüsse</li>`;
   const bulletsHtml = [wantLogo && bulletLogo, wantFotos && bulletFotos].filter(Boolean).join('\n        ');
 
@@ -92,7 +98,7 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
-      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(grußname)},</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(grusszeile)},</p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n/g, '<br>')}</p>
       <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">Was wir uns wünschen würden:</p>
       <ul style="font-size:14px;line-height:1.7;color:#2a2a2a;margin:0 0 24px;padding-left:18px;">
@@ -110,10 +116,10 @@ export async function sendUploadAnfrage({ to, kundenname, ansprechpartner, uploa
 
   const html = brandedShell({ brand, contentHtml: content });
   const textBullets = [
-    wantLogo && '• Euer Logo (PNG/JPG/SVG)',
+    wantLogo && t(k, '• Euer Logo (PNG/JPG/SVG)', '• Ihr Logo (PNG/JPG/SVG)'),
     wantFotos && '• 3-5 Fotos vom Arbeitsplatz, Team oder typischen Tätigkeiten',
   ].filter(Boolean).join('\n');
-  const text = `Hallo ${grußname},\n\n${intro}\n\nWas wir uns wünschen:\n${textBullets}\n\nUpload-Link: ${uploadUrl}\n\n(Der Link ist persönlich und nur für ${kundenname} gültig.)\n\nVielen Dank!\nEuer ${brand.name}-Team`;
+  const text = `${grusszeile},\n\n${intro}\n\nWas wir uns wünschen:\n${textBullets}\n\nUpload-Link: ${uploadUrl}\n\n(Der Link ist persönlich und nur für ${kundenname} gültig.)\n\nVielen Dank!\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
@@ -141,20 +147,25 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
   const brand = getBranding(kunde?.agentur);
   const firma = escape(kunde?.firmenname || '');
   const datum = new Date(akzeptiert_am || Date.now()).toLocaleString('de-DE', { dateStyle: 'long', timeStyle: 'short' });
-  const grußname = escape((akzeptiert_von || '').toString().split(' ')[0] || 'Sie');
+  // Du: Vorname der Person, die akzeptiert hat. Sie: Titel+Nachname vom Kunden
+  // (bzw. "Guten Tag", wenn nicht ermittelbar) — vorher war das eine Mischform
+  // ("Hallo <Vorname>," + "Sie haben ...").
+  const grusszeile = t(kunde,
+    `Hallo ${(akzeptiert_von || '').toString().split(' ')[0] || 'zusammen'}`,
+    anrede(kunde));
 
   const content = `
     <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">Auftragsverarbeitungsvertrag bestätigt</h1>
     <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 22px;">Version ${escape(version.version)}</p>
-    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">Hallo ${grußname},</p>
-    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">vielen Dank — Sie haben den Auftragsverarbeitungsvertrag (AVV) im Namen von <strong>${firma}</strong> akzeptiert.</p>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">${escape(grusszeile)},</p>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">${t(kunde, 'vielen Dank — du hast den Auftragsverarbeitungsvertrag (AVV) im Namen von', 'vielen Dank — Sie haben den Auftragsverarbeitungsvertrag (AVV) im Namen von')} <strong>${firma}</strong> akzeptiert.</p>
     <div style="margin:0 0 18px;padding:16px;background:#fafaf8;border:1px solid #ececea;border-radius:8px;font-size:13px;line-height:1.7;color:#2a2a2a;">
       <div><strong>Akzeptiert von:</strong> ${escape(akzeptiert_von || '—')}</div>
       <div><strong>Zeitpunkt:</strong> ${escape(datum)}</div>
       <div><strong>Version:</strong> ${escape(version.version)}</div>
     </div>
-    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">Ihre Kopie des Vertrags finden Sie im Anhang dieser E-Mail — bitte für Ihre Unterlagen aufbewahren.</p>
-    <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+    <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">${t(kunde, 'Deine Kopie des Vertrags findest du im Anhang dieser E-Mail — bitte für deine Unterlagen aufbewahren.', 'Ihre Kopie des Vertrags finden Sie im Anhang dieser E-Mail — bitte für Ihre Unterlagen aufbewahren.')}</p>
+    <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(kunde, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
   `;
   const html = brandedShell({ brand, contentHtml: content });
 
@@ -191,38 +202,43 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
 
 /* ─────────────────── Formular-Einladung an Kunde ─────────────────── */
 
-export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, customText, agentur, projekttyp }) {
+export async function sendFormularEinladung({ to, kunde, ansprechpartner, formularUrl, customText, agentur, projekttyp }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
-  const grußname = ansprechpartner || 'zusammen';
+  const k = kunde || { ansprechpartner };
+  const grusszeile = anrede(k);
   const isNeukunden = projekttyp === 'neukundengewinnung';
 
   const defaultIntro = isNeukunden
-    ? `wir freuen uns auf eure Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um euer Angebot, eure Zielgruppe und euer Unternehmen ein. Dauert etwa 10 Minuten.`
-    : `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`;
+    ? t(k, `wir freuen uns auf eure Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um euer Angebot, eure Zielgruppe und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
+            `wir freuen uns auf Ihre Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihr Angebot, Ihre Zielgruppe und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`)
+    : t(k, `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
+            `wir freuen uns auf Ihre Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihre offene Stelle, Ihre Benefits und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`);
   const intro = (customText || '').trim() || defaultIntro;
 
   const bullets = isNeukunden
     ? [
-        'Euer Produkt oder eure Dienstleistung',
-        'Eure Zielgruppe und was ihr besonders gut könnt',
-        'Logo + ein paar Produkt- oder Referenzbilder',
+        t(k, 'Euer Produkt oder eure Dienstleistung', 'Ihr Produkt oder Ihre Dienstleistung'),
+        t(k, 'Eure Zielgruppe und was ihr besonders gut könnt', 'Ihre Zielgruppe und was Sie besonders gut können'),
+        t(k, 'Logo + ein paar Produkt- oder Referenzbilder', 'Logo + ein paar Produkt- oder Referenzbilder'),
       ]
     : [
-        'Eure offene Stelle und was sie besonders macht',
+        t(k, 'Eure offene Stelle und was sie besonders macht', 'Ihre offene Stelle und was sie besonders macht'),
         'Benefits und Arbeitsumfeld',
-        'Logo + ein paar Fotos von euch',
+        t(k, 'Logo + ein paar Fotos von euch', 'Logo + ein paar Fotos von Ihnen'),
       ];
   const tipp = isNeukunden
-    ? `<strong>Tipp:</strong> Falls ihr eine bestehende Landingpage oder ein Angebots-PDF habt, könnt ihr die URL oder Datei oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`
-    : `<strong>Tipp:</strong> Falls ihr eine bestehende Stellenanzeige als URL oder PDF habt, könnt ihr sie oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`;
+    ? t(k, `<strong>Tipp:</strong> Falls ihr eine bestehende Landingpage oder ein Angebots-PDF habt, könnt ihr die URL oder Datei oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`,
+          `<strong>Tipp:</strong> Falls Sie eine bestehende Landingpage oder ein Angebots-PDF haben, können Sie die URL oder Datei oben im Formular einfügen — wir lesen sie automatisch aus, Sie passen nur noch an.`)
+    : t(k, `<strong>Tipp:</strong> Falls ihr eine bestehende Stellenanzeige als URL oder PDF habt, könnt ihr sie oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`,
+          `<strong>Tipp:</strong> Falls Sie eine bestehende Stellenanzeige als URL oder PDF haben, können Sie sie oben im Formular einfügen — wir lesen sie automatisch aus, Sie passen nur noch an.`);
   const subject = isNeukunden
-    ? 'Kurzes Briefing-Formular für eure Neukunden-Kampagne'
-    : 'Kurzes Briefing-Formular für eure Recruiting-Kampagne';
+    ? t(k, 'Kurzes Briefing-Formular für eure Neukunden-Kampagne', 'Kurzes Briefing-Formular für Ihre Neukunden-Kampagne')
+    : t(k, 'Kurzes Briefing-Formular für eure Recruiting-Kampagne', 'Kurzes Briefing-Formular für Ihre Recruiting-Kampagne');
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
-      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(grußname)},</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(grusszeile)},</p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n/g, '<br>')}</p>
       <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">Im Formular fragen wir ab:</p>
       <ul style="font-size:14px;line-height:1.7;color:#2a2a2a;margin:0 0 22px;padding-left:18px;">
@@ -242,7 +258,7 @@ export async function sendFormularEinladung({ to, ansprechpartner, formularUrl, 
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Hallo ${grußname},\n\n${intro}\n\nLink zum Formular: ${formularUrl}\n\nVielen Dank!\nEuer ${brand.name}-Team`;
+  const text = `${grusszeile},\n\n${intro}\n\nLink zum Formular: ${formularUrl}\n\nVielen Dank!\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
@@ -794,17 +810,17 @@ export async function sendReaktivierungsMail({ to, replyTo, kunde, job, ansprech
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
-  const grußname = ansprechpartner || kunde?.ansprechpartner || 'zusammen';
+  const k = kunde || { ansprechpartner };
   const stelle = job?.stelle || 'eure offene Stelle';
 
   // Standard-Text falls Mitarbeiter nichts eintippt
-  const introText = (customText || '').trim() || `Hallo ${grußname},
+  const introText = (customText || '').trim() || `${anrede(k)},
 
-wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für deine offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
+wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
 
 Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
 
-Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich): ${calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl}`;
+${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich):', 'Sollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich):')} ${calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl}`;
 
   // Nur Bilder (keine Videos) für Image-Embed, max. 6 Stück
   const bildCreatives = (creatives || []).filter(c => c.typ !== 'video' && c.bild_url).slice(0, 6);
@@ -873,16 +889,22 @@ export async function sendKampagneLiveMail({ to, kunde, job, ansprechpartner, cu
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
-  const grußname = ansprechpartner || kunde?.ansprechpartner || 'zusammen';
-  const stelle = job?.stelle || 'deine offene Stelle';
+  const k = kunde || { ansprechpartner };
+  const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
 
-  const introText = (customText || '').trim() || `Hallo ${grußname},
+  const introText = (customText || '').trim() || t(k, `${anrede(k)},
 
 gute Neuigkeiten — deine Recruiting-Kampagne für ${stelle} ist ab jetzt online! 🚀
 
 Ab sofort erreichen wir potenzielle Bewerber mit deinen Anzeigen. Die ersten Bewerbungen können in den nächsten Tagen reinkommen — du wirst pro Bewerbung automatisch per Mail benachrichtigt.
 
-Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`;
+Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`, `${anrede(k)},
+
+gute Neuigkeiten — Ihre Recruiting-Kampagne für ${stelle} ist ab jetzt online! 🚀
+
+Ab sofort erreichen wir potenzielle Bewerber mit Ihren Anzeigen. Die ersten Bewerbungen können in den nächsten Tagen reinkommen — Sie werden pro Bewerbung automatisch per Mail benachrichtigt.
+
+Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`);
 
   const introHtml = introText
     .split(/\n\s*\n/)
@@ -892,7 +914,7 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
   const bewerbungenButton = bewerbungenUrl ? `
     <tr><td align="center" style="padding:18px 32px 8px;">
       <a href="${escape(bewerbungenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">📋 Zur Bewerberliste</a>
-      <p style="font-size:11px;color:#9a9994;margin:10px 0 0;">Der Link ist persönlich und für ${escape(kunde?.firmenname || 'euch')} gültig.</p>
+      <p style="font-size:11px;color:#9a9994;margin:10px 0 0;">Der Link ist persönlich und für ${escape(kunde?.firmenname || t(k, 'euch', 'Sie'))} gültig.</p>
     </td></tr>` : '';
 
   const content = `
@@ -902,7 +924,7 @@ Du kannst alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, 
     </td></tr>
     ${bewerbungenButton}
     <tr><td style="padding:14px 32px 24px;">
-      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten — wir sind für dich da.</p>
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten — ${t(k, 'wir sind für dich da.', 'wir sind für Sie da.')}</p>
       <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>Euer ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
@@ -1039,30 +1061,33 @@ export async function sendTeamAlertMail({ subject, headline, lead, linkUrl, link
    Kurze Du-Form-Nachfrage wenn der Kunde noch nicht auf die Entwuerfe
    reagiert hat. Enthaelt den Review-Link. Absender + BCC + Reply-To wie
    bei den anderen Kunden-Mails. */
-export async function sendEntwurfReminder({ to, ansprechpartner, reviewUrl, customText, agentur }) {
+export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUrl, customText, agentur }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
-  const gruss = ansprechpartner || 'zusammen';
+  const k = kunde || { ansprechpartner };
+  const gruss = anrede(k);
 
-  const defaultText = `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`;
+  const defaultText = t(k,
+    `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`,
+    `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Hatten Sie schon Gelegenheit reinzuschauen?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback:`);
   const intro = (customText || '').trim() || defaultText;
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔔 Kurze Erinnerung</p>
-      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(gruss)},</p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">${escape(intro).replace(/\n\n/g, '</p><p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">').replace(/\n/g, '<br>')}</p>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
       <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Entwürfe ansehen &amp; freigeben</a>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
-      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen melde dich gerne jederzeit!</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(k, 'Bei Fragen melde dich gerne jederzeit!', 'Bei Fragen melden Sie sich gerne jederzeit!')}</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Dein', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Hallo ${gruss},\n\n${intro}\n\nEntwürfe ansehen & freigeben: ${reviewUrl}\n\nBei Fragen melde dich gerne jederzeit!\nDein ${brand.name}-Team`;
+  const text = `${gruss},\n\n${intro}\n\nEntwürfe ansehen & freigeben: ${reviewUrl}\n\n${t(k, 'Bei Fragen melde dich gerne jederzeit!', 'Bei Fragen melden Sie sich gerne jederzeit!')}\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
 
   const recipients = Array.isArray(to) ? to : [to];
   const bccList = getInternalBcc([], recipients);
@@ -1093,13 +1118,14 @@ export async function sendEntwurfReminder({ to, ansprechpartner, reviewUrl, cust
 /* ════════════════════ Termin-Einladung — Kunden-Mail ════════════════════
    Freundliche Du-Form-Einladung mit Calendly-Link, Branding + BCC. */
 export async function sendTerminEinladung({
-  to, ansprechpartner, agentur,
+  to, kunde, ansprechpartner, agentur,
   subject, calLink, calLabel = 'Termin auswählen',
   customText, personLabel,
 }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
-  const gruss = ansprechpartner || 'zusammen';
+  const k = kunde || { ansprechpartner };
+  const gruss = anrede(k);
 
   const bodyHtml = String(customText || '')
     .split(/\n\s*\n/)
@@ -1109,7 +1135,7 @@ export async function sendTerminEinladung({
   const content = `
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📅 Termin-Einladung${personLabel ? ` · Bei ${escape(personLabel)}` : ''}</p>
-      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(gruss)},</p>
       ${bodyHtml}
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
@@ -1117,11 +1143,11 @@ export async function sendTerminEinladung({
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen einfach auf diese Mail antworten.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Dein', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Hallo ${gruss},\n\n${customText || ''}\n\nTermin auswählen: ${calLink}\n\nBei Fragen einfach antworten.\nDein ${brand.name}-Team`;
+  const text = `${gruss},\n\n${customText || ''}\n\nTermin auswählen: ${calLink}\n\nBei Fragen einfach antworten.\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
 
   const recipients = Array.isArray(to) ? to : [to];
   const bccList = getInternalBcc([], recipients);
@@ -1150,20 +1176,21 @@ export async function sendTerminEinladung({
    Erste Einrichtung eines Portal-Accounts: der Kunde bekommt einen Link
    mit Einladungs-Token, ueber den er sein Passwort setzt. Danach kann er
    sich mit E-Mail + Passwort einloggen. */
-export async function sendPortalEinladung({ to, name, portalUrl, setupUrl, kundenname, agentur }) {
+export async function sendPortalEinladung({ to, kunde, name, portalUrl, setupUrl, kundenname, agentur }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
-  const gruss = name || 'zusammen';
+  const k = kunde || { ansprechpartner: name };
+  const gruss = anrede(k);
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
-      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔑 Dein Zugang zum Kunden-Dashboard</p>
-      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">Hallo ${escape(gruss)},</p>
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">🔑 ${t(k, 'Dein', 'Ihr')} Zugang zum Kunden-Dashboard</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(gruss)},</p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">
-        wir haben für dich bei <strong>${escape(kundenname || '')}</strong> einen Zugang zum Kampagnen-Dashboard eingerichtet. Dort siehst du alle Leads, kannst Notizen hinzufügen und die Pipeline pflegen.
+        ${t(k, 'wir haben für dich bei', 'wir haben für Sie bei')} <strong>${escape(kundenname || '')}</strong> ${t(k, 'einen Zugang zum Kampagnen-Dashboard eingerichtet. Dort siehst du alle Leads, kannst Notizen hinzufügen und die Pipeline pflegen.', 'einen Zugang zum Kampagnen-Dashboard eingerichtet. Dort sehen Sie alle Leads, können Notizen hinzufügen und die Pipeline pflegen.')}
       </p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 18px;">
-        Klick auf den Button unten, um dein Passwort zu setzen. Danach kannst du dich jederzeit mit deiner E-Mail-Adresse (<code>${escape(to)}</code>) und deinem Passwort einloggen.
+        ${t(k, 'Klick auf den Button unten, um dein Passwort zu setzen. Danach kannst du dich jederzeit mit deiner E-Mail-Adresse', 'Klicken Sie auf den Button unten, um Ihr Passwort zu setzen. Danach können Sie sich jederzeit mit Ihrer E-Mail-Adresse')} (<code>${escape(to)}</code>) ${t(k, 'und deinem Passwort einloggen.', 'und Ihrem Passwort einloggen.')}
       </p>
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
@@ -1175,7 +1202,7 @@ export async function sendPortalEinladung({ to, name, portalUrl, setupUrl, kunde
       <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
     </td></tr>`;
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Hallo ${gruss},\n\nwir haben für dich einen Zugang zum Kampagnen-Dashboard eingerichtet.\n\nPasswort setzen: ${setupUrl}\n\nSpaeter kannst du dich jederzeit mit deiner E-Mail-Adresse (${to}) und deinem Passwort einloggen.\n\nDein ${brand.name}-Team`;
+  const text = `${gruss},\n\n${t(k, 'wir haben für dich einen Zugang zum Kampagnen-Dashboard eingerichtet.', 'wir haben für Sie einen Zugang zum Kampagnen-Dashboard eingerichtet.')}\n\nPasswort setzen: ${setupUrl}\n\n${t(k, `Spaeter kannst du dich jederzeit mit deiner E-Mail-Adresse (${to}) und deinem Passwort einloggen.`, `Spaeter koennen Sie sich jederzeit mit Ihrer E-Mail-Adresse (${to}) und Ihrem Passwort einloggen.`)}\n\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
 
   const recipients = Array.isArray(to) ? to : [to];
   const response = await fetch(RESEND_API, {
@@ -1186,7 +1213,7 @@ export async function sendPortalEinladung({ to, name, portalUrl, setupUrl, kunde
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: `Dein Zugang zum ${brand.name}-Portal`,
+      subject: t(k, `Dein Zugang zum ${brand.name}-Portal`, `Ihr Zugang zum ${brand.name}-Portal`),
       html, text,
     }),
   });
@@ -1201,11 +1228,13 @@ export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, custom
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
-  const name = ansprechpartner || 'dich';
+  const k = kunde || { ansprechpartner };
 
   const introText = customText && customText.trim()
     ? customText.trim()
-    : `Hallo ${name},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`;
+    : t(k,
+        `${anrede(k)},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`,
+        `${anrede(k)},\n\nwir müssen Sie kurz informieren: Ihre Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — Ihnen entsteht kein Nachteil.`);
 
   const introHtml = introText
     .split(/\n\s*\n/)
@@ -1219,10 +1248,10 @@ export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, custom
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Rückfragen einfach auf diese Mail antworten.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Danke für deine Geduld!<br>Dein ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Danke für deine Geduld!', 'Danke für Ihre Geduld!')}<br>${t(k, 'Dein', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `${introText}\n\nDanke für deine Geduld!\nDein ${brand.name}-Team`;
+  const text = `${introText}\n\n${t(k, 'Danke für deine Geduld!', 'Danke für Ihre Geduld!')}\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

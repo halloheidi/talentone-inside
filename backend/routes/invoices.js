@@ -3,6 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { anrede, t } from '../anrede.js';
 import { getDocumentPdf, ensureFinalized } from '../easybill.js';
 import {
   createSetupInvoice,
@@ -243,7 +244,8 @@ router.get('/:id/email-preview', async (req, res) => {
     let kunde = null;
     if (inv.customer_id) {
       const { data } = await supabase.from('talentone_kunden')
-        .select('firmenname, ansprechpartner, email').eq('id', inv.customer_id).maybeSingle();
+        .select('firmenname, ansprechpartner, email, anrede_form, anrede_titel, nachname')
+        .eq('id', inv.customer_id).maybeSingle();
       kunde = data || null;
     }
 
@@ -253,6 +255,8 @@ router.get('/:id/email-preview', async (req, res) => {
     const tplMap = Object.fromEntries((templates || []).map(t => [t.key, t.text]));
 
     const ctx = {
+      // {{anrede}} = "Hallo Marc" / "Hallo Herr Petersen" — je nach Kunden-Anrede.
+      anrede:          anrede(kunde),
       ansprechpartner: kunde?.ansprechpartner || 'zusammen',
       firma:           kunde?.firmenname || '',
       period_label:    inv.label || 'Ihre Kampagne',
@@ -262,7 +266,11 @@ router.get('/:id/email-preview', async (req, res) => {
 
     res.json({
       subject: fill(tplMap.invoice_email_subject || 'Ihre Rechnung — {{period_label}}'),
-      body:    fill(tplMap.invoice_email_body    || `Hallo ${ctx.ansprechpartner},\n\nanbei erhalten Sie unsere Rechnung als PDF-Anhang.\n\nHerzliche Grüße`),
+      // Fallback in beiden Anrede-Fassungen — vorher stand hier "Hallo <Vorname>"
+      // (Du-Gruss) + "erhalten Sie" (Sie-Text), also eine Mischform.
+      body:    fill(tplMap.invoice_email_body || t(kunde,
+        `{{anrede}},\n\nanbei erhältst du unsere Rechnung als PDF-Anhang.\n\nHerzliche Grüße`,
+        `{{anrede}},\n\nanbei erhalten Sie unsere Rechnung als PDF-Anhang.\n\nHerzliche Grüße`)),
       to:      kunde?.email || null,
       firma:   ctx.firma,
       already_sent: !!inv.sent_at,
