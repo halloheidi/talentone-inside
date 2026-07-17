@@ -9,7 +9,7 @@
 import { fetchAsBuffer, uploadBuffer, safeFilenameStem } from './storage.js';
 import { supabase } from './supabase.js';
 import { randomUUID } from 'node:crypto';
-import sharp from 'sharp';
+import { normalizeImageForOpenAI } from './imageops.js';
 
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
 const FALLBACK_BUCKET = 'talentone-refphotos';
@@ -110,21 +110,9 @@ export async function generateVerbesserung({ referenzbildId, optionen, hintergru
   const prompt = buildPrompt(optionen, { hintergrund_setting, atmosphaere_setting });
   const { buffer } = await fetchAsBuffer(original.bild_url);
 
-  // OpenAI /images/edits akzeptiert nur PNG/JPEG/WebP in RGB, <50MB, max 4096px.
-  // Referenzbilder koennen HEIC (iPhone), CMYK-JPEGs oder sehr gross sein und werden
-  // dann mit "invalid_image_file" abgelehnt. Deshalb vor dem Call per Sharp normalisieren:
-  // EXIF-Rotation anwenden, nach sRGB konvertieren, auf max 2048px verkleinern, als PNG re-encoden.
-  let pngBuffer;
-  try {
-    pngBuffer = await sharp(buffer, { failOn: 'none' })
-      .rotate()
-      .toColourspace('srgb')
-      .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true })
-      .png()
-      .toBuffer();
-  } catch (e) {
-    throw new Error(`Bild konnte nicht verarbeitet werden (nicht unterstuetztes Format, z.B. HEIC?): ${e.message}`);
-  }
+  // Normalisierung (HEIC/CMYK/zu gross -> sRGB-PNG) liegt in imageops.js und
+  // wird von der Creative-Generierung genauso genutzt — siehe dort.
+  const norm = await normalizeImageForOpenAI(buffer, { label: 'Referenzbild' });
 
   const form = new FormData();
   form.append('model', 'gpt-image-2');
@@ -132,7 +120,7 @@ export async function generateVerbesserung({ referenzbildId, optionen, hintergru
   form.append('size', '1024x1024');
   form.append('quality', 'high');
   form.append('n', '1');
-  form.append('image[]', bufferToFile(pngBuffer, 'original.png', 'image/png'));
+  form.append('image[]', bufferToFile(norm.buffer, `original.${norm.ext}`, norm.contentType));
 
   const response = await fetch(OPENAI_EDITS_API, {
     method: 'POST',

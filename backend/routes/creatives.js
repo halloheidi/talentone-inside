@@ -10,6 +10,7 @@ import {
 } from '../imagegen.js';
 import { uploadBuffer, extFromMime, safeFilenameStem } from '../storage.js';
 import { generateOverlays } from '../overlay-renderer.js';
+import { UnsupportedImageError } from '../imageops.js';
 
 const router = Router();
 
@@ -22,8 +23,19 @@ const VALID_VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime']);
    einen klaren Fehler anzuzeigen statt endlos zu warten. */
 const lastGenError = new Map(); // job_id -> { error, friendly, ts }
 
+// Nimmt einen Error ODER einen String — die Aufrufer unten uebergeben beides.
 function friendlyOpenAIError(raw) {
-  const s = String(raw || '').toLowerCase();
+  // Unser eigener Normalisierungs-Fehler bringt die Nutzer-Meldung schon mit.
+  if (raw instanceof UnsupportedImageError) return raw.userMessage;
+
+  const s = String(raw?.message || raw || '').toLowerCase();
+  if (s.includes('invalid_image') || s.includes('invalid image') || s.includes('unsupported image')) {
+    // Sollte nach der Normalisierung in imageops.js nicht mehr auftreten:
+    // HEIC/CMYK/Uebergroesse werden vor dem Upload abgefangen. Wenn OpenAI das
+    // Bild trotzdem ablehnt, ist die Datei selbst defekt — "nochmal probieren"
+    // waere hier ein falscher Rat.
+    return 'Ein Referenzbild wurde von OpenAI abgelehnt. Format und Größe werden vor dem Upload automatisch konvertiert — die Datei ist daher vermutlich beschädigt. Bitte das Referenzbild austauschen.';
+  }
   if (s.includes('billing_hard_limit_reached') || s.includes('billing limit') || s.includes('billing_hard_limit')) {
     return 'OpenAI-Budget aufgebraucht — bitte im Dashboard das Spending-Limit erhöhen (platform.openai.com → Settings → Limits).';
   }
@@ -46,13 +58,13 @@ function friendlyOpenAIError(raw) {
     return 'Bild wurde generiert, konnte aber nicht gespeichert werden — Storage-Bucket prüfen.';
   }
   // Fallback: erste paar Worte der Original-Meldung anzeigen
-  return `Fehler bei der Bildgenerierung: ${String(raw || '').slice(0, 180)}`;
+  return `Fehler bei der Bildgenerierung: ${String(raw?.message || raw || '').slice(0, 180)}`;
 }
 
 export function recordGenError(jobId, rawError) {
   if (!jobId) return;
   lastGenError.set(jobId, {
-    error: String(rawError || '').slice(0, 500),
+    error: String(rawError?.message || rawError || '').slice(0, 500),
     friendly: friendlyOpenAIError(rawError),
     ts: Date.now(),
   });
@@ -313,11 +325,11 @@ router.post('/generate', async (req, res) => {
         }
       } catch (err) {
         console.error('[generate-bg overlay]', err);
-        recordGenError(job_id, err.message || String(err));
+        recordGenError(job_id, err);
       }
     })().catch(err => {
       console.error('[generate-bg overlay uncaught]', err);
-      recordGenError(job_id, err.message || String(err));
+      recordGenError(job_id, err);
     });
     return;
   }
@@ -354,11 +366,11 @@ router.post('/generate', async (req, res) => {
       }
     } catch (err) {
       console.error(`[generate-bg] Fehler:`, err.message);
-      recordGenError(job_id, err.message);
+      recordGenError(job_id, err);
     }
   })().catch(err => {
     console.error('[generate-bg] uncaught:', err);
-    recordGenError(job_id, err.message || String(err));
+    recordGenError(job_id, err);
   });
 });
 

@@ -7,7 +7,7 @@ import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
-import { extendTo9x16 } from './imageops.js';
+import { extendTo9x16, normalizeImageForOpenAI } from './imageops.js';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
@@ -573,20 +573,39 @@ export async function deleteFromStorage(publicUrl) {
 }
 
 // Lädt URLs nacheinander als Buffer + Mime und liefert sie als Liste — isLogo wird durchgereicht!
+//
+// Jedes Bild wird direkt hier fuer OpenAI normalisiert (HEIC/CMYK/zu gross ->
+// sRGB-PNG, max 2048px). Das ist bewusst der einzige Ort dafuer: Logo, Foto-
+// Overlay, Regenerate und Varianten laufen alle ueber diese Funktion.
+//
+// Zwei Fehlerarten, bewusst unterschiedlich behandelt:
+//  - URL nicht erreichbar (verwaiste Storage-Referenz) -> ueberspringen, wie bisher.
+//  - Bild da, aber unlesbar -> UnsupportedImageError hochreichen. Ein defektes
+//    Logo darf nicht dazu fuehren, dass stillschweigend ohne Logo generiert wird.
 async function loadReferenceImages(refs) {
   const out = [];
   for (const ref of refs) {
     if (!ref?.url) continue;
+    let roh;
     try {
-      const { buffer, contentType } = await fetchAsBuffer(ref.url);
-      out.push({
-        buffer, contentType,
-        name: ref.name || 'ref',
-        isLogo: !!ref.isLogo,
-      });
+      roh = await fetchAsBuffer(ref.url);
     } catch (err) {
+      // Nicht erreichbar -> wie bisher ueberspringen (kein Nutzerfehler).
       console.warn(`[ref-fetch] ${ref.url}: ${err.message}`);
+      continue;
     }
+    const label = ref.isLogo ? 'Firmenlogo' : (ref.name || 'Referenzbild');
+    const norm = await normalizeImageForOpenAI(roh.buffer, { label });
+    if (roh.contentType !== norm.contentType) {
+      console.log(`[ref-normalize] ${label}: ${roh.contentType} -> ${norm.contentType}`);
+    }
+    out.push({
+      buffer: norm.buffer,
+      contentType: norm.contentType,
+      ext: norm.ext,
+      name: ref.name || 'ref',
+      isLogo: !!ref.isLogo,
+    });
   }
   return out;
 }
@@ -626,8 +645,8 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     form.append('quality', 'high');
     form.append('n', '1');
     refs.forEach((r) => {
-      const ext = r.contentType.includes('png') ? 'png' : (r.contentType.includes('webp') ? 'webp' : 'jpg');
-      const fileName = r.isLogo ? `firmenlogo.${ext}` : (mode === 'foto' ? `hintergrundfoto.${ext}` : `person.${ext}`);
+      // Nach normalizeImageForOpenAI ist jedes Ref ein sRGB-PNG.
+      const fileName = r.isLogo ? `firmenlogo.${r.ext}` : (mode === 'foto' ? `hintergrundfoto.${r.ext}` : `person.${r.ext}`);
       form.append('image[]', bufferToFile(r.buffer, fileName, r.contentType));
     });
     response = await fetch(OPENAI_EDITS_API, {
