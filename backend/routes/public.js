@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
-import { normalizeKriterien, kundenVorqualSpalten } from '../kriterien.js';
+import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern } from '../kriterien.js';
 import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -1468,6 +1468,70 @@ router.post('/portal/:token/creative/:id/ueberarbeitung', async (req, res) => {
   })();
 
   res.json({ ok: true, review: saved });
+});
+
+
+/* PATCH /api/public/portal/:token/job/:jobId/kriterien
+   Der Kunde pflegt "Das ist uns wichtig" selbst. Invariante wie intern:
+   jedes Kriterium referenziert genau ein Vorqual-Feld (Neuland legt eins an).
+   Loest interne Benachrichtigung + Projekt-Kommentar aus. */
+router.patch('/portal/:token/job/:jobId/kriterien', async (req, res) => {
+  try {
+    const kunde = await loadKundeByPortalToken(req.params.token);
+    if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+    const gate = await requirePortalAccess(kunde, req);
+    if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
+
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, stelle, kunde_id, vorqualifizierung, vorqualifizierung_felder, wichtige_kriterien')
+      .eq('id', req.params.jobId).maybeSingle();
+    if (!job || job.kunde_id !== kunde.id) {
+      return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+    }
+
+    const vorher = normalizeKriterien(job.wichtige_kriterien);
+    const sync = syncKriterienMitFeldern({
+      kriterien: req.body?.kriterien,
+      felder: effektiveVorqualFelder(job),
+    });
+
+    const { data: updated, error } = await supabase.from('talentone_jobs')
+      .update({ wichtige_kriterien: sync.kriterien, vorqualifizierung_felder: sync.felder })
+      .eq('id', job.id).select('id, wichtige_kriterien, vorqualifizierung_felder').single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Intern benachrichtigen (best-effort — nie den Kunden blockieren)
+    (async () => {
+      try {
+        const { sendKriterienGeaendertNotiz } = await import('../mail.js');
+        await sendKriterienGeaendertNotiz({
+          kunde, job, vorher, nachher: sync.kriterien,
+          geaendert_von: gate.session?.email || kunde.ansprechpartner || 'Kunde',
+        });
+      } catch (e) { console.warn('[portal/kriterien mail]', e.message); }
+
+      try {
+        const { data: projekt } = await supabase.from('talentone_projekte')
+          .select('id').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt) {
+          const liste = sync.kriterien
+            .map(k => `${k.pflicht ? '❗ ' : ''}${k.kriterium}${k.anforderung ? ` — ${k.anforderung}` : ''}`)
+            .join(' · ') || '(keine)';
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor: 'Kunde (Portal)',
+            text: `⭐ Prüf-Kriterien angepasst für „${job.stelle || 'Stelle'}": ${liste}`,
+          });
+        }
+      } catch (e) { console.warn('[portal/kriterien kommentar]', e.message); }
+    })().catch(e => console.warn('[portal/kriterien bg]', e.message));
+
+    res.json({ kriterien: updated.wichtige_kriterien, felder: updated.vorqualifizierung_felder });
+  } catch (err) {
+    console.error('[portal/kriterien]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

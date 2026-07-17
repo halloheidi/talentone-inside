@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import WoraufAchtenBox from './WoraufAchtenBox.jsx';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
 
@@ -166,7 +167,7 @@ function downloadCsv(filename, rows) {
 }
 
 /* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
-function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
+function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, wichtigeKriterien = [], kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
   if (!bewerbung) return null;
   const n = notiz || {};
   const fb = feedback || {};
@@ -187,6 +188,9 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
         </header>
 
         <div className="slideover-body">
+          {/* Worauf achten — direkt sichtbar, damit der Caller es im Gespräch hat */}
+          <WoraufAchtenBox kriterien={wichtigeKriterien} />
+
           {/* Kontakt + Tel-Button */}
           <section>
             <h3>Kontakt</h3>
@@ -771,6 +775,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
           notiz={data.notizen[selected.id]}
           feedback={data.feedback[selected.id]}
           vorqualFelder={vorqualFelder}
+          wichtigeKriterien={Array.isArray(job?.wichtige_kriterien) ? job.wichtige_kriterien : []}
           kundenname={kunde?.firmenname}
           kundeJobs={kundeJobs}
           currentJobId={job.id}

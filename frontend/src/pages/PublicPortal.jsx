@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
+import KriterienEditor from '../components/KriterienEditor.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -305,7 +306,10 @@ function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbunge
           anfragen={anfragen} onReload={onReload}
         />
       ) : (
-        <BewerbungenSection job={job} bewerbungen={bewerbungen} primary={primary} primaryInk={primaryInk} />
+        <>
+          <KriterienPortalSection job={job} token={token} primary={primary} primaryInk={primaryInk} onReload={onReload} />
+          <BewerbungenSection job={job} bewerbungen={bewerbungen} primary={primary} primaryInk={primaryInk} />
+        </>
       )}
 
       {creatives.length > 0 && (
@@ -315,6 +319,93 @@ function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbunge
         />
       )}
     </section>
+  );
+}
+
+
+/* ══════════════════════ "Das ist uns wichtig" (Kunde pflegt die Prüf-Kriterien) ══════════════════════ */
+
+function KriterienPortalSection({ job, token, primary, primaryInk, onReload }) {
+  const [entwurf, setEntwurf] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const kriterien = Array.isArray(job.wichtige_kriterien) ? job.wichtige_kriterien : [];
+  const felder = Array.isArray(job.vorqual_spalten) ? job.vorqual_spalten.map(s => ({ name: s.name })) : [];
+
+  // Nur relevant, wenn wir fuer diese Stelle wirklich vorqualifizieren.
+  if (!job.vorqualifizierung) return null;
+
+  async function speichern() {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/public/portal/${token}/job/${job.id}/kriterien`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ kriterien: entwurf }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Speichern fehlgeschlagen.');
+      setEntwurf(null);
+      setMsg('Gespeichert — danke! Wir prüfen das ab sofort bei jedem Bewerber.');
+      setTimeout(() => setMsg(''), 4000);
+      onReload?.();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, padding: 18, marginBottom: 14 }}>
+      <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>⭐ Das ist uns wichtig</h2>
+      <p style={{ margin: '0 0 12px', fontSize: 13, color: '#5a5955' }}>
+        Worauf sollen wir bei der telefonischen Vorqualifizierung achten? Diese Punkte prüfen wir
+        bei jedem Bewerber und tragen das Ergebnis in die Liste unten ein.
+      </p>
+
+      {entwurf == null ? (
+        <>
+          {kriterien.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#9a9994', margin: '0 0 12px' }}>
+              Noch nichts festgelegt — sag uns gern, worauf es dir ankommt.
+            </p>
+          ) : (
+            <ul style={{ margin: '0 0 12px', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+              {kriterien.map((k, i) => (
+                <li key={i} style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                  <span style={{ width: 14 }}>{k.pflicht ? '❗' : '·'}</span>
+                  <span>
+                    <strong>{k.kriterium}</strong>
+                    {k.anforderung && <span style={{ color: '#5a5955' }}> — {k.anforderung}</span>}
+                    {k.pflicht && <span style={{ color: '#9a9994', fontSize: 11 }}> (Pflicht)</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button onClick={() => setEntwurf(kriterien.map(k => ({ ...k })))}
+            style={{ background: primary, color: primaryInk, border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+            {kriterien.length ? 'Anpassen' : 'Kriterien festlegen'}
+          </button>
+          {msg && <div style={{ marginTop: 10, fontSize: 13, color: '#166534' }}>{msg}</div>}
+        </>
+      ) : (
+        <>
+          <KriterienEditor kriterien={entwurf} felder={felder} onChange={setEntwurf} disabled={busy} />
+          {err && <div style={{ marginTop: 10, color: '#b91c1c', fontSize: 13 }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button onClick={speichern} disabled={busy}
+              style={{ background: primary, color: primaryInk, border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+              {busy ? 'Speichere…' : 'Speichern'}
+            </button>
+            <button onClick={() => { setEntwurf(null); setErr(''); }} disabled={busy}
+              style={{ background: '#f1f1ee', border: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}>
+              Abbrechen
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

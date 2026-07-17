@@ -5,6 +5,7 @@ import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
 import CropModal from '../../components/CropModal.jsx';
 import BewerbungenTable from '../../components/BewerbungenTable.jsx';
+import KriterienPanel from '../../components/KriterienPanel.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
 
 const TYPE_META = {
@@ -499,6 +500,7 @@ export default function JobFunnel() {
       {!(extern && externUrl.trim()) && (
         <fieldset className="formular-section bewerbungen-section bewerbungen-fullwidth">
           <legend>Eingegangene Bewerbungen</legend>
+          <KriterienPanel job={job} onJobUpdated={() => reload?.()} />
           <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
           <BewerbungenTable
             job={job}

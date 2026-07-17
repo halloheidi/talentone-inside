@@ -6,7 +6,8 @@ import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
-import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
+import { VORQUAL_STANDARD, effektiveVorqualFelder } from '../vorqualifizierung.js';
+import { syncKriterienMitFeldern, normalizeKriterien } from '../kriterien.js';
 import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 
 const router = Router();
@@ -205,7 +206,7 @@ const ALLOWED_JOB_FIELDS = [
   'stelle', 'region', 'gehalt', 'benefits', 'besonderheiten',
   'reisebereitschaft', 'quereinsteiger', 'eingabe_methode', 'url',
   'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
-  'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder',
+  'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder', 'wichtige_kriterien',
   // Projekttyp „Neukundengewinnung" (Migration 021):
   'projekttyp', 'neukunden_daten',
   // Arbeitshinweise-Banner (Migration 023)
@@ -232,6 +233,20 @@ router.patch('/:id', async (req, res) => {
       ? cur.vorqualifizierung_felder.filter(f => f && f.name)
       : [];
     if (curFelder.length === 0) patch.vorqualifizierung_felder = VORQUAL_STANDARD;
+  }
+
+  // Invariante: jedes Kriterium referenziert genau EIN Vorqual-Feld.
+  // "Führerschein B" wird auf das bestehende Feld "Führerschein" gezogen (keine
+  // Doppel-Spalte); echtes Neuland ("Schwindelfreiheit") legt ein Feld an.
+  if (patch.wichtige_kriterien !== undefined) {
+    const { data: cur } = await supabase.from('talentone_jobs')
+      .select('vorqualifizierung, vorqualifizierung_felder').eq('id', req.params.id).maybeSingle();
+    const basisFelder = patch.vorqualifizierung_felder !== undefined
+      ? patch.vorqualifizierung_felder
+      : effektiveVorqualFelder({ ...cur, vorqualifizierung: patch.vorqualifizierung ?? cur?.vorqualifizierung });
+    const sync = syncKriterienMitFeldern({ kriterien: patch.wichtige_kriterien, felder: basisFelder });
+    patch.wichtige_kriterien = sync.kriterien;
+    patch.vorqualifizierung_felder = sync.felder;
   }
 
   const { data, error } = await supabase
@@ -470,6 +485,129 @@ router.post('/:id/send-creative-auftrag', async (req, res) => {
   } catch (err) {
     console.error('[send-creative-auftrag]', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+/* POST /api/jobs/:id/kriterien-vorschlag
+   KI-Extraktion "Worauf achten wir?" aus vorhandenen Daten (Stelle, Briefing,
+   Benefits, Besonderheiten, KO-Kriterien aus dem Funnel). Matcht die Vorschlaege
+   fuzzy gegen die bestehenden Vorqual-Felder — nur echtes Neuland legt ein
+   neues Feld an (Invariante: jedes Kriterium = genau ein Feld).
+   Speichert NICHT — der Nutzer bestaetigt im Editor. */
+router.post('/:id/kriterien-vorschlag', async (req, res) => {
+  try {
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('*').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('firmenname, branche').eq('id', job.kunde_id).maybeSingle();
+    const { data: funnel } = await supabase.from('talentone_funnels')
+      .select('screens').eq('job_id', job.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+    // KO-Kriterien aus dem Funnel einsammeln (Antwort-Optionen mit ko: true)
+    const koAntworten = [];
+    for (const s of (funnel?.screens || [])) {
+      for (const o of (Array.isArray(s?.options) ? s.options : [])) {
+        if (o?.ko && o?.text) koAntworten.push(`${s.text || s.headline || 'Frage'}: "${o.text}"`);
+      }
+    }
+
+    const felder = effektiveVorqualFelder(job);
+    const feldNamen = felder.map(f => f.name);
+    const briefing = job.formdata_komplett && typeof job.formdata_komplett === 'object'
+      ? JSON.stringify(job.formdata_komplett).slice(0, 2000) : '';
+
+    const prompt = `Du hilfst einem Recruiting-Team bei der Telefon-Vorqualifizierung.
+Leite aus den Daten ab, WORAUF bei Bewerbern fuer diese Stelle besonders zu achten ist.
+
+Stelle: ${job.stelle || '-'}
+Region: ${job.region || '-'}
+Branche: ${kunde?.branche || '-'}
+Gehalt: ${job.gehalt || '-'}
+Benefits: ${Array.isArray(job.benefits) ? job.benefits.join(', ') : '-'}
+Besonderheiten: ${job.besonderheiten || '-'}
+${koAntworten.length ? `Bekannte KO-Kriterien aus dem Funnel:\n- ${koAntworten.join('\n- ')}` : ''}
+${briefing ? `Briefing-Daten (Auszug): ${briefing}` : ''}
+
+Es gibt bereits diese Pruef-Felder: ${feldNamen.join(', ') || '(keine)'}
+
+Regeln:
+- Ordne jedes Kriterium WENN MOEGLICH einem der vorhandenen Felder zu (Feldname exakt uebernehmen).
+  Beispiel: "Fuehrerschein Klasse B" -> feld "Fuehrerschein", anforderung "Klasse B".
+- Nur wenn wirklich kein Feld passt, gib einen neuen, kurzen Feldnamen an (z. B. "Schwindelfreiheit").
+- anforderung = die konkrete Erwartung, kurz (z. B. "mind. 3 Jahre", "Klasse B", "gut").
+- pflicht = true nur bei echten KO-Punkten (ohne das geht es nicht).
+- Maximal 6 Kriterien, die wichtigsten zuerst.
+
+NUR JSON, keine Backticks:
+{ "kriterien": [ { "feld": "...", "anforderung": "...", "pflicht": true } ] }`;
+
+    const data = await callClaudeWithRetry({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 800,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const parsed = parseJsonContent(data);
+    const roh = Array.isArray(parsed?.kriterien) ? parsed.kriterien : [];
+
+    // Fuzzy auf bestehende Felder ziehen + Invariante herstellen
+    const sync = syncKriterienMitFeldern({
+      kriterien: roh.map(k => ({
+        kriterium: k?.feld ?? k?.kriterium ?? '',
+        anforderung: k?.anforderung ?? null,
+        pflicht: !!k?.pflicht,
+      })),
+      felder,
+    });
+
+    // Welche Felder waeren neu? (Transparenz im Editor)
+    const neueFelder = sync.felder.filter(f => !feldNamen.includes(f.name)).map(f => f.name);
+    res.json({ kriterien: sync.kriterien, felder: sync.felder, neue_felder: neueFelder });
+  } catch (err) {
+    console.error('[jobs/kriterien-vorschlag]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/kriterien-anfrage — "Kunden fragen: worauf sollen wir achten?"
+   Kleine Mail an den Kunden mit Link ins Portal. */
+router.post('/:id/kriterien-anfrage', async (req, res) => {
+  try {
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, stelle, kunde_id').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('*').eq('id', job.kunde_id).maybeSingle();
+    if (!kunde?.email) return res.status(400).json({ error: 'Kunde hat keine E-Mail-Adresse.' });
+
+    let token = kunde.portal_token;
+    if (!token) {
+      token = randomUUID();
+      await supabase.from('talentone_kunden').update({ portal_token: token }).eq('id', kunde.id);
+    }
+    const portalUrl = `${getPublicBaseUrl(kunde.agentur)}/portal/${token}`;
+
+    const { sendKriterienAnfrage } = await import('../mail.js');
+    await sendKriterienAnfrage({
+      to: kunde.email, kunde, job, portalUrl,
+      customText: req.body?.customText || null,
+    });
+
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: kunde.email,
+      betreff: 'Worauf sollen wir achten? (Prüf-Kriterien)',
+      gesendet_von: req.user?.email || null,
+      typ: 'kriterien_anfrage',
+      inhalte: { portal_url: portalUrl },
+    });
+
+    res.json({ ok: true, portalUrl });
+  } catch (err) {
+    console.error('[jobs/kriterien-anfrage]', err.message);
+    res.status(503).json({ error: err.message });
   }
 });
 

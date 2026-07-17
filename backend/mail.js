@@ -1532,3 +1532,84 @@ export async function sendErinnerungsMail({
   }
   return await response.json();
 }
+
+/* Kleine Mail an den Kunden: "Worauf sollen wir bei der Vorqualifizierung achten?"
+   Link fuehrt ins Portal, wo der Kunde die Kriterien selbst pflegen kann. */
+export async function sendKriterienAnfrage({ to, kunde, job, portalUrl, customText }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const k = kunde || {};
+  const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
+
+  const intro = (customText || '').trim() || t(k,
+    `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was dir wichtig ist: Was sind deine wichtigsten Kriterien?\n\nÜber den Link unten kannst du sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`,
+    `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was Ihnen wichtig ist: Was sind Ihre wichtigsten Kriterien?\n\nÜber den Link unten können Sie sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`);
+
+  const introHtml = intro
+    .split(/\n\s*\n/)
+    .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">⭐ Prüf-Kriterien · ${escape(brand.name)}</p>
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(anrede(k))},</p>
+      ${introHtml}
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(portalUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ ${t(k, 'Kriterien eintragen', 'Kriterien eintragen')}</a>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(k, 'Bei Fragen einfach auf diese Mail antworten.', 'Bei Fragen einfach auf diese Mail antworten.')}</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Dein', 'Ihr')} ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${anrede(k)},\n\n${intro}\n\nKriterien eintragen: ${portalUrl}\n\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
+  const recipients = Array.isArray(to) ? to : [to];
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to: recipients,
+      bcc: getInternalBcc([], recipients),
+      reply_to: getMailReplyTo(brand),
+      subject: t(k, `Worauf sollen wir achten? — ${stelle}`, `Worauf sollen wir achten? — ${stelle}`),
+      html, text,
+    }),
+  });
+  if (!response.ok) throw new Error(`Resend: ${await response.text()}`);
+  return response.json();
+}
+
+/* Intern: Kunde hat die Pruef-Kriterien im Portal angepasst. */
+export async function sendKriterienGeaendertNotiz({ kunde, job, vorher = [], nachher = [], geaendert_von }) {
+  const fmt = (list) => list.length
+    ? list.map(k => `${k.pflicht ? '❗ ' : ''}${k.kriterium}${k.anforderung ? ` — ${k.anforderung}` : ''}`).join('<br>')
+    : '<em>(keine)</em>';
+  const jobUrl = `${(process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de')}/kunden/${kunde?.id}/jobs/${job?.id}/stelle`;
+
+  const html = `
+    <p style="font-size:14px;color:#0a0a0a;margin:0 0 10px;"><strong>${escape(kunde?.firmenname || 'Kunde')}</strong> hat die Prüf-Kriterien angepasst.</p>
+    <p style="font-size:13px;color:#5a5955;margin:0 0 14px;">Stelle: <strong>${escape(job?.stelle || '—')}</strong> · geändert von ${escape(geaendert_von || 'Kunde')}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <tr>
+        <td style="vertical-align:top;padding:10px;background:#fafaf8;border:1px solid #ececea;width:50%;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#9a9994;margin-bottom:6px;">Vorher</div>${fmt(vorher)}
+        </td>
+        <td style="vertical-align:top;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;width:50%;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#166534;margin-bottom:6px;">Jetzt</div>${fmt(nachher)}
+        </td>
+      </tr>
+    </table>
+    <p style="margin:16px 0 0;"><a href="${escape(jobUrl)}" style="color:#0a0a0a;font-weight:600;">→ Zur Stelle</a></p>`;
+
+  const text = `${kunde?.firmenname || 'Kunde'} hat die Prüf-Kriterien angepasst.\nStelle: ${job?.stelle || '—'}\nGeändert von: ${geaendert_von || 'Kunde'}\n\n${jobUrl}`;
+
+  return sendInternalNotification({
+    subject: `⭐ Kriterien angepasst — ${kunde?.firmenname || 'Kunde'} (${job?.stelle || 'Stelle'})`,
+    html, text,
+  });
+}
