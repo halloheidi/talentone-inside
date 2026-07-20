@@ -6,9 +6,16 @@
 // Das Vorher/Nachher ist bewusst verpflichtend: gpt-image-2-Edits mit Text sind
 // gut, aber nicht immer pixelperfekt. Overlay-Creatives sind deterministisch.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Modal from './Modal.jsx';
 import { api } from '../lib/api.js';
+
+// Feuert-und-vergisst: verworfene Vorschau-Dateien im Storage loeschen.
+function discard(preview) {
+  if (!preview) return;
+  const urls = [preview.bild_url, preview.bild_ohne_logo_url].filter(Boolean);
+  if (urls.length) api('/creatives/edit-discard', { method: 'POST', body: { urls } }).catch(() => {});
+}
 
 export default function CreativeEditModal({ open, creative, onClose, onApplied, initialWunsch = '' }) {
   const [wunsch, setWunsch] = useState('');
@@ -17,13 +24,15 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const appliedRef = useRef(false);
 
   useEffect(() => {
-    if (open) { setWunsch(initialWunsch || ''); setPreview(null); setErr(''); }
+    if (open) { setWunsch(initialWunsch || ''); setPreview(null); setErr(''); appliedRef.current = false; }
   }, [open, creative?.id, initialWunsch]);
 
   async function vorschau() {
     if (!wunsch.trim()) return;
+    discard(preview);              // alte Vorschau verwerfen (kein Storage-Muell bei "Neu versuchen")
     setBusy(true); setErr(''); setPreview(null);
     try {
       const res = await api(`/creatives/${creative.id}/edit-preview`, {
@@ -43,10 +52,17 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
         method: 'POST',
         body: { wunsch: wunsch.trim(), bild_url: preview.bild_url, bild_ohne_logo_url: preview.bild_ohne_logo_url },
       });
-      onApplied?.(res.creative);
+      appliedRef.current = true;   // uebernommene Vorschau NICHT verwerfen
+      onApplied?.(res.creative, creative);
       onClose?.();
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setSaving(false); }
+  }
+
+  // Schliessen ohne Uebernehmen -> nicht genutzte Vorschau aufraeumen.
+  function handleClose() {
+    if (!appliedRef.current) discard(preview);
+    onClose?.();
   }
 
   if (!creative) return null;
@@ -54,11 +70,11 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title="✏️ Gezielt ändern"
       footer={
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn-ghost" onClick={onClose} disabled={busy || saving}>Abbrechen</button>
+          <button className="btn-ghost" onClick={handleClose} disabled={busy || saving}>Abbrechen</button>
           {!preview && (
             <button className="btn-primary" onClick={vorschau} disabled={busy || !wunsch.trim()}>
               {busy ? 'Erzeuge Vorschau…' : 'Vorschau erzeugen'}

@@ -221,8 +221,24 @@ router.get('/', async (req, res) => {
   q = q.eq('archiviert', archivedOnly);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
+
+  // parent_created_at anreichern — fuer den Hinweis "ersetzt Version vom [Datum]"
+  // bei gezielt geaenderten Versionen. Der Parent kann archiviert (also nicht in
+  // dieser Liste) sein, daher separat nachladen.
+  const parentIds = [...new Set((data || []).map(c => c.parent_id).filter(Boolean))];
+  let parentMap = {};
+  if (parentIds.length) {
+    const { data: parents } = await supabase.from('talentone_creatives')
+      .select('id, created_at').in('id', parentIds);
+    parentMap = Object.fromEntries((parents || []).map(p => [p.id, p.created_at]));
+  }
+  const creatives = (data || []).map(c => ({
+    ...c,
+    parent_created_at: c.parent_id ? (parentMap[c.parent_id] || null) : null,
+  }));
+
   res.json({
-    creatives: data,
+    creatives,
     last_generation_error: req.query.job_id ? getGenError(req.query.job_id) : null,
   });
 });
@@ -790,6 +806,15 @@ router.post('/:id/edit-preview', async (req, res) => {
     console.error('[edit-preview]', err.message);
     res.status(500).json({ error: friendlyOpenAIError(err) });
   }
+});
+
+/* POST /api/creatives/edit-discard  body: { urls: [] }
+   Loescht verworfene Vorschau-Dateien aus dem Storage (bei "Neu versuchen" /
+   Abbrechen), damit nur der final uebernommene Stand liegen bleibt. Best-effort. */
+router.post('/edit-discard', async (req, res) => {
+  const urls = Array.isArray(req.body?.urls) ? req.body.urls.filter(Boolean) : [];
+  await Promise.all(urls.map(u => deleteFromStorage(u).catch(() => {})));
+  res.json({ ok: true, geloescht: urls.length });
 });
 
 /* POST /api/creatives/:id/edit-apply  body: { wunsch, bild_url, bild_ohne_logo_url }

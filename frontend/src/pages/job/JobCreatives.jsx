@@ -1044,6 +1044,11 @@ export default function JobCreatives() {
                     </div>
                   );
                 })()}
+                {c.parent_id && c.parent_created_at && (
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', padding: '2px 4px' }} title="Aus einer gezielten Änderung entstanden">
+                    ↩ ersetzt Version vom {new Date(c.parent_created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                  </div>
+                )}
                 <div className="creative-foot">
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">
@@ -1178,7 +1183,23 @@ export default function JobCreatives() {
         creative={editTarget}
         initialWunsch={editInitialWunsch}
         onClose={() => setEditTarget(null)}
-        onApplied={(neu) => { setCreatives(prev => [neu, ...prev]); setEditTarget(null); }}
+        onApplied={(neu, original) => {
+          setCreatives(prev => [neu, ...prev]);
+          setEditTarget(null);
+          // Default: Ja — die neue Version ersetzt in ~90% das Original.
+          // Deferred, damit die Abfrage NACH dem Schliessen des Modals kommt.
+          setTimeout(async () => {
+            const jaArchivieren = window.confirm(
+              'Neue Version übernommen.\n\nAltes Creative archivieren? Die neue Version ersetzt es meist.\n\n„OK" = archivieren (bleibt wiederherstellbar)   ·   „Abbrechen" = beide behalten'
+            );
+            if (jaArchivieren && original?.id) {
+              try {
+                await api(`/creatives/${original.id}/archivieren`, { method: 'POST' });
+                setCreatives(prev => prev.filter(c => c.id !== original.id));
+              } catch (err) { alert('Archivieren fehlgeschlagen: ' + err.message); }
+            }
+          }, 0);
+        }}
       />
 
       {verbessernFoto && (
