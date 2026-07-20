@@ -9,6 +9,7 @@ import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
 import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
 import LogoPositionModal from '../../components/LogoPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
+import CreativeEditModal from '../../components/CreativeEditModal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
@@ -68,6 +69,8 @@ export default function JobCreatives() {
   // Rework
   const [reworkTarget, setReworkTarget] = useState(null);
   const [reworkMotiv, setReworkMotiv] = useState('');
+  const [editTarget, setEditTarget] = useState(null);      // Creative fuer "Gezielt ändern"
+  const [editInitialWunsch, setEditInitialWunsch] = useState('');
   const [reworkBusy, setReworkBusy] = useState(false);
   const reworkAbortRef = useRef(null);
 
@@ -423,6 +426,7 @@ export default function JobCreatives() {
   }
 
   function openRework(creative) { setReworkTarget(creative); setReworkMotiv(motiv || ''); }
+  function openEdit(creative, wunsch = '') { setEditInitialWunsch(wunsch); setEditTarget(creative); }
   function cancelRework() {
     // Laufenden Request abbrechen + UI zurücksetzen
     if (reworkAbortRef.current) {
@@ -1027,6 +1031,16 @@ export default function JobCreatives() {
                     <div className="creative-kommentar" title="Kundenkommentar aus Review">
                       <div className="creative-kommentar-head">📝 Änderungswunsch vom Kunden</div>
                       <div className="creative-kommentar-body">{kommentar}</div>
+                      {c.typ !== 'video' && c.quelle !== 'upload' && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          style={{ marginTop: 6 }}
+                          onClick={() => openEdit(c, kommentar)}
+                          title="Kommentartext als gezielten Änderungswunsch übernehmen"
+                        >
+                          ✏️ Als gezielte Änderung ausführen
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
@@ -1034,7 +1048,14 @@ export default function JobCreatives() {
                   <span className="creative-date">{new Date(c.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
                   <div className="creative-actions">
                     {c.typ !== 'video' && c.quelle !== 'upload' && (
-                      <button className="btn-ghost btn-sm" onClick={() => openRework(c)}>Überarbeiten</button>
+                      <>
+                        <button className="btn-ghost btn-sm" onClick={() => openEdit(c)} title="Kleiner Eingriff — Motiv bleibt, nur das Gewünschte ändert sich">
+                          ✏️ Gezielt ändern
+                        </button>
+                        <button className="btn-ghost btn-sm" onClick={() => openRework(c)} title="Neues Motiv — komplette Neu-Generierung">
+                          🔄 Neu generieren
+                        </button>
+                      </>
                     )}
                     {c.typ !== 'video' && c.bild_ohne_logo_url && kunde?.logo_url && (
                       <button className="btn-ghost btn-sm" onClick={() => setLogoPosTarget(c)}>Logo anpassen</button>
@@ -1149,6 +1170,15 @@ export default function JobCreatives() {
         jobId={job.id}
         onClose={() => setShowLogoRefresh(false)}
         onDone={() => { loadGalerie(); loadLogoStatus(); }}
+      />
+
+      {/* ───────── Gezielt ändern (kleiner Eingriff) ───────── */}
+      <CreativeEditModal
+        open={!!editTarget}
+        creative={editTarget}
+        initialWunsch={editInitialWunsch}
+        onClose={() => setEditTarget(null)}
+        onApplied={(neu) => { setCreatives(prev => [neu, ...prev]); setEditTarget(null); }}
       />
 
       {verbessernFoto && (

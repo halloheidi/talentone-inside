@@ -5,6 +5,8 @@ import {
   generateSpruchVorschlaege,
   verbessereSpruch,
   generateVariant,
+  generateGezielteAenderung,
+  neuerHookAusWunsch,
   deleteFromStorage,
   STORAGE_BUCKET as CREATIVES_BUCKET,
 } from '../imagegen.js';
@@ -750,6 +752,76 @@ router.post('/logo-refresh', async (req, res) => {
   const erfolge = ergebnisse.filter(r => r.ok).length;
   console.log(`[logo-refresh] job ${job_id.slice(0,8)}: ${erfolge}/${ergebnisse.length} Creatives neu belogo-t.`);
   res.json({ aktualisiert: erfolge, gesamt: ergebnisse.length, ergebnisse });
+});
+
+/* POST /api/creatives/:id/edit-preview  body: { wunsch }
+   Gezielte Änderung: erhält das bestehende Creative und ändert nur den Wunsch.
+   Erzeugt eine VORSCHAU (Storage-Upload), legt noch keine DB-Row an — das macht
+   edit-apply nach dem Vorher/Nachher-Vergleich. Overlay-Creatives werden
+   deterministisch neu gerendert (perfektes Text-Ergebnis). */
+router.post('/:id/edit-preview', async (req, res) => {
+  const wunsch = (req.body?.wunsch || '').trim();
+  if (!wunsch) return res.status(400).json({ error: 'Änderungswunsch (wunsch) ist Pflicht.' });
+
+  const { data: existing, error: e1 } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (e1 || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.typ === 'video') return res.status(400).json({ error: 'Videos können nicht gezielt geändert werden.' });
+
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  try {
+    // Overlay (Modus C): deterministisch neu rendern — pixelperfekter Text.
+    if (existing.typ === 'overlay') {
+      const aktHook = (existing.prompt || '').match(/Hook:\s*"([^"]*)"/)?.[1] || '';
+      const neuHook = await neuerHookAusWunsch({ hook: aktHook, wunsch });
+      const fmt = existing.format === 'story' ? '9:16' : '1:1';
+      const overlays = await generateOverlays({ job, kunde, spruch: neuHook, benefits: null, formats: [fmt] });
+      const match = overlays.find(o => o.format === fmt) || overlays[0];
+      if (!match?.bild_url) throw new Error('Overlay-Render lieferte kein Bild.');
+      return res.json({ preview: { bild_url: match.bild_url, bild_ohne_logo_url: null, typ: 'overlay' }, deterministisch: true });
+    }
+
+    // Bild (ki/foto): gpt-image-2 /images/edits auf dem Basisbild.
+    const { bildUrl, bildOhneLogoUrl } = await generateGezielteAenderung({ job, kunde, creative: existing, wunsch });
+    res.json({ preview: { bild_url: bildUrl, bild_ohne_logo_url: bildOhneLogoUrl, typ: 'bild' }, deterministisch: false });
+  } catch (err) {
+    console.error('[edit-preview]', err.message);
+    res.status(500).json({ error: friendlyOpenAIError(err) });
+  }
+});
+
+/* POST /api/creatives/:id/edit-apply  body: { wunsch, bild_url, bild_ohne_logo_url }
+   Uebernimmt die Vorschau als NEUE Version neben dem Original (parent_id-Link,
+   Original bleibt). Erbt Format, typ, stilvorlage_id und Logo-Position. */
+router.post('/:id/edit-apply', async (req, res) => {
+  const { wunsch, bild_url, bild_ohne_logo_url } = req.body || {};
+  if (!bild_url) return res.status(400).json({ error: 'bild_url (Vorschau) ist Pflicht.' });
+
+  const { data: original, error: e1 } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (e1 || !original) return res.status(404).json({ error: 'Original-Creative nicht gefunden.' });
+
+  const { data: created, error: insErr } = await supabase
+    .from('talentone_creatives')
+    .insert({
+      job_id: original.job_id,
+      format: original.format,
+      typ: original.typ,
+      bild_url,
+      bild_ohne_logo_url: bild_ohne_logo_url || null,
+      logo_position: original.logo_position || null,
+      stilvorlage_id: original.stilvorlage_id || null,
+      parent_id: original.id,
+      status: 'fertig',
+      prompt: `${original.prompt || ''}${original.prompt ? ' · ' : ''}Gezielt geändert: ${(wunsch || '').slice(0, 200)}`,
+    })
+    .select().single();
+  if (insErr) return res.status(500).json({ error: insErr.message });
+
+  console.log(`[edit-apply] job ${original.job_id.slice(0,8)}: gezielte Änderung als neue Version ${created.id.slice(0,8)}.`);
+  res.status(201).json({ creative: created });
 });
 
 export default router;

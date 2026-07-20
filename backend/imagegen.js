@@ -8,6 +8,7 @@ import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
 import { extendTo9x16, normalizeImageForOpenAI } from './imageops.js';
+import sharp from 'sharp';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
 const OPENAI_EDITS_API = 'https://api.openai.com/v1/images/edits';
@@ -753,4 +754,110 @@ export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenc
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
   return { ok, errors };
+}
+
+// Wendet einen freien Änderungswunsch auf einen Overlay-Hook an und gibt NUR
+// den neuen Text zurueck. Fuer die gezielte Änderung von Overlay-Creatives
+// (deterministisches HTML-Rerender mit geaendertem Text).
+export async function neuerHookAusWunsch({ hook, wunsch }) {
+  const prompt = `Du bearbeitest den Text-Hook einer Recruiting-Anzeige.
+
+AKTUELLER HOOK: "${hook || '(leer)'}"
+ÄNDERUNGSWUNSCH: ${wunsch}
+
+Setze den Änderungswunsch um. Wenn er einen konkreten neuen Text vorgibt, nutze exakt diesen. Sonst passe den Hook sinngemäß an. Behalte die Kürze (max. 5-6 Wörter).
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "hook": "der neue Text" }`;
+  const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 200, messages: [{ role: 'user', content: prompt }] });
+  const parsed = parseJsonContent(data);
+  return (parsed?.hook || '').trim() || hook || '';
+}
+
+// Kanonische Zielgroesse je Format — damit editierte Bilder uniform zu den
+// uebrigen Creatives sind (Logo-Position in % mappt dann identisch).
+const FORMAT_PIXELS = { quadrat: [1024, 1024], story: [1080, 1920] };
+
+// Baut den Edit-Prompt: NUR der Wunsch aendert sich, alles andere bleibt.
+function buildEditPrompt(wunsch) {
+  return (
+    `Ändere an diesem Bild AUSSCHLIESSLICH Folgendes: ${wunsch.trim()}\n\n` +
+    `HARTE REGELN (nicht verletzen):\n` +
+    `1. Komposition, Bildausschnitt, Personen, Gesichter, Farben, Beleuchtung und Layout bleiben exakt identisch zum Eingabebild.\n` +
+    `2. ALLE übrigen Texte im Bild bleiben unverändert — gleicher Wortlaut, gleiche Schriftart, Größe und Position. Ändere NUR den oben genannten Text/Inhalt.\n` +
+    `3. Füge nichts hinzu und entferne nichts außer der genannten Änderung.\n` +
+    `4. Das Ergebnis muss ansonsten so nah wie möglich am Eingabebild bleiben.`
+  );
+}
+
+/**
+ * Gezielte Änderung: nimmt ein BESTEHENDES Creative als Input (nicht Neu-
+ * Generierung aus dem Voll-Prompt) und ändert per gpt-image-2 /images/edits nur
+ * den gewünschten Aspekt. Als Input bevorzugt das Basisbild OHNE Logo — das Logo
+ * wird danach per Sharp-Overlay drauf gelegt, damit die KI es nicht verändert.
+ *
+ * Laedt Ergebnis in Storage hoch (Vorschau) und gibt die URLs zurueck; legt
+ * KEINE DB-Row an (das macht der Apply-Schritt).
+ *
+ * @returns {Promise<{bildUrl:string, bildOhneLogoUrl:(string|null)}>}
+ */
+export async function generateGezielteAenderung({ job, kunde, creative, wunsch }) {
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
+  if (!wunsch?.trim()) throw new Error('Änderungswunsch fehlt.');
+
+  const inputUrl = creative.bild_ohne_logo_url || creative.bild_url;
+  if (!inputUrl) throw new Error('Creative hat kein Bild.');
+  const nutztBasis = !!creative.bild_ohne_logo_url; // dann Logo nachtraeglich overlayen
+
+  const { buffer: rawInput } = await fetchAsBuffer(inputUrl);
+  const norm = await normalizeImageForOpenAI(rawInput, { label: 'Creative' });
+
+  const form = new FormData();
+  form.append('model', 'gpt-image-2');
+  form.append('prompt', buildEditPrompt(wunsch));
+  // 'auto' erhaelt das Seitenverhaeltnis der Eingabe (1:1 bzw. 9:16) —
+  // die festen Groessen kennen kein 9:16.
+  form.append('size', 'auto');
+  form.append('quality', 'high');
+  form.append('n', '1');
+  form.append('image[]', bufferToFile(norm.buffer, `creative.${norm.ext}`, norm.contentType));
+
+  const response = await fetch(OPENAI_EDITS_API, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: form,
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI ${response.status}: ${body.slice(0, 400)}`);
+  }
+  const data = await response.json();
+  const b64 = data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
+
+  // Auf kanonische Format-Groesse bringen (Seitenverhaeltnis stimmt dank 'auto'
+  // schon; fit:'cover' gleicht nur Rundungsdifferenzen aus, ohne zu verzerren).
+  let editedBase = Buffer.from(b64, 'base64');
+  const [w, h] = FORMAT_PIXELS[creative.format] || [];
+  if (w && h) {
+    editedBase = await sharp(editedBase).resize({ width: w, height: h, fit: 'cover' }).png().toBuffer();
+  }
+
+  let finalBuffer = editedBase;
+  let bildOhneLogoUrl = null;
+  if (nutztBasis) {
+    // Basis (ohne Logo) speichern + Logo an gespeicherter Position overlayen.
+    const rawFilename = `${job.id}/raw-edit-${creative.format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    try { bildOhneLogoUrl = await uploadToStorage(editedBase, rawFilename); }
+    catch (err) { console.warn(`[gezielt] raw-upload skip: ${err.message}`); }
+    try {
+      const logoBuf = kunde?.logo_url ? (await fetchAsBuffer(kunde.logo_url)).buffer : null;
+      const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
+      finalBuffer = await composeLogoOverlay(editedBase, transparentLogo, creative.logo_position || {});
+    } catch (err) { console.warn(`[gezielt] logo-overlay skip: ${err.message}`); }
+  }
+
+  const filename = `${job.id}/${creative.format}-edit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const bildUrl = await uploadToStorage(finalBuffer, filename);
+  return { bildUrl, bildOhneLogoUrl };
 }
