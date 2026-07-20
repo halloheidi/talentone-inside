@@ -165,7 +165,7 @@ router.post('/quick-create', async (req, res) => {
             bucket: 'talentone-logos', path, buffer: logoBuffer,
             contentType: norm.contentType,
           });
-          await supabase.from('talentone_kunden').update({ logo_url: logoUrl }).eq('id', kunde.id);
+          await supabase.from('talentone_kunden').update({ logo_url: logoUrl, logo_uploaded_at: new Date().toISOString() }).eq('id', kunde.id);
           console.log(`[quick-create-bg] Logo gesetzt für ${kunde.id.slice(0, 8)}`);
           try {
             const { prepareAndSaveTransparentLogo } = await import('../logo.js');
@@ -708,7 +708,7 @@ router.post('/:id/logo', async (req, res) => {
     // gespeicherte URL im Zwischenfenster (oder bei Regen-Fehlschlag) noch aufs
     // ALTE Logo — und die Creative-Generierung (ensureTransparentLogo) bevorzugt
     // genau diese URL. So wird garantiert das AKTUELLE Logo kompositiert.
-    const update = { logo_url: publicUrl, logo_transparent_url: null };
+    const update = { logo_url: publicUrl, logo_transparent_url: null, logo_uploaded_at: new Date().toISOString() };
     if (farbenUpdate) update.farben = farbenUpdate;
 
     const { data: updated, error: uErr } = await supabase

@@ -8,6 +8,7 @@ import Lightbox from '../../components/Lightbox.jsx';
 import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
 import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
 import LogoPositionModal from '../../components/LogoPositionModal.jsx';
+import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
@@ -59,6 +60,8 @@ export default function JobCreatives() {
   const [logoPosTarget, setLogoPosTarget] = useState(null);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
+  const [showLogoRefresh, setShowLogoRefresh] = useState(false);
+  const [logoVeraltet, setLogoVeraltet] = useState(0); // Anzahl Creatives mit altem Logo (fuer Banner)
   const [expected, setExpected] = useState(0);
   const pollRef = useRef(null);
 
@@ -154,6 +157,14 @@ export default function JobCreatives() {
       .finally(() => setLoadingGalerie(false));
   }
   useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id, showArchived]);
+
+  // Banner-Info: wie viele aktive Creatives tragen noch die alte Logo-Fassung?
+  function loadLogoStatus() {
+    api(`/creatives/logo-refresh-info?job_id=${job.id}`)
+      .then(res => setLogoVeraltet((res.creatives || []).filter(c => c.swappable && c.veraltet).length))
+      .catch(() => setLogoVeraltet(0));
+  }
+  useEffect(() => { if (!showArchived) loadLogoStatus(); /* eslint-disable-next-line */ }, [job.id, showArchived, kunde?.logo_uploaded_at]);
 
   // Stilvorlagen einmalig laden
   useEffect(() => {
@@ -917,6 +928,11 @@ export default function JobCreatives() {
             >
               {showArchived ? '← Zurück zur Galerie' : '📦 Archiv anzeigen'}
             </button>
+            {!showArchived && kunde?.logo_url && (
+              <button className="btn-ghost btn-sm" onClick={() => setShowLogoRefresh(true)} title="Aktuelles Logo ohne Neu-Generierung auf bestehende Creatives rendern">
+                🔄 Logo aktualisieren
+              </button>
+            )}
             {!showArchived && (
               <button className="btn-ghost btn-sm" onClick={() => setShowCreativeUpload(true)} title="Eigene Bilder/Videos hochladen">
                 <Icon name="plus" /> Fertiges Creative hochladen
@@ -924,6 +940,21 @@ export default function JobCreatives() {
             )}
           </div>
         </div>
+        {!showArchived && logoVeraltet > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            background: '#eef6ff', border: '1px solid #bcdcff', borderRadius: 10,
+            padding: '12px 16px', marginBottom: 14,
+          }}>
+            <span style={{ fontSize: 13, color: '#0b4a80', flex: 1, minWidth: 240 }}>
+              🔄 <strong>Das Logo wurde aktualisiert</strong> — {logoVeraltet} Creative{logoVeraltet === 1 ? '' : 's'} verwende{logoVeraltet === 1 ? 't' : 'n'} noch die alte Version.
+              Das neue Logo kann ohne Neu-Generierung übernommen werden.
+            </span>
+            <button className="btn-primary btn-sm" onClick={() => setShowLogoRefresh(true)}>
+              Logo auf Creatives aktualisieren
+            </button>
+          </div>
+        )}
         {loadingGalerie && <div className="card empty">Lade Galerie…</div>}
         {!loadingGalerie && creatives.length === 0 && (
           <div className="card empty">
@@ -1110,6 +1141,14 @@ export default function JobCreatives() {
         logoUrl={kunde?.logo_url}
         onClose={() => setLogoPosTarget(null)}
         onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
+      />
+
+      {/* ───────── Logo-Tausch auf bestehende Creatives ───────── */}
+      <LogoRefreshModal
+        open={showLogoRefresh}
+        jobId={job.id}
+        onClose={() => setShowLogoRefresh(false)}
+        onDone={() => { loadGalerie(); loadLogoStatus(); }}
       />
 
       {verbessernFoto && (

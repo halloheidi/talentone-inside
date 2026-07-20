@@ -8,9 +8,74 @@ import {
   deleteFromStorage,
   STORAGE_BUCKET as CREATIVES_BUCKET,
 } from '../imagegen.js';
-import { uploadBuffer, extFromMime, safeFilenameStem } from '../storage.js';
+import { uploadBuffer, extFromMime, safeFilenameStem, fetchAsBuffer } from '../storage.js';
 import { generateOverlays } from '../overlay-renderer.js';
+import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
+
+// ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
+// Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
+// KI-Bild neu zu generieren. Genutzt von PATCH /:id/logo-position (einzeln,
+// mit neuer Position) UND von POST /logo-refresh (Batch, mit gespeicherter
+// Position). Ein Creative ist nur tauschbar, wenn bild_ohne_logo_url existiert.
+
+// Holt das transparente Logo des Kunden — bevorzugt aus logo_transparent_url,
+// sonst on-the-fly aus logo_url und (best-effort) persistiert. Einmal pro Batch
+// aufrufen, dann fuer alle Creatives wiederverwenden.
+async function resolveTransparentLogo(kunde) {
+  if (kunde.logo_transparent_url) {
+    try { return (await fetchAsBuffer(kunde.logo_transparent_url)).buffer; }
+    catch (err) { console.warn('[logo-refresh] transparent-URL nicht ladbar, regeneriere:', err.message); }
+  }
+  const { buffer: origBuf } = await fetchAsBuffer(kunde.logo_url);
+  const transparent = await makeTransparent(origBuf);
+  try {
+    const path = `${kunde.id}/transparent-${Date.now()}.png`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer: transparent, contentType: 'image/png' });
+    await supabase.from('talentone_kunden').update({ logo_transparent_url: publicUrl }).eq('id', kunde.id);
+  } catch (err) { console.warn('[logo-refresh] transparent-Upload skip:', err.message); }
+  return transparent;
+}
+
+// Rendert EIN Bild-Creative neu (Basis + transparentes Logo an position),
+// ersetzt bild_url in-place, loescht das alte Bild. position: gespeicherte
+// logo_position oder null (=> Default oben rechts). Gibt die neue Row zurueck.
+async function relogoBildCreative(existing, transparentLogo) {
+  const base = await fetchAsBuffer(existing.bild_ohne_logo_url);
+  const composed = await composeLogoOverlay(base.buffer, transparentLogo, existing.logo_position || {});
+  const path = `${existing.job_id}/${existing.format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const newUrl = await uploadBuffer({ bucket: CREATIVES_BUCKET, path, buffer: composed, contentType: 'image/png' });
+
+  const { data: updated, error: uErr } = await supabase.from('talentone_creatives')
+    .update({ bild_url: newUrl }).eq('id', existing.id).select().single();
+  if (uErr) throw new Error(uErr.message);
+
+  // Altes Bild aufraeumen — aber nie das Basisbild (das brauchen wir weiter).
+  const oldUrl = existing.bild_url;
+  if (oldUrl && oldUrl !== existing.bild_ohne_logo_url && oldUrl !== newUrl) {
+    await deleteFromStorage(oldUrl).catch(() => {});
+  }
+  return updated;
+}
+
+// Overlay-Modus (typ='overlay'): kein Basisbild — das HTML/Playwright-Overlay
+// wird neu gerendert (nutzt kunde.logo_url live). Hook steckt im prompt-String
+// ("Overlay · Hook: \"…\""); Benefits werden nicht persistiert -> best effort.
+async function relogoOverlayCreative(existing, job, kunde) {
+  const hook = (existing.prompt || '').match(/Hook:\s*"([^"]*)"/)?.[1] || '';
+  const fmt = existing.format === 'story' ? '9:16' : '1:1';
+  const overlays = await generateOverlays({ job, kunde, spruch: hook, benefits: null, formats: [fmt] });
+  const match = overlays.find(o => o.format === fmt) || overlays[0];
+  if (!match?.bild_url) throw new Error('Overlay-Render lieferte kein Bild.');
+
+  const { data: updated, error: uErr } = await supabase.from('talentone_creatives')
+    .update({ bild_url: match.bild_url }).eq('id', existing.id).select().single();
+  if (uErr) throw new Error(uErr.message);
+
+  const oldUrl = existing.bild_url;
+  if (oldUrl && oldUrl !== match.bild_url) await deleteFromStorage(oldUrl).catch(() => {});
+  return updated;
+}
 
 const router = Router();
 
@@ -562,32 +627,8 @@ router.patch('/:id/logo-position', async (req, res) => {
   if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
 
   try {
-    const [{ fetchAsBuffer }, { makeTransparent, composeLogoOverlay }] = await Promise.all([
-      import('../storage.js'), import('../logo.js'),
-    ]);
-
-    // Base-Bild laden
+    const transparentLogo = await resolveTransparentLogo(kunde);
     const base = await fetchAsBuffer(existing.bild_ohne_logo_url);
-
-    // Transparentes Logo: bevorzugt aus logo_transparent_url, sonst on-the-fly
-    let transparentLogo;
-    if (kunde.logo_transparent_url) {
-      try { transparentLogo = (await fetchAsBuffer(kunde.logo_transparent_url)).buffer; }
-      catch (err) { console.warn('[logo-position] transparent-URL nicht ladbar, regeneriere:', err.message); }
-    }
-    if (!transparentLogo) {
-      const { buffer: origBuf } = await fetchAsBuffer(kunde.logo_url);
-      transparentLogo = await makeTransparent(origBuf);
-      try {
-        const path = `${kunde.id}/transparent-${Date.now()}.png`;
-        const publicUrl = await uploadBuffer({
-          bucket: 'talentone-logos', path, buffer: transparentLogo, contentType: 'image/png',
-        });
-        await supabase.from('talentone_kunden')
-          .update({ logo_transparent_url: publicUrl }).eq('id', kunde.id);
-      } catch (err) { console.warn('[logo-position] transparent-Upload skip:', err.message); }
-    }
-
     const composed = await composeLogoOverlay(base.buffer, transparentLogo, position);
 
     // Neues Bild uploaden, altes ersetzen
@@ -609,6 +650,106 @@ router.patch('/:id/logo-position', async (req, res) => {
     console.error('[logo-position]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+/* GET /api/creatives/logo-refresh-info?job_id=…
+   Liefert alles fuer Banner + Auswahl-Modal des Logo-Tauschs:
+   - logo_url / logo_uploaded_at des Kunden
+   - offene_review (Transparenz-Hinweis)
+   - je aktivem Creative: veraltet? (aelter als Logo), tauschbar? + Grund */
+router.get('/logo-refresh-info', async (req, res) => {
+  const { job_id } = req.query;
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+
+  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id').eq('id', job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, logo_url, logo_uploaded_at').eq('id', job.kunde_id).single();
+
+  const { data: creatives = [] } = await supabase.from('talentone_creatives')
+    .select('id, format, typ, created_at, bild_url, bild_ohne_logo_url, logo_position')
+    .eq('job_id', job_id).eq('archiviert', false)
+    .order('created_at', { ascending: false });
+
+  const logoTs = kunde?.logo_uploaded_at ? new Date(kunde.logo_uploaded_at).getTime() : null;
+
+  const rows = creatives.map(c => {
+    let swappable = false, reason = null;
+    if (c.typ === 'video') { reason = 'Video — Logo-Tausch nicht möglich.'; }
+    else if (c.typ === 'overlay') { swappable = true; }
+    else if (c.bild_ohne_logo_url) { swappable = true; }
+    else { reason = 'Kein Basisbild gespeichert — nur Neu-Generierung möglich.'; }
+    // "veraltet" = vor dem letzten Logo-Upload entstanden
+    const veraltet = logoTs != null && new Date(c.created_at).getTime() < logoTs;
+    return {
+      id: c.id, format: c.format, typ: c.typ, created_at: c.created_at,
+      bild_url: c.bild_url, hat_position: !!c.logo_position,
+      veraltet, swappable, reason,
+    };
+  });
+
+  // Offene Review-Runde? (Kunde hat Entwuerfe zur Freigabe -> Transparenz-Hinweis)
+  const { data: latestReview } = await supabase.from('talentone_reviews')
+    .select('status, runde').eq('job_id', job_id)
+    .order('runde', { ascending: false }).limit(1).maybeSingle();
+
+  res.json({
+    logo_url: kunde?.logo_url || null,
+    logo_uploaded_at: kunde?.logo_uploaded_at || null,
+    hat_logo: !!kunde?.logo_url,
+    offene_review: latestReview?.status === 'offen',
+    review_runde: latestReview?.runde || null,
+    creatives: rows,
+  });
+});
+
+/* POST /api/creatives/logo-refresh  body: { job_id, creative_ids: [] }
+   Rendert die gewaehlten Creatives mit dem AKTUELLEN Logo neu (in-place),
+   ohne die KI-Bilder neu zu generieren. Nicht-tauschbare (Video / kein
+   Basisbild) werden mit Grund uebersprungen, nicht abgebrochen. */
+router.post('/logo-refresh', async (req, res) => {
+  const { job_id, creative_ids } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  if (!Array.isArray(creative_ids) || creative_ids.length === 0) {
+    return res.status(400).json({ error: 'creative_ids (nicht leer) ist Pflicht.' });
+  }
+
+  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id').eq('id', job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, logo_url, logo_transparent_url').eq('id', job.kunde_id).single();
+  if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
+
+  const { data: creatives = [] } = await supabase.from('talentone_creatives')
+    .select('*').eq('job_id', job_id).eq('archiviert', false).in('id', creative_ids);
+
+  // Transparentes Logo einmal aufloesen — gilt fuer alle Bild-Creatives.
+  let transparentLogo = null;
+  try { transparentLogo = await resolveTransparentLogo(kunde); }
+  catch (err) { return res.status(500).json({ error: `Logo konnte nicht aufbereitet werden: ${err.message}` }); }
+
+  const ergebnisse = [];
+  for (const c of creatives) {
+    try {
+      if (c.typ === 'video') { ergebnisse.push({ id: c.id, ok: false, reason: 'Video — übersprungen.' }); continue; }
+      if (c.typ === 'overlay') {
+        const updated = await relogoOverlayCreative(c, job, kunde);
+        ergebnisse.push({ id: c.id, ok: true, bild_url: updated.bild_url }); continue;
+      }
+      if (!c.bild_ohne_logo_url) {
+        ergebnisse.push({ id: c.id, ok: false, reason: 'Kein Basisbild — nur Neu-Generierung möglich.' }); continue;
+      }
+      const updated = await relogoBildCreative(c, transparentLogo);
+      ergebnisse.push({ id: c.id, ok: true, bild_url: updated.bild_url });
+    } catch (err) {
+      console.error(`[logo-refresh] Creative ${c.id}:`, err.message);
+      ergebnisse.push({ id: c.id, ok: false, reason: err.message });
+    }
+  }
+
+  const erfolge = ergebnisse.filter(r => r.ok).length;
+  console.log(`[logo-refresh] job ${job_id.slice(0,8)}: ${erfolge}/${ergebnisse.length} Creatives neu belogo-t.`);
+  res.json({ aktualisiert: erfolge, gesamt: ergebnisse.length, ergebnisse });
 });
 
 export default router;

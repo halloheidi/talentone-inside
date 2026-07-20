@@ -77,7 +77,7 @@ router.post('/upload/:token', async (req, res) => {
       }
       // logo_transparent_url synchron nullen — sonst nutzt die Creative-Generierung
       // im Zwischenfenster bis zur (async) Regen noch die alte transparente Version.
-      await supabase.from('talentone_kunden').update({ logo_url: publicUrl, logo_transparent_url: null }).eq('id', kunde.id);
+      await supabase.from('talentone_kunden').update({ logo_url: publicUrl, logo_transparent_url: null, logo_uploaded_at: new Date().toISOString() }).eq('id', kunde.id);
       // Transparente Version im Hintergrund vorbereiten
       (async () => {
         try {
@@ -191,7 +191,7 @@ router.post('/formular/:token/logo', async (req, res) => {
     if (kunde.logo_url) await deleteFromBucket('talentone-logos', kunde.logo_url);
     // logo_transparent_url synchron nullen (siehe Upload-Handler oben) — aktuelles
     // Logo wird sonst bis zur async Regen nicht in neue Creatives übernommen.
-    await supabase.from('talentone_kunden').update({ logo_url: publicUrl, logo_transparent_url: null }).eq('id', kunde.id);
+    await supabase.from('talentone_kunden').update({ logo_url: publicUrl, logo_transparent_url: null, logo_uploaded_at: new Date().toISOString() }).eq('id', kunde.id);
     (async () => {
       try {
         const { prepareAndSaveTransparentLogo } = await import('../logo.js');
