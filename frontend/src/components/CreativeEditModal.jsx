@@ -92,6 +92,12 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
         style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13, resize: 'vertical' }}
       />
 
+      {busy && !preview && (
+        <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>
+          Die KI bearbeitet das Bild — das dauert typischerweise <strong>1–3 Minuten</strong>. Bitte das Fenster offen lassen.
+        </div>
+      )}
+
       {err && <div className="alert alert-error" style={{ marginTop: 10 }}>{err}</div>}
 
       {preview && (
