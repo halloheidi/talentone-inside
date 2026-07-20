@@ -5,7 +5,8 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern } from '../kriterien.js';
-import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
+import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
+import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
@@ -57,14 +58,17 @@ router.post('/upload/:token', async (req, res) => {
   if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
 
   try {
-    const buffer = Buffer.from(fileData, 'base64');
-    const ext = extFromMime(contentType, typ === 'logo' ? 'png' : 'jpg');
+    const roh = Buffer.from(fileData, 'base64');
+    // Beim Upload einmalig sauber machen (sRGB, EXIF-Rotation, web-taugliches
+    // Format). Danach ist die Datei fuer Generierung, Vorschau und Canva ok.
+    const norm = await normalizeImageForStorage(roh, { kind: typ, label: fileName });
+    const buffer = norm.buffer;
     const stem = safeFilenameStem(fileName);
-    const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
+    const path = `${kunde.id}/${Date.now()}-${stem}.${norm.ext}`;
 
     if (typ === 'logo') {
       const publicUrl = await uploadBuffer({
-        bucket: 'talentone-logos', path, buffer, contentType,
+        bucket: 'talentone-logos', path, buffer, contentType: norm.contentType,
       });
       // Altes Logo aufräumen
       if (kunde.logo_url) {
@@ -92,7 +96,7 @@ router.post('/upload/:token', async (req, res) => {
 
     // typ === 'foto'
     const publicUrl = await uploadBuffer({
-      bucket: 'talentone-referenzbilder', path, buffer, contentType,
+      bucket: 'talentone-referenzbilder', path, buffer, contentType: norm.contentType,
     });
     const { data: row, error: insErr } = await supabase
       .from('talentone_referenzbilder')
@@ -106,7 +110,7 @@ router.post('/upload/:token', async (req, res) => {
     res.status(201).json({ ok: true, typ: 'foto', referenzbild: row });
   } catch (err) {
     console.error('[public-upload]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.userMessage || err.message });
   }
 });
 
@@ -178,11 +182,12 @@ router.post('/formular/:token/logo', async (req, res) => {
   if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
 
   try {
-    const buffer = Buffer.from(fileData, 'base64');
-    const ext = extFromMime(contentType, 'png');
+    const roh = Buffer.from(fileData, 'base64');
+    const norm = await normalizeImageForStorage(roh, { kind: 'logo', label: fileName });
+    const buffer = norm.buffer;
     const stem = safeFilenameStem(fileName);
-    const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
-    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType });
+    const path = `${kunde.id}/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType: norm.contentType });
     if (kunde.logo_url) await deleteFromBucket('talentone-logos', kunde.logo_url);
     // logo_transparent_url synchron nullen (siehe Upload-Handler oben) — aktuelles
     // Logo wird sonst bis zur async Regen nicht in neue Creatives übernommen.
@@ -196,7 +201,7 @@ router.post('/formular/:token/logo', async (req, res) => {
     res.status(201).json({ logo_url: publicUrl });
   } catch (err) {
     console.error('[formular/logo]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.userMessage || err.message });
   }
 });
 
@@ -210,11 +215,11 @@ router.post('/formular/:token/foto', async (req, res) => {
   if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
 
   try {
-    const buffer = Buffer.from(fileData, 'base64');
-    const ext = extFromMime(contentType, 'jpg');
+    const roh = Buffer.from(fileData, 'base64');
+    const norm = await normalizeImageForStorage(roh, { kind: 'foto', label: fileName });
     const stem = safeFilenameStem(fileName);
-    const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
-    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer, contentType });
+    const path = `${kunde.id}/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer: norm.buffer, contentType: norm.contentType });
     const { data: row, error: insErr } = await supabase
       .from('talentone_referenzbilder').insert({
         kunde_id: kunde.id, bild_url: publicUrl, typ: 'foto',
@@ -224,7 +229,7 @@ router.post('/formular/:token/foto', async (req, res) => {
     res.status(201).json({ referenzbild: row });
   } catch (err) {
     console.error('[formular/foto]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.userMessage || err.message });
   }
 });
 

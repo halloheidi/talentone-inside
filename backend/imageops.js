@@ -33,19 +33,24 @@ export class UnsupportedImageError extends Error {
   }
 }
 
+// Gemeinsamer Kern beider Normalisierer: EXIF-Rotation einbrennen (sonst liegt
+// das iPhone-Bild quer), CMYK/Graustufen -> sRGB, unter das Groessenlimit
+// verkleinern (nie hochskalieren). failOn:'none' dekodiert auch leicht defekte
+// Dateien, statt an einer Warnung abzubrechen.
+function baseSharp(buffer, maxPixel) {
+  return sharp(buffer, { failOn: 'none' })
+    .rotate()
+    .toColourspace('srgb')
+    .resize({ width: maxPixel, height: maxPixel, fit: 'inside', withoutEnlargement: true });
+}
+
 /**
- * Normalisiert ein Bild fuer die OpenAI-Bild-APIs.
+ * Normalisiert ein Bild fuer die OpenAI-Bild-APIs (Laufzeit-Sicherheitsnetz).
  *
  * Referenzbilder kommen oft direkt vom iPhone (HEIC), aus InDesign/Print
  * (CMYK-JPEG) oder als 6000px-Kameradatei — alle drei lehnt OpenAI mit
- * 400 "invalid_image_file" bzw. "Invalid image" ab. Deshalb hier:
- *   - .rotate()              EXIF-Orientierung einbrennen (sonst liegt das Bild quer)
- *   - .toColourspace('srgb') CMYK/Graustufen -> sRGB
- *   - .resize(max 2048)      unter das Groessenlimit, nie hochskalieren
- *   - .png()                 einheitliches Format; Transparenz (Logos!) bleibt erhalten
- *
- * failOn:'none' laesst Sharp auch leicht defekte Dateien noch dekodieren,
- * statt an einer Warnung abzubrechen.
+ * 400 "invalid_image_file" bzw. "Invalid image" ab. Ausgabe immer PNG:
+ * einheitliches Format, und Transparenz (Logos!) bleibt erhalten.
  *
  * @param {Buffer} buffer  Rohes Bild
  * @param {object} [opts]
@@ -55,13 +60,43 @@ export class UnsupportedImageError extends Error {
  */
 export async function normalizeImageForOpenAI(buffer, { label = 'Bild' } = {}) {
   try {
-    const out = await sharp(buffer, { failOn: 'none' })
-      .rotate()
-      .toColourspace('srgb')
-      .resize({ width: OPENAI_MAX_PIXEL, height: OPENAI_MAX_PIXEL, fit: 'inside', withoutEnlargement: true })
-      .png()
-      .toBuffer();
+    const out = await baseSharp(buffer, OPENAI_MAX_PIXEL).png().toBuffer();
     return { buffer: out, contentType: 'image/png', ext: 'png' };
+  } catch (err) {
+    throw new UnsupportedImageError(label, err.message);
+  }
+}
+
+// Gespeicherte Originale duerfen groesser sein als der OpenAI-Upload — sie
+// dienen auch Tool-Vorschau und Canva-Download. 4096 ist grosszuegig, aber
+// noch im Rahmen (das Laufzeit-Netz verkleinert fuer OpenAI ohnehin auf 2048).
+const STORAGE_MAX_PIXEL = 4096;
+
+/**
+ * Normalisiert ein Bild BEIM UPLOAD, bevor es im Storage landet. Damit sind
+ * gespeicherte Logos/Fotos schon sauber: sRGB, korrekt gedreht (EXIF), web-
+ * taugliches Format — schnellere Generierung (keine Wiederhol-Konvertierung),
+ * richtig gedrehte Vorschauen im Tool, Canva-taugliche Downloads.
+ *
+ * Format-Wahl:
+ *   - kind='logo' ODER Bild mit Alpha -> PNG (Transparenz muss bleiben)
+ *   - sonst (Fotos ohne Alpha)        -> JPEG q88 (deutlich kleiner als PNG)
+ *
+ * @param {Buffer} buffer
+ * @param {object} [opts]
+ * @param {'logo'|'foto'} [opts.kind]
+ * @param {string} [opts.label]
+ * @returns {Promise<{buffer: Buffer, contentType: string, ext: string}>}
+ * @throws {UnsupportedImageError}
+ */
+export async function normalizeImageForStorage(buffer, { kind = 'foto', label = 'Bild' } = {}) {
+  try {
+    const meta = await sharp(buffer, { failOn: 'none' }).metadata();
+    const pipe = baseSharp(buffer, STORAGE_MAX_PIXEL);
+    if (kind === 'logo' || meta.hasAlpha) {
+      return { buffer: await pipe.png().toBuffer(), contentType: 'image/png', ext: 'png' };
+    }
+    return { buffer: await pipe.jpeg({ quality: 88 }).toBuffer(), contentType: 'image/jpeg', ext: 'jpg' };
   } catch (err) {
     throw new UnsupportedImageError(label, err.message);
   }

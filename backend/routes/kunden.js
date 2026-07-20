@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
-import { uploadBuffer, deleteFromBucket, extFromMime, safeFilenameStem } from '../storage.js';
+import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
+import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -156,13 +157,13 @@ router.post('/quick-create', async (req, res) => {
 
       if (logo?.fileData) {
         try {
-          logoBuffer = Buffer.from(logo.fileData, 'base64');
-          const ext = extFromMime(logo.contentType || 'image/png', 'png');
+          const norm = await normalizeImageForStorage(Buffer.from(logo.fileData, 'base64'), { kind: 'logo', label: logo.fileName || 'Logo' });
+          logoBuffer = norm.buffer;
           const stem = safeFilenameStem(logo.fileName || 'logo');
-          const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
+          const path = `${kunde.id}/${Date.now()}-${stem}.${norm.ext}`;
           logoUrl = await uploadBuffer({
             bucket: 'talentone-logos', path, buffer: logoBuffer,
-            contentType: logo.contentType || 'image/png',
+            contentType: norm.contentType,
           });
           await supabase.from('talentone_kunden').update({ logo_url: logoUrl }).eq('id', kunde.id);
           console.log(`[quick-create-bg] Logo gesetzt für ${kunde.id.slice(0, 8)}`);
@@ -684,11 +685,11 @@ router.post('/:id/logo', async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
 
   try {
-    const buffer = decodeBase64File(fileData);
-    const ext = extFromMime(contentType, 'png');
+    const norm = await normalizeImageForStorage(decodeBase64File(fileData), { kind: 'logo', label: fileName });
+    const buffer = norm.buffer;
     const stem = safeFilenameStem(fileName);
-    const path = `${req.params.id}/${Date.now()}-${stem}.${ext}`;
-    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType });
+    const path = `${req.params.id}/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer, contentType: norm.contentType });
 
     if (existing.logo_url) await deleteFromBucket('talentone-logos', existing.logo_url);
 
@@ -729,7 +730,7 @@ router.post('/:id/logo', async (req, res) => {
     res.status(201).json({ kunde: updated });
   } catch (err) {
     console.error('[logo-upload]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.userMessage || err.message });
   }
 });
 
@@ -786,11 +787,10 @@ router.post('/:id/referenzbilder', async (req, res) => {
   if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
 
   try {
-    const buffer = decodeBase64File(fileData);
-    const ext = extFromMime(contentType, 'jpg');
+    const norm = await normalizeImageForStorage(decodeBase64File(fileData), { kind: 'foto', label: fileName });
     const stem = safeFilenameStem(fileName);
-    const path = `${req.params.id}/${Date.now()}-${stem}.${ext}`;
-    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer, contentType });
+    const path = `${req.params.id}/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer: norm.buffer, contentType: norm.contentType });
 
     const { data: row, error: insErr } = await supabase
       .from('talentone_referenzbilder')
@@ -806,7 +806,7 @@ router.post('/:id/referenzbilder', async (req, res) => {
     res.status(201).json({ referenzbild: row });
   } catch (err) {
     console.error('[ref-upload]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.userMessage || err.message });
   }
 });
 
