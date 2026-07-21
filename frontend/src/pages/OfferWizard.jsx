@@ -137,9 +137,13 @@ export default function OfferWizard() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [additionalPositionsCount, setAdditionalPositionsCount] = useState(0);
   const [adBudget, setAdBudget] = useState('800');
-  // Garantie + Einstellungen-Ziel (Phase 5 Nachtrag)
+  // Garantie: explizite Art (none | hire | applications). Default 'none' — wird
+  // beim Marken-Wechsel gesetzt (N&W: hire an, TalentOne: keine). Behebt den Bug,
+  // dass eine Garantie erschien, obwohl keine gewählt war.
+  const [guaranteeType, setGuaranteeType] = useState('none');
   const [guaranteePeriodDays, setGuaranteePeriodDays] = useState(30);
-  const [guaranteeNote, setGuaranteeNote] = useState('Kostenlos weiterarbeiten, wenn nach 30 Tagen keine Einstellung erfolgt ist.');
+  const [guaranteeApplicationsCount, setGuaranteeApplicationsCount] = useState(10);
+  const [guaranteeNote, setGuaranteeNote] = useState(''); // optionaler Freitext-Override
   const [hiresTarget, setHiresTarget] = useState(1);
   // Rabatt (beide Brands): percent | flat, Wert in %/EUR
   const [discountType, setDiscountType] = useState('');       // '' = kein Rabatt
@@ -163,8 +167,12 @@ export default function OfferWizard() {
         if (n !== 0 && n % 50 !== 0) return 'Werbebudget muss ein Vielfaches von 50 € sein.';
       }
     }
+    if (guaranteeType === 'applications') {
+      const c = Number(guaranteeApplicationsCount);
+      if (!Number.isFinite(c) || c < 1) return 'Bitte die garantierte Mindestanzahl Bewerbungen angeben (mind. 1).';
+    }
     return null;
-  }, [step, products, brand, adBudget]);
+  }, [step, products, brand, adBudget, guaranteeType, guaranteeApplicationsCount]);
 
   const canNext = useMemo(() => {
     if (step === 1) return !!customer;
@@ -173,12 +181,14 @@ export default function OfferWizard() {
     return false;
   }, [step, customer, brand, products.length, step3Error]);
 
-  // Marken-Default fuer Garantie: bei Brand-Wechsel Note default setzen (falls User leer).
+  // Marken-Default fuer Garantie beim Brand-Wechsel: N&W hat standardmaessig die
+  // Erfolgsgarantie (hire), TalentOne standardmaessig KEINE (bewusst gewaehlt).
   useEffect(() => {
-    setGuaranteeNote(prev => prev && prev.trim()
-      ? prev
-      : `Kostenlos weiterarbeiten, wenn nach ${guaranteePeriodDays} Tagen keine Einstellung erfolgt ist.`);
-  }, [brand, guaranteePeriodDays]);
+    if (!brand) return;
+    if (brand === 'nowag_wirth') { setGuaranteeType('hire'); setGuaranteePeriodDays(30); }
+    else { setGuaranteeType('none'); setGuaranteePeriodDays(30); }
+    setGuaranteeNote('');
+  }, [brand]);
 
   // Wenn Marke wechselt: Katalog + Textbausteine laden, Default-Optionen wählen
   useEffect(() => {
@@ -243,7 +253,9 @@ export default function OfferWizard() {
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
       additional_positions_count: additionalPositionsCount,
       ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+      guarantee_type: guaranteeType,
       guarantee_period_days: guaranteePeriodDays,
+      guarantee_applications_count: guaranteeType === 'applications' ? guaranteeApplicationsCount : null,
       guarantee_note: guaranteeNote,
       hires_target: hiresTarget,
       discount_type: discountType || null,
@@ -379,6 +391,8 @@ export default function OfferWizard() {
             setGuaranteePeriodDays={setGuaranteePeriodDays}
             hiresTarget={hiresTarget}
             setHiresTarget={setHiresTarget}
+            guaranteeType={guaranteeType} setGuaranteeType={setGuaranteeType}
+            guaranteeApplicationsCount={guaranteeApplicationsCount} setGuaranteeApplicationsCount={setGuaranteeApplicationsCount}
             guaranteeNote={guaranteeNote} setGuaranteeNote={setGuaranteeNote}
             discountType={discountType} setDiscountType={setDiscountType}
             discountValue={discountValue} setDiscountValue={setDiscountValue}
@@ -390,6 +404,8 @@ export default function OfferWizard() {
             brand={brand} customer={customer} products={products}
             selectedIds={selectedIds} totals={totals} templates={templates}
             additionalPositionsCount={additionalPositionsCount}
+            guaranteeType={guaranteeType}
+            guaranteeApplicationsCount={guaranteeApplicationsCount}
             guaranteeNote={guaranteeNote}
             guaranteePeriodDays={guaranteePeriodDays}
             savingDraft={savingDraft} onSaveDraft={saveDraft}
@@ -844,6 +860,8 @@ function Step3Config({
   adBudget, setAdBudget,
   guaranteePeriodDays, setGuaranteePeriodDays,
   hiresTarget, setHiresTarget,
+  guaranteeType, setGuaranteeType,
+  guaranteeApplicationsCount, setGuaranteeApplicationsCount,
   guaranteeNote, setGuaranteeNote,
   discountType, setDiscountType,
   discountValue, setDiscountValue,
@@ -892,50 +910,75 @@ function Step3Config({
       </section>
 
       <section style={{ marginBottom: 22, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
-        <SectionHead label="Garantie & Einstellungsziel" />
-        <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-          <input type="checkbox" checked={guaranteePeriodDays > 0}
-            onChange={e => setGuaranteePeriodDays(e.target.checked ? (brand === 'talentone' ? 30 : 30) : 0)} />
-          <span style={{ fontSize: 13, fontWeight: 600 }}>🛡️ Garantie gewähren</span>
-        </label>
-        {guaranteePeriodDays > 0 && (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: brand === 'nowag_wirth' ? '1fr 1fr' : '1fr 1fr', gap: 14 }}>
-              {brand === 'nowag_wirth' ? (
-                <label style={{ display: 'grid', gap: 4 }}>
-                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Zeitraum</span>
-                  <select value={guaranteePeriodDays} onChange={e => setGuaranteePeriodDays(Number(e.target.value))}
-                    style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
-                    <option value={30}>30 Tagen</option>
-                    <option value={60}>60 Tagen</option>
-                    <option value={90}>90 Tagen</option>
-                  </select>
-                </label>
-              ) : (
-                <label style={{ display: 'grid', gap: 4 }}>
-                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Zeitraum</span>
-                  <input type="number" min="1" max="180" value={guaranteePeriodDays}
-                    onChange={e => setGuaranteePeriodDays(Math.max(1, Math.min(180, parseInt(e.target.value, 10) || 30)))}
-                    style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }} />
-                </label>
-              )}
+        <SectionHead label="Garantie" />
+
+        {brand === 'talentone' ? (
+          // TalentOne: explizite Wahl — keine / Bewerbungen / Einstellung.
+          <label style={{ display: 'grid', gap: 4, maxWidth: 340 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Garantie-Art</span>
+            <select value={guaranteeType} onChange={e => setGuaranteeType(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
+              <option value="none">Keine Garantie</option>
+              <option value="applications">Bewerbungs-Garantie (Mindestanzahl)</option>
+              <option value="hire">Einstellungs-Garantie (kostenlose Weiterarbeit)</option>
+            </select>
+          </label>
+        ) : (
+          // N&W: Erfolgsgarantie an/aus (Standard: an).
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="checkbox" checked={guaranteeType === 'hire'}
+              onChange={e => setGuaranteeType(e.target.checked ? 'hire' : 'none')} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>🛡️ Erfolgsgarantie gewähren</span>
+          </label>
+        )}
+
+        {/* Bewerbungs-Garantie: Mindestanzahl */}
+        {guaranteeType === 'applications' && (
+          <label style={{ display: 'grid', gap: 4, maxWidth: 340, marginTop: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Garantierte Mindestanzahl Bewerbungen</span>
+            <input type="number" min="1" max="999" value={guaranteeApplicationsCount}
+              onChange={e => setGuaranteeApplicationsCount(Math.max(1, Math.min(999, parseInt(e.target.value, 10) || 1)))}
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
+            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Wird als Zusage im Angebot ausgewiesen — bei Unterschreitung arbeiten wir kostenlos weiter.</span>
+          </label>
+        )}
+
+        {/* Einstellungs-Garantie: Zeitraum (N&W wählbar, TalentOne fix 30 Tage) + Einstellungsziel */}
+        {guaranteeType === 'hire' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 12, maxWidth: 400 }}>
+            {brand === 'nowag_wirth' && (
               <label style={{ display: 'grid', gap: 4 }}>
-                <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Einstellungsziel</span>
-                <input type="number" min="1" max="10" value={hiresTarget}
-                  onChange={e => setHiresTarget(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
-                  style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
+                <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Zeitraum</span>
+                <select value={guaranteePeriodDays} onChange={e => setGuaranteePeriodDays(Number(e.target.value))}
+                  style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14 }}>
+                  <option value={30}>30 Tagen</option>
+                  <option value={60}>60 Tagen</option>
+                  <option value={90}>90 Tagen</option>
+                </select>
               </label>
-            </div>
+            )}
             <label style={{ display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Beschreibungstext im Angebot</span>
-              <textarea rows={2} value={guaranteeNote} onChange={e => setGuaranteeNote(e.target.value)}
-                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
-              <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Erscheint im Angebot/PDF und wird beim Annehmen ans Projekt uebertragen.</span>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Einstellungsziel</span>
+              <input type="number" min="1" max="10" value={hiresTarget}
+                onChange={e => setHiresTarget(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 14, textAlign: 'right' }} />
             </label>
           </div>
         )}
-        {guaranteePeriodDays === 0 && (
-          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '6px 0 0' }}>Keine Garantie gewaehrt.</p>
+
+        {/* Optionaler Freitext-Override — nur wenn eine Garantie aktiv ist */}
+        {guaranteeType !== 'none' && (
+          <label style={{ display: 'grid', gap: 4, marginTop: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 600 }}>Beschreibungstext im Angebot (optional)</span>
+            <textarea rows={2} value={guaranteeNote} onChange={e => setGuaranteeNote(e.target.value)}
+              placeholder="Leer lassen für den Standardtext dieser Garantie-Art."
+              style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
+            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Leer = automatischer Standardtext. Erscheint im Angebot/PDF.</span>
+          </label>
+        )}
+
+        {guaranteeType === 'none' && (
+          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '10px 0 0' }}>Keine Garantie — es erscheint keine Garantie-Position im Angebot.</p>
         )}
       </section>
 
@@ -1120,16 +1163,24 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
 }
 
 // ─────────────────────── Step 4 ───────────────────────
-function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, guaranteeNote, guaranteePeriodDays, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
+function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, guaranteeType, guaranteeApplicationsCount, guaranteeNote, guaranteePeriodDays, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
   const positionsWithText = (totals?.positions || []).map(l => ({
     ...l,
     description: products.find(p => p.id === l.product_id)?.description || '',
   }));
   const brandMeta = BRAND_META[brand];
-  // Vorrang: manuell gepflegter Guarantee-Text; sonst Template. Wenn Garantie aus (0 Tage): keine Anzeige.
-  const guarantee = (guaranteePeriodDays > 0)
-    ? ((guaranteeNote && guaranteeNote.trim()) || templates.find(t => t.key === 'guarantee')?.text || '')
-    : '';
+  // Vorschau spiegelt die Builder-Logik: Garantie nur bei type != 'none';
+  // Text = gepflegter Note-Text > generierter Default; Platzhalter gefuellt.
+  let guarantee = '';
+  if (guaranteeType && guaranteeType !== 'none') {
+    guarantee = (guaranteeNote && guaranteeNote.trim())
+      || (guaranteeType === 'applications'
+        ? `Wir garantieren mindestens ${guaranteeApplicationsCount || 0} Bewerbungen für die ausgeschriebene Stelle innerhalb der Kampagnenlaufzeit. Werden weniger erreicht, arbeiten wir ohne weitere Servicegebühr weiter, bis die zugesagte Anzahl erreicht ist.`
+        : (templates.find(t => t.key === 'guarantee')?.text || ''));
+    guarantee = String(guarantee)
+      .replace(/\{\{\s*garantie_frist\s*\}\}/gi, String(Number(guaranteePeriodDays) || 0))
+      .replace(/\{\{\s*bewerbungen\s*\}\}/gi, String(guaranteeApplicationsCount || 0));
+  }
   const paymentTerms = templates.find(t => t.key === 'payment_terms')?.text || '';
 
   if (!totals) return <div>Lade Vorschau…</div>;

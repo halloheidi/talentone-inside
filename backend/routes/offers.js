@@ -482,7 +482,7 @@ router.get('/resolve-kunde', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_period_days, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
@@ -550,6 +550,32 @@ router.get('/:id', async (req, res) => {
   res.json({ offer: data });
 });
 
+// Leitet die Garantie-Felder aus dem Request-Body ab — zentrale Stelle fuer
+// Create + Patch. guarantee_type steuert OB/WELCHE Garantie; Bewerbungs-Garantie
+// ('applications') nur bei TalentOne. `guarantee` ist das Frist-/Billing-Fenster
+// in Tagen (0 = keine Garantie -> keine Position).
+function resolveGuarantee(b) {
+  let type = ['none', 'hire', 'applications'].includes(b.guarantee_type) ? b.guarantee_type : null;
+  // Rueckwaertskompatibel: ohne type aus period_days ableiten.
+  if (!type) type = Number(b.guarantee_period_days) > 0 ? 'hire' : 'none';
+  if (type === 'applications' && b.brand !== 'talentone') type = 'hire';
+  const guaranteeType = type;
+
+  let guarantee = 0;
+  if (guaranteeType !== 'none') {
+    guarantee = b.brand === 'talentone'
+      ? 30
+      : ([30, 60, 90].includes(Number(b.guarantee_period_days)) ? Number(b.guarantee_period_days) : 30);
+  }
+  const applicationsCount = guaranteeType === 'applications'
+    ? Math.max(1, Math.min(999, Math.round(Number(b.guarantee_applications_count) || 0)))
+    : null;
+  const guaranteeNote = guaranteeType === 'none'
+    ? null
+    : (typeof b.guarantee_note === 'string' && b.guarantee_note.trim() ? b.guarantee_note.trim() : null);
+  return { guaranteeType, guarantee, applicationsCount, guaranteeNote };
+}
+
 /* POST /api/offers  — Draft speichern
    body: {
      brand, easybill_customer_id, customer_snapshot,
@@ -584,18 +610,9 @@ router.post('/', async (req, res) => {
       discount_value: discountVal,
     });
 
-    // Garantie: 0 = keine Garantie. TalentOne bekommt jetzt auch Wahlmoeglichkeit
-    // (aus / 30). N&W behaelt 30/60/90. 0 immer erlaubt.
-    const rawGuarantee = Number(b.guarantee_period_days);
-    let guarantee;
-    if (rawGuarantee === 0) guarantee = 0;
-    else if (b.brand === 'talentone') guarantee = 30;
-    else guarantee = [30, 60, 90].includes(rawGuarantee) ? rawGuarantee : 30;
-    const guaranteeNote = guarantee > 0
-      ? (typeof b.guarantee_note === 'string' && b.guarantee_note.trim()
-          ? b.guarantee_note.trim()
-          : 'Kostenlos weiterarbeiten, wenn nach 30 Tagen keine Einstellung erfolgt ist.')
-      : null;
+    // Garantie-Art (explizit): none | hire | applications. Steuert OB + WELCHE
+    // Garantie-Position erscheint. Bewerbungs-Garantie nur bei TalentOne.
+    const { guaranteeType, guarantee, applicationsCount, guaranteeNote } = resolveGuarantee(b);
     const hiresTarget = Number.isFinite(+b.hires_target)
       ? Math.max(1, Math.min(10, Math.round(+b.hires_target)))
       : 1;
@@ -623,7 +640,9 @@ router.post('/', async (req, res) => {
       first_month_total:           totals.first_month_total,
       vat_rate:                    totals.vat_rate,
       status:                      b.status === 'draft' ? 'draft' : 'draft',
+      guarantee_type:              guaranteeType,
       guarantee_period_days:       guarantee,
+      guarantee_applications_count: applicationsCount,
       guarantee_note:              guaranteeNote,
       discount_type:               totals.discount_type,
       discount_value:              totals.discount_value,
@@ -696,14 +715,15 @@ router.patch('/:id', async (req, res) => {
     if (b.easybill_customer_id !== undefined) patch.easybill_customer_id = String(b.easybill_customer_id);
     if (b.customer_snapshot !== undefined)    patch.customer_snapshot = b.customer_snapshot;
     if (b.close_lead_id !== undefined)        patch.close_lead_id = b.close_lead_id || null;
-    if (b.guarantee_period_days !== undefined) {
-      const raw = Number(b.guarantee_period_days);
-      if (raw === 0) patch.guarantee_period_days = 0;
-      else patch.guarantee_period_days = brand === 'talentone' ? 30 : ([30, 60, 90].includes(raw) ? raw : 30);
-    }
-    if (b.guarantee_note !== undefined) {
-      const t = typeof b.guarantee_note === 'string' ? b.guarantee_note.trim() : '';
-      patch.guarantee_note = t || null;
+    // Garantie: wird als Einheit neu abgeleitet, sobald eine Garantie-Angabe im
+    // Body ist (Art/Frist/Anzahl/Text) — so bleiben Art, Frist und Text konsistent.
+    if (b.guarantee_type !== undefined || b.guarantee_period_days !== undefined
+        || b.guarantee_applications_count !== undefined || b.guarantee_note !== undefined) {
+      const g = resolveGuarantee({ ...b, brand });
+      patch.guarantee_type = g.guaranteeType;
+      patch.guarantee_period_days = g.guarantee;
+      patch.guarantee_applications_count = g.applicationsCount;
+      patch.guarantee_note = g.guaranteeNote;
     }
     if (b.hires_target !== undefined) {
       const raw = Number(b.hires_target);
@@ -732,6 +752,9 @@ router.patch('/:id', async (req, res) => {
  */
 function checkGuaranteeWarning({ offer, templateText }) {
   if (!offer || Number(offer.guarantee_period_days || 0) <= 0) return null;
+  // Bewerbungs-Garantie ist eine bewusste, explizit gewaehlte Zusage — hier ist
+  // eine Bewerbungsanzahl gewollt, also kein Preflight-Warnhinweis.
+  if (offer.guarantee_type === 'applications') return null;
   const text = (offer.guarantee_note && offer.guarantee_note.trim())
     || templateText
     || '';
@@ -796,6 +819,9 @@ router.post('/:id/create-easybill', async (req, res) => {
       templates: templates || [],
       discount_type: offer.discount_type || null,
       discount_value: Number(offer.discount_value) || 0,
+      guarantee_type: offer.guarantee_type || null,
+      guarantee_period_days: Number(offer.guarantee_period_days) || 0,
+      guarantee_applications_count: offer.guarantee_applications_count ?? null,
       guarantee_note: offer.guarantee_note || null,
     });
 
@@ -882,6 +908,9 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       templates: templates || [],
       discount_type: offer.discount_type || null,
       discount_value: Number(offer.discount_value) || 0,
+      guarantee_type: offer.guarantee_type || null,
+      guarantee_period_days: Number(offer.guarantee_period_days) || 0,
+      guarantee_applications_count: offer.guarantee_applications_count ?? null,
       guarantee_note: offer.guarantee_note || null,
     });
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
@@ -976,12 +1005,22 @@ router.get('/:id/pdf', async (req, res) => {
 /* DELETE /api/offers/:id — nur Drafts löschbar. */
 router.delete('/:id', async (req, res) => {
   const { data: cur } = await supabase
-    .from('talentone_offers').select('status').eq('id', req.params.id).maybeSingle();
+    .from('talentone_offers')
+    .select('status, easybill_document_id, easybill_order_document_id')
+    .eq('id', req.params.id).maybeSingle();
   if (!cur) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
-  if (cur.status !== 'draft') return res.status(409).json({ error: 'Nur Drafts können gelöscht werden.' });
+  // Angenommene Angebote sind verbindlich (Kunde hat unterschrieben) — nicht löschbar.
+  if (cur.status === 'accepted') {
+    return res.status(409).json({ error: 'Angenommene Angebote können nicht gelöscht werden.' });
+  }
   const { error } = await supabase.from('talentone_offers').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true });
+  // Ein evtl. schon erzeugter easybill-Beleg bleibt in easybill bestehen (wird
+  // nicht automatisch gelöscht) — Hinweis für die UI.
+  const easybillBeleg = cur.easybill_document_id || cur.easybill_order_document_id
+    ? 'Der zugehörige easybill-Beleg bleibt in easybill bestehen und muss dort ggf. separat storniert/gelöscht werden.'
+    : null;
+  res.json({ ok: true, hinweis: easybillBeleg });
 });
 
 /* POST /api/offers/:id/link-customer  body: { customer_id }

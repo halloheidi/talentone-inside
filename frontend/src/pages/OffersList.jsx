@@ -314,6 +314,24 @@ export default function OffersList() {
                           onClick={() => setDeclineOffer(o)}
                         >❌ Ablehnen</button>
                       )}
+                      {o.status !== 'accepted' && (
+                        <button
+                          className="btn-ghost btn-sm btn-danger"
+                          title="Angebot löschen"
+                          onClick={async () => {
+                            const hatBeleg = o.easybill_document_id || o.easybill_order_document_id;
+                            const frage = hatBeleg
+                              ? 'Angebot wirklich löschen?\n\nEs wurde bereits ein easybill-Beleg erzeugt — der bleibt in easybill bestehen und muss dort ggf. separat storniert werden.'
+                              : 'Angebot wirklich löschen?';
+                            if (!confirm(frage)) return;
+                            try {
+                              const res = await api(`/offers/${o.id}`, { method: 'DELETE' });
+                              if (res.hinweis) alert(res.hinweis);
+                              load();
+                            } catch (e) { alert('Löschen fehlgeschlagen: ' + (e.body?.error || e.message)); }
+                          }}
+                        >🗑 Löschen</button>
+                      )}
                       {err && <span style={{ fontSize: 11, color: '#b91c1c' }}>⚠ {err}</span>}
                     </td>
                   </tr>

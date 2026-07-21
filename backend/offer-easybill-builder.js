@@ -63,6 +63,9 @@ export function buildEasybillOfferPayload({
   templates = [],
   discount_type = null,
   discount_value = 0,
+  guarantee_type = null,
+  guarantee_period_days = 0,
+  guarantee_applications_count = null,
   guarantee_note = null,
 } = {}) {
   const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
@@ -145,10 +148,29 @@ export function buildEasybillOfferPayload({
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)
-  // Garantie: bevorzugt der pro Angebot gepflegte guarantee_note-Text; sonst Template.
-  const guaranteeFromNote = (guarantee_note && guarantee_note.trim()) || null;
-  const guaranteeFromTpl  = findTemplate(templates, 'guarantee');
-  const guarantee = guaranteeFromNote || guaranteeFromTpl;
+  // Garantie-Position NUR, wenn eine Garantie gewaehlt wurde. Frueher wurde sie
+  // gerendert, sobald ein guarantee-Template existierte (schlug auch bei "keine
+  // Garantie" durch) — das ist der Bug, den wir hier schliessen.
+  // Rueckwaerts-kompatibel: fehlt guarantee_type, an guarantee_period_days koppeln.
+  const guaranteeAktiv = guarantee_type
+    ? guarantee_type !== 'none'
+    : Number(guarantee_period_days) > 0;
+  let guarantee = null;
+  if (guaranteeAktiv) {
+    // Text: gepflegter Note-Text > generierter Default je Art.
+    guarantee = (guarantee_note && guarantee_note.trim()) || null;
+    if (!guarantee) {
+      guarantee = guarantee_type === 'applications'
+        ? `Wir garantieren mindestens ${guarantee_applications_count || 0} Bewerbungen fuer die ausgeschriebene Stelle innerhalb der Kampagnenlaufzeit. Werden weniger erreicht, arbeiten wir ohne weitere Servicegebuehr weiter, bis die zugesagte Anzahl erreicht ist.`
+        : findTemplate(templates, 'guarantee'); // hire -> Template
+    }
+    if (guarantee) {
+      // Platzhalter fuellen (bisher blieb {{garantie_frist}} leer -> "nach Tagen").
+      guarantee = String(guarantee)
+        .replace(/\{\{\s*garantie_frist\s*\}\}/gi, String(Number(guarantee_period_days) || 0))
+        .replace(/\{\{\s*bewerbungen\s*\}\}/gi, String(guarantee_applications_count || 0));
+    }
+  }
   const guaranteeLabel = findTemplate(templates, 'guarantee_label')
                        || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand]
                        || 'Garantie';
