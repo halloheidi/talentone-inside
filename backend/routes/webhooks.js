@@ -279,11 +279,22 @@ router.post('/perspective', async (req, res) => {
       .select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
 
-    // Mails (best-effort)
+    // Nachgelagert (best-effort): Google-Sheets-Sync + Mails. Blockiert nie.
     (async () => {
       try {
         const { data: kunde } = await supabase
           .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+
+        // Google-Sheets-Sync (append-only). Wirft nie nach aussen.
+        const { syncBewerbungToSheet } = await import('../sheets-sync.js');
+        await syncBewerbungToSheet({ bewerbung: bew, job, kunde });
+
+        // Sheet-Link fuer die Kunden-Mail: aktiver Sheets-Sync > Funnel-Extern-Sheet.
+        const sheetsCfg = kunde?.sheets_sync;
+        const sheetUrl = (sheetsCfg?.enabled && sheetsCfg?.spreadsheet_id)
+          ? `https://docs.google.com/spreadsheets/d/${sheetsCfg.spreadsheet_id}/edit`
+          : (funnel?.extern_sheet_url || null);
+
         if (zuordnungUnklar) {
           // Interne Warn-Mail — Kunden-Mail bewusst NICHT (mögliche Fehlzuordnung).
           const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');
@@ -293,7 +304,7 @@ router.post('/perspective', async (req, res) => {
           await sendBewerbungsMail({
             kunde, job,
             bewerbung: { ...bew, quelle: 'perspective' },
-            sheetUrl: funnel?.extern_sheet_url || null,
+            sheetUrl,
           });
         }
       } catch (err) { console.warn('[perspective-mail]', err.message); }

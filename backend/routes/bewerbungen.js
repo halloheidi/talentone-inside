@@ -70,6 +70,27 @@ router.patch('/:id/notiz', async (req, res) => {
     .single();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ notiz: data });
+
+  // Best-effort: Vorqual-Daten in die Sheet-Zeile zurueckschreiben (nur wenn sich
+  // Vorqual/Kontakt geaendert hat). Blockiert die Antwort nicht, wirft nie.
+  if (body.vorqualifizierung_werte !== undefined || body.nw_kontaktiert !== undefined) {
+    (async () => {
+      try {
+        const { data: bew } = await supabase.from('talentone_bewerbungen')
+          .select('id, job_id, sheets_row_number, talentone_jobs!inner(kunde_id)')
+          .eq('id', bewId).maybeSingle();
+        if (!bew?.sheets_row_number) return;
+        const { data: kunde } = await supabase.from('talentone_kunden')
+          .select('id, firmenname, sheets_sync').eq('id', bew.talentone_jobs?.kunde_id).maybeSingle();
+        const { updateVorqualInSheet } = await import('../sheets-sync.js');
+        await updateVorqualInSheet({
+          bewerbung: bew, kunde,
+          vorqualWerte: data.vorqualifizierung_werte || {},
+          nwKontaktiertAm: data.nw_kontaktiert || null,
+        });
+      } catch (err) { console.warn('[bewerbungen/notiz sheets-writeback]', err.message); }
+    })();
+  }
 });
 
 // PATCH /api/bewerbungen/:id/zuordnen  body: { job_id }
