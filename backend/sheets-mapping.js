@@ -3,8 +3,10 @@
 // den Spalten zu. Fehlende Werte = leere Zelle (nie Spaltenversatz).
 //
 // Schutz: vom Kunden gepflegte Spalten (Clivet: kontaktiert/Lebenslauf/Notiz/
-// VG eingeladen/Eingestellt) werden NIE geschrieben. Nicht zuordenbare Funnel-
-// Antworten landen in "weiteres" (nur beim ersten Anhaengen, nie beim Update).
+// VG eingeladen/Eingestellt) werden NIE geschrieben. Die N&W-"kontaktiert am"-
+// Spalte ist reserviert und wird nur bei der Vorqual-Rueckschreibung gefuellt
+// (beim ersten Anhaengen bleibt sie leer). Nicht zuordenbare Funnel-Antworten
+// landen in "weiteres".
 
 function norm(s) {
   return String(s || '').toLowerCase()
@@ -21,21 +23,41 @@ function matches(header, aliases) {
   return aliases.some(a => { const n = norm(a); return n && (h === n || h.includes(n) || n.includes(h)); });
 }
 
-// Vom Kunden gepflegt — NIE beschreiben.
-const CLIVET_OWNED = ['clivet kontaktiert', 'lebenslauf', 'notiz', 'vg eingeladen', 'eingestellt'];
-export const isClivetOwned = (header) => matches(header, CLIVET_OWNED);
+// Vom Kunden gepflegt — NIE beschreiben. Regel: jede Spalte, die "clivet" nennt,
+// plus die restlichen kundengepflegten Spalten per Alias (VG-Einladung, Lebenslauf,
+// Notiz, Eingestellt). Bewusst grosszuegig, damit wir nie in Kundenspalten schreiben.
+const CLIVET_OWNED = [
+  'lebenslauf', 'notiz', 'eingestellt',
+  'vg eingeladen', 'vorstellungsgespraech eingeladen', 'vorstellungsgesprach eingeladen', 'eingeladen am',
+];
+export const isClivetOwned = (header) => norm(header).includes('clivet') || matches(header, CLIVET_OWNED);
 const isWeiteres = (header) => matches(header, ['weiteres', 'weitere antworten', 'sonstiges']);
 
+// Reservierte N&W-"kontaktiert am"-Spalte: beim Append leer lassen, nur per
+// Vorqual-Rueckschreibung fuellen. (Clivet-Variante ist bereits via isClivetOwned
+// ausgeschlossen und wird hier nicht mehr erreicht.)
+const NW_KONTAKTIERT = ['n&w telefonisch kontaktiert', 'n&w kontaktiert', 'telefonisch kontaktiert am', 'nw kontaktiert'];
+const isNwKontaktiert = (header) => !isClivetOwned(header) && matches(header, NW_KONTAKTIERT);
+
 // Standard-Felder (aus dem Bewerbungs-Datensatz, nicht aus Antworten).
-function standardValue(header, ctx) {
-  if (matches(header, ['vor und nachname', 'vor- und nachname', 'name', 'vorname nachname'])) return ctx.name;
-  if (matches(header, ['beworben am', 'eingang', 'eingegangen', 'datum', 'bewerbungsdatum'])) return ctx.datum;
-  if (matches(header, ['tel nr', 'tel. nr', 'telefon', 'telefonnummer', 'handy', 'mobil', 'rufnummer'])) return ctx.telefon;
-  if (matches(header, ['mail', 'e-mail', 'email', 'e mail'])) return ctx.email;
-  if (matches(header, ['stelle', 'position', 'job', 'bewerbung fuer'])) return ctx.stelle;
-  if (matches(header, ['quelle', 'source'])) return ctx.quelle;
-  return undefined; // kein Standard-Feld
+// Wertunabhaengig definiert, damit "ist Standardfeld?" unabhaengig vom Kontext
+// bestimmt werden kann.
+const STANDARD_FIELDS = [
+  { aliases: ['vor und nachname', 'vor- und nachname', 'name', 'vorname nachname'], get: c => c.name },
+  { aliases: ['beworben am', 'eingang', 'eingegangen', 'bewerbungsdatum', 'datum'], get: c => c.datum },
+  { aliases: ['tel nr', 'tel. nr', 'telefonnummer', 'handy', 'mobil', 'rufnummer', 'telefon'], get: c => c.telefon },
+  { aliases: ['mail', 'e-mail', 'email', 'e mail'], get: c => c.email },
+  { aliases: ['stelle', 'position', 'bewerbung fuer'], get: c => c.stelle },
+  { aliases: ['quelle', 'source'], get: c => c.quelle },
+];
+
+// Reihenfolge: Reservierte/kundengepflegte Spalten haben Vorrang, damit z.B.
+// "N&W telefonisch kontaktiert am" NICHT als Telefon-Standardfeld verstanden wird.
+function standardField(header) {
+  if (isClivetOwned(header) || isWeiteres(header) || isNwKontaktiert(header)) return null;
+  return STANDARD_FIELDS.find(f => matches(header, f.aliases)) || null;
 }
+const isStandardHeader = (header) => standardField(header) !== null;
 
 // Antwort-Wert flatten: Arrays/Mehrfachantworten -> ", "; Zeilenumbrueche -> "; ".
 function flatten(v) {
@@ -63,15 +85,15 @@ export function toPairs({ antworten = [], vorqual = {} } = {}) {
  */
 export function buildAppendRow({ header = [], ctx = {}, pairs = [] } = {}) {
   const row = new Array(header.length).fill('');
-  const usedIdx = new Set();
 
   header.forEach((h, i) => {
-    if (isClivetOwned(h) || isWeiteres(h)) return; // spaeter / nie
-    const std = standardValue(h, ctx);
-    if (std !== undefined) { row[i] = std == null ? '' : String(std); usedIdx.add(i); return; }
+    // Kundengepflegte, "weiteres"- und reservierte N&W-Spalten NIE beim Append fuellen.
+    if (isClivetOwned(h) || isWeiteres(h) || isNwKontaktiert(h)) return;
+    const std = standardField(h);
+    if (std) { const v = std.get(ctx); row[i] = v == null ? '' : String(v); return; }
     // Fuzzy gegen Antwort-/Vorqual-Labels.
     const hit = pairs.find(p => matches(h, [p.key]));
-    if (hit) { row[i] = hit.value || ''; usedIdx.add(i); hit._used = true; }
+    if (hit) { row[i] = hit.value || ''; hit._used = true; }
   });
 
   // Nicht zugeordnete Funnel-Antworten -> "weiteres"-Spalte (nur Answers).
@@ -94,13 +116,13 @@ export function buildVorqualUpdateCells({ header = [], vorqual = {}, nwKontaktie
   const pairs = toPairs({ vorqual });
   const cells = [];
   header.forEach((h, i) => {
-    if (isClivetOwned(h) || isWeiteres(h)) return;
-    if (standardValue(h, {}) !== undefined) return; // Standardfeld nicht ueberschreiben
-    // N&W telefonisch kontaktiert am:
-    if (matches(h, ['n&w telefonisch kontaktiert', 'n w telefonisch kontaktiert', 'telefonisch kontaktiert am', 'nw kontaktiert'])) {
+    if (isClivetOwned(h) || isWeiteres(h)) return;   // Kundenspalten strikt unberuehrt
+    // N&W "telefonisch kontaktiert am": nur mit dem Kontaktdatum fuellen.
+    if (isNwKontaktiert(h)) {
       if (nwKontaktiertAm) cells.push({ colIndex: i, value: nwKontaktiertAm });
       return;
     }
+    if (isStandardHeader(h)) return;                 // Standardfelder nicht ueberschreiben
     const hit = pairs.find(p => matches(h, [p.key]));
     if (hit && hit.value) cells.push({ colIndex: i, value: hit.value });
   });
