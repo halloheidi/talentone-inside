@@ -15,9 +15,20 @@ const SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 let _creds = null;      // geparste Service-Account-JSON
 let _token = null;      // { access_token, exp } — im Prozess gecacht
 
+// Roh-Credential aus der Env holen. Akzeptiert entweder direktes JSON (beginnt
+// mit "{") oder base64-kodiertes JSON — letzteres umgeht env_file-Quote-/Newline-
+// Fallen, weil der komplette Service-Account-Key viele " und \n enthaelt.
+function rawCreds() {
+  const v = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!v || typeof v !== 'string') return v || null;
+  const s = v.trim();
+  if (s.startsWith('{')) return s;
+  try { return Buffer.from(s, 'base64').toString('utf8'); } catch { return s; }
+}
+
 function creds() {
   if (_creds) return _creds;
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const raw = rawCreds();
   if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON nicht gesetzt.');
   _creds = typeof raw === 'string' ? JSON.parse(raw) : raw;
   if (!_creds.client_email || !_creds.private_key) {
