@@ -171,9 +171,10 @@ export function buildEasybillOfferPayload({
         .replace(/\{\{\s*bewerbungen\s*\}\}/gi, String(guarantee_applications_count || 0));
     }
   }
-  const guaranteeLabel = findTemplate(templates, 'guarantee_label')
-                       || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand]
-                       || 'Garantie';
+  // Label passend zur Art: Bewerbungs-Garantie ist keine "Erfolgsgarantie".
+  const guaranteeLabel = guarantee_type === 'applications'
+    ? 'Bewerbungs-Garantie'
+    : (findTemplate(templates, 'guarantee_label') || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand] || 'Garantie');
   const paymentTerms   = findTemplate(templates, 'payment_terms');
   if (guarantee)    items.push(makeTextPosition({ pos: pos++, title: guaranteeLabel,      body: guarantee }));
   if (paymentTerms) items.push(makeTextPosition({ pos: pos++, title: 'Zahlungsbedingungen', body: paymentTerms }));
