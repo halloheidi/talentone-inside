@@ -1,9 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import Icon from '../components/Icon.jsx';
 import KundePicker from '../components/KundePicker.jsx';
+
+// Fängt Renderfehler eines Wizard-Schritts ab, damit nie eine weiße Seite
+// stehen bleibt. `key={step}` am Aufruf setzt die Boundary beim Schrittwechsel
+// zurück, sodass ein reparierter/anderer Schritt wieder normal rendert.
+class StepErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[OfferWizard] Schritt-Renderfehler:', error, info?.componentStack); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="alert alert-error" style={{ margin: 0 }}>
+          <strong>Schritt konnte nicht geladen werden.</strong>
+          <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'pre-wrap' }}>{String(this.state.error?.message || this.state.error)}</div>
+          <div style={{ fontSize: 12, marginTop: 8, color: 'var(--ink-3)' }}>Bitte einen Schritt zurück und erneut versuchen — oder die Seite neu laden.</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const eur  = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const num  = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -322,6 +343,7 @@ export default function OfferWizard() {
       {error && <div className="alert alert-error" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div className="card" style={{ padding: 22, marginBottom: 16 }}>
+        <StepErrorBoundary key={step}>
         {step === 1 && <Step1Customer customer={customer} onSelect={setCustomer} alsoInTool={alsoInTool} setAlsoInTool={setAlsoInTool}
           internerKundeName={customer?.tool_kunde_name} kundeExistiertNicht={kundeExistiertNicht}
           onPickKunde={pickInternerKunde} onKundeExistiertNicht={markKundeExistiertNicht} onResetKunde={resetInternerKunde} />}
@@ -357,6 +379,10 @@ export default function OfferWizard() {
             setGuaranteePeriodDays={setGuaranteePeriodDays}
             hiresTarget={hiresTarget}
             setHiresTarget={setHiresTarget}
+            guaranteeNote={guaranteeNote} setGuaranteeNote={setGuaranteeNote}
+            discountType={discountType} setDiscountType={setDiscountType}
+            discountValue={discountValue} setDiscountValue={setDiscountValue}
+            totals={totals}
           />
         )}
         {step === 4 && (
@@ -372,6 +398,7 @@ export default function OfferWizard() {
             onCreateEasybillOrder={createEasybillOrder}
           />
         )}
+        </StepErrorBoundary>
       </div>
 
       {step3Error && step === 3 && (
@@ -817,6 +844,10 @@ function Step3Config({
   adBudget, setAdBudget,
   guaranteePeriodDays, setGuaranteePeriodDays,
   hiresTarget, setHiresTarget,
+  guaranteeNote, setGuaranteeNote,
+  discountType, setDiscountType,
+  discountValue, setDiscountValue,
+  totals,
 }) {
   const setups   = products.filter(p => p.category === 'setup');
   const monthlys = products.filter(p => p.category === 'monthly');
