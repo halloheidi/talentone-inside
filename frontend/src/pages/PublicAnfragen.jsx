@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { t } from '../lib/anrede.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -60,9 +61,11 @@ export default function PublicAnfragen() {
       </header>
 
       <main style={{ maxWidth: 1400, margin: '0 auto', padding: '32px 24px' }}>
-        <h1 style={{ fontSize: 24, marginBottom: 8 }}>Ihre Anfragen ({anfragen.length})</h1>
+        <h1 style={{ fontSize: 24, marginBottom: 8 }}>{t(data.kunde, 'Deine', 'Ihre')} Anfragen ({anfragen.length})</h1>
         <p style={{ color: '#5a5955', marginBottom: 20 }}>
-          Alle Anfragen aus Ihrer Neukunden-Kampagne. Klick auf eine Zeile für Details.
+          {t(data.kunde,
+            'Alle Anfragen aus deiner Neukunden-Kampagne. Klick auf eine Zeile für Details.',
+            'Alle Anfragen aus Ihrer Neukunden-Kampagne. Klicken Sie auf eine Zeile für Details.')}
         </p>
 
         {anfragen.length === 0 ? (

@@ -10,6 +10,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
 import Icon from './Icon.jsx';
 import Modal from './Modal.jsx';
+import AnredeAbfrage from './AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -159,7 +161,7 @@ export default function InvoicesSection({
   );
 }
 
-export function SendInvoiceMailModal({ invoice, onClose, onSent }) {
+export function SendInvoiceMailModal({ invoice, kunde, onKundeSaved, onClose, onSent }) {
   const [preview, setPreview] = useState(null);
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
@@ -202,7 +204,7 @@ export function SendInvoiceMailModal({ invoice, onClose, onSent }) {
       title={`Rechnung an ${preview?.firma || 'Kunden'} senden`}
       footer={<>
         <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
-        <button className="btn-primary" onClick={send} disabled={busy || !preview}>
+        <button className="btn-primary" onClick={send} disabled={busy || !preview || (kunde && anredeOffen(kunde))}>
           {busy ? 'Sende…' : '📄 Jetzt senden'}
         </button>
       </>}
@@ -210,6 +212,8 @@ export function SendInvoiceMailModal({ invoice, onClose, onSent }) {
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
         Absender richtet sich nach der Marke der Rechnung. Reply-To geht an info@nowagwirth.de. Die Rechnung als PDF wird automatisch aus easybill angefügt.
       </p>
+
+      <AnredeAbfrage kunde={kunde} onSaved={(k) => onKundeSaved?.(k)} />
 
       {preview?.already_sent && (
         <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>

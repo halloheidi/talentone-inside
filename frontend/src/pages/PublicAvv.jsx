@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getBrand } from '../lib/branding.js';
+import { t } from '../lib/anrede.js';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 async function publicApi(path, options = {}) {
@@ -38,7 +39,7 @@ export default function PublicAvv() {
   async function accept(e) {
     e.preventDefault();
     setError('');
-    if (!name.trim()) { setError('Bitte Ihren Namen eingeben.'); return; }
+    if (!name.trim()) { setError(t(info, 'Bitte deinen Namen eingeben.', 'Bitte Ihren Namen eingeben.')); return; }
     setBusy(true);
     try {
       await publicApi(`/avv/${token}/akzeptieren`, { method: 'POST', body: { name: name.trim() } });
@@ -77,12 +78,12 @@ export default function PublicAvv() {
             ✅ Der Auftragsverarbeitungsvertrag wurde akzeptiert
             {info.akzeptiert_von ? ` von ${info.akzeptiert_von}` : ''}
             {info.akzeptiert_am ? ` am ${new Date(info.akzeptiert_am).toLocaleDateString('de-DE')}` : ''}.
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>Eine Kopie wurde per E-Mail an Sie versendet.</div>
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>{t(info, 'Eine Kopie wurde per E-Mail an dich versendet.', 'Eine Kopie wurde per E-Mail an Sie versendet.')}</div>
           </div>
         ) : (
           <form onSubmit={accept} style={{ marginTop: 16 }}>
             <label className="field">
-              <span>Ihr Name (zur Bestätigung)</span>
+              <span>{t(info, 'Dein Name (zur Bestätigung)', 'Ihr Name (zur Bestätigung)')}</span>
               <input value={name} onChange={e => setName(e.target.value)} placeholder="Vor- und Nachname" autoComplete="name" required />
             </label>
             {error && <div className="alert alert-error">{error}</div>}
@@ -90,7 +91,7 @@ export default function PublicAvv() {
               {busy ? 'Wird bestätigt…' : 'Auftragsverarbeitungsvertrag akzeptieren'}
             </button>
             <p style={{ marginTop: 10, fontSize: 12, color: '#9a9994', lineHeight: 1.5 }}>
-              Mit Klick bestätigen Sie, den Auftragsverarbeitungsvertrag im Namen von <strong>{info.firmenname}</strong> gelesen zu haben und zu akzeptieren.
+              {t(info, 'Mit Klick bestätigst du, den Auftragsverarbeitungsvertrag im Namen von ', 'Mit Klick bestätigen Sie, den Auftragsverarbeitungsvertrag im Namen von ')}<strong>{info.firmenname}</strong> gelesen zu haben und zu akzeptieren.
             </p>
           </form>
         )}

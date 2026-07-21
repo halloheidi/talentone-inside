@@ -625,11 +625,11 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Fragen einfach auf diese Mail antworten.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(kunde, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Rechnung für ${stelle}\n\nBetrag: ${betragStr}\nBeschreibung: ${zahlung.beschreibung || ''}\n${zahlung.faelligkeit ? `Fällig: ${new Date(zahlung.faelligkeit).toLocaleDateString('de-DE')}\n` : ''}\nJetzt bezahlen: ${zahlung.pay_link}\n\nViele Grüße\nEuer ${brand.name}-Team`;
+  const text = `Rechnung für ${stelle}\n\nBetrag: ${betragStr}\nBeschreibung: ${zahlung.beschreibung || ''}\n${zahlung.faelligkeit ? `Fällig: ${new Date(zahlung.faelligkeit).toLocaleDateString('de-DE')}\n` : ''}\nJetzt bezahlen: ${zahlung.pay_link}\n\nViele Grüße\n${t(kunde, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
@@ -682,8 +682,8 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
       <a href="${escape(anfragenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;">→ Alle Anfragen ansehen</a>
     </td></tr>` : ''}
     <tr><td style="padding:0 32px 24px;">
-      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Melde dich zeitnah — je schneller die Kontaktaufnahme, desto höher die Abschluss-Wahrscheinlichkeit.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(kunde, 'Melde dich zeitnah', 'Melden Sie sich zeitnah')} — je schneller die Kontaktaufnahme, desto höher die Abschluss-Wahrscheinlichkeit.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>${t(kunde, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
@@ -770,16 +770,16 @@ export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFile
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Rechnung · ${escape(brand.name)}</p>
       <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 8px;color:#0a0a0a;">${escape(String(rechnungsNr))}</h1>
-      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">Vielen Dank für eure Zahlung! Anbei erhaltet ihr eure Rechnung als PDF im Anhang.</p>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">${t(kunde, 'Vielen Dank für eure Zahlung! Anbei erhaltet ihr eure Rechnung als PDF im Anhang.', 'Vielen Dank für Ihre Zahlung! Anbei erhalten Sie Ihre Rechnung als PDF im Anhang.')}</p>
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0 0 6px;">${escape(zahlung.beschreibung || '')}</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(kunde, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `Rechnung ${rechnungsNr}\n\n${zahlung.beschreibung || ''}\n\nDie Rechnung findet ihr im Anhang.\n\nViele Grüße\nEuer ${brand.name}-Team`;
+  const text = `Rechnung ${rechnungsNr}\n\n${zahlung.beschreibung || ''}\n\n${t(kunde, 'Die Rechnung findet ihr im Anhang.', 'Die Rechnung finden Sie im Anhang.')}\n\nViele Grüße\n${t(kunde, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

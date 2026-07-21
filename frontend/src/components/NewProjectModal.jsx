@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import Modal from './Modal.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 import ProjektFlagsFields from './ProjektFlagsFields.jsx';
+import AnredeAbfrage from './AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 import { api } from '../lib/api.js';
 
 const TABS = [
@@ -149,7 +151,7 @@ export default function NewProjectModal({ open, onClose, kunde }) {
       footer={success ? null : (
         <>
           <button className="btn-ghost" onClick={close} disabled={busy}>Abbrechen</button>
-          <button className="btn-primary" onClick={submit} disabled={busy}>
+          <button className="btn-primary" onClick={submit} disabled={busy || (tab === 'formular' && anredeOffen(currentKunde))}>
             {busy
               ? (tab === 'formular' ? 'Sende Mail…' : (tab === 'manual' ? 'Speichere…' : 'Analysiere…'))
               : (tab === 'formular' ? 'Briefing-Mail senden'
@@ -308,6 +310,7 @@ export default function NewProjectModal({ open, onClose, kunde }) {
                 </div>
               )}
               <CloseLeadWarnung kunde={currentKunde} onSaved={setKundeLocal} />
+              <AnredeAbfrage kunde={currentKunde} onSaved={setKundeLocal} />
               <label className="field field-full">
                 <span>Persönlicher Mail-Text (optional)</span>
                 <textarea

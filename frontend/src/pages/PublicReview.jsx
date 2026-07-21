@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
+import { t } from '../lib/anrede.js';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -72,11 +73,14 @@ export default function PublicReview() {
     // Bei Aenderungswuenschen ist eine Nachfrage nicht noetig (Kunde hat ja
     // schon Text im Feld).
     if (status === 'freigegeben') {
-      const ok = window.confirm(
+      const ok = window.confirm(t(data?.kunde,
         'Möchtest du wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
         'Danach wird sofort mit der Umsetzung gestartet. Falls du noch Änderungen möchtest, ' +
-        'klick stattdessen auf "Änderungswünsche senden".'
-      );
+        'klick stattdessen auf "Änderungswünsche senden".',
+        'Möchten Sie wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
+        'Danach wird sofort mit der Umsetzung gestartet. Falls Sie noch Änderungen möchten, ' +
+        'klicken Sie stattdessen auf "Änderungswünsche senden".'
+      ));
       if (!ok) return;
     }
     setBusy(status);
@@ -126,23 +130,25 @@ export default function PublicReview() {
         <div className="review-hero">
           <p className="review-eyebrow">Entwürfe zur Freigabe</p>
           <h1 className="review-h1">{job?.stelle || 'Stelle'}{kunde?.firmenname ? <> · <span style={{ color: 'var(--rv-primary)' }}>{kunde.firmenname}</span></> : ''}</h1>
-          <p className="review-intro">Schau dir die ersten Entwürfe in Ruhe an. Bei Bedarf kannst du pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.</p>
+          <p className="review-intro">{t(kunde,
+            'Schau dir die ersten Entwürfe in Ruhe an. Bei Bedarf kannst du pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.',
+            'Schauen Sie sich die ersten Entwürfe in Ruhe an. Bei Bedarf können Sie pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.')}</p>
         </div>
 
         {done && (
           <div className={`review-done review-done-${done}`}>
             {done === 'freigegeben'
-              ? <><strong>✅ Du hast die Entwürfe freigegeben.</strong><br/>Vielen Dank! Wir starten direkt mit der Umsetzung.</>
-              : <><strong>📝 Deine Änderungswünsche sind angekommen.</strong><br/>Wir setzen sie um und melden uns sobald die neue Version bereit ist.</>}
+              ? <><strong>✅ {t(kunde, 'Du hast die Entwürfe freigegeben.', 'Sie haben die Entwürfe freigegeben.')}</strong><br/>Vielen Dank! Wir starten direkt mit der Umsetzung.</>
+              : <><strong>📝 {t(kunde, 'Deine Änderungswünsche sind angekommen.', 'Ihre Änderungswünsche sind angekommen.')}</strong><br/>Wir setzen sie um und melden uns sobald die neue Version bereit ist.</>}
           </div>
         )}
 
         {/* Vorherige Runden — einklappbar */}
-        <VorherigeRunden runden={data.vorherige_runden || []} creatives={creatives} adcopies={adcopies} />
+        <VorherigeRunden runden={data.vorherige_runden || []} creatives={creatives} adcopies={adcopies} kunde={kunde} />
 
         {(data.review?.runde || 1) > 1 && !done && (
           <div style={{ padding: '10px 14px', marginBottom: 16, borderRadius: 10, background: '#fef3c7', border: '1px solid #fbbf24', color: '#92400e', fontSize: 13 }}>
-            🔄 <strong>Runde {data.review.runde}</strong> — Danke für dein Feedback! Wir haben die Entwürfe überarbeitet.
+            🔄 <strong>Runde {data.review.runde}</strong> — {t(kunde, 'Danke für dein Feedback!', 'Danke für Ihr Feedback!')} Wir haben die Entwürfe überarbeitet.
           </div>
         )}
 
@@ -244,7 +250,7 @@ export default function PublicReview() {
             <>
               {hasComments && (
                 <div className="review-comments-hint">
-                  Du hast Anmerkungen hinterlassen — diese senden wir an unser Team zur Überarbeitung.
+                  {t(kunde, 'Du hast Anmerkungen hinterlassen', 'Sie haben Anmerkungen hinterlassen')} — diese senden wir an unser Team zur Überarbeitung.
                 </div>
               )}
               <div className="review-actions">
@@ -290,7 +296,7 @@ export default function PublicReview() {
  * „Dein Feedback aus Runde N" — einklappbar. Nur sichtbar, wenn es
  * mindestens eine vorherige abgeschlossene Runde gibt.
  */
-function VorherigeRunden({ runden, creatives, adcopies }) {
+function VorherigeRunden({ runden, creatives, adcopies, kunde }) {
   const [open, setOpen] = useState(false);
   const withKommentare = (runden || []).filter(r => r.kommentare && Object.keys(r.kommentare).length > 0);
   if (withKommentare.length === 0) return null;
@@ -307,7 +313,7 @@ function VorherigeRunden({ runden, creatives, adcopies }) {
         }}
       >
         <span>{open ? '▼' : '▶'}</span>
-        Dein Feedback aus {withKommentare.length === 1 ? `Runde ${withKommentare[0].runde || 1}` : `${withKommentare.length} vorherigen Runden`}
+        {t(kunde, 'Dein Feedback aus ', 'Ihr Feedback aus ')}{withKommentare.length === 1 ? `Runde ${withKommentare[0].runde || 1}` : `${withKommentare.length} vorherigen Runden`}
       </button>
       {open && withKommentare.map(r => (
         <div key={r.id} style={{ marginTop: 10, padding: 14, borderRadius: 10, background: '#fafaf8', border: '1px solid var(--rv-line, #ddd)' }}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
+import { t } from '../lib/anrede.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -97,7 +98,7 @@ function CustomFieldCell({ spalte, wert, onChange, fullWidth }) {
 }
 
 /* ─── Spalten-Manager Modal ─── */
-function SpaltenManagerModal({ open, onClose, spalten, onAdd, onRemove }) {
+function SpaltenManagerModal({ open, onClose, spalten, onAdd, onRemove, kunde }) {
   const [name, setName] = useState('');
   const [typ, setTyp] = useState('text');
   const [optionenText, setOptionenText] = useState('');
@@ -120,8 +121,9 @@ function SpaltenManagerModal({ open, onClose, spalten, onAdd, onRemove }) {
         </header>
         <div className="pub-modal-body">
           <p className="pub-modal-hint">
-            Fügen Sie eigene Felder hinzu, die für Ihre Bewerber relevant sind — z.B. Gehaltswunsch,
-            Wechselmotivation, Erfahrung, Alter, Erreichbarkeit, Interview-Notiz. Werte werden pro Bewerber gespeichert.
+            {t(kunde,
+              'Füg eigene Felder hinzu, die für deine Bewerber relevant sind — z.B. Gehaltswunsch, Wechselmotivation, Erfahrung, Alter, Erreichbarkeit, Interview-Notiz. Werte werden pro Bewerber gespeichert.',
+              'Fügen Sie eigene Felder hinzu, die für Ihre Bewerber relevant sind — z.B. Gehaltswunsch, Wechselmotivation, Erfahrung, Alter, Erreichbarkeit, Interview-Notiz. Werte werden pro Bewerber gespeichert.')}
           </p>
 
           {spalten.length > 0 && (
@@ -172,7 +174,7 @@ const RECRUITER_STATUS_LABELS = {
   neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessiert',
   abgesagt: 'Abgesagt', weitergeleitet: 'Weitergeleitet',
 };
-function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [] }) {
+function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [], kunde }) {
   const werte = sync?.vorqualifizierung_werte && typeof sync.vorqualifizierung_werte === 'object'
     ? sync.vorqualifizierung_werte : {};
   // Reihenfolge + Sichtbarkeit kommen zentral vom Backend (vorqual_spalten):
@@ -197,7 +199,7 @@ function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [] }) {
       <h3>Vom {brandName || 'Recruiter'}</h3>
       <dl className="pub-slideover-dl">
         {sync?.recruiter_status && <><dt>Status</dt><dd>{RECRUITER_STATUS_LABELS[sync.recruiter_status] || sync.recruiter_status}</dd></>}
-        {sync?.kunde_kontaktiert && <><dt>Sie kontaktiert</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
+        {sync?.kunde_kontaktiert && <><dt>{t(kunde, 'Du kontaktiert', 'Sie kontaktiert')}</dt><dd>{new Date(sync.kunde_kontaktiert).toLocaleDateString('de-DE')}</dd></>}
         {sync?.vg_vereinbart_am && <><dt>VG vereinbart</dt><dd>{new Date(sync.vg_vereinbart_am).toLocaleString('de-DE')}</dd></>}
         {sync?.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
         {sync?.vorqual_gehaltswunsch && <><dt>Gehaltswunsch</dt><dd>{sync.vorqual_gehaltswunsch}</dd></>}
@@ -221,7 +223,7 @@ function FragmentRow({ label, value, muted = false }) {
 }
 
 /* ─── Slide-Over für Bewerber-Detail ─── */
-function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], onPatchFeedback, onSetWert, onClose }) {
+function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], kunde, onPatchFeedback, onSetWert, onClose }) {
   if (!bewerbung) return null;
   const norm = normalized || {};
   const fb = feedback || {};
@@ -254,7 +256,7 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
           </section>
 
           {/* Vom Recruiter (sync) */}
-          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} vorqualSpalten={vorqualSpalten} />
+          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} vorqualSpalten={vorqualSpalten} kunde={kunde} />
 
           {/* Funnel-Antworten */}
           {norm.antworten?.length > 0 && (
@@ -271,9 +273,9 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
             </section>
           )}
 
-          {/* Ihre Einschätzung — Status / VG / Notizen */}
+          {/* Einschätzung — Status / VG / Notizen */}
           <section>
-            <h3>Ihre Einschätzung</h3>
+            <h3>{t(kunde, 'Deine Einschätzung', 'Ihre Einschätzung')}</h3>
             <div className="pub-slideover-form">
               <label>
                 <span>Status</span>
@@ -299,7 +301,7 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
           {/* Eigene Felder */}
           {spalten?.length > 0 && (
             <section>
-              <h3>Ihre eigenen Felder</h3>
+              <h3>{t(kunde, 'Deine eigenen Felder', 'Ihre eigenen Felder')}</h3>
               <div className="pub-slideover-customs">
                 {spalten.map(s => (
                   <label key={s.id} className="pub-full">
@@ -500,7 +502,7 @@ export default function PublicBewerbungen() {
         {/* Ampel-Erklärungsbox */}
         <details className="pub-ampel-info" open={erklaerungOffen} onToggle={e => setErklaerungOffen(e.target.open)}>
           <summary>
-            <span>🚦 So lesen Sie die Ampel-Bewertung des {brand.name}-Teams</span>
+            <span>🚦 {t(data.kunde, 'So liest du', 'So lesen Sie')} die Ampel-Bewertung des {brand.name}-Teams</span>
           </summary>
           <div className="pub-ampel-info-grid">
             {Object.entries(AMPEL_INFO).map(([key, info]) => (
@@ -684,6 +686,7 @@ export default function PublicBewerbungen() {
         recruiterSync={selected ? data.recruiter_sync?.[selected.id] : null}
         vorqualSpalten={data.vorqual_spalten || []}
         brandName={brand.name}
+        kunde={data.kunde}
         onPatchFeedback={body => selected && patchFeedback(selected.id, body)}
         onSetWert={(spalteId, v) => selected && setSpalteWert(selected.id, spalteId, v)}
         onClose={() => setSelectedId(null)}
@@ -695,6 +698,7 @@ export default function PublicBewerbungen() {
         spalten={data.spalten || []}
         onAdd={addSpalte}
         onRemove={removeSpalte}
+        kunde={data.kunde}
       />
     </div>
   );

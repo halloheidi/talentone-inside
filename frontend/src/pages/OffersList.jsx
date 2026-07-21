@@ -6,6 +6,8 @@ import Modal from '../components/Modal.jsx';
 import KundePicker from '../components/KundePicker.jsx';
 import { AdBudgetChips } from './OfferWizard.jsx';
 import { displayNameForEmail } from '../lib/team-display.js';
+import AnredeAbfrage from '../components/AnredeAbfrage.jsx';
+import { anredeOffen } from '../lib/anrede.js';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -40,6 +42,16 @@ export function computeBillingPhaseClient(offerSnap) {
   const guaranteeMs = (Number(offerSnap.guarantee_period_days) || 30) * 86400000;
   if (now <= start + guaranteeMs) return 'guarantee';
   return 'active'; // Backend unterscheidet zusätzlich guarantee_expired via hires — Vereinfachung im Client.
+}
+
+// Lädt den verknüpften Kunden (für die Pflicht-Anrede im Versand-Modal).
+// Verwaiste Angebote ohne customer_id liefern null — dort greift kein Gate.
+async function loadOfferKunde(offer) {
+  if (!offer?.customer_id) return null;
+  try {
+    const res = await api(`/kunden/${offer.customer_id}`);
+    return res.kunde || null;
+  } catch { return null; }
 }
 
 export default function OffersList() {
@@ -84,7 +96,8 @@ export default function OffersList() {
     setRowError(r => ({ ...r, [offer.id]: '' }));
     try {
       const preview = await api(`/offers/${offer.id}/email-preview`);
-      setSendModal({ offerId: offer.id, ...preview });
+      const kunde = await loadOfferKunde(offer);
+      setSendModal({ offerId: offer.id, kunde, ...preview });
     } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
     finally { setBusyId(null); }
   }
@@ -94,7 +107,8 @@ export default function OffersList() {
     setRowError(r => ({ ...r, [offer.id]: '' }));
     try {
       const preview = await api(`/offers/${offer.id}/order-email-preview`);
-      setSendOrderModal({ offerId: offer.id, ...preview });
+      const kunde = await loadOfferKunde(offer);
+      setSendOrderModal({ offerId: offer.id, kunde, ...preview });
     } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
     finally { setBusyId(null); }
   }
@@ -312,12 +326,16 @@ export default function OffersList() {
 
       <SendOfferModal
         preview={sendModal}
+        kunde={sendModal?.kunde}
+        onKundeSaved={(k) => setSendModal(m => (m ? { ...m, kunde: k } : m))}
         onClose={() => setSendModal(null)}
         onSent={() => { setSendModal(null); load(); }}
       />
 
       <SendOrderModal
         preview={sendOrderModal}
+        kunde={sendOrderModal?.kunde}
+        onKundeSaved={(k) => setSendOrderModal(m => (m ? { ...m, kunde: k } : m))}
         onClose={() => setSendOrderModal(null)}
         onSent={() => { setSendOrderModal(null); load(); }}
       />
@@ -357,7 +375,7 @@ export default function OffersList() {
   );
 }
 
-export function SendOfferModal({ preview, onClose, onSent }) {
+export function SendOfferModal({ preview, kunde, onKundeSaved, onClose, onSent }) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -426,7 +444,7 @@ export function SendOfferModal({ preview, onClose, onSent }) {
       title={`Angebot an ${preview.firma || 'Kunden'} senden`}
       footer={<>
         <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
-        <button className="btn-primary" onClick={send} disabled={busy}>
+        <button className="btn-primary" onClick={send} disabled={busy || (kunde && anredeOffen(kunde))}>
           {busy ? 'Sende…' : '📤 Jetzt senden'}
         </button>
       </>}
@@ -434,6 +452,8 @@ export function SendOfferModal({ preview, onClose, onSent }) {
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
         Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Das easybill-PDF wird automatisch als Anhang angefügt.
       </p>
+
+      <AnredeAbfrage kunde={kunde} onSaved={(k) => onKundeSaved?.(k)} />
 
       {preview.flyer_available && (
         <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -475,7 +495,7 @@ export function SendOfferModal({ preview, onClose, onSent }) {
   );
 }
 
-export function SendOrderModal({ preview, onClose, onSent }) {
+export function SendOrderModal({ preview, kunde, onKundeSaved, onClose, onSent }) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -565,7 +585,7 @@ export function SendOrderModal({ preview, onClose, onSent }) {
       title={`Auftragsbestätigung an ${preview.firma || 'Kunden'} senden`}
       footer={<>
         <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
-        <button className="btn-primary" onClick={send} disabled={busy}>
+        <button className="btn-primary" onClick={send} disabled={busy || (kunde && anredeOffen(kunde))}>
           {busy ? 'Sende…' : '📋 Jetzt senden'}
         </button>
       </>}
@@ -573,6 +593,8 @@ export function SendOrderModal({ preview, onClose, onSent }) {
       <p style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 12 }}>
         Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Die AB als PDF wird automatisch aus easybill angefügt.
       </p>
+
+      <AnredeAbfrage kunde={kunde} onSaved={(k) => onKundeSaved?.(k)} />
 
       {preview.flyer_available && (
         <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>

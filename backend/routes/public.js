@@ -30,7 +30,7 @@ async function loadKundeByToken(token) {
 router.get('/upload/:token', async (req, res) => {
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, ansprechpartner, logo_url, agentur')
+    .select('id, firmenname, ansprechpartner, logo_url, agentur, anrede_form, anrede_titel, nachname')
     .eq('upload_token', req.params.token)
     .maybeSingle();
   if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
@@ -40,6 +40,9 @@ router.get('/upload/:token', async (req, res) => {
       ansprechpartner: kunde.ansprechpartner,
       agentur: kunde.agentur || 'talentone',
       hat_logo: !!kunde.logo_url,
+      anrede_form: kunde.anrede_form,
+      anrede_titel: kunde.anrede_titel,
+      nachname: kunde.nachname,
     },
   });
 });
@@ -139,6 +142,9 @@ router.get('/formular/:token', async (req, res) => {
       ansprechpartner: kunde.ansprechpartner,
       email: kunde.email,
       agentur: kunde.agentur || 'talentone',
+      anrede_form: kunde.anrede_form,
+      anrede_titel: kunde.anrede_titel,
+      nachname: kunde.nachname,
     },
     projekttyp: pendingJob?.projekttyp || 'mitarbeitergewinnung',
     avv: { version: avvVersion?.version || null, pdf_url: avvVersion?.pdf_url || null },
@@ -506,7 +512,7 @@ router.get('/review/:token', async (req, res) => {
 
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, branche, logo_url, farben, agentur')
+    .select('id, firmenname, branche, logo_url, farben, agentur, ansprechpartner, anrede_form, anrede_titel, nachname')
     .eq('id', job.kunde_id).maybeSingle();
   const { data: creatives = [] } = await supabase
     .from('talentone_creatives').select('*').eq('job_id', job.id)
@@ -649,7 +655,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
 
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, agentur, logo_url')
+    .select('id, firmenname, agentur, logo_url, ansprechpartner, anrede_form, anrede_titel, nachname')
     .eq('id', job.kunde_id)
     .maybeSingle();
 
@@ -718,7 +724,11 @@ router.get('/bewerbungen/:token', async (req, res) => {
       id: job.id, stelle: job.stelle, region: job.region,
       vorqualifizierung: !!job.vorqualifizierung,
     },
-    kunde: kunde ? { firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url } : null,
+    kunde: kunde ? {
+      firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url,
+      ansprechpartner: kunde.ansprechpartner, anrede_form: kunde.anrede_form,
+      anrede_titel: kunde.anrede_titel, nachname: kunde.nachname,
+    } : null,
     bewerbungen: bewerbungen || [],
     feedback,
     spalten: spalten || [],
@@ -861,7 +871,7 @@ router.get('/anfragen/:token', async (req, res) => {
   const job = await loadJobByAnfragenToken(req.params.token);
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
   const { data: kunde } = await supabase.from('talentone_kunden')
-    .select('firmenname, agentur, logo_url, farben').eq('id', job.kunde_id).maybeSingle();
+    .select('firmenname, agentur, logo_url, farben, ansprechpartner, anrede_form, anrede_titel, nachname').eq('id', job.kunde_id).maybeSingle();
   const { data: anfragen = [] } = await supabase.from('talentone_anfragen')
     .select('*').eq('job_id', job.id).order('created_at', { ascending: false });
   res.json({
@@ -1162,6 +1172,10 @@ router.get('/avv/:token', async (req, res) => {
   res.json({
     firmenname: kunde.firmenname,
     agentur: kunde.agentur,
+    ansprechpartner: kunde.ansprechpartner,
+    anrede_form: kunde.anrede_form,
+    anrede_titel: kunde.anrede_titel,
+    nachname: kunde.nachname,
     version: version?.version || null,
     pdf_url: version?.pdf_url || null,
     akzeptiert: !!annahme,
@@ -1295,6 +1309,7 @@ router.get('/portal/:token', async (req, res) => {
         id: kunde.id, firmenname: kunde.firmenname, ansprechpartner: kunde.ansprechpartner,
         email: kunde.email, agentur: kunde.agentur || 'nowagwirth',
         logo_url: kunde.logo_url, farben: kunde.farben,
+        anrede_form: kunde.anrede_form, anrede_titel: kunde.anrede_titel, nachname: kunde.nachname,
       },
       jobs: jobsOut,
       anfragen: anfragenOut,

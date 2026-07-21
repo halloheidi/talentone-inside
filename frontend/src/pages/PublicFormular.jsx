@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
 import { getBrand } from '../lib/branding.js';
+import { t, anrede } from '../lib/anrede.js';
 import BrancheField from '../components/BrancheField.jsx';
 
 // Meta Pixel — TalentOne (Formular-Eingang als Lead)
@@ -312,8 +313,8 @@ export default function PublicFormular() {
     setSubmitError('');
     if (!form.firmenname.trim()) { setSubmitError('Firmenname ist Pflicht.'); return; }
     if (!form.stelle.trim()) { setSubmitError('Stellenbezeichnung ist Pflicht.'); return; }
-    if (!form.unterschied.trim()) { setSubmitError('Bitte beschreibt, was euch von anderen unterscheidet.'); return; }
-    if (!form.mitarbeiter_gerne.trim()) { setSubmitError('Bitte beantwortet, warum Mitarbeiter gerne bei euch sind.'); return; }
+    if (!form.unterschied.trim()) { setSubmitError(t(info, 'Bitte beschreibt, was euch von anderen unterscheidet.', 'Bitte beschreiben Sie, was Sie von anderen unterscheidet.')); return; }
+    if (!form.mitarbeiter_gerne.trim()) { setSubmitError(t(info, 'Bitte beantwortet, warum Mitarbeiter gerne bei euch sind.', 'Bitte beantworten Sie, warum Mitarbeiter gerne bei Ihnen sind.')); return; }
     if (avv?.pdf_url && !avvChecked) { setSubmitError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.'); return; }
 
     setSubmitBusy(true);
@@ -380,7 +381,9 @@ export default function PublicFormular() {
         <div className="public-card">
           <BrandHeader agentur={info?.agentur} />
           <h1 className="public-title">Vielen Dank!</h1>
-          <p className="public-sub">Eure Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei euch.</p>
+          <p className="public-sub">{t(info,
+            'Eure Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei euch.',
+            'Ihre Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei Ihnen.')}</p>
         </div>
       </div>
     );
@@ -400,7 +403,9 @@ export default function PublicFormular() {
         <BrandHeader agentur={info?.agentur} />
         <h1 className="public-title">Briefing-Formular</h1>
         <p className="public-sub">
-          Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : (info.firmenname || 'zusammen')}! Damit wir eine passgenaue Recruiting-Kampagne für euch bauen können, brauchen wir ein paar Infos. ~10 Minuten.
+          {info.ansprechpartner ? anrede(info) : `Hallo ${info.firmenname || 'zusammen'}`}! {t(info,
+            'Damit wir eine passgenaue Recruiting-Kampagne für euch bauen können, brauchen wir ein paar Infos. ~10 Minuten.',
+            'Damit wir eine passgenaue Recruiting-Kampagne für Sie bauen können, brauchen wir ein paar Infos. ~10 Minuten.')}
         </p>
 
         {/* ───── Modus oben: URL / PDF / Manuell ───── */}
@@ -412,7 +417,9 @@ export default function PublicFormular() {
           </div>
           {mode === 'url' && (
             <div className="form-quick-pane">
-              <p>Falls ihr eine bestehende Stellenanzeige als URL habt, fügt sie hier ein — wir füllen die Felder unten automatisch aus.</p>
+              <p>{t(info,
+                'Falls ihr eine bestehende Stellenanzeige als URL habt, fügt sie hier ein — wir füllen die Felder unten automatisch aus.',
+                'Falls Sie eine bestehende Stellenanzeige als URL haben, fügen Sie sie hier ein — wir füllen die Felder unten automatisch aus.')}</p>
               <div className="form-quick-row">
                 <input type="url" placeholder="https://…" value={extractUrl} onChange={e => setExtractUrl(e.target.value)} />
                 <button type="button" className="btn-primary btn-sm" onClick={runExtractUrl} disabled={extracting || !extractUrl.trim()}>
@@ -475,15 +482,15 @@ export default function PublicFormular() {
                 </select>
               </label>
               <label className="field field-full">
-                <span>Was unterscheidet euch von anderen Arbeitgebern? *</span>
+                <span>{t(info, 'Was unterscheidet euch von anderen Arbeitgebern? *', 'Was unterscheidet Sie von anderen Arbeitgebern? *')}</span>
                 <textarea rows={3} value={form.unterschied} onChange={e => setField('unterschied', e.target.value)} required />
               </label>
               <label className="field field-full">
-                <span>Warum arbeiten eure Mitarbeiter gerne bei euch? *</span>
+                <span>{t(info, 'Warum arbeiten eure Mitarbeiter gerne bei euch? *', 'Warum arbeiten Ihre Mitarbeiter gerne bei Ihnen? *')}</span>
                 <textarea rows={3} value={form.mitarbeiter_gerne} onChange={e => setField('mitarbeiter_gerne', e.target.value)} required />
               </label>
               <label className="field field-full">
-                <span>Unternehmenskultur — wie würdet ihr sie beschreiben?</span>
+                <span>{t(info, 'Unternehmenskultur — wie würdet ihr sie beschreiben?', 'Unternehmenskultur — wie würden Sie sie beschreiben?')}</span>
                 <textarea rows={2} value={form.unternehmenskultur} onChange={e => setField('unternehmenskultur', e.target.value)} />
               </label>
             </div>
@@ -534,7 +541,7 @@ export default function PublicFormular() {
               ))}
             </div>
             <label className="field field-full" style={{ marginTop: 14 }}>
-              <span>Weitere Benefits die ihr bietet</span>
+              <span>{t(info, 'Weitere Benefits die ihr bietet', 'Weitere Benefits die Sie bieten')}</span>
               <textarea rows={2} value={form.benefits_zusatz} onChange={e => setField('benefits_zusatz', e.target.value)} placeholder="Mehrere mit Komma trennen" />
             </label>
           </fieldset>
@@ -554,7 +561,7 @@ export default function PublicFormular() {
                 </select>
               </label>
               <div className="field field-full">
-                <span className="field-label">Welche Soft Skills sind euch wichtig?</span>
+                <span className="field-label">{t(info, 'Welche Soft Skills sind euch wichtig?', 'Welche Soft Skills sind Ihnen wichtig?')}</span>
                 <div className="check-grid">
                   {SOFT_SKILL_OPTIONS.map(s => (
                     <label key={s} className="check-item">
@@ -579,7 +586,7 @@ export default function PublicFormular() {
           <fieldset className="formular-section">
             <legend>Logo & Fotos</legend>
             <div className="upload-block" style={{ borderTop: 0, paddingTop: 0, marginTop: 0 }}>
-              <div className="upload-block-title">Euer Logo</div>
+              <div className="upload-block-title">{t(info, 'Euer Logo', 'Ihr Logo')}</div>
               <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }} onChange={onLogoChange} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 {logo?.url && <img src={logo.url} alt="" style={{ width: 56, height: 56, borderRadius: 10, border: '1px solid var(--line)', objectFit: 'contain', background: '#fff', padding: 4 }} />}
@@ -587,7 +594,7 @@ export default function PublicFormular() {
                   {logoBusy ? 'Lade hoch…' : (logo ? 'Logo tauschen' : 'Logo wählen')}
                 </button>
               </div>
-              <p className="upload-block-hint">PNG, JPG, SVG oder WebP. Aus dem Logo extrahieren wir auch automatisch eure Markenfarben.</p>
+              <p className="upload-block-hint">{t(info, 'PNG, JPG, SVG oder WebP. Aus dem Logo extrahieren wir auch automatisch eure Markenfarben.', 'PNG, JPG, SVG oder WebP. Aus dem Logo extrahieren wir auch automatisch Ihre Markenfarben.')}</p>
             </div>
             <div className="upload-block">
               <div className="upload-block-title">Fotos vom Team / Mitarbeitern / Geschäftsführung</div>
@@ -710,7 +717,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
       });
       applyExtracted(res.extracted);
       setMode('manual');
-      setExtractedHinweis('✅ Wir haben deine Website analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.');
+      setExtractedHinweis(t(info,
+        '✅ Wir haben deine Website analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.',
+        '✅ Wir haben Ihre Website analysiert. Bitte prüfen Sie die Angaben unten und ergänzen Sie fehlende Punkte.'));
     } catch (err) { setExtractError('Extraktion fehlgeschlagen: ' + err.message); }
     finally { setExtracting(false); }
   }
@@ -733,7 +742,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
       });
       applyExtracted(res.extracted);
       setMode('manual');
-      setExtractedHinweis('✅ Wir haben das PDF analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.');
+      setExtractedHinweis(t(info,
+        '✅ Wir haben das PDF analysiert. Bitte prüf die Angaben unten und ergänze fehlende Punkte.',
+        '✅ Wir haben das PDF analysiert. Bitte prüfen Sie die Angaben unten und ergänzen Sie fehlende Punkte.'));
     } catch (err) { setExtractError('Extraktion fehlgeschlagen: ' + err.message); }
     finally { setExtracting(false); }
   }
@@ -846,7 +857,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
         <BrandHeader agentur={info?.agentur} />
         <h1 className="public-title">Neukunden-Briefing</h1>
         <p className="public-sub">
-          Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : 'zusammen'}! Damit wir eine passgenaue Kampagne für neue Kunden bauen können, brauchen wir ein paar Infos zu deinem Angebot. ~10 Minuten.
+          {info.ansprechpartner ? anrede(info) : 'Hallo zusammen'}! {t(info,
+            'Damit wir eine passgenaue Kampagne für neue Kunden bauen können, brauchen wir ein paar Infos zu deinem Angebot. ~10 Minuten.',
+            'Damit wir eine passgenaue Kampagne für neue Kunden bauen können, brauchen wir ein paar Infos zu Ihrem Angebot. ~10 Minuten.')}
         </p>
 
         {/* Eingabewege — URL / PDF / Manuell */}
@@ -858,7 +871,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
 
         {mode === 'url' && (
           <div className="modal-pane">
-            <p className="pane-hint">URL deiner Firmen-Website oder Produkt-Landingpage — die KI zieht Produkt, Zielgruppe und Vorteile automatisch raus.</p>
+            <p className="pane-hint">{t(info,
+              'URL deiner Firmen-Website oder Produkt-Landingpage — die KI zieht Produkt, Zielgruppe und Vorteile automatisch raus.',
+              'URL Ihrer Firmen-Website oder Produkt-Landingpage — die KI zieht Produkt, Zielgruppe und Vorteile automatisch raus.')}</p>
             <label className="field field-full">
               <span>URL</span>
               <input type="url" placeholder="https://…" value={extractUrl} onChange={e => setExtractUrl(e.target.value)} />
@@ -894,7 +909,7 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
         {/* Manuelles Formular — immer sichtbar */}
         <form onSubmit={onSubmit} className="public-form">
           <fieldset className="formular-section">
-            <legend>Deine Firma</legend>
+            <legend>{t(info, 'Deine Firma', 'Ihre Firma')}</legend>
             <div className="stelle-grid">
               <label className="field"><span>Firmenname *</span>
                 <input required value={form.firmenname} onChange={e => setF('firmenname', e.target.value)} />
@@ -915,9 +930,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
           </fieldset>
 
           <fieldset className="formular-section">
-            <legend>Dein Angebot</legend>
+            <legend>{t(info, 'Dein Angebot', 'Ihr Angebot')}</legend>
             <div className="stelle-grid">
-              <label className="field field-full"><span>Produkt / Dienstleistung — was bietet ihr an? *</span>
+              <label className="field field-full"><span>{t(info, 'Produkt / Dienstleistung — was bietet ihr an? *', 'Produkt / Dienstleistung — was bieten Sie an? *')}</span>
                 <input required value={form.produkt} onChange={e => setF('produkt', e.target.value)}
                   placeholder="z. B. Photovoltaik-Komplettlösung inkl. Speicher" />
               </label>
@@ -925,7 +940,7 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
                 <textarea rows={2} value={form.kundenprofil} onChange={e => setF('kundenprofil', e.target.value)}
                   placeholder="z. B. Photovoltaik-Anlagen für Eigenheimbesitzer" />
               </label>
-              <label className="field field-full"><span>Zielgruppe — wen wollt ihr erreichen?</span>
+              <label className="field field-full"><span>{t(info, 'Zielgruppe — wen wollt ihr erreichen?', 'Zielgruppe — wen wollen Sie erreichen?')}</span>
                 <textarea rows={2} value={form.zielgruppe} onChange={e => setF('zielgruppe', e.target.value)}
                   placeholder="z. B. Hausbesitzer 35-65, ländlich, mit eigenem Dach" />
               </label>
@@ -941,7 +956,7 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
           </fieldset>
 
           <fieldset className="formular-section">
-            <legend>Vorteile deines Produkts</legend>
+            <legend>{t(info, 'Vorteile deines Produkts', 'Vorteile Ihres Produkts')}</legend>
             <div className="benefits-list">
               {form.vorteile.map((v, i) => (
                 <span key={i} className="benefit-chip">
@@ -959,7 +974,7 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
           </fieldset>
 
           <fieldset className="formular-section">
-            <legend>Was unterscheidet euch vom Wettbewerb?</legend>
+            <legend>{t(info, 'Was unterscheidet euch vom Wettbewerb?', 'Was unterscheidet Sie vom Wettbewerb?')}</legend>
             <label className="field field-full">
               <textarea rows={3} value={form.unterschied} onChange={e => setF('unterschied', e.target.value)}
                 placeholder="z. B. Regionaler Anbieter, keine Subunternehmen, 25 Jahre Erfahrung, eigenes Montageteam" />
@@ -985,7 +1000,9 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
           <fieldset className="formular-section">
             <legend>Produktbilder ({fotos.length})</legend>
             <p className="pane-hint" style={{ margin: '0 0 8px' }}>
-              Bilder deines Produkts / typischer Anwendungssituationen / zufriedener Kunden. Bitte in guter Qualität — landen später als Herzstück in den Werbeanzeigen.
+              {t(info,
+                'Bilder deines Produkts / typischer Anwendungssituationen / zufriedener Kunden. Bitte in guter Qualität — landen später als Herzstück in den Werbeanzeigen.',
+                'Bilder Ihres Produkts / typischer Anwendungssituationen / zufriedener Kunden. Bitte in guter Qualität — landen später als Herzstück in den Werbeanzeigen.')}
             </p>
             <input ref={fotoInputRef} type="file" multiple accept="image/*"
               style={{ display: 'none' }} onChange={onFotosChange} />

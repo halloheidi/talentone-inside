@@ -10,6 +10,8 @@ import CloseLeadWarnung from '../../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../../components/TerminEinladungModal.jsx';
 import StandaloneAdBudgetModal from '../../components/StandaloneAdBudgetModal.jsx';
 import InvoicesSection, { SendInvoiceMailModal } from '../../components/InvoicesSection.jsx';
+import AnredeAbfrage from '../../components/AnredeAbfrage.jsx';
+import { anrede, t, anredeOffen } from '../../lib/anrede.js';
 import { getBrandBaseUrl } from '../../lib/branding.js';
 
 const STYLE_LABEL = {
@@ -257,17 +259,21 @@ export default function JobExport() {
   }
 
   /* ───── Reaktivierungs-Modal ───── */
-  function openReakModal() {
+  // Vorbelegter Mail-Text — folgt der am Kunden gesetzten Anrede (Du/Sie).
+  function buildReakText(k) {
     const stelle = job?.stelle || 'eure offene Stelle';
-    const grußname = kunde?.ansprechpartner || 'zusammen';
     const calLink = 'https://calendly.com/andrea-saltaleggio/drafts';
-    const defaultText = `Hallo ${grußname},
+    return `${anrede(k)},
 
-wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für deine offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
+wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
 
-Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
+Unser Vorschlag: ${t(k, 'Geh', 'Gehen Sie')} nochmal für 30 Tage online — ${t(k, 'du zahlst', 'Sie zahlen')} nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
 
-Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich): ${calLink}`;
+Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf diese Mail oder ${t(k, 'buch dir', 'buchen Sie sich')} direkt einen Termin (unverbindlich): ${calLink}`;
+  }
+
+  function openReakModal() {
+    const defaultText = buildReakText(kunde);
     // Standardmäßig nur Bild-Creatives vorausgewählt (Videos werden in der Mail eh nicht eingebettet)
     const bildIds = (data?.creatives || [])
       .filter(c => c.typ !== 'video' && c.bild_url)
@@ -949,7 +955,7 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
             <button
               className="btn-primary"
               onClick={sendReak}
-              disabled={reakBusy || !reakForm.to.trim() || reakForm.selected.size === 0}
+              disabled={reakBusy || !reakForm.to.trim() || reakForm.selected.size === 0 || anredeOffen(kunde)}
             >
               {reakBusy ? 'Sende…' : 'Absenden'}
             </button>
@@ -962,6 +968,11 @@ Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir dire
         </p>
 
         <CloseLeadWarnung kunde={kunde} onSaved={() => reload?.()} />
+        <AnredeAbfrage kunde={kunde} onSaved={(k) => {
+          reload?.();
+          // Vorbelegten Text auf die frisch gesetzte Anrede umstellen.
+          setReakForm(prev => ({ ...prev, customText: buildReakText(k) }));
+        }} />
 
         {/* Creatives auswählen */}
         <div className="form-grid">
@@ -1212,6 +1223,8 @@ function ZahlungenSection({ job, kunde, onKundeUpdated }) {
 
       <SendInvoiceMailModal
         invoice={sendInvoiceModal}
+        kunde={kunde}
+        onKundeSaved={() => reload?.()}
         onClose={() => setSendInvoiceModal(null)}
         onSent={() => { setSendInvoiceModal(null); loadInvoices(); }}
       />

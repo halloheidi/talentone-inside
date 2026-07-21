@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fileToBase64 } from '../lib/files.js';
 import { getBrand } from '../lib/branding.js';
+import { t, anrede } from '../lib/anrede.js';
 
 function BrandHeader({ agentur }) {
   const brand = getBrand(agentur);
@@ -121,15 +122,17 @@ export default function PublicUpload() {
     <div className="public-page">
       <div className="public-card">
         <BrandHeader agentur={info?.agentur} />
-        <h1 className="public-title">Hallo {info.ansprechpartner ? info.ansprechpartner.split(' ')[0] : info.firmenname}!</h1>
+        <h1 className="public-title">{info.ansprechpartner ? anrede(info) : `Hallo ${info.firmenname}`}!</h1>
         <p className="public-sub">
-          Schön, dass du hier bist. Lade einfach euer Logo und ein paar Fotos vom Team / Arbeitsplatz hoch — wir nutzen sie für eure Recruiting-Kampagne.
+          {t(info,
+            'Schön, dass du hier bist. Lade einfach euer Logo und ein paar Fotos vom Team / Arbeitsplatz hoch — wir nutzen sie für eure Recruiting-Kampagne.',
+            'Schön, dass Sie hier sind. Laden Sie einfach Ihr Logo und ein paar Fotos vom Team / Arbeitsplatz hoch — wir nutzen sie für Ihre Recruiting-Kampagne.')}
         </p>
 
         {/* Logo */}
         <div className="upload-block">
           <div className="upload-block-title">
-            1) Euer Logo {info.hat_logo && <span className="upload-block-tag">bereits vorhanden — kann ersetzt werden</span>}
+            1) {t(info, 'Euer Logo', 'Ihr Logo')} {info.hat_logo && <span className="upload-block-tag">bereits vorhanden — kann ersetzt werden</span>}
           </div>
           <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }} onChange={onLogoChange} />
           <button className="btn-primary" onClick={() => logoInputRef.current?.click()}>Logo auswählen</button>
@@ -181,7 +184,9 @@ export default function PublicUpload() {
         )}
 
         <p className="public-foot">
-          Sobald du fertig bist, kannst du den Tab einfach schließen — wir bekommen automatisch Bescheid. Vielen Dank!
+          {t(info,
+            'Sobald du fertig bist, kannst du den Tab einfach schließen — wir bekommen automatisch Bescheid. Vielen Dank!',
+            'Sobald Sie fertig sind, können Sie den Tab einfach schließen — wir bekommen automatisch Bescheid. Vielen Dank!')}
         </p>
         <BrandFooter agentur={info?.agentur} />
       </div>

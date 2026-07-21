@@ -974,17 +974,23 @@ export default function KundeDetail() {
 
       <SendInvoiceMailModal
         invoice={sendInvoiceModal}
+        kunde={kunde}
+        onKundeSaved={setKunde}
         onClose={() => setSendInvoiceModal(null)}
         onSent={() => { setSendInvoiceModal(null); loadInvoices(); loadActivity(); }}
       />
 
       <SendOfferModal
         preview={sendOfferPreview}
+        kunde={kunde}
+        onKundeSaved={setKunde}
         onClose={() => setSendOfferPreview(null)}
         onSent={() => { setSendOfferPreview(null); loadOffers(); loadActivity(); }}
       />
       <SendOrderModal
         preview={sendOrderPreview}
+        kunde={kunde}
+        onKundeSaved={setKunde}
         onClose={() => setSendOrderPreview(null)}
         onSent={() => { setSendOrderPreview(null); loadOffers(); loadActivity(); }}
       />
@@ -1578,11 +1584,12 @@ function PortalAccountsSection({ kunde, onKundeUpdated }) {
                     }} />
                   📥 Leads
                 </label>
-                <button onClick={() => resend(a)} className="btn-ghost btn-sm">Einladung neu</button>
+                <button onClick={() => resend(a)} className="btn-ghost btn-sm" disabled={anredeOffen(kunde)}>Einladung neu</button>
                 <button onClick={() => remove(a)} className="btn-ghost btn-sm btn-danger">×</button>
               </div>
             ))}
           </div>
+          <AnredeAbfrage kunde={kunde} onSaved={onKundeUpdated} />
           <form onSubmit={create} style={{ display: 'flex', gap: 6 }}>
             <input placeholder="Name (optional)" value={neu.name}
               onChange={e => setNeu({ ...neu, name: e.target.value })}
@@ -1590,7 +1597,7 @@ function PortalAccountsSection({ kunde, onKundeUpdated }) {
             <input type="email" placeholder="E-Mail-Adresse" value={neu.email}
               onChange={e => setNeu({ ...neu, email: e.target.value })}
               style={{ flex: 2, padding: '6px 10px', border: '1px solid #ececea', borderRadius: 6, fontSize: 12 }} />
-            <button type="submit" disabled={busy || !neu.email.trim()} className="btn-primary btn-sm">
+            <button type="submit" disabled={busy || !neu.email.trim() || anredeOffen(kunde)} className="btn-primary btn-sm">
               {busy ? '…' : '+ Einladen'}
             </button>
           </form>

@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
 import { supabase } from '../lib/supabase.js';
+import { t } from '../lib/anrede.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -51,7 +52,7 @@ function AvvGate({ token, data, onDone }) {
 
   async function accept() {
     setError('');
-    if (!name.trim()) { setError('Bitte Ihren Namen eingeben.'); return; }
+    if (!name.trim()) { setError(t(data.kunde, 'Bitte deinen Namen eingeben.', 'Bitte Ihren Namen eingeben.')); return; }
     if (!checked) { setError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.'); return; }
     setBusy(true);
     try {
@@ -65,7 +66,9 @@ function AvvGate({ token, data, onDone }) {
       <div style={{ background: '#fff', borderRadius: 16, maxWidth: 560, width: '100%', padding: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.12)' }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 6px' }}>Bevor es losgeht</h1>
         <p style={{ fontSize: 14, color: '#5a5955', margin: '0 0 18px', lineHeight: 1.6 }}>
-          Bitte bestätigen Sie einmalig den Auftragsverarbeitungsvertrag (AVV), damit wir mit Ihrer Kampagne starten dürfen.
+          {t(data.kunde,
+            'Bitte bestätige einmalig den Auftragsverarbeitungsvertrag (AVV), damit wir mit deiner Kampagne starten dürfen.',
+            'Bitte bestätigen Sie einmalig den Auftragsverarbeitungsvertrag (AVV), damit wir mit Ihrer Kampagne starten dürfen.')}
         </p>
         {data.avv?.pdf_url && (
           <div style={{ border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
@@ -76,7 +79,7 @@ function AvvGate({ token, data, onDone }) {
           <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} style={{ marginTop: 3 }} />
           <span>Ich habe den <a href={data.avv?.pdf_url} target="_blank" rel="noreferrer" style={{ color: brand.primary }}>Auftragsverarbeitungsvertrag (PDF)</a> gelesen und akzeptiere ihn im Namen von <strong>{data.kunde?.firmenname}</strong>.</span>
         </label>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Ihr Name (zur Bestätigung)"
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={t(data.kunde, 'Dein Name (zur Bestätigung)', 'Ihr Name (zur Bestätigung)')}
           style={{ width: '100%', padding: '10px 12px', border: '1px solid #ececea', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', marginBottom: 10 }} />
         {error && <div style={{ color: '#980000', fontSize: 13, marginBottom: 10 }}>{error}</div>}
         <button onClick={accept} disabled={busy} style={{ background: brand.accent, color: brand.accentInk, border: 'none', padding: '12px 20px', borderRadius: 100, fontWeight: 700, fontSize: 14, cursor: 'pointer', width: '100%' }}>
@@ -118,7 +121,7 @@ export default function PublicPortal() {
   }
   if (needsLogin) return <LoginForm token={token} onLogin={load} />;
   if (error) return <FullMsg text={error} />;
-  if (!data) return <FullMsg text="Lade dein Dashboard…" />;
+  if (!data) return <FullMsg text="Dashboard wird geladen…" />;
   if (data.avv?.erforderlich) return <AvvGate token={token} data={data} onDone={load} />;
 
   const brand = BRAND[data.kunde?.agentur] || BRAND.nowagwirth;
@@ -136,11 +139,11 @@ export default function PublicPortal() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>{brand.name}</div>
           <div style={{ fontSize: 18, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {data.kunde?.firmenname || 'Dein Dashboard'}
+            {data.kunde?.firmenname || t(data.kunde, 'Dein Dashboard', 'Ihr Dashboard')}
           </div>
         </div>
         <div style={{ fontSize: 12, opacity: 0.75, textAlign: 'right' }}>
-          <div>Dein Kampagnen-Dashboard</div>
+          <div>{t(data.kunde, 'Dein Kampagnen-Dashboard', 'Ihr Kampagnen-Dashboard')}</div>
           <div>Live-Daten · aktualisiert vor wenigen Sekunden</div>
         </div>
         <button
@@ -178,6 +181,7 @@ export default function PublicPortal() {
             key={activeJob.id}
             job={activeJob}
             token={token}
+            kunde={data.kunde}
             brand={brand}
             primary={primary}
             primaryInk={primaryInk}
@@ -282,7 +286,7 @@ function PasswortSetzen({ token, einladung, onDone }) {
 
 /* ══════════════════════ JobBlock ══════════════════════ */
 
-function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbungen, creatives, adcopies, onReload }) {
+function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bewerbungen, creatives, adcopies, onReload }) {
   const istNeukunden = job.projekttyp === 'neukundengewinnung';
   return (
     <section style={{ display: 'grid', gap: 20 }}>
@@ -290,7 +294,7 @@ function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbunge
         <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
           <span>🔗</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: '#5a5955', fontWeight: 600, letterSpacing: 0.03, textTransform: 'uppercase' }}>Deine Landingpage</div>
+            <div style={{ fontSize: 11, color: '#5a5955', fontWeight: 600, letterSpacing: 0.03, textTransform: 'uppercase' }}>{t(kunde, 'Deine Landingpage', 'Ihre Landingpage')}</div>
             <a href={job.funnel_url} target="_blank" rel="noreferrer" style={{ color: '#0a0a0a', wordBreak: 'break-all', fontSize: 13 }}>{job.funnel_url}</a>
           </div>
           <button onClick={() => navigator.clipboard.writeText(job.funnel_url).catch(() => {})}
@@ -302,19 +306,19 @@ function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbunge
 
       {istNeukunden ? (
         <LeadsSection
-          job={job} token={token} primary={primary} primaryInk={primaryInk}
+          job={job} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk}
           anfragen={anfragen} onReload={onReload}
         />
       ) : (
         <>
-          <KriterienPortalSection job={job} token={token} primary={primary} primaryInk={primaryInk} onReload={onReload} />
-          <BewerbungenSection job={job} bewerbungen={bewerbungen} primary={primary} primaryInk={primaryInk} />
+          <KriterienPortalSection job={job} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk} onReload={onReload} />
+          <BewerbungenSection job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} primaryInk={primaryInk} />
         </>
       )}
 
       {creatives.length > 0 && (
         <CreativesSection
-          creatives={creatives} token={token} primary={primary} primaryInk={primaryInk}
+          creatives={creatives} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk}
           onSaved={onReload}
         />
       )}
@@ -325,7 +329,7 @@ function JobBlock({ job, token, brand, primary, primaryInk, anfragen, bewerbunge
 
 /* ══════════════════════ "Das ist uns wichtig" (Kunde pflegt die Prüf-Kriterien) ══════════════════════ */
 
-function KriterienPortalSection({ job, token, primary, primaryInk, onReload }) {
+function KriterienPortalSection({ job, token, kunde, primary, primaryInk, onReload }) {
   const [entwurf, setEntwurf] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -367,7 +371,9 @@ function KriterienPortalSection({ job, token, primary, primaryInk, onReload }) {
         <>
           {kriterien.length === 0 ? (
             <p style={{ fontSize: 13, color: '#9a9994', margin: '0 0 12px' }}>
-              Noch nichts festgelegt — sag uns gern, worauf es dir ankommt.
+              {t(kunde,
+                'Noch nichts festgelegt — sag uns gern, worauf es dir ankommt.',
+                'Noch nichts festgelegt — sagen Sie uns gern, worauf es Ihnen ankommt.')}
             </p>
           ) : (
             <ul style={{ margin: '0 0 12px', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
@@ -411,7 +417,7 @@ function KriterienPortalSection({ job, token, primary, primaryInk, onReload }) {
 
 /* ══════════════════════ Lead-Pipeline (Neukunden) ══════════════════════ */
 
-function LeadsSection({ job, token, primary, primaryInk, anfragen, onReload }) {
+function LeadsSection({ job, token, kunde, primary, primaryInk, anfragen, onReload }) {
   const [view, setView] = useState('pipeline'); // 'pipeline' | 'tabelle'
   const [selected, setSelected] = useState(null);
   const [showPipelineEdit, setShowPipelineEdit] = useState(false);
@@ -420,7 +426,7 @@ function LeadsSection({ job, token, primary, primaryInk, anfragen, onReload }) {
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>🎯 Deine Anfragen ({anfragen.length})</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>🎯 {t(kunde, 'Deine', 'Ihre')} Anfragen ({anfragen.length})</h2>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button onClick={() => setView('pipeline')}
             style={pillStyle(view === 'pipeline', primary, primaryInk)}>Pipeline</button>
@@ -443,7 +449,7 @@ function LeadsSection({ job, token, primary, primaryInk, anfragen, onReload }) {
 
       {selected && (
         <LeadSlideOver
-          anfrage={selected} stufen={stufen} token={token}
+          anfrage={selected} stufen={stufen} token={token} kunde={kunde}
           felderConfig={Array.isArray(job.anfragen_felder) ? job.anfragen_felder : null}
           onClose={() => setSelected(null)} onReload={onReload}
         />
@@ -630,7 +636,7 @@ function LeadsTabelle({ stufen, anfragen, token, onOpen, onReload }) {
 const thStyle = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', cursor: 'pointer', whiteSpace: 'nowrap' };
 const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'top' };
 
-function LeadSlideOver({ anfrage, stufen, token, felderConfig, onClose, onReload }) {
+function LeadSlideOver({ anfrage, stufen, token, kunde, felderConfig, onClose, onReload }) {
   const [status, setStatus] = useState(anfrage.status || '');
   const [notizen, setNotizen] = useState(anfrage.notizen || '');
   const [zustaendiger, setZustaendiger] = useState(anfrage.daten?.zustaendiger || '');
@@ -732,7 +738,9 @@ function LeadSlideOver({ anfrage, stufen, token, felderConfig, onClose, onReload
               ...extras.map(k => ({ key: k, label: k, typ: 'text', custom: true })),
             ];
             if (items.length === 0) return (
-              <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>Keine zusätzlichen Details. Über „+ Feld hinzufügen" kannst du eigene Felder anlegen (Adresse, Größe, Bundesland, …).</p>
+              <p style={{ fontSize: 12, color: '#9a9994', margin: 0 }}>{t(kunde,
+                'Keine zusätzlichen Details. Über „+ Feld hinzufügen" kannst du eigene Felder anlegen (Adresse, Größe, Bundesland, …).',
+                'Keine zusätzlichen Details. Über „+ Feld hinzufügen" können Sie eigene Felder anlegen (Adresse, Größe, Bundesland, …).')}</p>
             );
             return items.map(f => {
               const v = datenLocal[f.key] ?? '';
@@ -866,10 +874,10 @@ function PipelineEditor({ job, token, onClose, onSaved }) {
 
 /* ══════════════════════ Bewerbungen (Recruiting) ══════════════════════ */
 
-function BewerbungenSection({ job, bewerbungen }) {
+function BewerbungenSection({ job, bewerbungen, kunde }) {
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 Deine Bewerbungen ({bewerbungen.length})</h2>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
       {bewerbungen.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Noch keine Bewerbungen eingegangen.</p>
       ) : (
@@ -929,7 +937,7 @@ function BewerbungenSection({ job, bewerbungen }) {
 
 /* ══════════════════════ Creatives-Galerie ══════════════════════ */
 
-function CreativesSection({ creatives, token, onSaved }) {
+function CreativesSection({ creatives, token, kunde, onSaved }) {
   const [lightbox, setLightbox] = useState(null);
   const [ueberarbeit, setUeberarbeit] = useState(null); // { creative, text }
 
@@ -939,7 +947,7 @@ function CreativesSection({ creatives, token, onSaved }) {
       await api(`/public/portal/${token}/creative/${ueberarbeit.creative.id}/ueberarbeitung`, {
         method: 'POST', body: JSON.stringify({ text: ueberarbeit.text.trim() }),
       });
-      alert('Danke — dein Änderungswunsch ist beim Team.');
+      alert(t(kunde, 'Danke — dein Änderungswunsch ist beim Team.', 'Danke — Ihr Änderungswunsch ist beim Team.'));
       setUeberarbeit(null);
       onSaved();
     } catch (err) { alert(err.message); }
@@ -947,7 +955,7 @@ function CreativesSection({ creatives, token, onSaved }) {
 
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>🎨 Deine Creatives</h2>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>🎨 {t(kunde, 'Deine', 'Ihre')} Creatives</h2>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
         {creatives.map((c, i) => (
           <div key={c.id} style={{ background: '#000', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
