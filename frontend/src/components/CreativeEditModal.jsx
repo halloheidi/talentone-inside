@@ -19,6 +19,7 @@ function discard(preview) {
 
 export default function CreativeEditModal({ open, creative, onClose, onApplied, initialWunsch = '' }) {
   const [wunsch, setWunsch] = useState('');
+  const [logoAufKleidung, setLogoAufKleidung] = useState(false);
   const [preview, setPreview] = useState(null);   // { bild_url, bild_ohne_logo_url, typ }
   const [deterministisch, setDeterministisch] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -27,7 +28,7 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
   const appliedRef = useRef(false);
 
   useEffect(() => {
-    if (open) { setWunsch(initialWunsch || ''); setPreview(null); setErr(''); appliedRef.current = false; }
+    if (open) { setWunsch(initialWunsch || ''); setLogoAufKleidung(false); setPreview(null); setErr(''); appliedRef.current = false; }
   }, [open, creative?.id, initialWunsch]);
 
   async function vorschau() {
@@ -36,7 +37,7 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
     setBusy(true); setErr(''); setPreview(null);
     try {
       const res = await api(`/creatives/${creative.id}/edit-preview`, {
-        method: 'POST', body: { wunsch: wunsch.trim() },
+        method: 'POST', body: { wunsch: wunsch.trim(), logo_auf_kleidung: logoAufKleidung },
       });
       setPreview(res.preview);
       setDeterministisch(!!res.deterministisch);
@@ -107,6 +108,17 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
         disabled={busy || saving}
         style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13, resize: 'vertical' }}
       />
+
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={logoAufKleidung} onChange={e => setLogoAufKleidung(e.target.checked)} disabled={busy || saving} style={{ marginTop: 2 }} />
+        <span>
+          🏷️ <strong>Logo auf Kleidung platzieren</strong>
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>
+            Das echte Firmenlogo wird der KI mitgegeben und aufs Shirt/die Arbeitskleidung eingearbeitet — kleine
+            Details können leicht abweichen. Das exakte Eck-Logo oben im Creative bleibt davon unberührt.
+          </span>
+        </span>
+      </label>
 
       {busy && !preview && (
         <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>

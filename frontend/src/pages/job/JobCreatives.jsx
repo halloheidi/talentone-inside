@@ -55,6 +55,7 @@ export default function JobCreatives() {
 
   // Generation
   const [varianten, setVarianten] = useState(1);
+  const [logoAufKleidungGen, setLogoAufKleidungGen] = useState(false); // Logo aufs Motiv (Kleidung/Fahrzeug)
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
@@ -388,9 +389,9 @@ export default function JobCreatives() {
     try {
       const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined }
+        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen }
         : mode === 'foto'
-        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined }
+        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen }
         : { job_id: job.id, mode: 'overlay', varianten, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
@@ -884,6 +885,13 @@ export default function JobCreatives() {
               <option value={3}>3 (= 6 Bilder)</option>
             </select>
           </label>
+          {mode !== 'overlay' && kunde?.logo_url && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flex: '0 0 auto', cursor: 'pointer' }}
+              title="Das echte Logo wird der KI mitgegeben und aufs Shirt/die Arbeitskleidung eingearbeitet. Das Eck-Logo oben bleibt unberührt.">
+              <input type="checkbox" checked={logoAufKleidungGen} onChange={e => setLogoAufKleidungGen(e.target.checked)} />
+              🏷️ Logo auf Kleidung
+            </label>
+          )}
           <div className="generate-actions">
             <div className="generate-hint">
               Läuft im Hintergrund — Bilder erscheinen automatisch in der Galerie. Pro Bild ~30-90 Sekunden.
