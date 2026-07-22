@@ -117,6 +117,45 @@ function extractOnepage(body) {
   return { name, email, telefon, daten };
 }
 
+/**
+ * onepage.io-Format (data.fields[]) -> selbe Kontakt-Struktur wie extractContact:
+ * { name, email, telefon, antworten:[{frage_text, antwort}] }. Kontakt via
+ * fieldType (Fallback: Label), alles Uebrige wird zur Antwort (Label bzw. Step
+ * als Fragetext). Gibt null zurueck, wenn es kein data.fields-Payload ist.
+ */
+function extractOnepageContact(body) {
+  const fields = body?.data?.fields;
+  if (!Array.isArray(fields)) return null;
+
+  const norm = s => String(s || '').toLowerCase().trim();
+  let vorname = null, nachname = null, fullName = null, email = null, telefon = null;
+  const antworten = [];
+
+  for (const f of fields) {
+    const ftype = norm(f.fieldType);
+    const label = String(f.label || '').trim();
+    const step  = String(f.step  || '').trim();
+    const val   = f.value == null ? '' : String(f.value).trim();
+    if (!val) continue;
+
+    if (ftype === 'fname' || ftype === 'firstname') { vorname = val; continue; }
+    if (ftype === 'lname' || ftype === 'lastname')  { nachname = val; continue; }
+    if (ftype === 'name'  || ftype === 'fullname')  { fullName = val; continue; }
+    if (ftype === 'email') { email = val; continue; }
+    if (['phone', 'tel', 'telephone', 'mobile'].includes(ftype)) { telefon = val; continue; }
+    // Kontakt ohne fieldType: nur bei eindeutigem Label uebernehmen.
+    if (!ftype) {
+      const nl = norm(label);
+      if (!email && /^e-?mail/.test(nl)) { email = val; continue; }
+      if (!telefon && /^(telefon|handy|mobil|rufnummer|tel\b)/.test(nl)) { telefon = val; continue; }
+    }
+    antworten.push({ frage_text: label || step || 'Antwort', antwort: val });
+  }
+
+  const name = fullName || [vorname, nachname].filter(Boolean).join(' ').trim() || null;
+  return { name, email, telefon, antworten };
+}
+
 function extractContact(body) {
   if (!body || typeof body !== 'object') {
     return { name: null, email: null, telefon: null, antworten: [] };
@@ -208,21 +247,33 @@ function matchJobFromMapping(mapping, antworten) {
    die Bewerbung wird per Stellen-Mapping dem richtigen Job zugeordnet. */
 router.post('/perspective', async (req, res) => {
   const { job_id, kunde_id, secret } = req.query || {};
+
+  // IMMER roh loggen — auch bei Ablehnung. Damit "kam nichts an" nie wieder
+  // Raetselraten ist. Content-Type verraet Body-Parser-Probleme (leerer Body).
+  const bodyKeys = req.body && typeof req.body === 'object' ? Object.keys(req.body) : [];
+  console.log(`[webhooks/perspective] IN ct=${req.headers['content-type'] || '-'} query=${JSON.stringify(req.query || {})} bodyKeys=[${bodyKeys.join(',')}] raw=${JSON.stringify(req.body ?? null).slice(0, 4000)}`);
+
   if (!job_id && !kunde_id) return res.status(400).json({ error: 'job_id oder kunde_id query param fehlt.' });
 
   const requiredSecret = process.env.PERSPECTIVE_WEBHOOK_SECRET;
   if (requiredSecret && secret !== requiredSecret) {
+    console.warn('[webhooks/perspective] 401 invalid secret');
     return res.status(401).json({ error: 'invalid secret' });
   }
 
   try {
-    const contact = extractContact(req.body);
+    // Format-erkennend: onepage.io (data.fields[]) ODER Perspective/flat.
+    const isOnepage = Array.isArray(req.body?.data?.fields);
+    const contact = (isOnepage ? extractOnepageContact(req.body) : extractContact(req.body))
+      || { name: null, email: null, telefon: null, antworten: [] };
 
     // Unvollstaendige Bewerbungen ausfiltern: WEDER E-Mail NOCH Telefon → 200 OK
     // (kein Retry), aber nicht speichern.
     if (!contact.email && !contact.telefon) {
+      console.warn(`[webhooks/perspective] SKIP no_contact — format=${isOnepage ? 'onepage' : 'perspective'} name=${contact.name || '-'} antworten=${contact.antworten?.length || 0} bodyKeys=[${bodyKeys.join(',')}]`);
       return res.status(200).json({ ok: true, skipped: 'no_contact' });
     }
+    console.log(`[webhooks/perspective] parsed format=${isOnepage ? 'onepage' : 'perspective'} name=${contact.name || '-'} email=${contact.email || '-'} telefon=${contact.telefon || '-'} antworten=${contact.antworten?.length || 0}`);
 
     let job = null;
     let zuordnungUnklar = false;
