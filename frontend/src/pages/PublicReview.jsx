@@ -46,6 +46,8 @@ export default function PublicReview() {
   const [busy, setBusy] = useState(null); // 'freigeben' | 'aenderungen' | null
   const [done, setDone] = useState(null); // 'freigegeben' | 'aenderungen'
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [avvChecked, setAvvChecked] = useState(false);
+  const [avvName, setAvvName] = useState('');
 
   useEffect(() => {
     publicApi(`/review/${token}`)
@@ -57,6 +59,10 @@ export default function PublicReview() {
         }
         if (d.review?.status === 'freigegeben' || d.review?.status === 'aenderungen') {
           setDone(d.review.status);
+        }
+        // AVV-Namensfeld mit dem Ansprechpartner vorbelegen (editierbar).
+        if (d.avv?.erforderlich && d.kunde?.ansprechpartner) {
+          setAvvName(d.kunde.ansprechpartner);
         }
       })
       .catch(err => setError(err.message));
@@ -83,15 +89,23 @@ export default function PublicReview() {
       ));
       if (!ok) return;
     }
+    // AVV-Pflicht (eigene, explizite Zustimmung — keine stille Kopplung).
+    const avvErforderlich = !!data?.avv?.erforderlich;
+    if (avvErforderlich && (!avvChecked || !avvName.trim())) {
+      alert(t(data?.kunde,
+        'Bitte bestätige zuerst den Auftragsverarbeitungsvertrag (Haken setzen und Namen angeben).',
+        'Bitte bestätigen Sie zuerst den Auftragsverarbeitungsvertrag (Haken setzen und Namen angeben).'));
+      return;
+    }
     setBusy(status);
     try {
       // Leere Kommentare rausfiltern
       const cleaned = Object.fromEntries(
         Object.entries(kommentare).filter(([, v]) => (v || '').trim())
       );
-      await publicApi(`/review/${token}`, {
-        method: 'POST', body: { status, kommentare: cleaned },
-      });
+      const body = { status, kommentare: cleaned };
+      if (avvErforderlich) { body.avv_akzeptiert = true; body.avv_name = avvName.trim(); }
+      await publicApi(`/review/${token}`, { method: 'POST', body });
       setDone(status);
     } catch (err) {
       alert(err.message);
@@ -246,18 +260,47 @@ export default function PublicReview() {
 
         {!done && (() => {
           const hasComments = Object.values(kommentare).some(v => (v || '').trim().length > 0);
+          const avvErforderlich = !!data.avv?.erforderlich;
+          const avvBlockt = avvErforderlich && (!avvChecked || !avvName.trim());
           return (
             <>
+              {avvErforderlich && (
+                <div className="review-avv" style={{ margin: '8px 0 4px', padding: 16, border: '1px solid var(--line, #ececea)', borderRadius: 12, background: '#fafaf8' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 14, lineHeight: 1.5 }}>
+                    <input type="checkbox" checked={avvChecked} onChange={e => setAvvChecked(e.target.checked)} style={{ marginTop: 3, flex: '0 0 auto' }} />
+                    <span>
+                      {t(kunde, 'Ich habe den ', 'Ich habe den ')}
+                      {data.avv.pdf_url
+                        ? <a href={data.avv.pdf_url} target="_blank" rel="noreferrer" style={{ color: brand.accent || '#0a0a0a', fontWeight: 600 }}>Auftragsverarbeitungsvertrag (PDF)</a>
+                        : <strong>Auftragsverarbeitungsvertrag</strong>}
+                      {t(kunde, ' gelesen und akzeptiere ihn im Namen von ', ' gelesen und akzeptiere ihn im Namen von ')}
+                      <strong>{data.avv.firmenname}</strong>.
+                    </span>
+                  </label>
+                  <input
+                    value={avvName}
+                    onChange={e => setAvvName(e.target.value)}
+                    placeholder={t(kunde, 'Dein Name (zur Bestätigung)', 'Ihr Name (zur Bestätigung)')}
+                    autoComplete="name"
+                    style={{ marginTop: 10, width: '100%', maxWidth: 320, padding: '8px 10px', border: '1px solid var(--line, #ececea)', borderRadius: 8, fontSize: 14 }}
+                  />
+                </div>
+              )}
               {hasComments && (
                 <div className="review-comments-hint">
                   {t(kunde, 'Du hast Anmerkungen hinterlassen', 'Sie haben Anmerkungen hinterlassen')} — diese senden wir an unser Team zur Überarbeitung.
+                </div>
+              )}
+              {avvBlockt && (
+                <div className="review-comments-hint">
+                  {t(kunde, 'Bitte bestätige oben den Auftragsverarbeitungsvertrag, um fortzufahren.', 'Bitte bestätigen Sie oben den Auftragsverarbeitungsvertrag, um fortzufahren.')}
                 </div>
               )}
               <div className="review-actions">
                 <button
                   className={hasComments ? 'review-btn-primary' : 'review-btn-secondary'}
                   onClick={() => submit('aenderungen')}
-                  disabled={busy}
+                  disabled={busy || avvBlockt}
                 >
                   {busy === 'aenderungen' ? 'Sende…' : '📝 Änderungswünsche senden'}
                 </button>
@@ -265,7 +308,7 @@ export default function PublicReview() {
                   <button
                     className="review-btn-primary"
                     onClick={() => submit('freigegeben')}
-                    disabled={busy}
+                    disabled={busy || avvBlockt}
                   >
                     {busy === 'freigegeben' ? 'Sende…' : '✅ Alles freigeben'}
                   </button>

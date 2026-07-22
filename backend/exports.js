@@ -407,9 +407,7 @@ ${sortedAdcopies.map(a => `
     ${funnelHtml}
     ${sheetHtml}
     ${avvUrl ? `
-    <div style="margin:24px 0 0;padding:14px 16px;background:#fafaf8;border:1px solid #ececea;border-radius:10px;">
-      <p style="font-size:12px;line-height:1.6;color:#5a5955;margin:0;">📄 <strong style="color:#2a2a2a;">Bitte noch bestätigen:</strong> Für die Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags. <a href="${escape(avvUrl)}" style="color:${brand.primary};font-weight:600;">AVV ansehen &amp; akzeptieren →</a></p>
-    </div>` : ''}
+    <p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:#5a5955;">📄 Nebenbei: Der Auftragsverarbeitungsvertrag ist noch offen — ${t(kunde, 'du kannst ihn direkt auf der Freigabe-Seite oder', 'Sie können ihn direkt auf der Freigabe-Seite oder')} <a href="${escape(avvUrl)}" style="color:${brand.primary};font-weight:600;">hier ansehen &amp; akzeptieren</a>.</p>` : ''}
   </td></tr>
   <tr><td style="padding:20px 32px;background:#fafaf8;border-top:1px solid #ececea;">
     <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(kunde, 'Bei Änderungswünschen kannst du direkt im', 'Bei Änderungswünschen können Sie direkt im')} <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> ${t(kunde, 'kommentieren oder einfach auf diese Mail antworten.', 'kommentieren oder einfach auf diese Mail antworten.')}</p>

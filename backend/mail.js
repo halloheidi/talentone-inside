@@ -141,6 +141,57 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
   return await response.json();
 }
 
+/* ─────────────── AVV zur Unterschrift anfragen (Extra-Mail) ─────────────── */
+// Prominenter Button -> Public-Token-Seite (PDF-Ansicht + Name + Akzeptieren).
+export async function sendAvvAnfrage({ to, kunde, avvUrl, customText, agentur }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(agentur || kunde?.agentur);
+  const k = kunde || {};
+  const grusszeile = anrede(k);
+  const firma = escape(k.firmenname || 'euer Unternehmen');
+
+  const subject = t(k, 'Bitte noch bestätigen: Auftragsverarbeitungsvertrag (AVV)',
+                       'Bitte noch bestätigen: Auftragsverarbeitungsvertrag (AVV)');
+  const defaultIntro = t(k,
+    `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten kannst du den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'eurem Unternehmen'} akzeptieren.`,
+    `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten können Sie den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'Ihrem Unternehmen'} akzeptieren.`);
+  const intro = (customText || '').trim() || defaultIntro;
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(grusszeile)},</p>
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 20px;">${escape(intro).replace(/\n/g, '<br>')}</p>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 26px;">
+      <a href="${escape(avvUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:100px;letter-spacing:0.02em;">→ AVV ansehen &amp; akzeptieren</a>
+      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link ist persönlich und nur für ${firma} gültig.</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(k, 'Fragen? Einfach auf diese Mail antworten.', 'Bei Fragen antworten Sie einfach auf diese Mail.')}</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${grusszeile},\n\n${intro}\n\nAVV ansehen & akzeptieren: ${avvUrl}\n\n(Der Link ist persönlich und nur für ${k.firmenname || 'euer Unternehmen'} gültig.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to,
+      bcc: getInternalBcc([], [to].flat()),
+      reply_to: getMailReplyTo(brand),
+      subject, html, text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ─────────────────── AVV-Bestätigung (mit PDF-Anhang) ─────────────────── */
 export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am }) {
   if (!process.env.RESEND_API_KEY) return null;

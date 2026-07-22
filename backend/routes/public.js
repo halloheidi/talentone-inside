@@ -537,6 +537,18 @@ router.get('/review/:token', async (req, res) => {
   const review = alleReviews[0] || null;
   const vorherige_runden = alleReviews.slice(1);
 
+  // AVV-Status für die Click-Wrap-Checkbox auf der Review-Seite. `erforderlich`
+  // = es gibt eine aktive Version UND der Kunde hat noch nicht akzeptiert.
+  const avvVersion = kunde ? await getAktuelleVersion(kunde.agentur) : null;
+  const avvAnnahme = kunde ? await getAnnahme(kunde.id) : null;
+  const avv = {
+    erforderlich: !!avvVersion && !avvAnnahme,
+    akzeptiert: !!avvAnnahme,
+    version: avvVersion?.version || null,
+    pdf_url: avvVersion?.pdf_url || null,
+    firmenname: kunde?.firmenname || null,
+  };
+
   res.json({
     job: { id: job.id, stelle: job.stelle, region: job.region },
     kunde,
@@ -546,18 +558,48 @@ router.get('/review/:token', async (req, res) => {
     sheet_url: sheetUrl,
     review,
     vorherige_runden,
+    avv,
   });
 });
 
-// POST /api/public/review/:token  body: { status, kommentare }
+// POST /api/public/review/:token  body: { status, kommentare, avv_akzeptiert?, avv_name? }
 router.post('/review/:token', async (req, res) => {
-  const { status, kommentare } = req.body || {};
+  const { status, kommentare, avv_akzeptiert, avv_name } = req.body || {};
   if (!['freigegeben', 'aenderungen'].includes(status)) {
     return res.status(400).json({ error: 'status muss "freigegeben" oder "aenderungen" sein.' });
   }
   const { data: job } = await supabase
     .from('talentone_jobs').select('*').eq('review_token', req.params.token).maybeSingle();
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  // ── AVV-Click-Wrap: eigene, explizite Zustimmung (KEINE stille Kopplung an die
+  // Freigabe). Wenn eine aktive AVV-Version existiert und noch keine Annahme
+  // vorliegt, ist der Haken Pflicht — sonst kein Absenden. Wird sofort und
+  // vollstaendig protokolliert (protokolliereAnnahme: Bestaetigungsmail, Check-
+  // liste, Close-Note). Eine Quelle fuer alle Tueren. */
+  const { data: avvKunde } = await supabase
+    .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+  const avvVersion = avvKunde ? await getAktuelleVersion(avvKunde.agentur) : null;
+  const avvBereitsAkzeptiert = avvKunde ? !!(await getAnnahme(avvKunde.id)) : false;
+  const avvErforderlich = !!avvVersion && !avvBereitsAkzeptiert;
+  if (avvErforderlich) {
+    if (avv_akzeptiert !== true || !String(avv_name || '').trim()) {
+      return res.status(400).json({
+        error: 'Bitte den Auftragsverarbeitungsvertrag bestätigen (Haken setzen und Namen angeben).',
+      });
+    }
+    try {
+      await protokolliereAnnahme({
+        kunde: avvKunde,
+        akzeptiert_von: String(avv_name).trim(),
+        akzeptiert_email: avvKunde.email,
+        req,
+      });
+    } catch (e) {
+      console.error('[review avv]', e.message);
+      return res.status(500).json({ error: `AVV-Zustimmung konnte nicht gespeichert werden: ${e.message}` });
+    }
+  }
 
   // AKTUELLE Runde (höchste runde) suchen. Bei mehreren Runden bearbeitet
   // der Kunde immer die neueste — alte Runden bleiben archiviert.

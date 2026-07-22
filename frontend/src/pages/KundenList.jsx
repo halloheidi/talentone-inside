@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import QuickCreateModal from '../components/QuickCreateModal.jsx';
 import NaechsterSchrittStapel from '../components/NaechsterSchrittBadge.jsx';
+import AvvAnfrageModal from '../components/AvvAnfrageModal.jsx';
 
 const VIEW_KEY = 'kundenList.view';
 
@@ -12,6 +13,7 @@ export default function KundenList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [avvKunde, setAvvKunde] = useState(null); // Kunde für AVV-Anfrage-Modal
   const [search, setSearch] = useState('');
   const [agenturFilter, setAgenturFilter] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -141,7 +143,11 @@ export default function KundenList() {
               <div className="kunde-card-body">
                 <div className="kunde-card-name">
                   {k.firmenname || k.email || '—'}
-                  {k.avv_offen && <span className="avv-warn" title="AVV noch nicht akzeptiert">⚠️</span>}
+                  {k.avv_offen && (
+                    <span className="avv-warn" role="button" tabIndex={0} title="AVV noch nicht akzeptiert — klicken zum Senden"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAvvKunde(k); }}>⚠️</span>
+                  )}
                 </div>
                 <div className="kunde-card-meta">
                   {k.branche && <span>{k.branche}</span>}
@@ -184,7 +190,11 @@ export default function KundenList() {
                         : <span>{(k.firmenname || '?').slice(0, 1).toUpperCase()}</span>}
                     </div>
                   </td>
-                  <td><strong>{k.firmenname || k.email || '—'}</strong>{k.avv_offen && <span className="avv-warn" title="AVV noch nicht akzeptiert">⚠️</span>}</td>
+                  <td><strong>{k.firmenname || k.email || '—'}</strong>{k.avv_offen && (
+                    <span className="avv-warn" role="button" tabIndex={0} title="AVV noch nicht akzeptiert — klicken zum Senden"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAvvKunde(k); }}>⚠️</span>
+                  )}</td>
                   <td>{k.branche || '—'}</td>
                   <td>{k.ansprechpartner || '—'}</td>
                   <td>{k.email ? <a href={`mailto:${k.email}`} onClick={e => e.stopPropagation()}>{k.email}</a> : '—'}</td>
@@ -201,6 +211,7 @@ export default function KundenList() {
       )}
 
       <QuickCreateModal open={showCreate} onClose={() => setShowCreate(false)} />
+      <AvvAnfrageModal open={!!avvKunde} kunde={avvKunde} onClose={() => setAvvKunde(null)} />
     </div>
   );
 }

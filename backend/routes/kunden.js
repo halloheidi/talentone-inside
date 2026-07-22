@@ -4,7 +4,7 @@ import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { normalizeImageForStorage } from '../imageops.js';
-import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
+import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { findVerwaisteAngeboteForKunde } from '../offer-linking.js';
@@ -1003,6 +1003,55 @@ router.post('/:id/anfrage', async (req, res) => {
     res.json({ ok: true, uploadUrl });
   } catch (err) {
     console.error('[anfrage]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/kunden/:id/avv-anfrage  body: { to?, text? }
+   Schickt eine eigene Mail mit prominentem Button zur Public-AVV-Seite
+   (portal_token). Protokolliert: Versand (typ 'avv_anfrage') am neuesten Job +
+   Close-Note. Die Annahme selbst laeuft ueber die bestehende Public-Seite und
+   protokolliereAnnahme — eine Quelle, vier Tueren. */
+router.post('/:id/avv-anfrage', async (req, res) => {
+  const { data: kunde, error: kErr } = await supabase
+    .from('talentone_kunden').select('*').eq('id', req.params.id).maybeSingle();
+  if (kErr || !kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+  const to = (req.body?.to || kunde.email || '').trim();
+  if (!to) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt (Kunde hat keine E-Mail).' });
+
+  // Public-AVV-Seite laeuft ueber portal_token — bei Bedarf erzeugen.
+  let portalToken = kunde.portal_token;
+  if (!portalToken) {
+    portalToken = randomUUID();
+    const { error: uErr } = await supabase
+      .from('talentone_kunden').update({ portal_token: portalToken }).eq('id', kunde.id);
+    if (uErr) return res.status(500).json({ error: uErr.message });
+  }
+  const avvUrl = `${getPublicBaseUrl(kunde.agentur)}/avv/${portalToken}`;
+
+  try {
+    await sendAvvAnfrage({ to, kunde, avvUrl, customText: req.body?.text, agentur: kunde.agentur });
+
+    const { data: firstJob } = await supabase.from('talentone_jobs')
+      .select('id').eq('kunde_id', kunde.id)
+      .order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (firstJob) {
+      await supabase.from('talentone_versand').insert({
+        job_id: firstJob.id,
+        empfaenger: to,
+        betreff: 'AVV zur Unterschrift',
+        gesendet_von: req.user?.email || null,
+        typ: 'avv_anfrage',
+        inhalte: { text: req.body?.text || null, avv_url: avvUrl },
+      });
+    }
+    notifyKunde(kunde, `📄 AVV zur Unterschrift an ${to} gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[avv-anfrage close-note]', err.message));
+
+    res.json({ ok: true, avvUrl });
+  } catch (err) {
+    console.error('[avv-anfrage]', err.message);
     res.status(503).json({ error: err.message });
   }
 });

@@ -12,6 +12,7 @@ import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
 import StandaloneAdBudgetModal from '../components/StandaloneAdBudgetModal.jsx';
 import AnredeAbfrage from '../components/AnredeAbfrage.jsx';
+import AvvAnfrageModal from '../components/AvvAnfrageModal.jsx';
 import { anredeLabel, anredeOffen } from '../lib/anrede.js';
 import InvoicesSection, { SendInvoiceMailModal } from '../components/InvoicesSection.jsx';
 import { ItemBadge } from '../components/NaechsterSchrittBadge.jsx';
@@ -37,6 +38,7 @@ export default function KundeDetail() {
   const [showAnrede, setShowAnrede] = useState(false);
   const [showAnfrage, setShowAnfrage] = useState(false);
   const [showTermin, setShowTermin] = useState(false);
+  const [showAvvAnfrage, setShowAvvAnfrage] = useState(false);
   const [anfrageUmfang, setAnfrageUmfang] = useState('beides'); // beides | logo | fotos
   const [anfrageText, setAnfrageText] = useState(DEFAULT_ANFRAGE);
   const [anfrageBusy, setAnfrageBusy] = useState(false);
@@ -523,14 +525,15 @@ export default function KundeDetail() {
                     ✅ AVV akzeptiert am {new Date(avv.annahme.akzeptiert_am).toLocaleDateString('de-DE')} von {avv.annahme.akzeptiert_von || '—'}{avv.annahme.version ? ` (Version ${avv.annahme.version})` : ''}
                   </span>
                 ) : (kunde.status === 'aktiv' ? (
-                  <span title="Auftragsverarbeitungsvertrag noch nicht akzeptiert"
+                  <button type="button" onClick={() => setShowAvvAnfrage(true)}
+                    title="AVV noch nicht akzeptiert — klicken, um ihn zur Unterschrift zu senden"
                     style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      background: '#fef3c7', color: '#92400e',
+                      display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                      background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a',
                       padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600,
                     }}>
-                    ⚠️ AVV offen
-                  </span>
+                    ⚠️ AVV offen · zum Senden
+                  </button>
                 ) : null)}
               </h1>
               <div className="kunde-head-meta">
@@ -596,6 +599,16 @@ export default function KundeDetail() {
                 >
                   📅 Termin-Einladung senden
                 </button>
+                {!avv?.annahme && (
+                  <button
+                    className="btn-ghost btn-sm"
+                    onClick={() => setShowAvvAnfrage(true)}
+                    title={kunde.email ? '' : 'Kunden-E-Mail fehlt'}
+                    disabled={!kunde.email}
+                  >
+                    📄 AVV zur Unterschrift senden
+                  </button>
+                )}
               </div>
               {kunde.portal_token && (
                 <div style={{
@@ -1044,6 +1057,13 @@ export default function KundeDetail() {
         </label>
         {anfrageMsg && <div className="form-msg" style={{ marginTop: 8 }}>{anfrageMsg}</div>}
       </Modal>
+
+      <AvvAnfrageModal
+        open={showAvvAnfrage}
+        kunde={kunde}
+        onClose={() => setShowAvvAnfrage(false)}
+        onSent={() => {}}
+      />
 
       {refLightboxIndex !== null && referenzbilder.length > 0 && (
         <Lightbox
