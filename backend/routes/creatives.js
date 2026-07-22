@@ -325,9 +325,11 @@ router.post('/spruch-verbessern', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung, logo_kleidung_modus } = req.body || {};
   // Logo aufs Motiv (Kleidung/Fahrzeug): expliziter Toggle ODER aus dem Motiv erkannt.
   const logoAufKleidung = logo_auf_kleidung === true || willLogoImMotiv(motiv || '');
+  // Modus: 'icon' = nur Bildzeichen; sonst 'voll' (komplettes Logo inkl. Schriftzug).
+  const logoModus = logo_kleidung_modus === 'icon' ? 'icon' : 'voll';
   console.log(`[generate] body keys=[${Object.keys(req.body || {}).join(',')}] mode=${mode} job_id=${job_id?.slice(0,8)} personenfoto_id=${personenfoto_id?.slice(0,8) || '–'} foto_id=${foto_id?.slice(0,8) || '–'} varianten=${varianten} spruch="${(spruch||'').slice(0,40)}"`);
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
   if (!['ki', 'foto', 'overlay'].includes(mode)) return res.status(400).json({ error: 'mode muss "ki", "foto" oder "overlay" sein.' });
@@ -426,7 +428,7 @@ router.post('/generate', async (req, res) => {
     console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
@@ -782,6 +784,7 @@ router.post('/:id/edit-preview', async (req, res) => {
   const wunsch = (req.body?.wunsch || '').trim();
   if (!wunsch) return res.status(400).json({ error: 'Änderungswunsch (wunsch) ist Pflicht.' });
   const logoAufKleidung = req.body?.logo_auf_kleidung === true || willLogoImMotiv(wunsch);
+  const logoModus = req.body?.logo_kleidung_modus === 'icon' ? 'icon' : 'voll';
 
   const { data: existing, error: e1 } = await supabase
     .from('talentone_creatives').select('*').eq('id', req.params.id).single();
@@ -804,7 +807,7 @@ router.post('/:id/edit-preview', async (req, res) => {
     }
 
     // Bild (ki/foto): gpt-image-2 /images/edits auf dem Basisbild.
-    const { bildUrl, bildOhneLogoUrl } = await generateGezielteAenderung({ job, kunde, creative: existing, wunsch, logoAufKleidung });
+    const { bildUrl, bildOhneLogoUrl } = await generateGezielteAenderung({ job, kunde, creative: existing, wunsch, logoAufKleidung, logoModus });
     res.json({ preview: { bild_url: bildUrl, bild_ohne_logo_url: bildOhneLogoUrl, typ: 'bild' }, deterministisch: false });
   } catch (err) {
     console.error('[edit-preview]', err.message);

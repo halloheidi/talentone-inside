@@ -56,6 +56,7 @@ export default function JobCreatives() {
   // Generation
   const [varianten, setVarianten] = useState(1);
   const [logoAufKleidungGen, setLogoAufKleidungGen] = useState(false); // Logo aufs Motiv (Kleidung/Fahrzeug)
+  const [logoKleidungModusGen, setLogoKleidungModusGen] = useState('voll'); // 'voll' = komplett inkl. Schriftzug | 'icon'
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
@@ -389,9 +390,9 @@ export default function JobCreatives() {
     try {
       const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen }
+        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
         : mode === 'foto'
-        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen }
+        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
         : { job_id: job.id, mode: 'overlay', varianten, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * 2;
@@ -886,11 +887,28 @@ export default function JobCreatives() {
             </select>
           </label>
           {mode !== 'overlay' && kunde?.logo_url && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flex: '0 0 auto', cursor: 'pointer' }}
-              title="Das echte Logo wird der KI mitgegeben und aufs Shirt/die Arbeitskleidung eingearbeitet. Das Eck-Logo oben bleibt unberührt.">
-              <input type="checkbox" checked={logoAufKleidungGen} onChange={e => setLogoAufKleidungGen(e.target.checked)} />
-              🏷️ Logo auf Kleidung
-            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}
+                title="Das echte Logo wird der KI mitgegeben und aufs Shirt/die Arbeitskleidung eingearbeitet. Das Eck-Logo oben bleibt unberührt.">
+                <input type="checkbox" checked={logoAufKleidungGen} onChange={e => setLogoAufKleidungGen(e.target.checked)} />
+                🏷️ Logo auf Kleidung
+              </label>
+              {logoAufKleidungGen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 22, fontSize: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="radio" name="logoModusGen" checked={logoKleidungModusGen === 'voll'} onChange={() => setLogoKleidungModusGen('voll')} />
+                    Komplettes Logo mit Schriftzug
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input type="radio" name="logoModusGen" checked={logoKleidungModusGen === 'icon'} onChange={() => setLogoKleidungModusGen('icon')} />
+                    Nur Bildzeichen/Icon (dezent)
+                  </label>
+                  <span style={{ color: 'var(--ink-4)', maxWidth: 320 }}>
+                    Bei sehr kleiner Platzierung kann feiner Schriftzug unleserlich werden — dann das Logo größer platzieren lassen (z.&nbsp;B. Brust statt Mini-Stick).
+                  </span>
+                </div>
+              )}
+            </div>
           )}
           <div className="generate-actions">
             <div className="generate-hint">

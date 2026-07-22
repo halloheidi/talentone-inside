@@ -20,6 +20,7 @@ function discard(preview) {
 export default function CreativeEditModal({ open, creative, onClose, onApplied, initialWunsch = '' }) {
   const [wunsch, setWunsch] = useState('');
   const [logoAufKleidung, setLogoAufKleidung] = useState(false);
+  const [logoModus, setLogoModus] = useState('voll'); // 'voll' = komplett inkl. Schriftzug | 'icon'
   const [preview, setPreview] = useState(null);   // { bild_url, bild_ohne_logo_url, typ }
   const [deterministisch, setDeterministisch] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,7 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
   const appliedRef = useRef(false);
 
   useEffect(() => {
-    if (open) { setWunsch(initialWunsch || ''); setLogoAufKleidung(false); setPreview(null); setErr(''); appliedRef.current = false; }
+    if (open) { setWunsch(initialWunsch || ''); setLogoAufKleidung(false); setLogoModus('voll'); setPreview(null); setErr(''); appliedRef.current = false; }
   }, [open, creative?.id, initialWunsch]);
 
   async function vorschau() {
@@ -37,7 +38,7 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
     setBusy(true); setErr(''); setPreview(null);
     try {
       const res = await api(`/creatives/${creative.id}/edit-preview`, {
-        method: 'POST', body: { wunsch: wunsch.trim(), logo_auf_kleidung: logoAufKleidung },
+        method: 'POST', body: { wunsch: wunsch.trim(), logo_auf_kleidung: logoAufKleidung, logo_kleidung_modus: logoModus },
       });
       setPreview(res.preview);
       setDeterministisch(!!res.deterministisch);
@@ -119,6 +120,23 @@ export default function CreativeEditModal({ open, creative, onClose, onApplied, 
           </span>
         </span>
       </label>
+
+      {logoAufKleidung && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0 0 26px', fontSize: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="radio" name="logoModusEdit" checked={logoModus === 'voll'} onChange={() => setLogoModus('voll')} disabled={busy || saving} />
+            Komplettes Logo mit Schriftzug
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="radio" name="logoModusEdit" checked={logoModus === 'icon'} onChange={() => setLogoModus('icon')} disabled={busy || saving} />
+            Nur Bildzeichen/Icon (dezent)
+          </label>
+          <span style={{ color: 'var(--ink-4)' }}>
+            Bei sehr kleiner Platzierung kann feiner Schriftzug unleserlich werden — dann das Logo größer platzieren
+            lassen (z.&nbsp;B. Brust statt Mini-Stick).
+          </span>
+        </div>
+      )}
 
       {busy && !preview && (
         <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 8 }}>

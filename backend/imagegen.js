@@ -328,16 +328,33 @@ export function willLogoImMotiv(text = '') {
 }
 
 // Prompt-Baustein, wenn das Logo IM Motiv (auf Kleidung/Fahrzeug) erscheinen soll.
-const LOGO_KLEIDUNG_HINWEIS =
-  `Das mitgelieferte Logo [Datei "firmenlogo"] ist das echte Firmenlogo — platziere EXAKT dieses Logo ` +
-  `dezent und realistisch als Stick/Aufdruck auf der Arbeitskleidung der Person (Brust, Ärmel oder Rücken), ` +
-  `an Perspektive, Faltenwurf und Stoff angepasst. Erfinde KEINEN Text, schreibe NICHT den Firmennamen als ` +
-  `Schrift — nutze NUR die echte Logo-Grafik aus dem Referenzbild. WICHTIG: Der Bereich oben rechts ` +
-  `(ca. 22% Breite × 18% Höhe, ~3% Abstand zum Rand) bleibt trotzdem FREI — dort wird nachträglich per Code ` +
-  `das exakte Eck-Logo eingefügt; platziere DORT kein Logo.`;
+// Zwei Modi: 'voll' (Default) = komplettes Logo inkl. Schriftzug; 'icon' = nur
+// das Bildzeichen (dezenter Brust-Stick). Beide halten den Eck-Bereich frei.
+const LOGO_ECK_FREI =
+  `WICHTIG: Der Bereich oben rechts (ca. 22% Breite × 18% Höhe, ~3% Abstand zum Rand) bleibt trotzdem FREI — ` +
+  `dort wird nachträglich per Code das exakte Eck-Logo eingefügt; platziere DORT kein Logo.`;
+
+const LOGO_KLEIDUNG_HINWEIS_VOLL =
+  `Das mitgelieferte Logo [Datei "firmenlogo"] ist das echte, VOLLSTÄNDIGE Firmenlogo. Platziere dieses Logo ` +
+  `VOLLSTÄNDIG und unverändert — INKLUSIVE des Schriftzugs/Firmennamens, exakt wie im beigefügten Logo-Bild. ` +
+  `Verwende NICHT nur das Bildzeichen/Icon. Das GESAMTE Logo (Grafik + Schriftzug) erscheint als EIN ` +
+  `zusammenhängender Aufdruck/Stick auf der Arbeitskleidung der Person (bevorzugt Brust oder Rücken), ` +
+  `realistisch in Perspektive und Faltenwurf des Stoffs eingepasst. Übernimm den Schriftzug 1:1 aus dem ` +
+  `Logo-Bild — erfinde keinen eigenen Text und ändere die Schreibweise nicht. Platziere das Logo groß genug, ` +
+  `dass der Schriftzug klar lesbar bleibt (Brustbereich, kein Mini-Stick). ${LOGO_ECK_FREI}`;
+
+const LOGO_KLEIDUNG_HINWEIS_ICON =
+  `Das mitgelieferte Logo [Datei "firmenlogo"] ist das echte Firmenlogo. Platziere daraus NUR das ` +
+  `Bildzeichen/Icon (die reine Grafik OHNE Schriftzug) dezent und realistisch als kleinen Stick/Aufdruck auf ` +
+  `der Arbeitskleidung der Person (Brust oder Ärmel), an Perspektive, Faltenwurf und Stoff angepasst. Erfinde ` +
+  `KEINEN Text und schreibe NICHT den Firmennamen als Schrift — nutze ausschließlich das Bildzeichen aus dem ` +
+  `Referenzbild. ${LOGO_ECK_FREI}`;
+
+// modus: 'voll' (Default) | 'icon'
+const logoKleidungHinweis = (modus) => (modus === 'icon' ? LOGO_KLEIDUNG_HINWEIS_ICON : LOGO_KLEIDUNG_HINWEIS_VOLL);
 
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
-function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung = false }) {
+function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
@@ -351,7 +368,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, sti
   const LOGO_FREI_HINWEIS = `KRITISCH — LOGO-REGEL: Zeichne im gesamten Bild KEIN Logo, KEIN Firmenlogo, KEIN Signet, KEIN Markenzeichen, KEINEN Firmenname-Text, KEINE Wortmarke, KEINE Buchstaben-Grafik, die an ein Logo erinnert. Das echte Original-Logo wird nachträglich per Code oben rechts als Overlay eingefügt. Halte im Bereich oben rechts (ca. 22% Breite × 18% Höhe, mit ~3% Abstand zum Rand) einen ruhigen, weitgehend flächigen Bereich frei (keine Gesichter, keine wichtigen Details, keine Text-Elemente) — der Bereich darf farblich Teil der Szene sein, aber ohne kritische Bildinhalte. Farb-Balance darf sich am mitgelieferten Logo orientieren, das Logo selbst darf NIRGENDS ins Bild.`;
   // Logo-Anweisung: entweder "nur Farb-Referenz, nie ins Bild" (Default) oder
   // "platziere das echte Logo auf der Kleidung" (logoAufKleidung).
-  const logoRefText = logoAufKleidung ? LOGO_KLEIDUNG_HINWEIS
+  const logoRefText = logoAufKleidung ? logoKleidungHinweis(logoModus)
     : `NUR als Farb-/Stil-Referenz. VERWENDE DIESES BILD NICHT als Person, NICHT als Hintergrund, NICHT als Bildelement. ${LOGO_FREI_HINWEIS}`;
   if (hasLogo && person) {
     refHinweis.push(
@@ -412,7 +429,7 @@ DESIGN-REGELN:
 }
 
 // Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
-function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung = false }) {
+function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const firmenname = kunde?.firmenname || '';
@@ -422,7 +439,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, log
   const farben = buildFarbenHinweis(kunde);
 
   const logoZeile = logoAufKleidung
-    ? `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. ${LOGO_KLEIDUNG_HINWEIS}`
+    ? `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. ${logoKleidungHinweis(logoModus)}`
     : `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR als Farb-/Stil-Referenz. Das Logo wird NIEMALS ins Bild gezeichnet — es wird nachträglich per Code als Overlay oben rechts eingefügt. Nutze das Bild nur, um die Markenfarbe zu erkennen.`;
   const refLines = hasLogo
     ? `MITGELIEFERTE BILDER (in dieser Reihenfolge):
@@ -474,12 +491,12 @@ DESIGN-REGELN:
 // Wrapper — wählt den passenden Prompt anhand des Projekttyps und Modus.
 // Projekttyp „neukundengewinnung" → Lead-Gen-Layout (Produkt/Ergebnis im Fokus,
 // CTA „Kostenloses Angebot", keine Stellenbezeichnung). Sonst Recruiting.
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, logoAufKleidung = false }) {
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   if (job?.projekttyp === 'neukundengewinnung') {
     return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
   }
-  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung });
-  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung });
+  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung, logoModus });
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung, logoModus });
 }
 
 // Prompt für Neukundengewinnung (Lead-Gen-Ad).
@@ -647,7 +664,7 @@ function bufferToFile(buf, name, type) {
 //   mode='ki'   → komplett neu generieren (optional mit Person als Vorlage)
 //   mode='foto' → Foto als Hintergrund übernehmen, nur Overlay (Foto MUSS in referenceImages enthalten sein)
 // referenceImages-Reihenfolge: Logo (isLogo:true) IMMER zuerst falls vorhanden, dann Person/Foto.
-export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false }) {
+export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
@@ -660,7 +677,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const person = referenceImages.find(r => !r.isLogo) || null;
   // Logo-auf-Kleidung nur, wenn ueberhaupt ein Logo mitgeht.
   const logoImMotiv = logoAufKleidung && hasLogo;
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage, logoAufKleidung: logoImMotiv });
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage, logoAufKleidung: logoImMotiv, logoModus });
 
   let response;
   if (refs.length > 0) {
@@ -775,10 +792,10 @@ async function ensureTransparentLogo(kunde, originalLogoBuffer) {
 }
 
 // Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false }) {
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   const formats = ['quadrat', 'story'];
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage, logoAufKleidung })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
@@ -810,7 +827,7 @@ const FORMAT_PIXELS = { quadrat: [1024, 1024], story: [1080, 1920] };
 // Baut den Edit-Prompt: NUR der Wunsch aendert sich, alles andere bleibt.
 // Bei logoAufKleidung geht ein zweites Bild (das Firmenlogo) mit — dann wird die
 // Anweisung ergaenzt, das echte Logo auf die Kleidung zu bringen.
-function buildEditPrompt(wunsch, logoAufKleidung = false) {
+function buildEditPrompt(wunsch, logoAufKleidung = false, logoModus = 'voll') {
   const basis =
     `Ändere an diesem Bild (BILD 1) AUSSCHLIESSLICH Folgendes: ${wunsch.trim()}\n\n` +
     `HARTE REGELN (nicht verletzen):\n` +
@@ -819,7 +836,7 @@ function buildEditPrompt(wunsch, logoAufKleidung = false) {
     `3. Füge nichts hinzu und entferne nichts außer der genannten Änderung.\n` +
     `4. Das Ergebnis muss ansonsten so nah wie möglich am Eingabebild bleiben.`;
   if (!logoAufKleidung) return basis;
-  return basis + `\n\nZUSATZ — LOGO AUF KLEIDUNG: ${LOGO_KLEIDUNG_HINWEIS.replace('[Datei "firmenlogo"]', '(BILD 2, das zweite mitgelieferte Bild)')}`;
+  return basis + `\n\nZUSATZ — LOGO AUF KLEIDUNG: ${logoKleidungHinweis(logoModus).replace('[Datei "firmenlogo"]', '(BILD 2, das zweite mitgelieferte Bild)')}`;
 }
 
 /**
@@ -833,7 +850,7 @@ function buildEditPrompt(wunsch, logoAufKleidung = false) {
  *
  * @returns {Promise<{bildUrl:string, bildOhneLogoUrl:(string|null)}>}
  */
-export async function generateGezielteAenderung({ job, kunde, creative, wunsch, logoAufKleidung = false }) {
+export async function generateGezielteAenderung({ job, kunde, creative, wunsch, logoAufKleidung = false, logoModus = 'voll' }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   if (!wunsch?.trim()) throw new Error('Änderungswunsch fehlt.');
 
@@ -854,7 +871,7 @@ export async function generateGezielteAenderung({ job, kunde, creative, wunsch, 
 
   const form = new FormData();
   form.append('model', 'gpt-image-2');
-  form.append('prompt', buildEditPrompt(wunsch, logoImMotiv));
+  form.append('prompt', buildEditPrompt(wunsch, logoImMotiv, logoModus));
   // 'auto' erhaelt das Seitenverhaeltnis der Eingabe (1:1 bzw. 9:16) —
   // die festen Groessen kennen kein 9:16.
   form.append('size', 'auto');
