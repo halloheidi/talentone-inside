@@ -117,11 +117,26 @@ function extractOnepage(body) {
   return { name, email, telefon, daten };
 }
 
+// Onepage-Wert flach machen: strings direkt; Select-Arrays [{_id,value}] ->
+// "a, b"; Name-Objekt {firstName,middleName,lastName} -> "Vor Nach"; {value:x} -> x.
+function flattenOnepageValue(v) {
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.map(flattenOnepageValue).filter(Boolean).join(', ');
+  if (typeof v === 'object') {
+    if ('value' in v) return flattenOnepageValue(v.value);
+    const nm = [v.firstName, v.middleName, v.lastName].filter(Boolean).join(' ').trim();
+    if (nm) return nm;
+    return '';
+  }
+  return String(v).trim();
+}
+
 /**
  * onepage.io-Format (data.fields[]) -> selbe Kontakt-Struktur wie extractContact:
  * { name, email, telefon, antworten:[{frage_text, antwort}] }. Kontakt via
- * fieldType (Fallback: Label), alles Uebrige wird zur Antwort (Label bzw. Step
- * als Fragetext). Gibt null zurueck, wenn es kein data.fields-Payload ist.
+ * fieldType (form-name/form-email/form-phone-number, auch legacy-Kurzformen).
+ * Echte Frage steht in `step` (label ist generisch wie "Select"). Datei-Uploads
+ * werden ignoriert. Gibt null zurueck, wenn es kein data.fields-Payload ist.
  */
 function extractOnepageContact(body) {
   const fields = body?.data?.fields;
@@ -135,21 +150,23 @@ function extractOnepageContact(body) {
     const ftype = norm(f.fieldType);
     const label = String(f.label || '').trim();
     const step  = String(f.step  || '').trim();
-    const val   = f.value == null ? '' : String(f.value).trim();
-    if (!val) continue;
+    const val   = flattenOnepageValue(f.value);
 
-    if (ftype === 'fname' || ftype === 'firstname') { vorname = val; continue; }
-    if (ftype === 'lname' || ftype === 'lastname')  { nachname = val; continue; }
-    if (ftype === 'name'  || ftype === 'fullname')  { fullName = val; continue; }
-    if (ftype === 'email') { email = val; continue; }
-    if (['phone', 'tel', 'telephone', 'mobile'].includes(ftype)) { telefon = val; continue; }
-    // Kontakt ohne fieldType: nur bei eindeutigem Label uebernehmen.
-    if (!ftype) {
-      const nl = norm(label);
-      if (!email && /^e-?mail/.test(nl)) { email = val; continue; }
-      if (!telefon && /^(telefon|handy|mobil|rufnummer|tel\b)/.test(nl)) { telefon = val; continue; }
+    // Kontakt-Felder (onepage: form-*; plus legacy-Kurzformen).
+    if (ftype === 'form-name' || ftype === 'name' || ftype === 'fullname') { if (val) fullName = val; continue; }
+    if (ftype === 'fname' || ftype === 'firstname') { if (val) vorname = val; continue; }
+    if (ftype === 'lname' || ftype === 'lastname')  { if (val) nachname = val; continue; }
+    if (ftype === 'form-email' || ftype === 'email') { if (val) email = val; continue; }
+    if (ftype === 'form-phone-number' || ftype === 'form-phone' || ['phone', 'tel', 'telephone', 'mobile'].includes(ftype)) {
+      if (val) telefon = val; continue;
     }
-    antworten.push({ frage_text: label || step || 'Antwort', antwort: val });
+    if (ftype === 'form-uploader' || ftype === 'uploader' || ftype === 'form-file') continue; // Datei -> ignorieren
+    // Kontakt ohne bekannten fieldType: nur bei eindeutigem Label.
+    if (!email && /^e-?mail$/.test(norm(label))) { if (val) { email = val; continue; } }
+    if (!telefon && /^(telefon|telefonnummer|handy|mobil|rufnummer)$/.test(norm(label))) { if (val) { telefon = val; continue; } }
+    if (!val) continue;
+    // Frage = step (echte Funnel-Frage), Fallback label.
+    antworten.push({ frage_text: step || label || 'Antwort', antwort: val });
   }
 
   const name = fullName || [vorname, nachname].filter(Boolean).join(' ').trim() || null;

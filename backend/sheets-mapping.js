@@ -39,6 +39,12 @@ const isWeiteres = (header) => matches(header, ['weiteres', 'weitere antworten',
 const NW_KONTAKTIERT = ['n&w telefonisch kontaktiert', 'n&w kontaktiert', 'telefonisch kontaktiert am', 'nw kontaktiert'];
 const isNwKontaktiert = (header) => !isClivetOwned(header) && matches(header, NW_KONTAKTIERT);
 
+// Frage-Label deutet auf eine Stellen-/Positionsauswahl hin (vor STANDARD_FIELDS
+// definiert, weil das Stelle-Feld darauf verweist).
+const STELLE_STRONG = /stelle|position|stellenauswahl/i;
+const STELLE_WEAK = /\bjob\b/i;
+export const isStelleLabel = (label) => { const s = String(label || ''); return STELLE_STRONG.test(s) || STELLE_WEAK.test(s); };
+
 // Standard-Felder (aus dem Bewerbungs-Datensatz, nicht aus Antworten).
 // Wertunabhaengig definiert, damit "ist Standardfeld?" unabhaengig vom Kontext
 // bestimmt werden kann.
@@ -47,7 +53,7 @@ const STANDARD_FIELDS = [
   { aliases: ['beworben am', 'eingang', 'eingegangen', 'bewerbungsdatum', 'datum'], get: c => c.datum },
   { aliases: ['tel nr', 'tel. nr', 'telefonnummer', 'handy', 'mobil', 'rufnummer', 'telefon'], get: c => c.telefon },
   { aliases: ['mail', 'e-mail', 'email', 'e mail'], get: c => c.email },
-  { aliases: ['stelle', 'position', 'bewerbung fuer'], get: c => c.stelle },
+  { aliases: ['stelle', 'position', 'bewerbung fuer'], get: c => c.stelle, consume: isStelleLabel },
   { aliases: ['quelle', 'source'], get: c => c.quelle },
 ];
 
@@ -89,9 +95,9 @@ export function toPairs({ antworten = [], vorqual = {} } = {}) {
 // Frage-Text ist funnel-abhaengig und beim ersten Probelead zu verifizieren.
 export function extractStelle(antworten = []) {
   const list = Array.isArray(antworten) ? antworten : [];
-  const strong = list.find(a => /stelle|position|stellenauswahl/i.test(answerLabel(a)) && answerValue(a));
+  const strong = list.find(a => STELLE_STRONG.test(answerLabel(a)) && answerValue(a));
   if (strong) return answerValue(strong);
-  const weak = list.find(a => /\bjob\b/i.test(answerLabel(a)) && answerValue(a));
+  const weak = list.find(a => STELLE_WEAK.test(answerLabel(a)) && answerValue(a));
   return weak ? answerValue(weak) : null;
 }
 
@@ -109,9 +115,10 @@ export function buildAppendRow({ header = [], ctx = {}, pairs = [] } = {}) {
     if (std) {
       const v = std.get(ctx);
       row[i] = v == null ? '' : String(v);
-      // Passende Antwort-Paare als "verbraucht" markieren (z.B. die Stellen-Frage,
-      // deren Wert bereits in Spalte A steht) -> nicht zusaetzlich in "weiteres".
-      pairs.forEach(p => { if (matches(h, [p.key])) p._used = true; });
+      // Passende Antwort-Paare als "verbraucht" markieren (z.B. die Stellen-Frage
+      // "Position", deren Wert bereits in Spalte A steht) -> nicht zusaetzlich in
+      // "weiteres". Neben Header-Fuzzy auch der feld-spezifische consume-Matcher.
+      pairs.forEach(p => { if (matches(h, [p.key]) || (std.consume && std.consume(p.key))) p._used = true; });
       return;
     }
     // Fuzzy gegen Antwort-/Vorqual-Labels.
