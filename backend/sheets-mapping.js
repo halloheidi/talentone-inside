@@ -66,17 +66,33 @@ function flatten(v) {
   return s.replace(/\r?\n+/g, '; ').replace(/\s*;\s*;+/g, '; ').trim();
 }
 
+// Fragetext einer Antwort robust auslesen. Perspective liefert `frage_text`;
+// andere Quellen ggf. `frage`/`label`/`key`.
+const answerLabel = (a) => String(a?.frage_text ?? a?.frage ?? a?.label ?? a?.key ?? '');
+const answerValue = (a) => flatten(a?.antwort ?? a?.value ?? a?.wert);
+
 // Baut aus antworten[] (Funnel) + vorqual-werte{} eine einheitliche Paar-Liste.
 export function toPairs({ antworten = [], vorqual = {} } = {}) {
   const pairs = [];
   for (const a of (Array.isArray(antworten) ? antworten : [])) {
-    const key = a?.frage ?? a?.label ?? a?.key;
-    if (key) pairs.push({ key: String(key), value: flatten(a?.antwort ?? a?.value ?? a?.wert), kind: 'answer' });
+    const key = answerLabel(a);
+    if (key) pairs.push({ key, value: answerValue(a), kind: 'answer' });
   }
   for (const [k, v] of Object.entries(vorqual || {})) {
     if (k) pairs.push({ key: String(k), value: flatten(v), kind: 'vorqual' });
   }
   return pairs;
+}
+
+// Extrahiert die im Funnel gewaehlte Stelle aus den Antworten (Frage-Label-Match
+// auf "Stelle"/"Position"/"Job"). Kein Treffer -> null (nicht raten). Der genaue
+// Frage-Text ist funnel-abhaengig und beim ersten Probelead zu verifizieren.
+export function extractStelle(antworten = []) {
+  const list = Array.isArray(antworten) ? antworten : [];
+  const strong = list.find(a => /stelle|position|stellenauswahl/i.test(answerLabel(a)) && answerValue(a));
+  if (strong) return answerValue(strong);
+  const weak = list.find(a => /\bjob\b/i.test(answerLabel(a)) && answerValue(a));
+  return weak ? answerValue(weak) : null;
 }
 
 /**
@@ -90,7 +106,14 @@ export function buildAppendRow({ header = [], ctx = {}, pairs = [] } = {}) {
     // Kundengepflegte, "weiteres"- und reservierte N&W-Spalten NIE beim Append fuellen.
     if (isClivetOwned(h) || isWeiteres(h) || isNwKontaktiert(h)) return;
     const std = standardField(h);
-    if (std) { const v = std.get(ctx); row[i] = v == null ? '' : String(v); return; }
+    if (std) {
+      const v = std.get(ctx);
+      row[i] = v == null ? '' : String(v);
+      // Passende Antwort-Paare als "verbraucht" markieren (z.B. die Stellen-Frage,
+      // deren Wert bereits in Spalte A steht) -> nicht zusaetzlich in "weiteres".
+      pairs.forEach(p => { if (matches(h, [p.key])) p._used = true; });
+      return;
+    }
     // Fuzzy gegen Antwort-/Vorqual-Labels.
     const hit = pairs.find(p => matches(h, [p.key]));
     if (hit) { row[i] = hit.value || ''; hit._used = true; }

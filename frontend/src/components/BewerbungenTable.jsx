@@ -179,6 +179,15 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
         <header className="slideover-head">
           <div>
             <h2>{norm?.name || '(ohne Namen)'}</h2>
+            {bewerbung.stelle_gewaehlt && (
+              <p className="slideover-stelle" style={{
+                display: 'inline-block', margin: '4px 0 2px', padding: '2px 10px',
+                borderRadius: 100, background: 'rgba(0,0,0,0.06)', fontSize: 13,
+                fontWeight: 600, color: '#1a1a1a',
+              }}>
+                💼 {bewerbung.stelle_gewaehlt}
+              </p>
+            )}
             <p className="muted">
               {new Date(bewerbung.created_at).toLocaleString('de-DE')} · {bewerbung.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}
               {bewerbung.ko_kriterium && <> · <span className="ko-badge">KO</span></>}

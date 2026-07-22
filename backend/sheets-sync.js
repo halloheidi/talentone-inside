@@ -4,7 +4,7 @@
 
 import { supabase } from './supabase.js';
 import { isConfigured, readHeaderRow, appendRow, updateCells, firstSheetName } from './google-sheets.js';
-import { buildAppendRow, buildVorqualUpdateCells, toPairs } from './sheets-mapping.js';
+import { buildAppendRow, buildVorqualUpdateCells, toPairs, extractStelle } from './sheets-mapping.js';
 
 let _consecutiveFailures = 0;
 
@@ -73,7 +73,9 @@ export async function syncBewerbungToSheet({ bewerbung, job, kunde }) {
       email: bewerbung.email || '',
       telefon: bewerbung.telefon || '',
       datum: berlinTimestamp(bewerbung.created_at),
-      stelle: job?.stelle || '',
+      // Stelle kommt aus der Formular-Antwort (nicht aus der Job-Zuordnung).
+      // Keine Antwort -> leer lassen, Kunde traegt nach (nicht raten).
+      stelle: bewerbung.stelle_gewaehlt || extractStelle(bewerbung.antworten) || '',
       quelle: bewerbung.quelle || '',
     };
     const { row } = buildAppendRow({ header, ctx, pairs });

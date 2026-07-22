@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { extractStelle } from '../sheets-mapping.js';
 
 const router = Router();
 
@@ -271,6 +272,7 @@ router.post('/perspective', async (req, res) => {
         email: contact.email,
         telefon: contact.telefon,
         antworten: contact.antworten,
+        stelle_gewaehlt: extractStelle(contact.antworten),
         quelle: 'perspective',
         ko_kriterium: false,
         zuordnung_unklar: zuordnungUnklar,

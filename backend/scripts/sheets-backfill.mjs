@@ -13,7 +13,7 @@
 
 import { supabase } from '../supabase.js';
 import { isConfigured, readHeaderRow, readValues, appendRow, firstSheetName } from '../google-sheets.js';
-import { buildAppendRow, toPairs } from '../sheets-mapping.js';
+import { buildAppendRow, toPairs, extractStelle } from '../sheets-mapping.js';
 
 const CLIVET_ID = '18bbfb99-f8b8-4b64-b08e-6fdf6e463cf9';
 const kundeId = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : CLIVET_ID;
@@ -72,7 +72,7 @@ async function main() {
   const { data: jobs } = await supabase.from('talentone_jobs').select('id, stelle').eq('kunde_id', kundeId);
   const jobById = new Map((jobs || []).map(j => [j.id, j]));
   const { data: bews } = await supabase.from('talentone_bewerbungen')
-    .select('id, name, email, telefon, quelle, antworten, vorqualifizierung_werte, created_at, job_id, sheets_synced_at, sheets_row_number')
+    .select('id, name, email, telefon, quelle, antworten, vorqualifizierung_werte, created_at, job_id, stelle_gewaehlt, sheets_synced_at, sheets_row_number')
     .in('job_id', (jobs || []).map(j => j.id))
     .order('created_at', { ascending: true });
 
@@ -99,7 +99,8 @@ async function main() {
       const pairs = toPairs({ antworten: b.antworten, vorqual: b.vorqualifizierung_werte });
       const ctx = {
         name: b.name || '', email: b.email || '', telefon: b.telefon || '',
-        datum: berlinTimestamp(b.created_at), stelle: job?.stelle || '', quelle: b.quelle || '',
+        datum: berlinTimestamp(b.created_at),
+        stelle: b.stelle_gewaehlt || extractStelle(b.antworten) || '', quelle: b.quelle || '',
       };
       const { row } = buildAppendRow({ header, ctx, pairs });
       const rowNumber = await appendRow(cfg.spreadsheet_id, sheetName, row);
