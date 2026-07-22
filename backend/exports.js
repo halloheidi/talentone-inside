@@ -412,7 +412,7 @@ ${sortedAdcopies.map(a => `
     </div>` : ''}
   </td></tr>
   <tr><td style="padding:20px 32px;background:#fafaf8;border-top:1px solid #ececea;">
-    <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Bei Änderungswünschen kannst du direkt im <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> kommentieren oder einfach auf diese Mail antworten.</p>
+    <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(kunde, 'Bei Änderungswünschen kannst du direkt im', 'Bei Änderungswünschen können Sie direkt im')} <a href="${escape(reviewUrl || '#')}" style="color:${brand.primary};">Review-Tool</a> ${t(kunde, 'kommentieren oder einfach auf diese Mail antworten.', 'kommentieren oder einfach auf diese Mail antworten.')}</p>
   </td></tr>
   <tr><td style="padding:14px 32px;background:#fafaf8;text-align:center;">
     <p style="font-size:11px;color:#9a9994;margin:0;">${escape(brand.footer)} · <a href="${brand.websiteUrl}" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">${escape(brand.websiteUrl.replace(/^https?:\/\//, ''))}</a></p>

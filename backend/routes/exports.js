@@ -9,6 +9,8 @@ import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, se
 import { TERMINE, getTerminMeta } from '../termine.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
+import { normalizeResendMode, resolveVersandVariante } from '../versand-variante.js';
+import { t } from '../anrede.js';
 
 const router = Router();
 
@@ -112,9 +114,10 @@ router.post('/jobs/:id/export/email', async (req, res) => {
   //                  Fuer Rueckwaertskompatibilitaet mit aelteren Frontend-Versionen.
   const { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel, resend_mode } = req.body || {};
   if (!to?.trim()) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
-  if (resend_mode && !['new_round', 'same_round'].includes(resend_mode)) {
-    return res.status(400).json({ error: 'resend_mode muss "new_round" oder "same_round" sein.' });
-  }
+  // resend_mode ist nur ein optionaler UI-Hinweis (Erstversand schickt z.B.
+  // 'first'). Kein harter Fehler mehr — die Variante wird unten aus dem echten
+  // DB-Zustand abgeleitet. normalizeResendMode() behaelt nur 'new_round'/'same_round'.
+  const resendHint = normalizeResendMode(resend_mode);
 
   try {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
@@ -146,14 +149,9 @@ router.post('/jobs/:id/export/email', async (req, res) => {
       ['aenderungen', 'freigegeben'].includes(latestReview.status) || latestReview.manuell_beantwortet
     ));
 
-    // 'erstversand' | 'resend' | 'neue_runde'
-    // Erstversand gewinnt IMMER, wenn noch nie etwas raus ist — egal was der
-    // Client schickt (verhindert "ueberarbeitete Entwuerfe Runde 1").
-    // Eine neue Runde setzt eine echte Kundenreaktion voraus.
-    const variante = !hatteVersand
-      ? 'erstversand'
-      : (resend_mode === 'new_round' && hatKundenReaktion) ? 'neue_runde'
-      : 'resend';
+    // 'erstversand' | 'resend' | 'neue_runde' — Erstversand gewinnt IMMER, wenn
+    // noch nie etwas raus ist; neue Runde nur mit echter Kundenreaktion.
+    const variante = resolveVersandVariante({ resendHint, hatteVersand, hatKundenReaktion });
 
     const istNeueRunde = variante === 'neue_runde';
     const neueRundeNr = istNeueRunde
@@ -188,9 +186,10 @@ router.post('/jobs/:id/export/email', async (req, res) => {
 
     // ── Drei klar getrennte Varianten ──
     const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
+    // Betreff folgt der Anrede des Kunden (Du/Sie).
     const standardBetreff = istNeueRunde
-      ? `Deine überarbeiteten Entwürfe — Runde ${neueRundeNr}`
-      : 'Deine Entwürfe sind fertig 🎨';
+      ? t(kunde, `Deine überarbeiteten Entwürfe — Runde ${neueRundeNr}`, `Ihre überarbeiteten Entwürfe — Runde ${neueRundeNr}`)
+      : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨');
 
     // Sicherheitsnetz: Ein Client (z. B. alter Cache) darf keinen
     // "ueberarbeitet/Runde X"-Betreff auf einen Erstversand/Resend setzen.

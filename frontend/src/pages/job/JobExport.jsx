@@ -54,6 +54,7 @@ export default function JobExport() {
   });
   const [mailBusy, setMailBusy] = useState(false);
   const [mailMsg, setMailMsg] = useState('');
+  const [mailErr, setMailErr] = useState(false); // Fehler (rot) vs. Erfolg (neutral)
   const [anschreibensBusy, setAnschreibensBusy] = useState(false);
 
   // Versand-Historie + Review
@@ -206,18 +207,21 @@ export default function JobExport() {
     const istResend = mode === 'same_round';
     const istNeueRunde = mode === 'new_round';
     const anschreibenDefault = istResend
-      ? `Hallo ${kunde?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`
+      ? t(kunde,
+          `Hallo ${kunde?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`,
+          `${anrede(kunde)},\n\nhier nochmal Ihre Entwürfe zur Freigabe — falls die letzte Mail bei Ihnen untergegangen ist.\n\nSie können auf der Review-Seite wieder kommentieren oder direkt freigeben.`)
       : '';
     setMailForm({
       to: kunde?.email || '',
       betreff: istNeueRunde
-        ? `Deine überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`
-        : 'Deine Entwürfe sind fertig 🎨',
+        ? t(kunde, `Deine überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`, `Ihre überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`)
+        : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'),
       anschreiben: anschreibenDefault,
       include_funnel: !!data?.funnel_url,
       resend_mode: mode,
     });
     setMailMsg('');
+    setMailErr(false);
     setShowMail(true);
     if (!istResend) {
       // KI-Anschreiben-Vorschlag für Erstversand + neue Runde
@@ -230,9 +234,10 @@ export default function JobExport() {
   }
 
   async function sendMail() {
-    if (!mailForm.to.trim()) { setMailMsg('Empfänger-Mail fehlt.'); return; }
+    if (!mailForm.to.trim()) { setMailErr(true); setMailMsg('Empfänger-Mail fehlt.'); return; }
     setMailBusy(true);
     setMailMsg('');
+    setMailErr(false);
     try {
       await api(`/jobs/${job.id}/export/email`, {
         method: 'POST',
@@ -246,13 +251,17 @@ export default function JobExport() {
           resend_mode: mailForm.resend_mode || undefined,
         },
       });
+      setMailErr(false);
       setMailMsg('Mail verschickt!');
       // Historie + Review nachladen
       api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
       api(`/jobs/${job.id}/export/review`).then(r => { setReview(r.review); setRunden(r.runden || []); }).catch(() => {});
       setTimeout(() => setShowMail(false), 1200);
     } catch (err) {
-      setMailMsg(err.message);
+      // Fehler sichtbar machen (rot) + Button wieder freigeben. Der stumme
+      // Zustand "es passiert nichts" ist selbst ein Bug.
+      setMailErr(true);
+      setMailMsg(`Versand fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
     } finally {
       setMailBusy(false);
     }
@@ -777,7 +786,12 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             </label>
           )}
         </div>
-        {mailMsg && <div className="form-msg" style={{ marginTop: 10 }}>{mailMsg}</div>}
+        {mailMsg && (
+          <div className={`form-msg${mailErr ? ' alert alert-error' : ''}`}
+            style={{ marginTop: 10, ...(mailErr ? { color: '#b00020', fontWeight: 600 } : {}) }}>
+            {mailErr ? '⚠️ ' : ''}{mailMsg}
+          </div>
+        )}
       </Modal>
 
       {/* ─────── Lightbox für Creative-Auswahl ─────── */}
