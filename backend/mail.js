@@ -193,7 +193,7 @@ export async function sendAvvAnfrage({ to, kunde, avvUrl, customText, agentur })
 }
 
 /* ─────────────────── AVV-Bestätigung (mit PDF-Anhang) ─────────────────── */
-export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am }) {
+export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am, pdfUrl }) {
   if (!process.env.RESEND_API_KEY) return null;
   const brand = getBranding(kunde?.agentur);
   const firma = escape(kunde?.firmenname || '');
@@ -221,9 +221,10 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
   const html = brandedShell({ brand, contentHtml: content });
 
   // PDF als Anhang laden (best-effort — ohne Anhang trotzdem senden).
+  // Bevorzugt die personalisierte Fassung; Fallback generischer Master.
   let attachments;
   try {
-    const r = await fetch(version.pdf_url);
+    const r = await fetch(pdfUrl || version.pdf_url);
     if (r.ok) {
       const buf = Buffer.from(await r.arrayBuffer());
       const fn = `AVV_${brand.name.replace(/[^\w]+/g, '_')}_v${version.version}.pdf`;

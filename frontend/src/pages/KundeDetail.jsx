@@ -126,6 +126,7 @@ export default function KundeDetail() {
   const [editForm, setEditForm] = useState({
     firmenname: '', ansprechpartner: '', email: '', telefon: '',
     branche: '', agentur: 'talentone', notizen: '', close_lead_id: '',
+    strasse: '', plz: '', ort: '',
   });
   const [editBusy, setEditBusy] = useState(false);
   const [editMsg, setEditMsg] = useState('');
@@ -140,6 +141,9 @@ export default function KundeDetail() {
       agentur: kunde?.agentur || 'talentone',
       notizen: kunde?.notizen || '',
       close_lead_id: kunde?.close_lead_id || '',
+      strasse: kunde?.strasse || '',
+      plz: kunde?.plz || '',
+      ort: kunde?.ort || '',
     });
     setEditMode(true);
     setEditMsg('');
@@ -164,6 +168,9 @@ export default function KundeDetail() {
           agentur: editForm.agentur || 'talentone',
           notizen: editForm.notizen.trim() || null,
           close_lead_id: closeLead || null,
+          strasse: editForm.strasse.trim() || null,
+          plz: editForm.plz.trim() || null,
+          ort: editForm.ort.trim() || null,
         },
       });
       setKunde(res.kunde);
@@ -659,6 +666,18 @@ export default function KundeDetail() {
                 <label className="field">
                   <span>Telefon</span>
                   <input value={editForm.telefon} onChange={e => setEditForm({ ...editForm, telefon: e.target.value })} />
+                </label>
+                <label className="field field-full">
+                  <span>Straße &amp; Hausnr. <em style={{ color: 'var(--ink-3)', fontStyle: 'normal', fontSize: 11 }}>(für AVV-Vertrag)</em></span>
+                  <input value={editForm.strasse} onChange={e => setEditForm({ ...editForm, strasse: e.target.value })} placeholder="z. B. Musterstraße 12" />
+                </label>
+                <label className="field">
+                  <span>PLZ</span>
+                  <input value={editForm.plz} onChange={e => setEditForm({ ...editForm, plz: e.target.value })} placeholder="40210" />
+                </label>
+                <label className="field">
+                  <span>Ort</span>
+                  <input value={editForm.ort} onChange={e => setEditForm({ ...editForm, ort: e.target.value })} placeholder="Düsseldorf" />
                 </label>
                 <label className="field field-full">
                   <span>Agentur</span>

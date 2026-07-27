@@ -426,7 +426,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben', 'website_url', 'agentur',
                    'paypal_enabled', 'campaign_payment_status', 'close_lead_id', 'keine_ki_bilder', 'funnel_stellen_mapping',
-                   'anrede_form', 'anrede_titel', 'nachname'];
+                   'anrede_form', 'anrede_titel', 'nachname', 'strasse', 'plz', 'ort'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
 
   // Anrede validieren + konsistent halten: Titel gehört nur zur Sie-Form.

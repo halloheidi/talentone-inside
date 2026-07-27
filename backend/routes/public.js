@@ -13,6 +13,7 @@ import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendT
 import { notifyKunde } from '../close.js';
 import { findMemberByName } from '../team.js';
 import { protokolliereAnnahme, getAktuelleVersion, getAnnahme } from '../avv.js';
+import { getPersonalizedAvvPdf } from '../avv-pdf.js';
 
 const router = Router();
 
@@ -136,6 +137,7 @@ router.get('/formular/:token', async (req, res) => {
     .contains('formdata_komplett', { _wartet_auf_briefing: true })
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   const avvVersion = await getAktuelleVersion(kunde.agentur);
+  const avvPdfUrl = (await getPersonalizedAvvPdf(kunde.id)).url || avvVersion?.pdf_url || null;
   res.json({
     kunde: {
       firmenname: kunde.firmenname,
@@ -147,7 +149,7 @@ router.get('/formular/:token', async (req, res) => {
       nachname: kunde.nachname,
     },
     projekttyp: pendingJob?.projekttyp || 'mitarbeitergewinnung',
-    avv: { version: avvVersion?.version || null, pdf_url: avvVersion?.pdf_url || null },
+    avv: { version: avvVersion?.version || null, pdf_url: avvPdfUrl },
   });
 });
 
@@ -541,11 +543,15 @@ router.get('/review/:token', async (req, res) => {
   // = es gibt eine aktive Version UND der Kunde hat noch nicht akzeptiert.
   const avvVersion = kunde ? await getAktuelleVersion(kunde.agentur) : null;
   const avvAnnahme = kunde ? await getAnnahme(kunde.id) : null;
+  // Personalisierte Fassung (Firmenname/Anschrift eingesetzt); Fallback Master.
+  const avvPdfUrl = kunde
+    ? (avvAnnahme?.pdf_url || (await getPersonalizedAvvPdf(kunde.id)).url || avvVersion?.pdf_url || null)
+    : null;
   const avv = {
     erforderlich: !!avvVersion && !avvAnnahme,
     akzeptiert: !!avvAnnahme,
     version: avvVersion?.version || null,
-    pdf_url: avvVersion?.pdf_url || null,
+    pdf_url: avvPdfUrl,
     firmenname: kunde?.firmenname || null,
   };
 
@@ -1211,6 +1217,9 @@ router.get('/avv/:token', async (req, res) => {
   if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
   const version = await getAktuelleVersion(kunde.agentur);
   const annahme = await getAnnahme(kunde.id);
+  // Bereits akzeptiert -> exakt die akzeptierte Fassung zeigen; sonst die
+  // personalisierte aktuelle Fassung (Fallback: generischer Master).
+  const pdfUrl = annahme?.pdf_url || (await getPersonalizedAvvPdf(kunde.id)).url || version?.pdf_url || null;
   res.json({
     firmenname: kunde.firmenname,
     agentur: kunde.agentur,
@@ -1219,7 +1228,7 @@ router.get('/avv/:token', async (req, res) => {
     anrede_titel: kunde.anrede_titel,
     nachname: kunde.nachname,
     version: version?.version || null,
-    pdf_url: version?.pdf_url || null,
+    pdf_url: pdfUrl,
     akzeptiert: !!annahme,
     akzeptiert_am: annahme?.akzeptiert_am || null,
     akzeptiert_von: annahme?.akzeptiert_von || null,
@@ -1345,6 +1354,9 @@ router.get('/portal/:token', async (req, res) => {
     const istStaff = !!gate.session?.staff;
     const avvAngenommen = await getAnnahme(kunde.id);
     const avvVersion = avvAngenommen ? null : await getAktuelleVersion(kunde.agentur);
+    // Noch nicht akzeptiert -> personalisierte aktuelle Fassung; sonst die akzeptierte.
+    const avvPdfUrl = avvAngenommen?.pdf_url
+      || (avvVersion ? (await getPersonalizedAvvPdf(kunde.id)).url || avvVersion.pdf_url : null);
 
     res.json({
       kunde: {
@@ -1361,7 +1373,7 @@ router.get('/portal/:token', async (req, res) => {
       avv: {
         erforderlich: kunde.portal_zugang === 'account' && !istStaff && !avvAngenommen,
         akzeptiert: !!avvAngenommen,
-        pdf_url: avvAngenommen?.pdf_url || avvVersion?.pdf_url || null,
+        pdf_url: avvPdfUrl,
         version: avvAngenommen?.version || avvVersion?.version || null,
       },
     });

@@ -5,6 +5,7 @@
 import { supabase } from './supabase.js';
 import { sendAvvBestaetigung } from './mail.js';
 import { notifyKundeById } from './close.js';
+import { getPersonalizedAvvPdf } from './avv-pdf.js';
 
 function normAgentur(agentur) {
   return agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
@@ -27,7 +28,7 @@ export async function getAktuelleVersion(agentur) {
 export async function getAnnahme(kundeId) {
   const { data } = await supabase
     .from('talentone_avv_annahmen')
-    .select('id, akzeptiert_von, akzeptiert_email, akzeptiert_am, avv_version_id, talentone_avv_versionen(version, pdf_url)')
+    .select('id, akzeptiert_von, akzeptiert_email, akzeptiert_am, avv_version_id, pdf_url, talentone_avv_versionen(version, pdf_url)')
     .eq('kunde_id', kundeId)
     .order('akzeptiert_am', { ascending: false })
     .limit(1)
@@ -39,7 +40,8 @@ export async function getAnnahme(kundeId) {
     akzeptiert_email: data.akzeptiert_email,
     akzeptiert_am: data.akzeptiert_am,
     version: data.talentone_avv_versionen?.version || null,
-    pdf_url: data.talentone_avv_versionen?.pdf_url || null,
+    // Konkret akzeptierte (personalisierte) Fassung; Alt-Annahmen -> generische Master-PDF.
+    pdf_url: data.pdf_url || data.talentone_avv_versionen?.pdf_url || null,
   };
 }
 
@@ -68,6 +70,12 @@ export async function protokolliereAnnahme({ kunde, akzeptiert_von, akzeptiert_e
 
   const ersteAnnahme = !(await hatAnnahme(kunde.id));
 
+  // Personalisierte PDF-Fassung, die der Kunde konkret gesehen hat (Nachweis).
+  // Fehler blockieren die Annahme nicht — dann bleibt pdf_url leer (Master gilt).
+  let pdfUrl = null;
+  try { pdfUrl = (await getPersonalizedAvvPdf(kunde.id)).url; }
+  catch (e) { console.warn('[avv] personalisierte PDF:', e.message); }
+
   const { data: annahme, error } = await supabase
     .from('talentone_avv_annahmen')
     .insert({
@@ -77,6 +85,7 @@ export async function protokolliereAnnahme({ kunde, akzeptiert_von, akzeptiert_e
       akzeptiert_email: akzeptiert_email ? String(akzeptiert_email).trim().slice(0, 200) : null,
       ip_adresse: req ? clientIpFrom(req) : null,
       user_agent: req?.headers?.['user-agent'] ? String(req.headers['user-agent']).slice(0, 500) : null,
+      pdf_url: pdfUrl,
     })
     .select()
     .single();
@@ -99,7 +108,7 @@ export async function protokolliereAnnahme({ kunde, akzeptiert_von, akzeptiert_e
     // Bestätigungsmail mit PDF-Anhang.
     const to = akzeptiert_email || kunde.email;
     if (to) {
-      sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am: annahme.akzeptiert_am })
+      sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, akzeptiert_am: annahme.akzeptiert_am, pdfUrl })
         .catch(e => console.warn('[avv] Bestätigungsmail:', e.message));
     }
 
