@@ -353,6 +353,18 @@ const LOGO_KLEIDUNG_HINWEIS_ICON =
 // modus: 'voll' (Default) | 'icon'
 const logoKleidungHinweis = (modus) => (modus === 'icon' ? LOGO_KLEIDUNG_HINWEIS_ICON : LOGO_KLEIDUNG_HINWEIS_VOLL);
 
+// ── Zentrale Layout-Invarianten ──
+// Kern-Regeln, die UNABHÄNGIG von Stilvorlage/Motiv/Logo-Umschaltung IMMER gelten.
+// Bewusst hier zentralisiert (nicht in einzelnen Prompt-Bausteinen verteilt), damit
+// künftige Prompt-Umbauten sie nicht versehentlich verdrängen (siehe Ebenen-Regression).
+// Text nie über das Gesicht — gilt in JEDEM Modus.
+const TEXT_GESICHT_REGEL = 'Lege Text, Banner oder Grafik-Elemente NIEMALS über das Gesicht der Person.';
+// Tiefen-/Ebeneneffekt — gilt, wenn eine Person das Hauptmotiv ist (KI-Modus).
+const EBENEN_TIEFE_REGEL =
+  'EBENEN & TIEFE (PFLICHT): Die Person steht klar im VORDERGRUND und überlappt die große Headline/Typografie ' +
+  'leicht (Kopf und Schulter liegen VOR dem Text) — Tiefeneffekt wie bei hochwertigen Social-Ads. Der Text/das ' +
+  'Banner liegt HINTER der Person, nicht davor. ' + TEXT_GESICHT_REGEL;
+
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
 function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
   const stelle = stelleDisplay(job.stelle);
@@ -407,7 +419,7 @@ FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung 
     ? `LOGO wird NACHTRÄGLICH oben rechts eingefügt — dort NICHTS platzieren, den Bereich freilassen (ca. 20% Breite × 15% Höhe). KEIN Firmenname-Text im Bild.`
     : `FIRMENNAME-SCHRIFTZUG dezent oben oder im Header-Bereich: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element.`}
 
-• Person/Hauptmotiv-Anordnung frei (links, rechts, mittig, ggf. freigestellt)
+• Person/Hauptmotiv im VORDERGRUND (Seite/Mitte frei wählbar) — sie überlappt die Headline leicht (siehe Ebenen-Regel unten)
 • Pinselstrich- oder Farbspritzer-Elemente in Markenfarbe als gestalterische Akzente (organisch, nicht überladen)`;
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur.
@@ -421,7 +433,7 @@ ${motiv}
 ${layoutBlock}
 
 DESIGN-REGELN:
-- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
+${person ? `- ${EBENEN_TIEFE_REGEL}\n` : ''}- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
 - ${farben ? 'Markenfarben konsequent.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot).'}
 - Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine QR-Codes, keine Rahmen ums ganze Bild
@@ -481,6 +493,7 @@ ${layoutBlock}
 DESIGN-REGELN:
 - HIERARCHIE der Größen: STELLENBEZEICHNUNG (formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
 - Dunkler halbtransparenter Gradient/Schatten hinter Overlay-Texten falls nötig für Lesbarkeit — das Foto bleibt der Held
+- ${TEXT_GESICHT_REGEL} Große Text-Elemente in ruhige Bildzonen (Himmel, Wand, unscharfer Hintergrund), nicht auf Personen/Gesichter.
 - ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (orange/türkis/rot) für Pinselstriche und Stellen-Bereich.'}
 - Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine zusätzlichen Filter aufs Foto, keine Verfremdung
