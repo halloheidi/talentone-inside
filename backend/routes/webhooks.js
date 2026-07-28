@@ -222,10 +222,14 @@ export function extractContact(body) {
   for (const [k, v] of Object.entries(profile)) {
     if (!v || typeof v !== 'object' || !('value' in v)) continue;
     if (KONTAKT_PROFILE.has(String(k).toLowerCase()) || istMetaKey(k)) continue;
+    // Echte Funnel-Fragen tragen IMMER einen title/label. Ohne title sind es
+    // Meta-Felder (z. B. "result": "Danke") — die lassen wir weg.
+    const frage = v.title || v.label;
+    if (!frage) continue;
     const antwort = v.value;
     if (antwort == null || antwort === '') continue;
     antworten.push({
-      frage_text: String(v.title || v.label || k).trim(),
+      frage_text: String(frage).trim(),
       antwort: typeof antwort === 'object' ? JSON.stringify(antwort) : String(antwort).trim(),
     });
   }
