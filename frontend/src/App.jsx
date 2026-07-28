@@ -26,6 +26,7 @@ import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
 import OfferKatalog from './pages/admin/OfferKatalog.jsx';
 import StilvorlagenAdmin from './pages/admin/Stilvorlagen.jsx';
+import EigeneLeads from './pages/admin/EigeneLeads.jsx';
 import Controlling from './pages/admin/Controlling.jsx';
 import ControllingDashboard from './pages/ControllingDashboard.jsx';
 import OfferWizard from './pages/OfferWizard.jsx';
@@ -77,6 +78,7 @@ export default function App() {
         <Route path="angebote/neu" element={<OfferWizard />} />
         <Route path="admin/angebots-katalog" element={<AdminOnly><OfferKatalog /></AdminOnly>} />
         <Route path="admin/stilvorlagen" element={<AdminOnly><StilvorlagenAdmin /></AdminOnly>} />
+        <Route path="admin/eigene-leads" element={<AdminOnly><EigeneLeads /></AdminOnly>} />
         <Route path="controlling" element={<ControllingDashboard />} />
         <Route path="admin/controlling" element={<AdminOnly><Controlling /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />

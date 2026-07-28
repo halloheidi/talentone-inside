@@ -35,6 +35,74 @@ export async function getUserIdByName(name) {
   return cachedUserMap[(name || '').trim().toLowerCase()] || null;
 }
 
+/* ═══════════════ Close-Metadaten (fuer Lead-Mapping-Konfiguration) ═══════════════ */
+
+/** Alle Org-User (fuer Task-Zuweisung). @returns [{id, name, email}] */
+export async function listUsers() {
+  const res = await closeFetch('/user/?_limit=100');
+  return (res.data || []).map(u => ({
+    id: u.id,
+    name: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.email,
+    email: u.email || null,
+  }));
+}
+
+/** Lead-Custom-Fields inkl. Typ + Dropdown-Optionen. @returns [{id, name, type, choices}] */
+export async function listLeadCustomFields() {
+  const res = await closeFetch('/custom_field/lead/?_limit=100');
+  return (res.data || []).map(f => ({
+    id: f.id,                                  // cf_...
+    key: `custom.${f.id}`,
+    name: f.name,
+    type: f.type,                              // text|choices|number|date|user|...
+    choices: Array.isArray(f.choices) ? f.choices : [],
+  }));
+}
+
+/** Lead-Status-Liste. @returns [{id, label}] */
+export async function listLeadStatuses() {
+  const res = await closeFetch('/status/lead/?_limit=100');
+  return (res.data || []).map(s => ({ id: s.id, label: s.label }));
+}
+
+/** Sucht einen bestehenden Lead per Email ODER Telefon (Duplikat-Schutz). */
+export async function findLeadByContact({ email, phone }) {
+  if (email) {
+    const res = await closeFetch(`/lead/?query=${encodeURIComponent('email:' + email)}&_limit=1`);
+    if (res.data?.[0]) return res.data[0];
+  }
+  if (phone) {
+    const digits = String(phone).replace(/[^\d+]/g, '');
+    if (digits.length >= 6) {
+      const res = await closeFetch(`/lead/?query=${encodeURIComponent(digits)}&_limit=1`);
+      if (res.data?.[0]) return res.data[0];
+    }
+  }
+  return null;
+}
+
+/**
+ * Legt einen neuen Lead an. customFields = { 'custom.cf_...': value }.
+ * @returns der angelegte Lead (inkl. id)
+ */
+export async function createLead({ name, contactName, email, phone, statusId, customFields = {} }) {
+  const contact = { name: contactName || name || 'Lead' };
+  if (email) contact.emails = [{ email, type: 'office' }];
+  if (phone) contact.phones = [{ phone, type: 'office' }];
+  const body = {
+    name: name || contactName || 'Neuer Lead',
+    contacts: [contact],
+    ...(statusId ? { status_id: statusId } : {}),
+    ...customFields,
+  };
+  return closeFetch('/lead/', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Löscht einen Lead (fuer Test-Leads aufräumen). */
+export async function deleteLead(leadId) {
+  return closeFetch(`/lead/${leadId}/`, { method: 'DELETE' });
+}
+
 /** Findet einen Lead per Email — oder per ID wenn closeLeadId gegeben. */
 export async function findLead({ closeLeadId, email }) {
   if (closeLeadId) {

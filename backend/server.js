@@ -14,6 +14,7 @@ import webhooksRouter from './routes/webhooks.js';
 import bewerbungenRouter from './routes/bewerbungen.js';
 import zahlungenRouter from './routes/zahlungen.js';
 import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
+import eigeneLeadsRouter from './routes/eigene-leads.js';
 import projekteRouter from './routes/projekte.js';
 import analyseFunnelRouter from './routes/analyse-funnel.js';
 import offerCatalogRouter from './routes/offer-catalog.js';
@@ -38,6 +39,7 @@ import { startWeeklyCloseSummaryScheduler } from './weekly-close-summary.js';
 import { startEntwurfsReminderScheduler } from './entwurfs-reminder.js';
 import { startDailyBewerbungsReportScheduler } from './daily-bewerbungs-report.js';
 import { startWeeklyBewerbungsReportScheduler } from './weekly-bewerbungs-report.js';
+import { startEigeneLeadsScheduler } from './eigene-leads-scheduler.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -93,6 +95,7 @@ app.use('/api/controlling', requireAuth, controllingRouter);
 app.use('/api/controlling-ops', requireAuth, controllingOpsRouter);
 app.use('/api/anfragen', requireAuth, anfragenRouter);
 app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
+app.use('/api/eigene-leads', requireAuth, eigeneLeadsRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
@@ -121,5 +124,6 @@ app.listen(PORT, () => {
   startEntwurfsReminderScheduler();
   startDailyBewerbungsReportScheduler();
   startWeeklyBewerbungsReportScheduler();
+  startEigeneLeadsScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });
