@@ -137,6 +137,10 @@ export default function OfferWizard() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [additionalPositionsCount, setAdditionalPositionsCount] = useState(0);
   const [adBudget, setAdBudget] = useState('800');
+  // Werbebudget-Modus (nur TalentOne): 'position' (Durchleitung, wie bisher) oder
+  // 'empfehlung' (nicht abgerechnet, nur Empfehlungs-Hinweis; Kunde zahlt direkt).
+  const [werbebudgetModus, setWerbebudgetModus] = useState('position');
+  const [tagesbudget, setTagesbudget] = useState('30'); // €/Tag (nur empfehlung)
   // Garantie: explizite Art (none | hire | applications). Default 'none' — wird
   // beim Marken-Wechsel gesetzt (N&W: hire an, TalentOne: keine). Behebt den Bug,
   // dass eine Garantie erschien, obwohl keine gewählt war.
@@ -157,7 +161,9 @@ export default function OfferWizard() {
 
   const step3Error = useMemo(() => {
     if (step !== 3 || !products.length) return null;
-    if (brand === 'talentone') {
+    // Budget-Validierung nur im Positions-Modus (im Empfehlungs-Modus ist der
+    // Betrag irrelevant — es wird nichts abgerechnet).
+    if (brand === 'talentone' && werbebudgetModus !== 'empfehlung') {
       const raw = String(adBudget ?? '').trim();
       if (raw !== '') {
         const n = Number(raw);
@@ -172,7 +178,7 @@ export default function OfferWizard() {
       if (!Number.isFinite(c) || c < 1) return 'Bitte die garantierte Mindestanzahl Bewerbungen angeben (mind. 1).';
     }
     return null;
-  }, [step, products, brand, adBudget, guaranteeType, guaranteeApplicationsCount]);
+  }, [step, products, brand, adBudget, guaranteeType, guaranteeApplicationsCount, werbebudgetModus]);
 
   const canNext = useMemo(() => {
     if (step === 1) return !!customer;
@@ -228,7 +234,8 @@ export default function OfferWizard() {
           brand,
           selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
           additional_positions_count: additionalPositionsCount,
-          ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+          // Empfehlungs-Modus: Budget NICHT in die Kalkulation (Vorschau ohne Werbebudget).
+          ad_budget_monthly: (brand === 'talentone' && werbebudgetModus !== 'empfehlung') ? parseFloat(adBudget) || 0 : null,
           discount_type: discountType || null,
           discount_value: Number(discountValue) || 0,
         };
@@ -237,7 +244,7 @@ export default function OfferWizard() {
       } catch (err) { setError(err.message); }
     }, 250);
     return () => calcTimer.current && clearTimeout(calcTimer.current);
-  }, [brand, products, selectedIds, additionalPositionsCount, adBudget, discountType, discountValue]);
+  }, [brand, products, selectedIds, additionalPositionsCount, adBudget, discountType, discountValue, werbebudgetModus]);
 
   function buildPayload() {
     return {
@@ -253,6 +260,8 @@ export default function OfferWizard() {
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
       additional_positions_count: additionalPositionsCount,
       ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
+      werbebudget_modus: brand === 'talentone' ? werbebudgetModus : 'position',
+      tagesbudget_empfehlung: (brand === 'talentone' && werbebudgetModus === 'empfehlung') ? (parseFloat(tagesbudget) || null) : null,
       guarantee_type: guaranteeType,
       guarantee_period_days: guaranteePeriodDays,
       guarantee_applications_count: guaranteeType === 'applications' ? guaranteeApplicationsCount : null,
@@ -387,6 +396,8 @@ export default function OfferWizard() {
               });
             }}
             adBudget={adBudget} setAdBudget={setAdBudget}
+            werbebudgetModus={werbebudgetModus} setWerbebudgetModus={setWerbebudgetModus}
+            tagesbudget={tagesbudget} setTagesbudget={setTagesbudget}
             guaranteePeriodDays={guaranteePeriodDays}
             setGuaranteePeriodDays={setGuaranteePeriodDays}
             hiresTarget={hiresTarget}
@@ -858,6 +869,8 @@ function Step3Config({
   brand, products, selectedIds, onToggle,
   additionalPositionsCount, setAdditionalPositionsCount,
   adBudget, setAdBudget,
+  werbebudgetModus, setWerbebudgetModus,
+  tagesbudget, setTagesbudget,
   guaranteePeriodDays, setGuaranteePeriodDays,
   hiresTarget, setHiresTarget,
   guaranteeType, setGuaranteeType,
@@ -1015,11 +1028,44 @@ function Step3Config({
 
       {brand === 'talentone' && (
         <section style={{ marginBottom: 6, padding: 16, background: 'var(--gray-50)', borderRadius: 12 }}>
-          <SectionHead label="Werbebudget (monatliche Durchleitung)" />
-          <AdBudgetChips value={adBudget} onChange={setAdBudget} />
-          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8 }}>
-            Wird als durchlaufender Posten monatlich im Voraus berechnet. Kampagnenstart erfolgt nach Zahlungseingang.
-          </p>
+          <SectionHead label="Werbebudget" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input type="radio" name="wbmodus" checked={werbebudgetModus === 'position'} onChange={() => setWerbebudgetModus('position')} style={{ marginTop: 2 }} />
+              <span><strong>Als Position (Durchleitung)</strong> — wird als monatlicher Posten im Voraus über TalentOne berechnet.</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input type="radio" name="wbmodus" checked={werbebudgetModus === 'empfehlung'} onChange={() => setWerbebudgetModus('empfehlung')} style={{ marginTop: 2 }} />
+              <span><strong>Als Empfehlung</strong> — erscheint NICHT als Position/Preis; der Kunde hinterlegt sein eigenes Zahlungsmittel im Werbekonto (Meta zahlt direkt).</span>
+            </label>
+          </div>
+          {werbebudgetModus === 'position' ? (
+            <>
+              <AdBudgetChips value={adBudget} onChange={setAdBudget} />
+              <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8 }}>
+                Wird als durchlaufender Posten monatlich im Voraus berechnet. Kampagnenstart erfolgt nach Zahlungseingang.
+              </p>
+            </>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>Empfohlenes Tagesbudget:</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                {['20', '30', '40'].map(v => (
+                  <button key={v} type="button" className={tagesbudget === v ? 'btn-primary btn-sm' : 'btn-ghost btn-sm'} onClick={() => setTagesbudget(v)}>{v} €/Tag</button>
+                ))}
+                <input type="number" min="1" placeholder="Individuell"
+                  value={['20', '30', '40'].includes(String(tagesbudget)) ? '' : tagesbudget}
+                  onChange={e => setTagesbudget(e.target.value)}
+                  style={{ width: 120, padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 8 }} />
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>€/Tag</span>
+              </div>
+              {Number(tagesbudget) > 0 && (
+                <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 8 }}>
+                  → Empfehlung: {tagesbudget} €/Tag (ca. {Number(tagesbudget) * 30} € pro Monat). Erscheint als Hinweis-Textblock im Angebot, nicht als Position.
+                </p>
+              )}
+            </div>
+          )}
         </section>
       )}
 

@@ -126,6 +126,10 @@ export async function ensureProjektForOffer(offer) {
       auftrag_checkliste: items,
       garantie:           guaranteeActive,
       garantie_details:   guaranteeText,
+      // Werbebudget-Modus aus dem Angebot: bei 'empfehlung' hinterlegt das Team
+      // das Kunden-Zahlungsmittel im Werbekonto (kein Zahlungslink-Flow).
+      werbebudget_modus:      offer.werbebudget_modus || 'position',
+      tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
       updated_at:         new Date().toISOString(),
     })
     .select().single();

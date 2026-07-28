@@ -36,6 +36,7 @@ export const INVOICE_STATUS_META = {
 
 export default function InvoicesSection({
   kunde, invoices, busy, syncing, onSync, onCreateAdBudget, onSendInvoice, compact = false,
+  werbebudgetEmpfehlung = null,
 }) {
   const openTotal = useMemo(() => invoices
     .filter(i => ['sent', 'partially_paid', 'overdue'].includes(i.status))
@@ -56,9 +57,11 @@ export default function InvoicesSection({
               : 'Alle Rechnungen dieses Kunden — Setup, Monatlich, Werbebudget und freistehende Werbekosten-Rechnungen.'}
           </p>
         </div>
-        <button className={compact ? 'btn-primary btn-sm' : 'btn-primary'} onClick={onCreateAdBudget}>
-          {!compact && <Icon name="plus" />} {compact ? '+ Werbekosten-Rechnung' : 'Werbekosten-Rechnung erstellen'}
-        </button>
+        {werbebudgetEmpfehlung?.aktiv
+          ? <span title="Werbebudget läuft direkt über das Kundenkonto — keine Werbebudget-Rechnung vorgesehen." style={{ fontSize: 12, color: 'var(--ink-3)', alignSelf: 'center' }}>💰 Budget läuft direkt über den Kunden</span>
+          : <button className={compact ? 'btn-primary btn-sm' : 'btn-primary'} onClick={onCreateAdBudget}>
+              {!compact && <Icon name="plus" />} {compact ? '+ Werbekosten-Rechnung' : 'Werbekosten-Rechnung erstellen'}
+            </button>}
       </div>
 
       {busy && invoices.length === 0 ? (

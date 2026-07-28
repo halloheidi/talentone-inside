@@ -482,7 +482,7 @@ router.get('/resolve-kunde', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value, werbebudget_modus, tagesbudget_empfehlung')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
@@ -600,10 +600,15 @@ router.post('/', async (req, res) => {
     const discountType = ['percent', 'flat'].includes(b.discount_type) ? b.discount_type : null;
     const discountVal  = Number(b.discount_value) || 0;
 
+    // Werbebudget-Modus: 'empfehlung' -> nicht abgerechnet (Budget aus der
+    // Kalkulation genommen), stattdessen nur ein Hinweis + Tagesbudget-Empfehlung.
+    const werbebudgetModus = b.werbebudget_modus === 'empfehlung' ? 'empfehlung' : 'position';
+    const tagesbudget = werbebudgetModus === 'empfehlung' ? (Number(b.tagesbudget_empfehlung) || null) : null;
+
     const totals = calculateOfferTotals({
       products, selected,
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
-      ad_budget_monthly: b.ad_budget_monthly ?? null,
+      ad_budget_monthly: werbebudgetModus === 'empfehlung' ? null : (b.ad_budget_monthly ?? null),
       vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
       extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
       discount_type: discountType,
@@ -647,6 +652,8 @@ router.post('/', async (req, res) => {
       discount_type:               totals.discount_type,
       discount_value:              totals.discount_value,
       hires_target:                hiresTarget,
+      werbebudget_modus:           werbebudgetModus,
+      tagesbudget_empfehlung:      tagesbudget,
       created_by:                  req.user?.email || null,
     };
 
@@ -689,10 +696,17 @@ router.patch('/:id', async (req, res) => {
       ? (Number(b.discount_value) || 0)
       : (Number(cur.discount_value) || 0);
 
+    const werbebudgetModus = b.werbebudget_modus !== undefined
+      ? (b.werbebudget_modus === 'empfehlung' ? 'empfehlung' : 'position')
+      : (cur.werbebudget_modus || 'position');
+    const tagesbudget = werbebudgetModus === 'empfehlung'
+      ? (b.tagesbudget_empfehlung !== undefined ? (Number(b.tagesbudget_empfehlung) || null) : (cur.tagesbudget_empfehlung ?? null))
+      : null;
+
     const totals = calculateOfferTotals({
       products, selected,
       additional_positions_count: addCount,
-      ad_budget_monthly: adBudget,
+      ad_budget_monthly: werbebudgetModus === 'empfehlung' ? null : adBudget,
       vat_rate: vatRate,
       extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[brand] || [],
       discount_type: discountType,
@@ -710,6 +724,8 @@ router.patch('/:id', async (req, res) => {
       vat_rate:                    totals.vat_rate,
       discount_type:               totals.discount_type,
       discount_value:              totals.discount_value,
+      werbebudget_modus:           werbebudgetModus,
+      tagesbudget_empfehlung:      tagesbudget,
     };
     if (b.customer_id !== undefined)          patch.customer_id = b.customer_id || null;
     if (b.easybill_customer_id !== undefined) patch.easybill_customer_id = String(b.easybill_customer_id);
@@ -823,6 +839,8 @@ router.post('/:id/create-easybill', async (req, res) => {
       guarantee_period_days: Number(offer.guarantee_period_days) || 0,
       guarantee_applications_count: offer.guarantee_applications_count ?? null,
       guarantee_note: offer.guarantee_note || null,
+      werbebudget_modus: offer.werbebudget_modus || 'position',
+      tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
     });
 
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
@@ -912,6 +930,8 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       guarantee_period_days: Number(offer.guarantee_period_days) || 0,
       guarantee_applications_count: offer.guarantee_applications_count ?? null,
       guarantee_note: offer.guarantee_note || null,
+      werbebudget_modus: offer.werbebudget_modus || 'position',
+      tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
     });
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
 

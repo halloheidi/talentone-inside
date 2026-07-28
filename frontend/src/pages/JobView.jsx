@@ -389,6 +389,12 @@ export default function JobView() {
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
         {projekt && <ProjektGarantieInline projekt={projekt} onSaved={setProjekt} />}
+        {projekt?.werbebudget_modus === 'empfehlung' && (
+          <span title="Werbebudget nicht über TalentOne abgerechnet — Kunden-Zahlungsmittel im Werbekonto hinterlegen (kein Zahlungslink)."
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            💰 Budget: {projekt.tagesbudget_empfehlung ? `${projekt.tagesbudget_empfehlung} €/Tag, ` : ''}Kunde zahlt direkt
+          </span>
+        )}
         {projekt
           ? <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />

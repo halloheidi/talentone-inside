@@ -30,6 +30,7 @@ export default function KundeDetail() {
   const { kundeId } = useParams();
   const [kunde, setKunde] = useState(null);
   const [avv, setAvv] = useState(null);
+  const [werbebudgetEmpf, setWerbebudgetEmpf] = useState(null); // {aktiv, tagesbudget} | null
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -234,6 +235,7 @@ export default function KundeDetail() {
       .then(([k, j]) => {
         setKunde(k.kunde);
         setAvv(k.avv || null);
+        setWerbebudgetEmpf(k.werbebudget_empfehlung || null);
         setJobs(j.jobs || []);
         setFarben({
           primaer:   k.kunde?.farben?.primaer   || '',
@@ -461,10 +463,18 @@ export default function KundeDetail() {
         <span>{kunde.firmenname}</span>
       </div>
 
-      <CampaignPaymentBanner
-        status={kunde.campaign_payment_status}
-        kundeId={kunde.id}
-      />
+      {/* Bei Werbebudget-Empfehlung (Kunde zahlt direkt) keine Overdue-Werbebudget-Warnung. */}
+      {!werbebudgetEmpf?.aktiv && (
+        <CampaignPaymentBanner
+          status={kunde.campaign_payment_status}
+          kundeId={kunde.id}
+        />
+      )}
+      {werbebudgetEmpf?.aktiv && (
+        <div style={{ margin: '0 0 12px', padding: '10px 14px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 13, color: '#075985' }}>
+          💰 Werbebudget läuft direkt über das Kundenkonto{werbebudgetEmpf.tagesbudget ? ` (Empfehlung: ${werbebudgetEmpf.tagesbudget} €/Tag)` : ''} — keine Werbebudget-Rechnung/Zahlungslink nötig. Die Monats-Pauschale läuft normal weiter.
+        </div>
+      )}
 
       <div className="kunde-head">
         <div style={{ position: 'relative' }}>
@@ -984,6 +994,7 @@ export default function KundeDetail() {
       <InvoicesSection
         kunde={kunde}
         invoices={invoices}
+        werbebudgetEmpfehlung={werbebudgetEmpf}
         busy={invoicesBusy}
         syncing={invoicesSyncing}
         onSync={syncInvoicesNow}

@@ -291,7 +291,19 @@ router.get('/:id', async (req, res) => {
     ]);
     avv = { annahme, aktuelle_version };
   } catch (e) { console.warn('[kunde/detail avv]', e.message); }
-  res.json({ kunde: data, avv });
+
+  // Werbebudget-Modus: hat der Kunde ein Projekt mit "empfehlung" (Kunde zahlt
+  // direkt), unterdrücken wir in der UI die Werbebudget-Rechnungs-/PayPal-Vorschläge.
+  let werbebudget_empfehlung = null;
+  try {
+    const { data: proj } = await supabase.from('talentone_projekte')
+      .select('werbebudget_modus, tagesbudget_empfehlung')
+      .eq('kunde_id', data.id).eq('werbebudget_modus', 'empfehlung')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (proj) werbebudget_empfehlung = { aktiv: true, tagesbudget: proj.tagesbudget_empfehlung ?? null };
+  } catch (e) { console.warn('[kunde/detail werbebudget]', e.message); }
+
+  res.json({ kunde: data, avv, werbebudget_empfehlung });
 });
 
 /* GET /api/kunden/:id/verwaiste-angebote — verwaiste Angebote (ohne customer_id),

@@ -28,6 +28,17 @@ export const AD_BUDGET_TITLE = 'Werbebudget-Abwicklung (Vorauszahlung)';
 export const AD_BUDGET_DESCRIPTION =
   'Vollständige Abwicklung Ihres Werbebudgets über TalentOne — eine Rechnung, keine separaten Meta-Rechnungen. Kampagnenstart nach Zahlungseingang.';
 
+// Hinweis-Text (Sie-Form) fuer den Empfehlungs-Modus. Kein Preis — der Kunde
+// hinterlegt sein eigenes Zahlungsmittel im Werbekonto, Meta zahlt direkt.
+export function buildWerbebudgetHinweis(tagesbudget) {
+  const tb = Number(tagesbudget) || 0;
+  const fmt = (n) => Number.isInteger(n) ? String(n) : n.toFixed(2).replace('.', ',');
+  const empfehlung = tb > 0
+    ? ` Wir empfehlen ein Tagesbudget von ${fmt(tb)} € (ca. ${fmt(tb * 30)} € pro Monat).`
+    : '';
+  return `Das Werbebudget wird direkt über das Werbekonto abgerechnet und ist nicht Bestandteil dieser Rechnung.${empfehlung} Anpassungen des Budgets erfolgen ausschließlich in Absprache mit Ihnen.`;
+}
+
 // easybill: single_price_net erwartet Cent, obwohl der Typ float ist
 // (siehe Spec: "150 = 1.50€"). Wir speichern Euro in der DB und wandeln
 // hier einmalig zentral um.
@@ -67,15 +78,22 @@ export function buildEasybillOfferPayload({
   guarantee_period_days = 0,
   guarantee_applications_count = null,
   guarantee_note = null,
+  werbebudget_modus = 'position',
+  tagesbudget_empfehlung = null,
 } = {}) {
   const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
+  // Empfehlungs-Modus: Werbebudget ist NICHT Bestandteil der Rechnung — keine
+  // Position, keine Summe. Deshalb geht in die Kalkulation ad_budget_monthly=0,
+  // stattdessen kommt weiter unten ein Empfehlungs-Textblock hinzu.
+  const istEmpfehlung = werbebudget_modus === 'empfehlung';
+  const effektivesAdBudget = istEmpfehlung ? null : ad_budget_monthly;
 
   // Erst: durch den Rechner laufen lassen, damit wir konsistente
   // Mengen/Beträge haben — genau die Zahlen, die auf dem PDF stehen sollen.
   const totals = calculateOfferTotals({
     products, selected,
     additional_positions_count,
-    ad_budget_monthly,
+    ad_budget_monthly: effektivesAdBudget,
     vat_rate,
     extra_job_skus: extraSkus,
     discount_type,
@@ -135,7 +153,7 @@ export function buildEasybillOfferPayload({
     }));
   }
 
-  // Werbebudget-Sonderposten (nur TalentOne)
+  // Werbebudget-Sonderposten (nur TalentOne, nur im Positions-Modus)
   if (brand === 'talentone' && totals.ad_budget_monthly > 0) {
     items.push(makePosition({
       pos: pos++,
@@ -145,6 +163,12 @@ export function buildEasybillOfferPayload({
       unit_price: totals.ad_budget_monthly,
       vat_percent: vat_rate,
     }));
+  }
+
+  // Empfehlungs-Modus: kein Preis, nur ein Hinweis-Textblock (Sie-Form) unter
+  // den Positionen. Kunde hinterlegt eigenes Zahlungsmittel, Meta zahlt direkt.
+  if (istEmpfehlung) {
+    items.push(makeTextPosition({ pos: pos++, title: 'Hinweis zum Werbebudget', body: buildWerbebudgetHinweis(tagesbudget_empfehlung) }));
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)
