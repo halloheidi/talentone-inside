@@ -28,11 +28,15 @@ Extrahiere die Informationen und antworte NUR mit einem JSON-Objekt, ohne Markdo
   "kenntnisse": "Wichtigste 2-3 fachliche Kenntnisse als kurze Aufzählung oder leer",
   "aufgaben": "Wichtigste typische Aufgaben als kurze Aufzählung oder leer",
   "benefits": ["Liste der erwähnten Benefits als Array"],
-  "betriebsklima": "Beschreibung des Betriebsklimas aus der Anzeige oder leer",
-  "unterschied": "Was den Betrieb von anderen unterscheidet laut Anzeige oder leer",
+  "unterschied": "Was den Betrieb von anderen ARBEITGEBERN unterscheidet (Alleinstellung als Arbeitgeber) — aus Formulierungen wie 'Bei uns...', 'Was uns ausmacht', 'Wir über uns'. Nur wenn im Text. Sonst leer.",
+  "mitarbeiter_gerne": "Warum Mitarbeiter GERNE hier arbeiten: Team-Events, Zusammenhalt, Kultur-Extras die KEINE harten Benefits sind. Nur wenn im Text. Sonst leer.",
+  "unternehmenskultur": "Beschreibung der Unternehmenskultur / des Betriebsklimas (z. B. 'familiär', 'modern', 'kollegial', Teamgeist). Nur wenn im Text. Sonst leer.",
+  "mitarbeiterzahl": "Mitarbeiterzahl NUR wenn im Text genannt (z. B. '30 Mitarbeiter', 'über 100 Kollegen', 'ein Team von 15'). Auf GENAU einen dieser Werte mappen: 1-10 | 11-50 | 51-200 | 200+. Sonst leer.",
   "reisebereitschaft": false,
   "quereinsteiger": false
-}`;
+}
+
+WICHTIG: Extrahiere NUR, was tatsächlich im Text steht — nichts erfinden oder raten. Fehlt eine Angabe, lass das Feld leer ("" bzw. leeres Array). Gerade die "Über uns"-Felder (unterschied, mitarbeiter_gerne, unternehmenskultur, mitarbeiterzahl) nur befüllen, wenn der Text dazu wirklich etwas hergibt.`;
 
 // Prompt für Neukunden-Extraktion (Landingpages, Angebots-PDFs, Firmen-Websites).
 // Andere Semantik: Produkt/Dienstleistung + Zielgruppe + USP statt Stellendaten.
@@ -144,7 +148,8 @@ export function toJob(extracted, eingabeMethode, sourceUrl = null) {
   const benefits = Array.isArray(extracted.benefits) ? extracted.benefits : [];
   const besonderheitenParts = [
     extracted.unterschied && `Unterschied: ${extracted.unterschied}`,
-    extracted.betriebsklima && `Klima: ${extracted.betriebsklima}`,
+    extracted.unternehmenskultur && `Kultur: ${extracted.unternehmenskultur}`,
+    extracted.mitarbeiter_gerne && `Gerne hier: ${extracted.mitarbeiter_gerne}`,
     extracted.aufgaben && `Aufgaben: ${extracted.aufgaben}`,
     extracted.kenntnisse && `Kenntnisse: ${extracted.kenntnisse}`,
   ].filter(Boolean);
