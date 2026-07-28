@@ -102,8 +102,7 @@ export async function extractFromUrl(url, opts = {}) {
     throw new Error('Konnte keinen Text von der URL lesen.');
   }
 
-  const prompt = opts.projekttyp === 'neukundengewinnung' ? EXTRACT_PROMPT_NEUKUNDEN : EXTRACT_PROMPT;
-  return await callClaude(textContent, prompt);
+  return await extractFromText(textContent, opts);
 }
 
 export async function extractFromFile(fileData, fileType, opts = {}) {
@@ -128,6 +127,11 @@ export async function extractFromFile(fileData, fileType, opts = {}) {
     throw new Error('Konnte keinen Text aus der Datei lesen.');
   }
 
+  return await extractFromText(text, opts);
+}
+
+/** Extrahiert aus bereits geparstem Text (gemeinsamer Kern von URL/File). */
+export async function extractFromText(text, opts = {}) {
   const prompt = opts.projekttyp === 'neukundengewinnung' ? EXTRACT_PROMPT_NEUKUNDEN : EXTRACT_PROMPT;
   return await callClaude(text, prompt);
 }
