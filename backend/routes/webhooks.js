@@ -138,7 +138,7 @@ function flattenOnepageValue(v) {
  * Echte Frage steht in `step` (label ist generisch wie "Select"). Datei-Uploads
  * werden ignoriert. Gibt null zurueck, wenn es kein data.fields-Payload ist.
  */
-function extractOnepageContact(body) {
+export function extractOnepageContact(body) {
   const fields = body?.data?.fields;
   if (!Array.isArray(fields)) return null;
 
@@ -173,7 +173,7 @@ function extractOnepageContact(body) {
   return { name, email, telefon, antworten };
 }
 
-function extractContact(body) {
+export function extractContact(body) {
   if (!body || typeof body !== 'object') {
     return { name: null, email: null, telefon: null, antworten: [] };
   }
@@ -210,16 +210,22 @@ function extractContact(body) {
     flat.telefon || flat.phone || flat.tel || flat.telephone || flat.mobile || flat.handynummer ||
     null;
 
-  // Antworten aus profile.question_* — Jeder Key hat { title, value }
+  // Antworten aus dem Profil — jede Funnel-Frage ist ein { title, value }-Objekt.
+  // Manche Funnels nutzen "question_xyz"-Keys, andere semantische Keys
+  // (ausbildung, fuehrerschein, startzeitpunkt …). Deshalb NICHT auf "question_"
+  // filtern, sondern ALLE Profil-Felder mit Wert nehmen AUSSER Kontakt- und
+  // Meta-/Tracking-Feldern (utm_*, ps_*, fbclid, …).
+  const KONTAKT_PROFILE = new Set(['email', 'phone', 'telefon', 'tel', 'mobile', 'name', 'fullname', 'full_name', 'first_name', 'firstname', 'vorname', 'last_name', 'lastname', 'nachname']);
+  const istMetaKey = (k) => /^(utm_|ps_|fb|ga_|gclid|gad|wbraid|gbraid)/i.test(k)
+    || ['fbclid', 'gclid', 'id', 'trackingversion'].includes(String(k).toLowerCase());
   const antworten = [];
   for (const [k, v] of Object.entries(profile)) {
-    if (!k.startsWith('question_')) continue;
-    if (!v || typeof v !== 'object') continue;
-    const frage = v.title || v.label || k;
+    if (!v || typeof v !== 'object' || !('value' in v)) continue;
+    if (KONTAKT_PROFILE.has(String(k).toLowerCase()) || istMetaKey(k)) continue;
     const antwort = v.value;
     if (antwort == null || antwort === '') continue;
     antworten.push({
-      frage_text: String(frage).trim(),
+      frage_text: String(v.title || v.label || k).trim(),
       antwort: typeof antwort === 'object' ? JSON.stringify(antwort) : String(antwort).trim(),
     });
   }

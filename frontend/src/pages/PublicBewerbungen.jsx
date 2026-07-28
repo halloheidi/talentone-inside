@@ -189,10 +189,12 @@ function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [], kunde }) {
         .filter(([, v]) => v != null && String(v).trim() !== '')
         .map(([k, v]) => ({ name: k, wert: String(v), wichtig: false }));
   const hatVqWert = vqZeilen.some(z => z.wert);
+  const kontaktversuche = Array.isArray(sync?.kontaktversuche) ? sync.kontaktversuche : [];
+  const kurzDatum = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); } catch { return d; } };
   if (!sync && !vqZeilen.length) return null;
   const hasData = sync?.recruiter_status || sync?.vg_vereinbart_am || (sync?.eingestellt && sync.eingestellt !== 'offen')
     || sync?.kunde_kontaktiert || sync?.vorqual_gehaltswunsch || sync?.vorqual_verfuegbarkeit
-    || sync?.vorqual_notiz || hatVqWert || vqZeilen.some(z => z.wichtig);
+    || sync?.vorqual_notiz || hatVqWert || vqZeilen.some(z => z.wichtig) || kontaktversuche.length;
   if (!hasData) return null;
   return (
     <section className="pub-recruiter-sync">
@@ -209,6 +211,17 @@ function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [], kunde }) {
             value={z.wert ?? '—'} muted={!z.wert} />
         ))}
       </dl>
+      {kontaktversuche.length > 0 && (
+        <div style={{ marginTop: 10, padding: '10px 12px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#075985', marginBottom: 4 }}>📞 Kontaktversuche</div>
+          <div style={{ fontSize: 13 }}>
+            {kontaktversuche.map((v, i) => (
+              <span key={i} title={v.erreicht ? 'erreicht' : ''}>{i > 0 ? ' / ' : ''}{kurzDatum(v.datum)}{v.erreicht ? ' ✓' : ''}</span>
+            ))}
+          </div>
+          {sync?.erreicht_am && <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>✓ Erreicht am {new Date(sync.erreicht_am).toLocaleDateString('de-DE')}</div>}
+        </div>
+      )}
       {sync?.vorqual_notiz && (
         <div style={{ marginTop: 10, padding: '10px 12px', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#78350f', marginBottom: 4 }}>Notiz aus dem Vorqualifizierungs-Gespräch</div>

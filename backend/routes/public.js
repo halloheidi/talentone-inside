@@ -723,7 +723,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
       supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
       supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, ampel, updated_at, gehaltswunsch, verfuegbarkeit, notizen, vorqualifizierung_werte')
+        .select('bewerbung_id, status, vg_vereinbart_am, eingestellt, kunde_kontaktiert, ampel, updated_at, gehaltswunsch, verfuegbarkeit, notizen, vorqualifizierung_werte, anrufversuche')
         .in('bewerbung_id', ids),
     ]);
     for (const f of fb.data || []) feedback[f.bewerbung_id] = f;
@@ -740,11 +740,18 @@ router.get('/bewerbungen/:token', async (req, res) => {
         ampel: r.ampel,
         updated_at: r.updated_at,
         // Vorqualifizierungs-Ergebnisse (kundenrelevant). NICHT durchgereicht:
-        // bewertung (interne Sterne), anrufversuche, naechste_aktion, nw_kontaktiert.
+        // bewertung (interne Sterne), naechste_aktion, interne Notiz je Anruf.
         vorqual_gehaltswunsch: r.gehaltswunsch || null,
         vorqual_verfuegbarkeit: r.verfuegbarkeit || null,
         vorqual_notiz: r.notizen || null,
         vorqualifizierung_werte: r.vorqualifizierung_werte || null,
+        // Kontaktversuche belegen die Vorqualifizierungs-Arbeit — Datum + ob
+        // erreicht (die interne Anruf-Notiz bleibt draussen).
+        kontaktversuche: (Array.isArray(r.anrufversuche) ? r.anrufversuche : [])
+          .filter(a => a?.datum)
+          .map(a => ({ datum: a.datum, erreicht: a.ergebnis === 'erreicht' })),
+        erreicht_am: (Array.isArray(r.anrufversuche) ? r.anrufversuche : [])
+          .find(a => a?.datum && a.ergebnis === 'erreicht')?.datum || null,
       };
     }
   }
@@ -1292,10 +1299,18 @@ router.get('/portal/:token', async (req, res) => {
     // Vorqualifizierungs-Werte der Bewerbungen (fuer die Vorqual-Spalten im Portal)
     const bewIds = (bewerbungenRes.data || []).map(b => b.id);
     const vorqualWerteByBew = {};
+    const kontaktByBew = {};  // bewerbung_id -> { kontaktversuche, erreicht_am }
     if (bewIds.length) {
       const { data: notizen = [] } = await supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, vorqualifizierung_werte').in('bewerbung_id', bewIds);
-      for (const n of notizen) vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
+        .select('bewerbung_id, vorqualifizierung_werte, anrufversuche').in('bewerbung_id', bewIds);
+      for (const n of notizen) {
+        vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
+        const av = Array.isArray(n.anrufversuche) ? n.anrufversuche : [];
+        kontaktByBew[n.bewerbung_id] = {
+          kontaktversuche: av.filter(a => a?.datum).map(a => ({ datum: a.datum, erreicht: a.ergebnis === 'erreicht' })),
+          erreicht_am: av.find(a => a?.datum && a.ergebnis === 'erreicht')?.datum || null,
+        };
+      }
     }
 
     // Kommentare zu allen Anfragen bulk-laden
@@ -1367,7 +1382,7 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {} })),
+      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }) })),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {

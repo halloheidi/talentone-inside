@@ -875,6 +875,17 @@ function PipelineEditor({ job, token, onClose, onSaved }) {
 /* ══════════════════════ Bewerbungen (Recruiting) ══════════════════════ */
 
 function BewerbungenSection({ job, bewerbungen, kunde }) {
+  // Funnel-Antworten als Spalten (alle vorkommenden Fragen, Reihenfolge des ersten Auftretens).
+  const frageSpalten = [];
+  for (const b of bewerbungen) {
+    for (const a of (Array.isArray(b.antworten) ? b.antworten : [])) {
+      const f = (a?.frage_text || '').trim();
+      if (f && !frageSpalten.includes(f)) frageSpalten.push(f);
+    }
+  }
+  const antwortFor = (b, frage) => (Array.isArray(b.antworten) ? b.antworten : []).find(a => (a?.frage_text || '').trim() === frage)?.antwort || '';
+  const kurzDatum = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); } catch { return d; } };
+  const hatKontakt = bewerbungen.some(b => (b.kontaktversuche || []).length);
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
       <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
@@ -890,6 +901,8 @@ function BewerbungenSection({ job, bewerbungen, kunde }) {
                 <th style={thStyle}>E-Mail</th>
                 <th style={thStyle}>Telefon</th>
                 <th style={thStyle}>Quelle</th>
+                {frageSpalten.map(f => <th key={`fr-${f}`} style={{ ...thStyle, whiteSpace: 'nowrap' }} title={f}>{f.length > 32 ? f.slice(0, 30) + '…' : f}</th>)}
+                {hatKontakt && <th style={{ ...thStyle, whiteSpace: 'nowrap' }}>📞 Kontaktversuche</th>}
                 {/* Vorqualifizierung: befüllte Felder + wichtige Kriterien (immer) */}
                 {(job.vorqual_spalten || []).map(sp => (
                   <th key={`vq-${sp.name}`} style={{ ...thStyle, background: '#f4f7ff', whiteSpace: 'nowrap' }}
@@ -911,6 +924,16 @@ function BewerbungenSection({ job, bewerbungen, kunde }) {
                   <td style={tdStyle}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
                   <td style={tdStyle}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
                   <td style={tdStyle}>{b.quelle || 'funnel'}</td>
+                  {frageSpalten.map(f => { const v = antwortFor(b, f); return <td key={`fr-${f}`} style={{ ...tdStyle, color: v ? undefined : '#9a9994' }}>{v || '—'}</td>; })}
+                  {hatKontakt && (
+                    <td style={tdStyle}>
+                      {(b.kontaktversuche || []).length
+                        ? <span title={b.erreicht_am ? `Erreicht am ${new Date(b.erreicht_am).toLocaleDateString('de-DE')}` : ''}>
+                            {b.kontaktversuche.map((v, i) => `${i ? ' / ' : ''}${kurzDatum(v.datum)}${v.erreicht ? ' ✓' : ''}`).join('')}
+                          </span>
+                        : <span style={{ color: '#9a9994' }}>—</span>}
+                    </td>
+                  )}
                   {(job.vorqual_spalten || []).map(sp => {
                     const v = b.vorqualifizierung_werte?.[sp.name];
                     const hat = v != null && String(v).trim() !== '';
