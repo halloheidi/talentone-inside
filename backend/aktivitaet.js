@@ -18,6 +18,7 @@ function versandEvent(v) {
   else if ((m = /^entwurf_resend_(\d+)$/.exec(typ)))  { icon = '↩️'; titel = `Entwürfe erneut verschickt (Runde ${m[1]})`; }
   else if ((m = /^update_runde_(\d+)$/.exec(typ)))    { icon = '📬'; titel = `Kampagnen-Update verschickt (Update ${m[1]})`; }
   else if (typ === 'entwurf_reminder')               { icon = '⏰'; titel = 'Reminder an Kunden'; }
+  else if (typ === 'daten_pruefung')                 { icon = '📋'; titel = 'Daten-Prüfung an Kunden geschickt'; }
   else if (typ === 'reaktivierung')                  { icon = '🔔'; titel = 'Reaktivierung an Kunden'; }
   else if (typ === 'kampagne_live')                  { icon = '🚀'; titel = 'Kampagne-Live gemeldet'; }
   else if (typ === 'kampagne_pause')                 { icon = '⏸️'; titel = 'Kampagne pausiert (Kunde informiert)'; }
@@ -151,12 +152,19 @@ export async function buildAktivitaet(jobId) {
   }
   if (projektId) {
     const { data: koms } = await supabase.from('talentone_kommentare')
-      .select('id, created_at, autor, text, quelle').eq('projekt_id', projektId).eq('quelle', 'intern');
+      .select('id, created_at, autor, text, quelle').eq('projekt_id', projektId).in('quelle', ['intern', 'pruefung']);
     for (const k of (koms || [])) {
-      events.push({
-        id: `kom_${k.id}`, kind: 'notiz', icon: '💬', at: k.created_at,
-        titel: `Interne Notiz${k.autor ? ' — ' + k.autor : ''}`, detail: k.text || null,
-      });
+      if (k.quelle === 'pruefung') {
+        events.push({
+          id: `kom_${k.id}`, kind: 'pruefung', icon: '📋', at: k.created_at,
+          titel: 'Kunde hat die Daten geprüft/ergänzt', detail: k.text || null,
+        });
+      } else {
+        events.push({
+          id: `kom_${k.id}`, kind: 'notiz', icon: '💬', at: k.created_at,
+          titel: `Interne Notiz${k.autor ? ' — ' + k.autor : ''}`, detail: k.text || null,
+        });
+      }
     }
   }
 

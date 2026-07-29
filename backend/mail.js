@@ -141,6 +141,59 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
   return await response.json();
 }
 
+/* ─────────────── Daten-Prüfung durch den Kunden ─────────────── */
+// Bittet den Kunden, die bereits erfassten Stellendaten zu prüfen und zu ergänzen.
+// customText (anrede-korrekt aus dem Modal) ersetzt den Default-Intro.
+export async function sendDatenPruefungMail({ to, betreff, customText, kunde, job, pruefungUrl }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const brand = getBranding(kunde?.agentur);
+  const k = kunde || {};
+  const grusszeile = anrede(k);
+  const stelleTxt = job?.stelle ? `„${job.stelle}"` : '';
+  const defaultIntro = t(k,
+    `wir haben die Informationen zu deiner Stelle ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
+    `wir haben die Informationen zu Ihrer Stelle ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`);
+  const intro = (customText || '').trim() || defaultIntro;
+  const subject = (betreff || '').trim()
+    || t(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle');
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(grusszeile)},</p>
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">${escape(intro).replace(/\n/g, '<br>')}</p>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 28px;">
+      <a href="${escape(pruefungUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">Angaben prüfen &amp; ergänzen →</a>
+      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link zeigt immer den aktuellen Stand — ${t(k, 'du kannst ihn jederzeit erneut öffnen', 'Sie können ihn jederzeit erneut öffnen')}.</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 24px;">
+      <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Falls etwas unklar ist, einfach auf diese Mail antworten.</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
+    </td></tr>`;
+
+  const html = brandedShell({ brand, contentHtml: content });
+  const text = `${grusszeile},\n\n${intro}\n\nAngaben prüfen & ergänzen: ${pruefungUrl}\n\n(Der Link zeigt immer den aktuellen Stand.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: getMailFrom(brand),
+      to,
+      bcc: getInternalBcc([], [to].flat()),
+      reply_to: getMailReplyTo(brand),
+      subject,
+      html,
+      text,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}
+
 /* ─────────────── AVV zur Unterschrift anfragen (Extra-Mail) ─────────────── */
 // Prominenter Button -> Public-Token-Seite (PDF-Ansicht + Name + Akzeptieren).
 export async function sendAvvAnfrage({ to, kunde, avvUrl, customText, agentur }) {

@@ -213,6 +213,8 @@ const ALLOWED_JOB_FIELDS = [
   'arbeitshinweise',
   // Tab-Häkchen (manuelle Erledigt-Overrides pro Tab)
   'tab_status',
+  // Daten-nach-Creatives-geändert-Warnung (Migration 051) — zum Ausblenden per PATCH
+  'daten_geaendert_nach_creatives_at',
 ];
 
 router.patch('/:id', async (req, res) => {
@@ -484,6 +486,49 @@ router.post('/:id/send-creative-auftrag', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[send-creative-auftrag]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/jobs/:id/send-pruefung  body: { to?, betreff?, customText? }
+   Schickt dem Kunden den Prüf-Link zu den bereits erfassten Stellendaten.
+   Legt bei Bedarf pruefung_token an, protokolliert typ='daten_pruefung'. */
+router.post('/:id/send-pruefung', async (req, res) => {
+  const { to, betreff, customText } = req.body || {};
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('*').eq('id', req.params.id).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('*').eq('id', job.kunde_id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  const empfaenger = (to || kunde.email || '').trim();
+  if (!empfaenger) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
+
+  try {
+    let token = job.pruefung_token;
+    if (!token) {
+      token = randomUUID();
+      await supabase.from('talentone_jobs').update({ pruefung_token: token }).eq('id', job.id);
+    }
+    const pruefungUrl = `${getPublicBaseUrl(kunde.agentur)}/pruefung/${token}`;
+
+    const { sendDatenPruefungMail } = await import('../mail.js');
+    await sendDatenPruefungMail({ to: empfaenger, betreff, customText, kunde, job, pruefungUrl });
+
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger,
+      betreff: (betreff || '').trim() || null,
+      gesendet_von: req.user?.email || null,
+      typ: 'daten_pruefung',
+      inhalte: { pruefung_url: pruefungUrl },
+    });
+    notifyKunde(kunde, `📋 Daten-Prüfung an Kunden gesendet (${job.stelle || 'Stelle'}) — ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[send-pruefung close-note]', err.message));
+
+    res.json({ ok: true, pruefung_url: pruefungUrl });
+  } catch (err) {
+    console.error('[send-pruefung]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

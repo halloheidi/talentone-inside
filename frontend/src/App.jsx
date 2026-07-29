@@ -53,6 +53,7 @@ export default function App() {
       <Route path="/reset-passwort" element={<ResetPassword />} />
       <Route path="/upload/:token" element={<PublicUpload />} />
       <Route path="/formular/:token" element={<PublicFormular />} />
+      <Route path="/pruefung/:token" element={<PublicFormular variant="pruefung" />} />
       <Route path="/f/:funnelId" element={<PublicFunnel />} />
       <Route path="/review/:token" element={<PublicReview />} />
       <Route path="/bewerbungen/:token" element={<PublicBewerbungen />} />

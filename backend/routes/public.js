@@ -685,6 +685,192 @@ router.post('/review/:token', async (req, res) => {
   res.status(existing ? 200 : 201).json({ ok: true, review: savedReview });
 });
 
+/* ════════════════ Daten-Prüfung durch den Kunden (pruefung_token) ════════════════
+   Der Kunde prüft/ergänzt die bereits erfassten Stellendaten. GET liefert den Job
+   vorbefüllt; POST übernimmt die Änderungen DIREKT in den Job (kein manueller
+   Übernahme-Schritt) und protokolliert einen Diff-Kommentar + Team-Mail. */
+
+// Menschlich lesbaren Änderungs-Diff bauen.
+function buildDatenDiff(oldJob, newJobVals, oldFd, newFd) {
+  const lines = [];
+  const cmp = (label, o, n) => {
+    const os = (o ?? '').toString().trim();
+    const ns = (n ?? '').toString().trim();
+    if (os !== ns) lines.push(`${label}: „${os || '—'}" → „${ns || '—'}"`);
+  };
+  cmp('Stelle', oldJob.stelle, newJobVals.stelle);
+  cmp('Region', oldJob.region, newJobVals.region);
+  cmp('Gehalt', oldJob.gehalt, newJobVals.gehalt);
+  cmp('Besonderheiten', oldJob.besonderheiten, newJobVals.besonderheiten);
+
+  const ob = Array.isArray(oldJob.benefits) ? oldJob.benefits : [];
+  const nb = Array.isArray(newJobVals.benefits) ? newJobVals.benefits : [];
+  const added = nb.filter(x => !ob.includes(x));
+  const removed = ob.filter(x => !nb.includes(x));
+  if (added.length) lines.push(`Benefits ergänzt: ${added.join(', ')}`);
+  if (removed.length) lines.push(`Benefits entfernt: ${removed.join(', ')}`);
+
+  const fdLabels = {
+    unterschied: 'Unterschied/USP', mitarbeiter_gerne: 'Warum man gerne hier arbeitet',
+    unternehmenskultur: 'Unternehmenskultur', mitarbeiter_anzahl: 'Mitarbeiterzahl',
+    ausbildung: 'Ausbildung', berufserfahrung: 'Berufserfahrung',
+    kandidat_eigenschaften: 'Eigenschaften des Kandidaten',
+    benefits_zusatz: 'Benefits (Freitext)', soft_skills_zusatz: 'Soft Skills (Freitext)',
+  };
+  for (const [key, label] of Object.entries(fdLabels)) cmp(label, oldFd[key], newFd[key]);
+
+  const oss = Array.isArray(oldFd.soft_skills) ? oldFd.soft_skills : [];
+  const nss = Array.isArray(newFd.soft_skills) ? newFd.soft_skills : [];
+  const sAdd = nss.filter(x => !oss.includes(x));
+  const sRem = oss.filter(x => !nss.includes(x));
+  if (sAdd.length) lines.push(`Soft Skills ergänzt: ${sAdd.join(', ')}`);
+  if (sRem.length) lines.push(`Soft Skills entfernt: ${sRem.join(', ')}`);
+  return lines;
+}
+
+// GET /api/public/pruefung/:token — Job vorbefüllt + Kunde + AVV-Status.
+router.get('/pruefung/:token', async (req, res) => {
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('*').eq('pruefung_token', req.params.token).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, ansprechpartner, telefon, website_url, branche, agentur, email, anrede_form, anrede_titel, nachname')
+    .eq('id', job.kunde_id).maybeSingle();
+
+  // AVV nach Review-Muster: nur erforderlich, wenn aktive Version existiert UND noch keine Annahme.
+  const avvVersion = kunde ? await getAktuelleVersion(kunde.agentur) : null;
+  const avvAnnahme = kunde ? await getAnnahme(kunde.id) : null;
+  const avvPdfUrl = kunde
+    ? (avvAnnahme?.pdf_url || (await getPersonalizedAvvPdf(kunde.id)).url || avvVersion?.pdf_url || null)
+    : null;
+
+  res.json({
+    job: {
+      id: job.id, stelle: job.stelle, region: job.region, gehalt: job.gehalt,
+      benefits: Array.isArray(job.benefits) ? job.benefits : [],
+      besonderheiten: job.besonderheiten || '',
+      reisebereitschaft: job.reisebereitschaft, quereinsteiger: job.quereinsteiger,
+      projekttyp: job.projekttyp || 'mitarbeitergewinnung',
+      formdata_komplett: job.formdata_komplett || {},
+      neukunden_daten: job.neukunden_daten || null,
+    },
+    kunde,
+    avv: {
+      erforderlich: !!avvVersion && !avvAnnahme,
+      akzeptiert: !!avvAnnahme,
+      version: avvVersion?.version || null,
+      pdf_url: avvPdfUrl,
+      firmenname: kunde?.firmenname || null,
+    },
+  });
+});
+
+// POST /api/public/pruefung/:token — Änderungen direkt in den Job übernehmen.
+router.post('/pruefung/:token', async (req, res) => {
+  const { kunde: kundePatch = {}, job: jobPatch = {}, formdata = {}, neukunden_daten, avv_akzeptiert, avv_name } = req.body || {};
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('*').eq('pruefung_token', req.params.token).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+
+  // AVV-Click-Wrap (nur wenn erforderlich)
+  const avvVersion = kunde ? await getAktuelleVersion(kunde.agentur) : null;
+  const avvBereits = kunde ? !!(await getAnnahme(kunde.id)) : false;
+  if (!!avvVersion && !avvBereits) {
+    if (avv_akzeptiert !== true || !String(avv_name || '').trim()) {
+      return res.status(400).json({ error: 'Bitte den Auftragsverarbeitungsvertrag bestätigen (Haken setzen und Namen angeben).' });
+    }
+    try {
+      await protokolliereAnnahme({ kunde, akzeptiert_von: String(avv_name).trim(), akzeptiert_email: kunde.email, req });
+    } catch (e) {
+      console.error('[pruefung avv]', e.message);
+      return res.status(500).json({ error: `AVV-Zustimmung konnte nicht gespeichert werden: ${e.message}` });
+    }
+  }
+
+  const oldFd = job.formdata_komplett || {};
+  const newFd = { ...oldFd, ...formdata };
+  const newBenefits = Array.isArray(jobPatch.benefits) ? jobPatch.benefits.filter(Boolean) : (job.benefits || []);
+  const reiseBool = typeof jobPatch.reisebereitschaft === 'boolean'
+    ? jobPatch.reisebereitschaft
+    : (formdata.reisebereitschaft ? formdata.reisebereitschaft !== 'keine' : job.reisebereitschaft);
+  const newJobVals = {
+    stelle: (jobPatch.stelle ?? job.stelle) || job.stelle,
+    region: jobPatch.region ?? job.region,
+    gehalt: jobPatch.gehalt ?? job.gehalt,
+    besonderheiten: jobPatch.besonderheiten ?? job.besonderheiten,
+    benefits: newBenefits,
+  };
+
+  const diff = buildDatenDiff(job, newJobVals, oldFd, newFd);
+
+  // Relevante Felder (Benefits/Stelle/Region) geändert → Creatives ggf. veraltet.
+  const relevantChanged = (newJobVals.stelle !== job.stelle)
+    || ((newJobVals.region || '') !== (job.region || ''))
+    || (JSON.stringify(newBenefits) !== JSON.stringify(Array.isArray(job.benefits) ? job.benefits : []));
+  let creativesVorhanden = false;
+  if (relevantChanged) {
+    const [{ count: cCount }, { count: aCount }] = await Promise.all([
+      supabase.from('talentone_creatives').select('id', { count: 'exact', head: true }).eq('job_id', job.id).neq('archiviert', true),
+      supabase.from('talentone_adcopies').select('id', { count: 'exact', head: true }).eq('job_id', job.id),
+    ]);
+    creativesVorhanden = (cCount || 0) > 0 || (aCount || 0) > 0;
+  }
+
+  const update = {
+    stelle: newJobVals.stelle,
+    region: newJobVals.region || null,
+    gehalt: newJobVals.gehalt || null,
+    besonderheiten: newJobVals.besonderheiten || null,
+    benefits: newBenefits.length ? newBenefits : null,
+    reisebereitschaft: reiseBool,
+    quereinsteiger: typeof jobPatch.quereinsteiger === 'boolean' ? jobPatch.quereinsteiger : job.quereinsteiger,
+    formdata_komplett: newFd,
+    updated_at: new Date().toISOString(),
+  };
+  if (neukunden_daten && typeof neukunden_daten === 'object') update.neukunden_daten = neukunden_daten;
+  if (creativesVorhanden) update.daten_geaendert_nach_creatives_at = new Date().toISOString();
+  await supabase.from('talentone_jobs').update(update).eq('id', job.id);
+
+  // Kunden-Felder, die der Kunde ergänzen darf.
+  const kUpd = {};
+  for (const f of ['ansprechpartner', 'telefon', 'website_url', 'branche']) {
+    if (kundePatch[f] != null && (kundePatch[f] || '') !== (kunde?.[f] || '')) kUpd[f] = kundePatch[f] || null;
+  }
+  if (Object.keys(kUpd).length && kunde?.id) await supabase.from('talentone_kunden').update(kUpd).eq('id', kunde.id);
+
+  res.json({ ok: true, creatives_warnung: creativesVorhanden });
+
+  // Hintergrund: Diff-Kommentar am Projekt + interne Team-Mail (best-effort).
+  (async () => {
+    try {
+      const projekt = await findProjektForJob(job, kunde);
+      const diffText = diff.length ? diff.map(l => `• ${l}`).join('\n')
+        : '(keine inhaltlichen Änderungen — Kunde hat die Angaben bestätigt)';
+      const warnLine = creativesVorhanden
+        ? '\n\n⚠️ Es existieren bereits Creatives/Ad Copies — bitte prüfen, ob sie noch zu den geänderten Daten passen.'
+        : '';
+      if (projekt) {
+        await supabase.from('talentone_kommentare').insert({
+          projekt_id: projekt.id,
+          autor: 'Kunde (Daten-Prüfung)',
+          text: `📋 Kunde hat die Stellendaten geprüft/ergänzt:\n\n${diffText}${warnLine}`,
+          quelle: 'pruefung',
+          erwaehnungen: projekt.verantwortlich ? [projekt.verantwortlich] : [],
+        });
+      }
+      const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+      await sendTeamAlertMail({
+        subject: `📋 ${kunde?.firmenname || 'Kunde'} hat die Stellendaten geprüft${creativesVorhanden ? ' — ⚠️ Creatives prüfen' : ''}`,
+        headline: 'Kunde hat die Daten-Prüfung abgeschlossen',
+        lead: `${kunde?.firmenname || 'Kunde'} · ${newJobVals.stelle || 'Stelle'}\n\n${diffText}${warnLine}`,
+        linkUrl: `${insideBase}/kunden/${job.kunde_id}/jobs/${job.id}/stelle`,
+        linkLabel: 'Zum Stelle-Tab',
+      });
+    } catch (err) { console.warn('[pruefung-sync]', err.message); }
+  })().catch(err => console.error('[pruefung-sync-uncaught]', err.message));
+});
+
 /* ════════════════════ Public Bewerberliste (Token) ════════════════════ */
 
 const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'abgesagt'];

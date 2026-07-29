@@ -121,7 +121,8 @@ function detectFileType(file) {
   return null;
 }
 
-export default function PublicFormular() {
+export default function PublicFormular({ variant = 'formular' }) {
+  const istPruefung = variant === 'pruefung';
   const { token } = useParams();
   const [info, setInfo] = useState(null);
   const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
@@ -149,10 +150,51 @@ export default function PublicFormular() {
   const fotosInputRef = useRef(null);
   const [avv, setAvv] = useState(null);
   const [avvChecked, setAvvChecked] = useState(false);
+  const [avvName, setAvvName] = useState('');
 
   useEffect(() => { loadMetaPixel(META_PIXEL_ID); }, []);
 
   useEffect(() => {
+    if (istPruefung) {
+      // Prüfungs-Modus: Job vorbefüllt laden (alle aktuellen Stellendaten).
+      publicApi(`/pruefung/${token}`)
+        .then(res => {
+          setInfo(res.kunde);
+          setAvv(res.avv || null);
+          setProjekttyp(res.job?.projekttyp || 'mitarbeitergewinnung');
+          const j = res.job || {};
+          const fd = j.formdata_komplett || {};
+          const allBen = Array.isArray(j.benefits) ? j.benefits.filter(Boolean) : [];
+          const checkBen = allBen.filter(b => BENEFIT_OPTIONS.includes(b));
+          const extraBen = allBen.filter(b => !BENEFIT_OPTIONS.includes(b));
+          setForm({
+            firmenname: res.kunde?.firmenname || '',
+            ansprechpartner: res.kunde?.ansprechpartner || '',
+            telefon: res.kunde?.telefon || '',
+            website_url: res.kunde?.website_url || '',
+            branche: res.kunde?.branche || '',
+            mitarbeiter_anzahl: fd.mitarbeiter_anzahl || '',
+            unterschied: fd.unterschied || '',
+            mitarbeiter_gerne: fd.mitarbeiter_gerne || '',
+            unternehmenskultur: fd.unternehmenskultur || '',
+            stelle: j.stelle || '',
+            region: j.region || '',
+            gehalt: j.gehalt || '',
+            besonderheiten: j.besonderheiten || '',
+            reisebereitschaft: fd.reisebereitschaft || (j.reisebereitschaft ? 'regional' : ''),
+            quereinsteiger: !!j.quereinsteiger,
+            benefits: checkBen,
+            benefits_zusatz: fd.benefits_zusatz || extraBen.join(', '),
+            ausbildung: fd.ausbildung || '',
+            soft_skills: Array.isArray(fd.soft_skills) ? fd.soft_skills : [],
+            soft_skills_zusatz: fd.soft_skills_zusatz || '',
+            berufserfahrung: fd.berufserfahrung || '',
+            kandidat_eigenschaften: fd.kandidat_eigenschaften || '',
+          });
+        })
+        .catch(err => setLoadError(err.message));
+      return;
+    }
     publicApi(`/formular/${token}`)
       .then(res => {
         setInfo(res.kunde);
@@ -165,7 +207,7 @@ export default function PublicFormular() {
         }));
       })
       .catch(err => setLoadError(err.message));
-  }, [token]);
+  }, [token, istPruefung]);
 
   function setField(key, value) { setForm(prev => ({ ...prev, [key]: value })); }
   function toggleArrayField(key, value) {
@@ -316,7 +358,17 @@ export default function PublicFormular() {
     if (!form.stelle.trim()) { setSubmitError('Stellenbezeichnung ist Pflicht.'); return; }
     if (!form.unterschied.trim()) { setSubmitError(t(info, 'Bitte beschreibt, was euch von anderen unterscheidet.', 'Bitte beschreiben Sie, was Sie von anderen unterscheidet.')); return; }
     if (!form.mitarbeiter_gerne.trim()) { setSubmitError(t(info, 'Bitte beantwortet, warum Mitarbeiter gerne bei euch sind.', 'Bitte beantworten Sie, warum Mitarbeiter gerne bei Ihnen sind.')); return; }
-    if (avv?.pdf_url && !avvChecked) { setSubmitError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.'); return; }
+    // AVV: Prüfung nutzt das Review-Muster (nur wenn erforderlich, dann + Name),
+    // das Formular die einfache Checkbox.
+    if (istPruefung) {
+      if (avv?.erforderlich && (!avvChecked || !avvName.trim())) {
+        setSubmitError('Bitte den Auftragsverarbeitungsvertrag bestätigen (Haken setzen und Namen angeben).');
+        return;
+      }
+    } else if (avv?.pdf_url && !avvChecked) {
+      setSubmitError('Bitte den Auftragsverarbeitungsvertrag akzeptieren.');
+      return;
+    }
 
     setSubmitBusy(true);
     try {
@@ -324,7 +376,41 @@ export default function PublicFormular() {
         ...(form.benefits || []),
         ...(form.benefits_zusatz ? form.benefits_zusatz.split(/[,\n]/).map(s => s.trim()).filter(Boolean) : []),
       ];
-      // Pixel-Lead-Event clientseitig
+
+      const commonJob = {
+        stelle: form.stelle,
+        region: form.region,
+        gehalt: form.gehalt,
+        benefits: benefitsList,
+        besonderheiten: form.besonderheiten,
+        reisebereitschaft: !!form.reisebereitschaft,
+        quereinsteiger: form.quereinsteiger,
+      };
+      const commonKunde = {
+        firmenname: form.firmenname,
+        ansprechpartner: form.ansprechpartner,
+        telefon: form.telefon,
+        website_url: form.website_url,
+        branche: form.branche,
+      };
+
+      if (istPruefung) {
+        // Änderungen direkt in den bestehenden Job übernehmen.
+        await publicApi(`/pruefung/${token}`, {
+          method: 'POST',
+          body: {
+            kunde: commonKunde,
+            job: commonJob,
+            formdata: form,
+            avv_akzeptiert: !!avvChecked,
+            avv_name: avvName.trim() || undefined,
+          },
+        });
+        setDone(true);
+        return;
+      }
+
+      // Pixel-Lead-Event clientseitig (nur Neuanlage)
       try {
         if (window.fbq) {
           window.fbq('track', 'Lead', { content_name: 'Briefing-Formular', source: form.firmenname });
@@ -334,22 +420,8 @@ export default function PublicFormular() {
       await publicApi(`/formular/${token}/submit`, {
         method: 'POST',
         body: {
-          kunde: {
-            firmenname: form.firmenname,
-            ansprechpartner: form.ansprechpartner,
-            telefon: form.telefon,
-            website_url: form.website_url,
-            branche: form.branche,
-          },
-          job: {
-            stelle: form.stelle,
-            region: form.region,
-            gehalt: form.gehalt,
-            benefits: benefitsList,
-            besonderheiten: form.besonderheiten,
-            reisebereitschaft: !!form.reisebereitschaft,
-            quereinsteiger: form.quereinsteiger,
-          },
+          kunde: commonKunde,
+          job: commonJob,
           formdata: form,
           avv_akzeptiert: !!avvChecked,
           _fbp: getCookie('_fbp'),
@@ -382,16 +454,21 @@ export default function PublicFormular() {
         <div className="public-card">
           <BrandHeader agentur={info?.agentur} />
           <h1 className="public-title">Vielen Dank!</h1>
-          <p className="public-sub">{t(info,
-            'Eure Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei euch.',
-            'Ihre Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei Ihnen.')}</p>
+          <p className="public-sub">{istPruefung
+            ? t(info,
+                'Deine Änderungen sind übernommen — danke fürs Prüfen! Wir arbeiten mit dem aktuellen Stand weiter.',
+                'Ihre Änderungen sind übernommen — danke fürs Prüfen! Wir arbeiten mit dem aktuellen Stand weiter.')
+            : t(info,
+                'Eure Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei euch.',
+                'Ihre Angaben sind bei uns angekommen. Wir machen uns sofort an die Arbeit und melden uns mit den ersten Creatives bei Ihnen.')}</p>
         </div>
       </div>
     );
   }
 
-  // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante.
-  if (projekttyp === 'neukundengewinnung') {
+  // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante
+  // (nur im Neuanlage-Formular; die Prüfung nutzt immer das Recruiting-Formular).
+  if (!istPruefung && projekttyp === 'neukundengewinnung') {
     return <NeukundenBriefingForm
       token={token} info={info} avv={avv}
       onDone={() => setDone(true)}
@@ -402,14 +479,19 @@ export default function PublicFormular() {
     <div className="public-page">
       <div className="public-card public-card-form">
         <BrandHeader agentur={info?.agentur} />
-        <h1 className="public-title">Briefing-Formular</h1>
+        <h1 className="public-title">{istPruefung ? 'Angaben prüfen & ergänzen' : 'Briefing-Formular'}</h1>
         <p className="public-sub">
-          {info.ansprechpartner ? anrede(info) : `Hallo ${info.firmenname || 'zusammen'}`}! {t(info,
-            'Damit wir eine passgenaue Recruiting-Kampagne für euch bauen können, brauchen wir ein paar Infos. ~10 Minuten.',
-            'Damit wir eine passgenaue Recruiting-Kampagne für Sie bauen können, brauchen wir ein paar Infos. ~10 Minuten.')}
+          {info.ansprechpartner ? anrede(info) : `Hallo ${info.firmenname || 'zusammen'}`}! {istPruefung
+            ? t(info,
+                'Wir haben die Infos zu deiner Stelle bereits zusammengetragen. Schau bitte drüber — du kannst alles ergänzen oder korrigieren und dann absenden.',
+                'Wir haben die Infos zu Ihrer Stelle bereits zusammengetragen. Schauen Sie bitte drüber — Sie können alles ergänzen oder korrigieren und dann absenden.')
+            : t(info,
+                'Damit wir eine passgenaue Recruiting-Kampagne für euch bauen können, brauchen wir ein paar Infos. ~10 Minuten.',
+                'Damit wir eine passgenaue Recruiting-Kampagne für Sie bauen können, brauchen wir ein paar Infos. ~10 Minuten.')}
         </p>
 
-        {/* ───── Modus oben: URL / PDF / Manuell ───── */}
+        {/* ───── Modus oben: URL / PDF / Manuell (nur bei Neuanlage) ───── */}
+        {!istPruefung && (
         <div className="form-quick">
           <div className="form-quick-tabs">
             <button type="button" className={`form-quick-tab ${mode === 'url' ? 'is-active' : ''}`} onClick={() => setMode('url')}>URL</button>
@@ -450,6 +532,7 @@ export default function PublicFormular() {
           )}
           {extractError && <div className="alert alert-error" style={{ marginTop: 10 }}>{extractError}</div>}
         </div>
+        )}
 
         <form onSubmit={onSubmit} className="formular">
           {/* ───── Über das Unternehmen ───── */}
@@ -583,7 +666,8 @@ export default function PublicFormular() {
             </div>
           </fieldset>
 
-          {/* ───── Logo + Fotos ───── */}
+          {/* ───── Logo + Fotos (nur bei Neuanlage — Prüfung nutzt job-eigenen Token) ───── */}
+          {!istPruefung && (
           <fieldset className="formular-section">
             <legend>Logo & Fotos</legend>
             <div className="upload-block" style={{ borderTop: 0, paddingTop: 0, marginTop: 0 }}>
@@ -626,13 +710,32 @@ export default function PublicFormular() {
               )}
             </div>
           </fieldset>
+          )}
 
           {submitError && <div className="alert alert-error" style={{ marginTop: 8 }}>{submitError}</div>}
 
           <div className="formular-submit">
-            <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
+            {istPruefung ? (
+              // Prüfung: AVV nur wenn noch keine Annahme existiert (Review-Muster + Name).
+              avv?.erforderlich && (
+                <div>
+                  <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
+                  {avvChecked && (
+                    <input
+                      type="text"
+                      value={avvName}
+                      onChange={e => setAvvName(e.target.value)}
+                      placeholder="Dein Name (zur Bestätigung)"
+                      style={{ marginTop: 8, padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, width: '100%', maxWidth: 320 }}
+                    />
+                  )}
+                </div>
+              )
+            ) : (
+              <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
+            )}
             <button type="submit" className="btn-primary" disabled={submitBusy}>
-              {submitBusy ? 'Sende…' : 'Briefing absenden'}
+              {submitBusy ? 'Sende…' : (istPruefung ? 'Änderungen absenden' : 'Briefing absenden')}
             </button>
           </div>
         </form>

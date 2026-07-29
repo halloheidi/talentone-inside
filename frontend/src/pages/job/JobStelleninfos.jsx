@@ -5,6 +5,9 @@ import { api } from '../../lib/api.js';
 import { fileToBase64 } from '../../lib/files.js';
 import BrancheField from '../../components/BrancheField.jsx';
 import { useAutoSave, SaveStatus } from '../../lib/useAutoSave.jsx';
+import Modal from '../../components/Modal.jsx';
+import AnredeAbfrage from '../../components/AnredeAbfrage.jsx';
+import { anrede, t as anredeT, anredeOffen } from '../../lib/anrede.js';
 const MITARBEITER_OPTIONS = [
   { value: '', label: '— nicht angegeben —' },
   { value: '1-10', label: '1–10' },
@@ -98,6 +101,62 @@ export default function JobStelleninfos() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiFields, setAiFields] = useState(new Set()); // Keys mit "KI-Vorschlag"-Badge
+
+  // Daten-Prüfung: Versand-Modal an den Kunden
+  const [showPruefung, setShowPruefung] = useState(false);
+  const [pruefungForm, setPruefungForm] = useState({ to: '', betreff: '', customText: '' });
+  const [pruefungBusy, setPruefungBusy] = useState(false);
+  const [pruefungMsg, setPruefungMsg] = useState('');
+  const [pruefungErr, setPruefungErr] = useState(false);
+  const [pruefungKunde, setPruefungKunde] = useState(null); // Kunde-Override nach Anrede-Wahl
+
+  function buildPruefungText(k) {
+    return anredeT(k,
+      'wir haben die Informationen zu deiner Stelle bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.',
+      'wir haben die Informationen zu Ihrer Stelle bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.');
+  }
+  function openPruefung() {
+    setPruefungKunde(kunde);
+    setPruefungForm({
+      to: kunde?.email || '',
+      betreff: anredeT(kunde, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle'),
+      customText: anredeOffen(kunde) ? '' : buildPruefungText(kunde),
+    });
+    setPruefungMsg(''); setPruefungErr(false);
+    setShowPruefung(true);
+  }
+  function onPruefungAnredeSaved(k) {
+    setPruefungKunde(k);
+    reload?.();
+    setPruefungForm(prev => ({
+      ...prev,
+      betreff: anredeT(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle'),
+      customText: buildPruefungText(k),
+    }));
+  }
+  async function sendPruefung() {
+    if (!pruefungForm.to.trim()) { setPruefungErr(true); setPruefungMsg('Empfänger-Mail fehlt.'); return; }
+    setPruefungBusy(true); setPruefungMsg(''); setPruefungErr(false);
+    try {
+      await api(`/jobs/${job.id}/send-pruefung`, {
+        method: 'POST',
+        body: { to: pruefungForm.to.trim(), betreff: pruefungForm.betreff, customText: pruefungForm.customText },
+      });
+      setPruefungMsg('Prüf-Link an den Kunden verschickt.');
+      setTimeout(() => setShowPruefung(false), 1200);
+    } catch (err) {
+      setPruefungErr(true);
+      setPruefungMsg(`Versand fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
+    } finally {
+      setPruefungBusy(false);
+    }
+  }
+  async function dismissCreativeWarnung() {
+    try {
+      const res = await api(`/jobs/${job.id}`, { method: 'PATCH', body: { daten_geaendert_nach_creatives_at: null } });
+      if (res.job) reload?.();
+    } catch { /* noop */ }
+  }
 
   const SUGGESTIBLE_KEYS = ['unterschied', 'mitarbeiter_gerne', 'unternehmenskultur', 'ausbildung', 'kandidat_eigenschaften'];
   const emptySuggestible = SUGGESTIBLE_KEYS.filter(k => !(form[k] || '').trim());
@@ -269,6 +328,29 @@ export default function JobStelleninfos() {
 
   return (
     <form onSubmit={e => e.preventDefault()} className="stelle-form">
+      {/* Warnung: Daten wurden nach der Creative-Erstellung geändert */}
+      {job?.daten_geaendert_nach_creatives_at && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          background: '#fff7ed', border: '1px solid #fdba74', borderLeft: '4px solid #ea580c',
+          borderRadius: 10, padding: '10px 14px', marginBottom: 12,
+        }}>
+          <span style={{ fontSize: 13, color: '#9a3412', flex: 1, minWidth: 240 }}>
+            ⚠️ <strong>Daten wurden nach der Creative-Erstellung geändert</strong> (durch die Kunden-Prüfung am{' '}
+            {new Date(job.daten_geaendert_nach_creatives_at).toLocaleDateString('de-DE')}) — bestehende Creatives/Ad&nbsp;Copies ggf. aktualisieren.
+          </span>
+          <button type="button" className="btn-ghost btn-sm" onClick={dismissCreativeWarnung}>Erledigt / ausblenden</button>
+        </div>
+      )}
+
+      {/* Aktion: Kunden zur Prüfung der erfassten Daten einladen */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button type="button" className="btn-ghost btn-sm" onClick={openPruefung}
+          title="Dem Kunden einen Link schicken, um die erfassten Stellendaten zu prüfen und zu ergänzen">
+          📋 Kunden zur Prüfung schicken
+        </button>
+      </div>
+
       {/* ───────── Logo-Header ───────── */}
       <div className={`stelle-header ${kunde?.logo_url ? 'has-logo' : 'no-logo'}`}>
         <button
@@ -505,6 +587,55 @@ export default function JobStelleninfos() {
           🗑 Projekt löschen
         </button>
       </div>
+
+      {/* ───────── Daten-Prüfung an Kunden senden ───────── */}
+      <Modal
+        open={showPruefung}
+        onClose={() => !pruefungBusy && setShowPruefung(false)}
+        title="📋 Kunden zur Prüfung schicken"
+        footer={
+          <>
+            <button type="button" className="btn-ghost" onClick={() => setShowPruefung(false)} disabled={pruefungBusy}>Abbrechen</button>
+            <button type="button" className="btn-primary" onClick={sendPruefung}
+              disabled={pruefungBusy || !pruefungForm.to.trim() || anredeOffen(pruefungKunde || kunde)}>
+              {pruefungBusy ? 'Sende…' : 'Link senden'}
+            </button>
+          </>
+        }
+      >
+        <p className="pane-hint">
+          Der Kunde bekommt einen Link, um die erfassten Stellendaten zu prüfen und zu ergänzen. Seine Änderungen landen
+          automatisch hier im Stelle-Tab (mit interner Benachrichtigung). Der Link zeigt immer den aktuellen Stand und kann mehrfach geschickt werden.
+        </p>
+        {/* Anrede zuerst — der Mail-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
+        <AnredeAbfrage kunde={pruefungKunde || kunde} onSaved={onPruefungAnredeSaved} />
+        {anredeOffen(pruefungKunde || kunde) ? (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: '4px 2px' }}>
+            Bitte oben zuerst die Anrede festlegen — danach wird der Mail-Text in der passenden Form (Du/Sie) erzeugt.
+          </div>
+        ) : (
+          <div className="form-grid">
+            <label className="field field-full">
+              <span>An</span>
+              <input type="email" value={pruefungForm.to} onChange={e => setPruefungForm({ ...pruefungForm, to: e.target.value })} />
+            </label>
+            <label className="field field-full">
+              <span>Betreff</span>
+              <input value={pruefungForm.betreff} onChange={e => setPruefungForm({ ...pruefungForm, betreff: e.target.value })} />
+            </label>
+            <label className="field field-full">
+              <span>Nachricht (der Button „Angaben prüfen & ergänzen" wird automatisch angehängt)</span>
+              <textarea rows={5} value={pruefungForm.customText} onChange={e => setPruefungForm({ ...pruefungForm, customText: e.target.value })} />
+            </label>
+          </div>
+        )}
+        {pruefungMsg && (
+          <div className={`form-msg${pruefungErr ? ' alert alert-error' : ''}`}
+            style={{ marginTop: 10, ...(pruefungErr ? { color: '#b00020', fontWeight: 600 } : {}) }}>
+            {pruefungErr ? '⚠️ ' : ''}{pruefungMsg}
+          </div>
+        )}
+      </Modal>
     </form>
   );
 }
