@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import KriterienEditor from './KriterienEditor.jsx';
+import { useAutoSave, SaveStatus } from '../lib/useAutoSave.jsx';
 
 export default function KriterienPanel({ job, onJobUpdated }) {
   const [offen, setOffen] = useState(false);
@@ -23,17 +24,13 @@ export default function KriterienPanel({ job, onJobUpdated }) {
 
   function startEdit() { setEntwurf(kriterien.map(k => ({ ...k }))); setOffen(true); setErr(''); setMsg(''); }
 
-  async function speichern() {
-    setBusy(true); setErr('');
-    try {
-      const res = await api(`/jobs/${job.id}`, { method: 'PATCH', body: { wichtige_kriterien: entwurf } });
-      onJobUpdated?.(res.job);
-      setEntwurf(null);
-      setMsg('Kriterien gespeichert.');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (e) { setErr(e.message); }
-    finally { setBusy(false); }
+  // Auto-Save während der Bearbeitung — kein manuelles Speichern mehr nötig.
+  async function saveNow() {
+    if (entwurf == null) return;
+    const res = await api(`/jobs/${job.id}`, { method: 'PATCH', body: { wichtige_kriterien: entwurf } });
+    onJobUpdated?.(res.job);
   }
+  const saveStatus = useAutoSave(saveNow, JSON.stringify(entwurf), { enabled: offen && entwurf != null });
 
   async function kiVorschlag() {
     setBusy(true); setErr('');
@@ -117,13 +114,12 @@ export default function KriterienPanel({ job, onJobUpdated }) {
           {err && <div className="alert alert-error" style={{ marginTop: 10 }}>{err}</div>}
           {msg && <div className="form-msg" style={{ marginTop: 10 }}>{msg}</div>}
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button type="button" className="btn-primary btn-sm" onClick={speichern} disabled={busy || entwurf == null}>
-              {busy ? 'Speichere…' : 'Speichern'}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+            <button type="button" className="btn-primary btn-sm" onClick={() => { setEntwurf(null); setOffen(false); }} disabled={busy}>
+              Fertig
             </button>
-            <button type="button" className="btn-ghost btn-sm" onClick={() => { setEntwurf(null); setOffen(false); }} disabled={busy}>
-              Schließen
-            </button>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Automatisch gespeichert</span>
+            <SaveStatus status={saveStatus} />
           </div>
         </div>
       )}

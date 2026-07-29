@@ -4,6 +4,7 @@ import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { fileToBase64 } from '../../lib/files.js';
 import BrancheField from '../../components/BrancheField.jsx';
+import { useAutoSave, SaveStatus } from '../../lib/useAutoSave.jsx';
 const MITARBEITER_OPTIONS = [
   { value: '', label: '— nicht angegeben —' },
   { value: '1-10', label: '1–10' },
@@ -212,68 +213,62 @@ export default function JobStelleninfos() {
     }
   }
 
-  async function onSave(e) {
-    e.preventDefault();
-    setBusy(true);
-    setMsg('');
-    try {
-      // formdata_komplett bauen — bestehende Werte erhalten + alle UI-Felder zurückschreiben
-      const newFormdata = {
-        ...fd,
-        benefits: form.benefits,
-        benefits_zusatz: form.benefits_zusatz,
-        unterschied: form.unterschied,
-        mitarbeiter_gerne: form.mitarbeiter_gerne,
-        unternehmenskultur: form.unternehmenskultur,
-        mitarbeiter_anzahl: form.mitarbeiter_anzahl,
-        ausbildung: form.ausbildung,
-        soft_skills: form.soft_skills,
-        soft_skills_zusatz: form.soft_skills_zusatz,
-        berufserfahrung: form.berufserfahrung,
-        kandidat_eigenschaften: form.kandidat_eigenschaften,
-        reisebereitschaft: form.reisebereitschaft, // String-Variante
-      };
+  // Auto-Save: speichert den aktuellen Stand ohne reload() (sonst würde das Formular
+  // beim Tippen zurückgesetzt). Fehler propagieren an useAutoSave (Status-Indikator).
+  const brancheSavedRef = useRef(kunde?.branche || '');
+  async function saveNow() {
+    // formdata_komplett bauen — bestehende Werte erhalten + alle UI-Felder zurückschreiben
+    const newFormdata = {
+      ...fd,
+      benefits: form.benefits,
+      benefits_zusatz: form.benefits_zusatz,
+      unterschied: form.unterschied,
+      mitarbeiter_gerne: form.mitarbeiter_gerne,
+      unternehmenskultur: form.unternehmenskultur,
+      mitarbeiter_anzahl: form.mitarbeiter_anzahl,
+      ausbildung: form.ausbildung,
+      soft_skills: form.soft_skills,
+      soft_skills_zusatz: form.soft_skills_zusatz,
+      berufserfahrung: form.berufserfahrung,
+      kandidat_eigenschaften: form.kandidat_eigenschaften,
+      reisebereitschaft: form.reisebereitschaft, // String-Variante
+    };
 
-      const tasks = [
-        api(`/jobs/${job.id}`, {
-          method: 'PATCH',
-          body: {
-            stelle: form.stelle,
-            region: form.region || null,
-            gehalt: form.gehalt || null,
-            eingabe_methode: form.eingabe_methode || null,
-            url: form.url || null,
-            besonderheiten: form.besonderheiten || null,
-            reisebereitschaft: form.reisebereitschaft !== 'keine',
-            quereinsteiger: form.quereinsteiger,
-            benefits: form.benefits.length ? form.benefits : null,
-            formdata_komplett: newFormdata,
-          },
-        }),
-      ];
-      if ((kunde?.branche || '') !== form.branche) {
-        tasks.push(api(`/kunden/${kunde.id}`, {
-          method: 'PATCH',
-          body: { branche: form.branche || null },
-        }));
-      }
-      await Promise.all(tasks);
-      await reload();
-      setAiFields(new Set()); // KI-Badges entfernen, Werte sind jetzt persistent
-      setMsg('Gespeichert.');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (err) {
-      setMsg(err.message);
-    } finally {
-      setBusy(false);
+    const tasks = [
+      api(`/jobs/${job.id}`, {
+        method: 'PATCH',
+        body: {
+          stelle: form.stelle,
+          region: form.region || null,
+          gehalt: form.gehalt || null,
+          eingabe_methode: form.eingabe_methode || null,
+          url: form.url || null,
+          besonderheiten: form.besonderheiten || null,
+          reisebereitschaft: form.reisebereitschaft !== 'keine',
+          quereinsteiger: form.quereinsteiger,
+          benefits: form.benefits.length ? form.benefits : null,
+          formdata_komplett: newFormdata,
+        },
+      }),
+    ];
+    if ((form.branche || '') !== (brancheSavedRef.current || '')) {
+      tasks.push(api(`/kunden/${kunde.id}`, {
+        method: 'PATCH',
+        body: { branche: form.branche || null },
+      }));
     }
+    await Promise.all(tasks);
+    brancheSavedRef.current = form.branche || '';
+    setAiFields(new Set()); // KI-Badges entfernen, Werte sind jetzt persistent
   }
+
+  const saveStatus = useAutoSave(saveNow, JSON.stringify(form));
 
   const analyse = job.analyse_ergebnis || null;
   const hasAnalyse = analyse && (typeof analyse === 'object') && Object.keys(analyse).length > 0;
 
   return (
-    <form onSubmit={onSave} className="stelle-form">
+    <form onSubmit={e => e.preventDefault()} className="stelle-form">
       {/* ───────── Logo-Header ───────── */}
       <div className={`stelle-header ${kunde?.logo_url ? 'has-logo' : 'no-logo'}`}>
         <button
@@ -499,11 +494,9 @@ export default function JobStelleninfos() {
         </fieldset>
       )}
 
-      <div className="form-actions stelle-actions">
-        {msg && <span className="form-msg">{msg}</span>}
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? 'Speichere…' : 'Änderungen speichern'}
-        </button>
+      <div className="form-actions stelle-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Änderungen werden automatisch gespeichert.</span>
+        <SaveStatus status={saveStatus} />
       </div>
 
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #ececea', display: 'flex', justifyContent: 'flex-end' }}>
@@ -592,49 +585,44 @@ function NeukundenProduktTab({ job, kunde, reload }) {
     set('vorteile', form.vorteile.filter((_, idx) => idx !== i));
   }
 
-  async function onSave(e) {
-    e?.preventDefault();
-    setBusy(true); setMsg('');
-    try {
-      const neukunden_daten = {
-        produkt: form.produkt.trim(),
-        kundenprofil: form.kundenprofil.trim(),
-        zielgruppe: form.zielgruppe.trim(),
-        vorteile: form.vorteile.filter(Boolean),
-        unterschied: form.unterschied.trim(),
-        preisrahmen: form.preisrahmen.trim(),
-        einzugsgebiet: form.einzugsgebiet.trim(),
-        funnel_url: form.funnel_url.trim(),
-      };
-      await api(`/jobs/${job.id}`, {
-        method: 'PATCH',
-        body: {
-          neukunden_daten,
-          // Sammelfelder für Kompatibilität mit Recruiting-Flows:
-          stelle: neukunden_daten.produkt || 'Neukunden-Kampagne',
-          region: neukunden_daten.einzugsgebiet || null,
-          benefits: neukunden_daten.vorteile.length ? neukunden_daten.vorteile : null,
-        },
-      });
-      setMsg('Gespeichert.');
-      reload?.();
-    } catch (err) { setMsg('Fehler: ' + err.message); }
-    finally { setBusy(false); }
+  // Auto-Save (ohne reload). Pflichtfeld Produkt: leer wird nicht gespeichert.
+  async function saveNow() {
+    if (!form.produkt.trim()) return;
+    const neukunden_daten = {
+      produkt: form.produkt.trim(),
+      kundenprofil: form.kundenprofil.trim(),
+      zielgruppe: form.zielgruppe.trim(),
+      vorteile: form.vorteile.filter(Boolean),
+      unterschied: form.unterschied.trim(),
+      preisrahmen: form.preisrahmen.trim(),
+      einzugsgebiet: form.einzugsgebiet.trim(),
+      funnel_url: form.funnel_url.trim(),
+    };
+    await api(`/jobs/${job.id}`, {
+      method: 'PATCH',
+      body: {
+        neukunden_daten,
+        // Sammelfelder für Kompatibilität mit Recruiting-Flows:
+        stelle: neukunden_daten.produkt || 'Neukunden-Kampagne',
+        region: neukunden_daten.einzugsgebiet || null,
+        benefits: neukunden_daten.vorteile.length ? neukunden_daten.vorteile : null,
+      },
+    });
   }
+  const saveStatus = useAutoSave(saveNow, JSON.stringify(form));
 
   return (
-    <form onSubmit={onSave} className="job-stelle-form">
+    <form onSubmit={e => e.preventDefault()} className="job-stelle-form">
       <div className="section-head">
         <div>
           <h2 className="section-title">Produkt &amp; Zielgruppe</h2>
           <p className="section-sub">Angebot, Zielgruppe und USP der Neukundenkampagne — Grundlage für Creatives und Ad-Copies.</p>
         </div>
-        <button type="submit" className="btn-primary" disabled={busy || !form.produkt.trim()}>
-          {busy ? 'Speichere…' : 'Speichern'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Auto-Save</span>
+          <SaveStatus status={saveStatus} />
+        </div>
       </div>
-
-      {msg && <div className="motiv-sub" style={{ marginBottom: 10 }}>{msg}</div>}
 
       <fieldset className="formular-section">
         <legend>Angebot</legend>
@@ -697,9 +685,7 @@ function NeukundenProduktTab({ job, kunde, reload }) {
       </fieldset>
 
       <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button type="submit" className="btn-primary" disabled={busy || !form.produkt.trim()}>
-          {busy ? 'Speichere…' : 'Speichern'}
-        </button>
+        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Änderungen werden automatisch gespeichert.</span>
         <button type="button" onClick={handleDelete}
           style={{ background: 'transparent', color: '#c1272d', border: '1px solid #f0c9cb', padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
           🗑 Projekt löschen

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { getBrandBaseUrl } from '../../lib/branding.js';
@@ -84,17 +84,22 @@ export default function JobAdCopies() {
     }
   }
 
-  async function saveHeadlines() {
+  const headlinesTimer = useRef(null);
+  async function saveHeadlinesNow(arr) {
     try {
-      await api('/adcopies/headlines', { method: 'PATCH', body: { job_id: job.id, headlines } });
+      await api('/adcopies/headlines', { method: 'PATCH', body: { job_id: job.id, headlines: arr } });
       setHeadlinesDirty(false);
-    } catch (err) {
-      alert(`Speichern: ${err.message}`);
-    }
+    } catch { /* dirty bleibt — nächster Blur/Tastendruck versucht erneut */ }
   }
+  function saveHeadlines() { return saveHeadlinesNow(headlines); }
 
   function setHeadlineAt(idx, val) {
-    setHeadlines(prev => prev.map((h, i) => i === idx ? val : h));
+    setHeadlines(prev => {
+      const next = prev.map((h, i) => i === idx ? val : h);
+      clearTimeout(headlinesTimer.current);
+      headlinesTimer.current = setTimeout(() => saveHeadlinesNow(next), 800);
+      return next;
+    });
     setHeadlinesDirty(true);
   }
 
@@ -180,14 +185,18 @@ export default function JobAdCopies() {
     }
   }
 
-  async function saveOne(stil) {
+  const saveTimers = useRef({});
+  // Debounced Auto-Save pro Stil. textOverride, damit der jüngste Tastendruck
+  // gespeichert wird (drafts-State ist im setTimeout ggf. noch nicht aktualisiert).
+  async function saveOne(stil, textOverride) {
     const existing = findItem(stil);
     if (!existing) return;
+    const text = textOverride !== undefined ? textOverride : (drafts[stil] ?? '');
     setSavingId(existing.id);
     try {
       const res = await api(`/adcopies/${existing.id}`, {
         method: 'PATCH',
-        body: { text: drafts[stil] ?? '' },
+        body: { text },
       });
       setItems(prev => prev.map(c => c.id === existing.id ? res.adcopy : c));
     } catch (err) {
@@ -195,6 +204,10 @@ export default function JobAdCopies() {
     } finally {
       setSavingId(null);
     }
+  }
+  function scheduleSave(stil, val) {
+    clearTimeout(saveTimers.current[stil]);
+    saveTimers.current[stil] = setTimeout(() => saveOne(stil, val), 800);
   }
 
   async function copyOne(stil) {
@@ -252,9 +265,11 @@ export default function JobAdCopies() {
               5 kurze Headlines mit Emoji — für Meta-Anzeigen-Texte oder als Variante in den Funnel-Screens. Editierbar.
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {headlinesDirty && (
-              <button className="btn-ghost btn-sm" onClick={saveHeadlines}>💾 Speichern</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {headlines.length > 0 && (
+              <span style={{ fontSize: 12, fontWeight: 600, color: headlinesDirty ? 'var(--ink-4)' : '#0a8043' }}>
+                {headlinesDirty ? 'Auto-Save…' : '✓ Gespeichert'}
+              </span>
             )}
             <button className="btn-ghost btn-sm" onClick={generateHeadlines} disabled={headlinesBusy}>
               {headlinesBusy ? 'Generiere…' : (headlines.length ? '🔄 Neu generieren' : '✨ Headlines generieren')}
@@ -348,7 +363,8 @@ export default function JobAdCopies() {
                   <textarea
                     className="adcopy-text"
                     value={text}
-                    onChange={e => setDrafts(prev => ({ ...prev, [s.id]: e.target.value }))}
+                    onChange={e => { const v = e.target.value; setDrafts(prev => ({ ...prev, [s.id]: v })); scheduleSave(s.id, v); }}
+                    onBlur={() => { clearTimeout(saveTimers.current[s.id]); if (isDirty(s.id)) saveOne(s.id, drafts[s.id]); }}
                     rows={s.id === 'kompakt' ? 6 : (s.id === 'benefit' ? 12 : 14)}
                     disabled={busy}
                   />
@@ -378,13 +394,9 @@ export default function JobAdCopies() {
                         {busy ? 'Generiere…' : 'Neu generieren'}
                       </button>
                     </div>
-                    <button
-                      className="btn-primary btn-sm"
-                      onClick={() => saveOne(s.id)}
-                      disabled={!dirty || savingId === item.id || busy}
-                    >
-                      {savingId === item.id ? 'Speichere…' : (dirty ? 'Speichern' : 'Gespeichert')}
-                    </button>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: savingId === item.id ? 'var(--ink-3)' : (dirty ? 'var(--ink-4)' : '#0a8043') }}>
+                      {savingId === item.id ? 'Speichert…' : (dirty ? 'Auto-Save…' : '✓ Gespeichert')}
+                    </span>
                   </footer>
                 )}
               </div>
