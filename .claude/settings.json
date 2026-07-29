@@ -14,7 +14,11 @@
       "Bash(node --input-type=module -e ' *)",
       "Bash(awk 'NR>=683 && NR<=970 && /router\\\\.\\(get|post|patch|put|delete\\)/ {print NR\": \"$0}' routes/public.js)",
       "Bash(curl -s \"https://inside.talent-one.de/api/public/bewerbungen/dd43e38b-d880-4476-9ae3-9bc18928e2a8\")",
-      "Bash(curl -s -X PATCH https://inside.talent-one.de/api/public/bewerbungen/dd43e38b-d880-4476-9ae3-9bc18928e2a8/7ae60a9b-52bd-473f-a304-256748038a43 -H 'Content-Type: application/json' -d '{\"vorqual_werte_kunde\":{\"Aktuelle Situation\":\"TEST vom Kunden — bitte ignorieren\"}}')"
+      "Bash(curl -s -X PATCH https://inside.talent-one.de/api/public/bewerbungen/dd43e38b-d880-4476-9ae3-9bc18928e2a8/7ae60a9b-52bd-473f-a304-256748038a43 -H 'Content-Type: application/json' -d '{\"vorqual_werte_kunde\":{\"Aktuelle Situation\":\"TEST vom Kunden — bitte ignorieren\"}}')",
+      "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|method: 'POST'\\\\|onSave\\\\|function save\\\\|async function\\\\|handleSave\\\\|debounce\\\\|setTimeout\" pages/job/JobCreatives.jsx)",
+      "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|method: 'POST'\\\\|onSave\\\\|function save\\\\|async function\\\\|handleSave\\\\|debounce\\\\|setTimeout\" pages/job/JobExport.jsx)",
+      "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|onSave\\\\|async function\\\\|handleSave\\\\|function save\\\\|Farben\\\\|Firmendaten\\\\|onSubmit\\\\|setTimeout\" pages/KundeDetail.jsx)",
+      "Bash(node --check aktivitaet.js)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

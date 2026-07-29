@@ -224,6 +224,7 @@ export default function JobView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabStatus, setTabStatus] = useState(null); // { auto, manual, effective }
+  const [letzteAktivitaet, setLetzteAktivitaet] = useState(null); // jüngstes Aktivitäts-Event (tab-übergreifend)
 
   const loadTabStatus = useCallback(
     () => api(`/jobs/${jobId}/tab-status`).then(setTabStatus).catch(() => {}),
@@ -336,6 +337,15 @@ export default function JobView() {
     }).catch(() => setProjekt(null));
   }, [kundeId, job?.id]);
 
+  // Jüngste Aktivität (tab-übergreifende "Zuletzt"-Zeile). Gleiche Quelle wie die
+  // Timeline im Export-Tab — events[0] ist das neueste Event.
+  useEffect(() => {
+    if (!jobId) return;
+    api(`/jobs/${jobId}/aktivitaet`)
+      .then(r => setLetzteAktivitaet((r.events || [])[0] || null))
+      .catch(() => setLetzteAktivitaet(null));
+  }, [jobId, job?.id]);
+
   if (loading) return <div className="card empty">Lade…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!job) return <div className="card empty"><h2>Projekt nicht gefunden</h2></div>;
@@ -400,6 +410,24 @@ export default function JobView() {
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
         }
       </div>
+
+      {/* Zuletzt passiert — jüngste Aktivität am Projekt, sichtbar auf jedem Tab */}
+      {letzteAktivitaet && (
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+          marginBottom: 12, padding: '6px 12px', borderRadius: 8,
+          background: 'var(--gray-50, #f7f7f5)', border: '1px solid var(--line, #eee)',
+          fontSize: 12.5, color: 'var(--ink-3, #666)',
+        }}>
+          <span aria-hidden>{letzteAktivitaet.icon || '🕑'}</span>
+          <span><strong style={{ color: 'var(--ink, #333)' }}>Zuletzt:</strong> {letzteAktivitaet.titel}</span>
+          {letzteAktivitaet.at && (
+            <span style={{ color: 'var(--ink-4, #999)' }}>
+              · {new Date(letzteAktivitaet.at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
+            </span>
+          )}
+        </div>
+      )}
 
       {hasPending && (
         <div className="bg-task-banner">

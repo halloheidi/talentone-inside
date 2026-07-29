@@ -61,6 +61,7 @@ export default function JobExport() {
   const [versand, setVersand] = useState([]);
   const [review, setReview] = useState(null);
   const [runden, setRunden] = useState([]);
+  const [aktivitaet, setAktivitaet] = useState([]);
   const [showKommentare, setShowKommentare] = useState(false);
 
   // Reaktivierungs-Modal
@@ -78,8 +79,9 @@ export default function JobExport() {
       api(`/jobs/${job.id}/export`),
       api(`/jobs/${job.id}/export/versand`).catch(() => ({ versand: [] })),
       api(`/jobs/${job.id}/export/review`).catch(() => ({ review: null, runden: [] })),
+      api(`/jobs/${job.id}/aktivitaet`).catch(() => ({ events: [] })),
     ])
-      .then(([d, v, r]) => {
+      .then(([d, v, r, a]) => {
         setData(d);
         // alle Creatives + alle AdCopies vorausgewählt
         setSelectedCreatives(new Set((d.creatives || []).map(c => c.id)));
@@ -87,6 +89,7 @@ export default function JobExport() {
         setVersand(v.versand || []);
         setReview(r.review);
         setRunden(r.runden || []);
+        setAktivitaet(a.events || []);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -360,6 +363,9 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
 
   return (
     <div className="export-tab">
+      {/* ─────── Chronologische Aktivitäts-Historie (neueste zuerst) ─────── */}
+      <AktivitaetsTimeline events={aktivitaet} loading={loading} />
+
       {/* ─────── Bewerberliste-Link für den Kunden ─────── */}
       {bewerbungenUrl && (
         <div className="bewerbungen-link-box">
@@ -427,9 +433,6 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
           </span>
         </div>
       )}
-
-      {/* ─────── Timeline der Runden (Versand + Feedback) ─────── */}
-      <RundenTimeline versand={versand} runden={runden} />
 
       {/* ─────── Review-Status ─────── */}
       {review && (review.status === 'freigegeben' || review.status === 'aenderungen') && (
@@ -733,21 +736,6 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
       </fieldset>
 
       {/* ─────── Versand-Historie ─────── */}
-      {versand.length > 0 && (
-        <fieldset className="formular-section" style={{ marginTop: 22 }}>
-          <legend>Versand-Historie ({versand.length})</legend>
-          <div className="bewerbungen-list">
-            {versand.map(v => (
-              <div key={v.id} className="bewerbung-row">
-                <strong>{v.empfaenger}</strong>
-                <span>{v.betreff || ''}</span>
-                <span className="bewerbung-date">{new Date(v.created_at).toLocaleString('de-DE')}</span>
-              </div>
-            ))}
-          </div>
-        </fieldset>
-      )}
-
       {/* ─────── Mail-Modal ─────── */}
       <Modal
         open={showMail}
@@ -1354,54 +1342,51 @@ function PauseFieldset({ kunde, job, letzteKampagnePause, onSent, onKundeUpdated
  * (aus talentone_versand.typ='entwurf_runde_N') und Feedback (aus
  * talentone_reviews.runde). Sortiert absteigend, kompakter Chip-Look.
  */
-function RundenTimeline({ versand, runden }) {
-  const events = [];
-  for (const v of versand || []) {
-    const m = (v.typ || '').match(/^entwurf_runde_(\d+)$/);
-    if (!m && v.typ === null && v.betreff) {
-      // Legacy-Versand vor Runden-Feld: als Runde 1 werten
-      events.push({
-        kind: 'versand', runde: 1, ts: v.created_at,
-        label: `📤 Runde 1 gesendet · ${v.empfaenger || ''}`,
-      });
-    } else if (m) {
-      const n = Number(m[1]);
-      events.push({
-        kind: 'versand', runde: n, ts: v.created_at,
-        label: `📤 Runde ${n} gesendet · ${v.empfaenger || ''}`,
-      });
-    }
-  }
-  for (const r of runden || []) {
-    if (r.status === 'aenderungen') {
-      events.push({ kind: 'feedback', runde: r.runde || 1, ts: r.updated_at, label: `📝 Feedback erhalten (Runde ${r.runde || 1})` });
-    } else if (r.status === 'freigegeben') {
-      events.push({ kind: 'freigabe', runde: r.runde || 1, ts: r.updated_at, label: `✅ Freigegeben (Runde ${r.runde || 1})` });
-    }
-  }
-  if (events.length === 0) return null;
-  events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+// Chronologische Aktivitäts-Historie (neueste zuerst). Mischt Versand, Reviews,
+// Creatives, Funnel, Notizen, AVV aus dem Backend-Aggregator /jobs/:id/aktivitaet.
+// Feedback-/Freigabe-Einträge mit Kommentaren sind aufklappbar.
+function AktivitaetEintrag({ e }) {
+  const [offen, setOffen] = useState(false);
+  const hatKommentare = Array.isArray(e.kommentare) && e.kommentare.length > 0;
+  const dt = e.at ? new Date(e.at) : null;
   return (
-    <div className="runden-timeline" style={{
-      padding: '10px 14px', marginBottom: 12, borderRadius: 8,
-      background: 'var(--gray-50)', border: '1px solid var(--line)',
-      display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 12,
-    }}>
-      <strong style={{ marginRight: 4 }}>Verlauf:</strong>
-      {events.map((e, i) => (
-        <span
-          key={i}
-          title={new Date(e.ts).toLocaleString('de-DE')}
-          style={{
-            padding: '3px 8px', borderRadius: 100,
-            background: e.kind === 'freigabe' ? '#dcfce7' : e.kind === 'feedback' ? '#fef3c7' : '#e0eaf7',
-            color:      e.kind === 'freigabe' ? '#166534' : e.kind === 'feedback' ? '#92400e' : '#1e3a8a',
-            fontSize: 11, fontWeight: 600,
-          }}
-        >
-          {e.label} · {new Date(e.ts).toLocaleDateString('de-DE')}
-        </span>
-      ))}
+    <div className="akt-item">
+      <div className="akt-icon" aria-hidden>{e.icon || '•'}</div>
+      <div className="akt-body">
+        <div className="akt-head">
+          <span className="akt-titel">{e.titel}</span>
+          {dt && <span className="akt-datum">{dt.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</span>}
+        </div>
+        {e.detail && <div className="akt-detail">{e.detail}</div>}
+        {hatKommentare && (
+          <button type="button" className="akt-toggle" onClick={() => setOffen(o => !o)}>
+            {offen ? '▾ Kommentare ausblenden' : `▸ ${e.kommentare.length} Kommentar${e.kommentare.length > 1 ? 'e' : ''} anzeigen`}
+          </button>
+        )}
+        {hatKommentare && offen && (
+          <div className="akt-kommentare">
+            {e.kommentare.map((k, i) => (
+              <div key={i} className="akt-kommentar">
+                <span className="akt-kommentar-label">{k.label}</span>
+                <span className="akt-kommentar-text">{k.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function AktivitaetsTimeline({ events, loading }) {
+  if (loading && (!events || events.length === 0)) return null;
+  if (!events || events.length === 0) return null;
+  return (
+    <fieldset className="formular-section akt-timeline" style={{ marginBottom: 18 }}>
+      <legend>🕑 Verlauf ({events.length})</legend>
+      <div className="akt-list">
+        {events.map(e => <AktivitaetEintrag key={e.id} e={e} />)}
+      </div>
+    </fieldset>
   );
 }

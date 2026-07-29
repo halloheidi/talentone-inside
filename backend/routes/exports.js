@@ -11,8 +11,20 @@ import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 import { normalizeResendMode, resolveVersandVariante } from '../versand-variante.js';
 import { t } from '../anrede.js';
+import { buildAktivitaet } from '../aktivitaet.js';
 
 const router = Router();
+
+/* GET /api/jobs/:id/aktivitaet — chronologische Aktivitäts-Timeline (neueste zuerst).
+   Gemeinsame Quelle für die Timeline im Export-Tab und die "Zuletzt"-Zeile im Kopf. */
+router.get('/jobs/:id/aktivitaet', async (req, res) => {
+  try {
+    const events = await buildAktivitaet(req.params.id);
+    res.json({ events });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Stellt sicher dass der Job einen review_token hat. Gibt ihn zurück.
 async function ensureReviewToken(jobId, existing) {
