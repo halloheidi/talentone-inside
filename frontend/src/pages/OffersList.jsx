@@ -417,6 +417,20 @@ export function SendOfferModal({ preview, kunde, onKundeSaved, onClose, onSent }
     setBody(composeBody(preview.body || '', preview.flyer_paragraph || '', flyerOnByDefault));
   }, [preview?.offerId]);
 
+  // Nach der Anrede-Wahl: Vorschau in der korrekten Form (Du/Sie) neu erzeugen.
+  async function reloadPreview() {
+    if (!preview?.offerId) return;
+    try {
+      const p = await api(`/offers/${preview.offerId}/email-preview`);
+      setTo(p.to || '');
+      setSubject(p.subject || '');
+      setFlyerParagraph(p.flyer_paragraph || '');
+      const flyerOn = !!p.flyer_available;
+      setAttachFlyer(flyerOn);
+      setBody(composeBody(p.body || '', p.flyer_paragraph || '', flyerOn));
+    } catch (e) { setErr(e.message); }
+  }
+
   // Wenn User Checkbox toggled: Body neu zusammensetzen (überschreibt Edits!)
   function onToggleFlyer(next) {
     if (!preview) return;
@@ -471,44 +485,53 @@ export function SendOfferModal({ preview, kunde, onKundeSaved, onClose, onSent }
         Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Das easybill-PDF wird automatisch als Anhang angefügt.
       </p>
 
-      <AnredeAbfrage kunde={kunde} onSaved={(k) => onKundeSaved?.(k)} />
+      {/* Anrede zuerst — der Angebotstext wird erst nach der Du/Sie-Wahl erzeugt. */}
+      <AnredeAbfrage kunde={kunde} onSaved={(k) => { onKundeSaved?.(k); reloadPreview(); }} />
 
-      {preview.flyer_available && (
-        <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input id="flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
-          <label htmlFor="flyer-toggle" style={{ fontSize: 13, cursor: 'pointer' }}>
-            📎 <strong>Flyer anhängen</strong> — <code style={{ fontSize: 11 }}>{preview.flyer_filename}</code>
-          </label>
+      {kunde && anredeOffen(kunde) ? (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          Bitte oben zuerst die Anrede festlegen — danach wird der Angebotstext in der passenden Form (Du/Sie) erzeugt und lässt sich hier prüfen.
         </div>
+      ) : (
+        <>
+          {preview.flyer_available && (
+            <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input id="flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
+              <label htmlFor="flyer-toggle" style={{ fontSize: 13, cursor: 'pointer' }}>
+                📎 <strong>Flyer anhängen</strong> — <code style={{ fontSize: 11 }}>{preview.flyer_filename}</code>
+              </label>
+            </div>
+          )}
+
+          {okNote && <div className="alert" style={{ background: '#fff8d4', color: '#a34e00', border: '1px solid #f0d878', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12 }}>{okNote}</div>}
+
+          {preview.already_sent && (
+            <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
+              Dieses Angebot wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
+            </div>
+          )}
+
+          {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+
+          <div style={{ display: 'grid', gap: 12 }}>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Empfänger</span>
+              <input type="email" value={to} onChange={e => setTo(e.target.value)}
+                style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Betreff</span>
+              <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
+                style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Nachricht</span>
+              <textarea rows={14} value={body} onChange={e => setBody(e.target.value)}
+                style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
+            </label>
+          </div>
+        </>
       )}
-
-      {okNote && <div className="alert" style={{ background: '#fff8d4', color: '#a34e00', border: '1px solid #f0d878', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 12 }}>{okNote}</div>}
-
-      {preview.already_sent && (
-        <div style={{ padding: 10, background: '#fff8d4', border: '1px solid #f0d878', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
-          Dieses Angebot wurde bereits versandt an <strong>{preview.sent_to}</strong> am {new Date(preview.sent_at).toLocaleString('de-DE')} — erneuter Versand aktualisiert den Empfänger.
-        </div>
-      )}
-
-      {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
-
-      <div style={{ display: 'grid', gap: 12 }}>
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Empfänger</span>
-          <input type="email" value={to} onChange={e => setTo(e.target.value)}
-            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
-        </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Betreff</span>
-          <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
-            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14 }} />
-        </label>
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, letterSpacing: '0.02em' }}>Nachricht</span>
-          <textarea rows={14} value={body} onChange={e => setBody(e.target.value)}
-            style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
-        </label>
-      </div>
     </Modal>
   );
 }
@@ -573,6 +596,22 @@ export function SendOrderModal({ preview, kunde, onKundeSaved, onClose, onSent }
   function onChangeTermin(v)     { reflow({ terminSet: terminSet || !!v, terminIso: v }); }
   function onChangeFormular(v)   { reflow({ formularOption: v }); }
 
+  // Nach der Anrede-Wahl: Vorschau in der korrekten Form (Du/Sie) neu erzeugen.
+  async function reloadPreview() {
+    if (!preview?.offerId) return;
+    try {
+      const p = await api(`/offers/${preview.offerId}/order-email-preview`);
+      setTo(p.to || '');
+      setSubject(p.subject || '');
+      setFlyerParagraph(p.flyer_paragraph || '');
+      const flyerOn = !!p.flyer_available;
+      setAttachFlyer(flyerOn);
+      setTerminSet(false); setTerminIso(''); setFormularOption('none');
+      const base = composeBody(p.body || '', p.flyer_paragraph || '', flyerOn);
+      setBody(composeOrderBody(base, { terminSet: false, terminIso: '', formularOption: 'none', formularLink: p.onboarding_form_url || null }));
+    } catch (e) { setErr(e.message); }
+  }
+
   if (!preview) return null;
 
   async function send() {
@@ -612,8 +651,15 @@ export function SendOrderModal({ preview, kunde, onKundeSaved, onClose, onSent }
         Absender richtet sich nach der Marke des Angebots. Reply-To geht an info@nowagwirth.de. Die AB als PDF wird automatisch aus easybill angefügt.
       </p>
 
-      <AnredeAbfrage kunde={kunde} onSaved={(k) => onKundeSaved?.(k)} />
+      {/* Anrede zuerst — der AB-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
+      <AnredeAbfrage kunde={kunde} onSaved={(k) => { onKundeSaved?.(k); reloadPreview(); }} />
 
+      {kunde && anredeOffen(kunde) ? (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          Bitte oben zuerst die Anrede festlegen — danach wird der AB-Text in der passenden Form (Du/Sie) erzeugt und lässt sich hier prüfen.
+        </div>
+      ) : (
+      <>
       {preview.flyer_available && (
         <div style={{ padding: 10, background: 'var(--gray-50)', borderRadius: 8, marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
           <input id="order-flyer-toggle" type="checkbox" checked={attachFlyer} onChange={e => onToggleFlyer(e.target.checked)} />
@@ -681,6 +727,8 @@ export function SendOrderModal({ preview, kunde, onKundeSaved, onClose, onSent }
             style={{ padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13.5, lineHeight: 1.55, fontFamily: 'inherit' }} />
         </label>
       </div>
+      </>
+      )}
     </Modal>
   );
 }

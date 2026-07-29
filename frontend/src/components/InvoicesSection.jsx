@@ -174,6 +174,9 @@ export function SendInvoiceMailModal({ invoice, kunde, onKundeSaved, onClose, on
 
   useEffect(() => {
     if (!invoice) { setPreview(null); return; }
+    // Anrede zuerst — die Vorschau (Du/Sie) wird erst nach der Wahl generiert und
+    // nach dem Speichern der Anrede automatisch neu geladen.
+    if (kunde && anredeOffen(kunde)) { setPreview(null); return; }
     setErr('');
     api(`/invoices/${invoice.id}/email-preview`)
       .then(p => {
@@ -183,7 +186,7 @@ export function SendInvoiceMailModal({ invoice, kunde, onKundeSaved, onClose, on
         setBody(p.body || '');
       })
       .catch(e => setErr(e.message));
-  }, [invoice?.id]);
+  }, [invoice?.id, kunde?.anrede_form]);
 
   if (!invoice) return null;
 
@@ -225,7 +228,9 @@ export function SendInvoiceMailModal({ invoice, kunde, onKundeSaved, onClose, on
       )}
 
       {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
-      {!preview && !err && <div>Lade Vorschau…</div>}
+      {kunde && anredeOffen(kunde)
+        ? <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Bitte oben zuerst die Anrede festlegen — danach wird der Mail-Text in der passenden Form (Du/Sie) erzeugt und angezeigt.</div>
+        : (!preview && !err && <div>Lade Vorschau…</div>)}
 
       {preview && (
         <div style={{ display: 'grid', gap: 12 }}>

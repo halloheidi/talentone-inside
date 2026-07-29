@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Modal from './Modal.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 import AnredeAbfrage from './AnredeAbfrage.jsx';
-import { anredeOffen } from '../lib/anrede.js';
+import { anredeOffen, anrede } from '../lib/anrede.js';
 import { api } from '../lib/api.js';
 
 // Termin-Einladung senden. Kontext = Job (endpoint=/jobs/:id/export/termin-einladung)
@@ -46,12 +46,14 @@ export default function TerminEinladungModal({
     const personen = config[terminKey].personen || [];
     if (personen.length === 1) setPersonKey(personen[0].key);
     else if (!personen.some(p => p.key === personKey)) setPersonKey('');
-    // Betreff + Text-Default aus Config vorbelegen
+    // Betreff + Text-Default aus Config vorbelegen. Der Mail-Text wird in der am
+    // Kunden gesetzten Anrede (Du/Sie) erzeugt — erst wenn diese feststeht.
     setSubject(config[terminKey].subject || '');
-    const gruss = kunde?.ansprechpartner || 'zusammen';
-    setCustomText(`Hallo ${gruss},\n\n${config[terminKey].intro || ''}`);
+    setCustomText(anredeOffen(kunde)
+      ? ''
+      : `${anrede(kunde)},\n\n${config[terminKey].intro || ''}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [terminKey, config]);
+  }, [terminKey, config, kunde?.anrede_form]);
 
   const verfuegbarePersonen = useMemo(() => {
     return config?.[terminKey]?.personen || [];
@@ -144,10 +146,16 @@ export default function TerminEinladungModal({
               <span>Betreff</span>
               <input value={subject} onChange={e => setSubject(e.target.value)} />
             </label>
-            <label className="field field-full">
-              <span>Mail-Text (Du-Form, editierbar)</span>
-              <textarea rows={7} value={customText} onChange={e => setCustomText(e.target.value)} />
-            </label>
+            {anredeOffen(kunde) ? (
+              <div className="field-full" style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                Bitte oben zuerst die Anrede festlegen — danach wird der Mail-Text in der passenden Form (Du/Sie) erzeugt und lässt sich hier prüfen.
+              </div>
+            ) : (
+              <label className="field field-full">
+                <span>Mail-Text (editierbar)</span>
+                <textarea rows={7} value={customText} onChange={e => setCustomText(e.target.value)} />
+              </label>
+            )}
           </div>
 
           {linkPreview && (

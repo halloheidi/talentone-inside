@@ -34,6 +34,7 @@ export default function JobExport() {
   const [showReminder, setShowReminder] = useState(false);
   const [reminderText, setReminderText] = useState('');
   const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderKunde, setReminderKunde] = useState(null);
   const [showManuell, setShowManuell] = useState(false);
   const [manuellForm, setManuellForm] = useState({ status: 'freigegeben', notiz: '' });
   const [manuellBusy, setManuellBusy] = useState(false);
@@ -56,6 +57,8 @@ export default function JobExport() {
   const [mailMsg, setMailMsg] = useState('');
   const [mailErr, setMailErr] = useState(false); // Fehler (rot) vs. Erfolg (neutral)
   const [anschreibensBusy, setAnschreibensBusy] = useState(false);
+  const [mailIntent, setMailIntent] = useState({ mode: 'first', kontext: 'entwurf' });
+  const [mailKunde, setMailKunde] = useState(null); // Kunde-Override nach Anrede-Wahl im Modal
 
   // Versand-Historie + Review
   const [versand, setVersand] = useState([]);
@@ -207,49 +210,74 @@ export default function JobExport() {
   // gewinnt, neue Runde nur mit echter Kundenreaktion) — der Modus hier ist nur
   // die Absicht der UI, nicht die alleinige Wahrheit.
   function openMailModal(mode = 'first', kontext = 'entwurf') {
-    if (kontext === 'update') {
-      // Kampagnen-Update: neue/optimierte Creatives während der Live-Phase.
-      // Intro-Text kommt serverseitig dazu — hier nur ein optionaler Zusatz.
-      setMailForm({
-        to: kunde?.email || '',
-        betreff: '', // Server setzt "Neue Werbeanzeigen … — Update N"
-        anschreiben: '',
-        include_funnel: !!data?.funnel_url,
-        resend_mode: mode === 'same_round' ? 'same_round' : (mode === 'new_round' ? 'new_round' : 'first'),
-        mailKontext: 'update',
-      });
-      setMailMsg('');
-      setMailErr(false);
-      setShowMail(true);
-      return;
-    }
-    const istResend = mode === 'same_round';
-    const istNeueRunde = mode === 'new_round';
-    const anschreibenDefault = istResend
-      ? t(kunde,
-          `Hallo ${kunde?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`,
-          `${anrede(kunde)},\n\nhier nochmal Ihre Entwürfe zur Freigabe — falls die letzte Mail bei Ihnen untergegangen ist.\n\nSie können auf der Review-Seite wieder kommentieren oder direkt freigeben.`)
-      : '';
+    setMailIntent({ mode, kontext });
+    setMailKunde(kunde);
     setMailForm({
       to: kunde?.email || '',
-      betreff: istNeueRunde
-        ? t(kunde, `Deine überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`, `Ihre überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`)
-        : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'),
-      anschreiben: anschreibenDefault,
+      betreff: '',
+      anschreiben: '',
       include_funnel: !!data?.funnel_url,
-      resend_mode: mode,
+      resend_mode: kontext === 'update'
+        ? (mode === 'same_round' ? 'same_round' : (mode === 'new_round' ? 'new_round' : 'first'))
+        : mode,
+      mailKontext: kontext,
     });
     setMailMsg('');
     setMailErr(false);
     setShowMail(true);
+    // Ist die Anrede noch offen, wird der Text erst NACH der Du/Sie-Wahl erzeugt
+    // (onMailAnredeSaved). Sonst sofort in der bereits gesetzten Form.
+    if (!anredeOffen(kunde)) applyMailDefaults(mode, kontext, kunde);
+  }
+
+  // Erzeugt Betreff/Anschreiben in der korrekten Anrede — erst wenn Du/Sie feststeht.
+  // Beim Update kommt Betreff + Intro serverseitig; hier bleibt der Zusatz leer.
+  function applyMailDefaults(mode, kontext, k) {
+    if (kontext === 'update') return;
+    const istResend = mode === 'same_round';
+    const istNeueRunde = mode === 'new_round';
+    const anschreibenDefault = istResend
+      ? t(k,
+          `Hallo ${k?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`,
+          `${anrede(k)},\n\nhier nochmal Ihre Entwürfe zur Freigabe — falls die letzte Mail bei Ihnen untergegangen ist.\n\nSie können auf der Review-Seite wieder kommentieren oder direkt freigeben.`)
+      : '';
+    setMailForm(prev => ({
+      ...prev,
+      betreff: istNeueRunde
+        ? t(k, `Deine überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`, `Ihre überarbeiteten Entwürfe — Runde ${(Number(review?.runde) || 1) + 1}`)
+        : t(k, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'),
+      anschreiben: anschreibenDefault,
+    }));
     if (!istResend) {
-      // KI-Anschreiben-Vorschlag für Erstversand + neue Runde
       setAnschreibensBusy(true);
       api(`/jobs/${job.id}/export/anschreiben`, { method: 'POST' })
         .then(r => setMailForm(prev => ({ ...prev, anschreiben: r.text || prev.anschreiben })))
         .catch(() => {})
         .finally(() => setAnschreibensBusy(false));
     }
+  }
+
+  // Nach der Anrede-Wahl im Mail-Modal: Kunde aktualisieren + Text jetzt erzeugen.
+  function onMailAnredeSaved(k) {
+    setMailKunde(k);
+    reload?.();
+    applyMailDefaults(mailIntent.mode, mailIntent.kontext, k);
+  }
+
+  function buildReminderText(k) {
+    return t(k,
+      `Hallo ${k?.ansprechpartner || 'zusammen'},\n\nvor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback.\n\nBei Fragen melde dich gerne jederzeit!`,
+      `${anrede(k)},\n\nvor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Haben Sie schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback.\n\nBei Fragen melden Sie sich gerne jederzeit!`);
+  }
+  function openReminder() {
+    setReminderKunde(kunde);
+    setReminderText(anredeOffen(kunde) ? '' : buildReminderText(kunde));
+    setShowReminder(true);
+  }
+  function onReminderAnredeSaved(k) {
+    setReminderKunde(k);
+    reload?.();
+    setReminderText(buildReminderText(k));
   }
 
   async function sendMail() {
@@ -417,11 +445,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
           {kannReminderSenden && (
             <button
               className="btn-ghost btn-sm"
-              onClick={() => {
-                const grus = kunde?.ansprechpartner || 'zusammen';
-                setReminderText(`Hallo ${grus},\n\nvor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback.\n\nBei Fragen melde dich gerne jederzeit!`);
-                setShowReminder(true);
-              }}
+              onClick={openReminder}
               disabled={!kunde?.email}
               title="Freundlichen Reminder mit Review-Link senden"
             >🔔 Reminder senden</button>
@@ -778,11 +802,11 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
           <>
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
             {mailForm.mailKontext === 'update' ? (
-              <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim()}>
+              <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : '📬 Update senden'}
               </button>
             ) : (
-              <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim()}>
+              <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : 'Weiter zum Check…'}
               </button>
             )}
@@ -795,26 +819,40 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             : <>Mail mit den ausgewählten Creatives ({selectedCreatives.size}), Ad-Copies ({selectedAdcopies.size})
               {mailForm.include_funnel && funnel?.veroeffentlicht ? ' und Funnel-Link' : ''} wird an den Kunden gesendet.</>}
         </p>
-        <div className="form-grid">
-          <label className="field field-full">
-            <span>An</span>
-            <input type="email" value={mailForm.to} onChange={e => setMailForm({ ...mailForm, to: e.target.value })} />
-          </label>
-          <label className="field field-full">
-            <span>Betreff</span>
-            <input value={mailForm.betreff} onChange={e => setMailForm({ ...mailForm, betreff: e.target.value })} />
-          </label>
-          <label className="field field-full">
-            <span>Anschreiben {anschreibensBusy && <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>(KI generiert…)</span>}</span>
-            <textarea rows={5} value={mailForm.anschreiben} onChange={e => setMailForm({ ...mailForm, anschreiben: e.target.value })} />
-          </label>
-          {data?.funnel_url && (
-            <label className="field-checkbox">
-              <input type="checkbox" checked={mailForm.include_funnel} onChange={e => setMailForm({ ...mailForm, include_funnel: e.target.checked })} />
-              <span>Funnel-Link „Vorschau ansehen" mit einbinden</span>
+
+        {/* Anrede zuerst — der Mail-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
+        <AnredeAbfrage kunde={mailKunde || kunde} onSaved={onMailAnredeSaved} />
+
+        {anredeOffen(mailKunde || kunde) ? (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: '4px 2px' }}>
+            Bitte oben zuerst festlegen, wie wir den Kunden ansprechen — danach wird der Mail-Text in der passenden Form (Du/Sie) erzeugt und lässt sich hier prüfen.
+          </div>
+        ) : (
+          <div className="form-grid">
+            <label className="field field-full">
+              <span>An</span>
+              <input type="email" value={mailForm.to} onChange={e => setMailForm({ ...mailForm, to: e.target.value })} />
             </label>
-          )}
-        </div>
+            {mailForm.mailKontext !== 'update' && (
+              <>
+                <label className="field field-full">
+                  <span>Betreff</span>
+                  <input value={mailForm.betreff} onChange={e => setMailForm({ ...mailForm, betreff: e.target.value })} />
+                </label>
+                <label className="field field-full">
+                  <span>Anschreiben {anschreibensBusy && <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>(KI generiert…)</span>}</span>
+                  <textarea rows={5} value={mailForm.anschreiben} onChange={e => setMailForm({ ...mailForm, anschreiben: e.target.value })} />
+                </label>
+              </>
+            )}
+            {data?.funnel_url && (
+              <label className="field-checkbox">
+                <input type="checkbox" checked={mailForm.include_funnel} onChange={e => setMailForm({ ...mailForm, include_funnel: e.target.checked })} />
+                <span>Funnel-Link „Vorschau ansehen" mit einbinden</span>
+              </label>
+            )}
+          </div>
+        )}
         {mailMsg && (
           <div className={`form-msg${mailErr ? ' alert alert-error' : ''}`}
             style={{ marginTop: 10, ...(mailErr ? { color: '#b00020', fontWeight: 600 } : {}) }}>
@@ -854,7 +892,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowReminder(false)} disabled={reminderBusy}>Abbrechen</button>
-            <button className="btn-primary" disabled={reminderBusy || !kunde?.email}
+            <button className="btn-primary" disabled={reminderBusy || !kunde?.email || anredeOffen(reminderKunde || kunde)}
               onClick={async () => {
                 setReminderBusy(true);
                 try {
@@ -863,6 +901,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
                     body: { to: kunde?.email, customText: reminderText.trim() || null },
                   });
                   api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
+                  api(`/jobs/${job.id}/aktivitaet`).then(a => setAktivitaet(a.events || [])).catch(() => {});
                   setShowReminder(false);
                 } catch (err) { alert(`Senden fehlgeschlagen: ${err.message}`); }
                 finally { setReminderBusy(false); }
@@ -877,10 +916,18 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
           Kurze Nachfrage an <strong>{kunde?.email}</strong>. Enthält den Review-Link zur Freigabe.
         </p>
         <CloseLeadWarnung kunde={kunde} onSaved={() => reload?.()} />
-        <label className="field field-full">
-          <span>Text (Du-Form, editierbar)</span>
-          <textarea rows={9} value={reminderText} onChange={e => setReminderText(e.target.value)} />
-        </label>
+        {/* Anrede zuerst — der Reminder-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
+        <AnredeAbfrage kunde={reminderKunde || kunde} onSaved={onReminderAnredeSaved} />
+        {anredeOffen(reminderKunde || kunde) ? (
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: '4px 2px' }}>
+            Bitte oben zuerst die Anrede festlegen — danach wird der Reminder-Text in der passenden Form (Du/Sie) erzeugt.
+          </div>
+        ) : (
+          <label className="field field-full">
+            <span>Text (editierbar)</span>
+            <textarea rows={9} value={reminderText} onChange={e => setReminderText(e.target.value)} />
+          </label>
+        )}
       </Modal>
 
       {/* ─────── Kunde hat manuell geantwortet ─────── */}
