@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import { t } from '../lib/anrede.js';
 
@@ -40,6 +40,9 @@ const BRANDING = {
 
 export default function PublicReview() {
   const { token } = useParams();
+  const [searchParams] = useSearchParams();
+  const kontext = searchParams.get('kontext') === 'update' ? 'update' : 'entwurf';
+  const istUpdate = kontext === 'update';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [kommentare, setKommentare] = useState({}); // { 'creative_<id>': 'text', 'adcopy_<id>': 'text', 'general': 'text' }
@@ -50,7 +53,7 @@ export default function PublicReview() {
   const [avvName, setAvvName] = useState('');
 
   useEffect(() => {
-    publicApi(`/review/${token}`)
+    publicApi(`/review/${token}${istUpdate ? '?kontext=update' : ''}`)
       .then(d => {
         setData(d);
         // Vorhandene Kommentare laden
@@ -79,13 +82,19 @@ export default function PublicReview() {
     // Bei Aenderungswuenschen ist eine Nachfrage nicht noetig (Kunde hat ja
     // schon Text im Feld).
     if (status === 'freigegeben') {
-      const ok = window.confirm(t(data?.kunde,
-        'Möchtest du wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
-        'Danach wird sofort mit der Umsetzung gestartet. Falls du noch Änderungen möchtest, ' +
-        'klick stattdessen auf "Änderungswünsche senden".',
-        'Möchten Sie wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
-        'Danach wird sofort mit der Umsetzung gestartet. Falls Sie noch Änderungen möchten, ' +
-        'klicken Sie stattdessen auf "Änderungswünsche senden".'
+      const ok = window.confirm(istUpdate
+        ? t(data?.kunde,
+            'Möchtest du die neuen Werbeanzeigen freigeben? Wir schalten sie dann zeitnah live.\n\n' +
+            'Falls du noch Änderungen möchtest, klick stattdessen auf "Änderungswünsche senden".',
+            'Möchten Sie die neuen Werbeanzeigen freigeben? Wir schalten sie dann zeitnah live.\n\n' +
+            'Falls Sie noch Änderungen möchten, klicken Sie stattdessen auf "Änderungswünsche senden".')
+        : t(data?.kunde,
+            'Möchtest du wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
+            'Danach wird sofort mit der Umsetzung gestartet. Falls du noch Änderungen möchtest, ' +
+            'klick stattdessen auf "Änderungswünsche senden".',
+            'Möchten Sie wirklich ALLE Entwürfe freigeben und die Kampagne live schalten?\n\n' +
+            'Danach wird sofort mit der Umsetzung gestartet. Falls Sie noch Änderungen möchten, ' +
+            'klicken Sie stattdessen auf "Änderungswünsche senden".'
       ));
       if (!ok) return;
     }
@@ -103,9 +112,9 @@ export default function PublicReview() {
       const cleaned = Object.fromEntries(
         Object.entries(kommentare).filter(([, v]) => (v || '').trim())
       );
-      const body = { status, kommentare: cleaned };
+      const body = { status, kommentare: cleaned, kontext };
       if (avvErforderlich) { body.avv_akzeptiert = true; body.avv_name = avvName.trim(); }
-      await publicApi(`/review/${token}`, { method: 'POST', body });
+      await publicApi(`/review/${token}${istUpdate ? '?kontext=update' : ''}`, { method: 'POST', body });
       setDone(status);
     } catch (err) {
       alert(err.message);
@@ -142,27 +151,31 @@ export default function PublicReview() {
 
       <main className="review-main">
         <div className="review-hero">
-          <p className="review-eyebrow">Entwürfe zur Freigabe</p>
+          <p className="review-eyebrow">{istUpdate ? 'Kampagnen-Update zur Freigabe' : 'Entwürfe zur Freigabe'}</p>
           <h1 className="review-h1">{job?.stelle || 'Stelle'}{kunde?.firmenname ? <> · <span style={{ color: 'var(--rv-primary)' }}>{kunde.firmenname}</span></> : ''}</h1>
-          <p className="review-intro">{t(kunde,
-            'Schau dir die ersten Entwürfe in Ruhe an. Bei Bedarf kannst du pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.',
-            'Schauen Sie sich die ersten Entwürfe in Ruhe an. Bei Bedarf können Sie pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.')}</p>
+          <p className="review-intro">{istUpdate
+            ? t(kunde,
+                'Wir haben neue Werbeanzeigen für deine laufende Kampagne erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei, damit wir sie live schalten können.',
+                'Wir haben neue Werbeanzeigen für Ihre laufende Kampagne erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei, damit wir sie live schalten können.')
+            : t(kunde,
+                'Schau dir die ersten Entwürfe in Ruhe an. Bei Bedarf kannst du pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.',
+                'Schauen Sie sich die ersten Entwürfe in Ruhe an. Bei Bedarf können Sie pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.')}</p>
         </div>
 
         {done && (
           <div className={`review-done review-done-${done}`}>
             {done === 'freigegeben'
-              ? <><strong>✅ {t(kunde, 'Du hast die Entwürfe freigegeben.', 'Sie haben die Entwürfe freigegeben.')}</strong><br/>Vielen Dank! Wir starten direkt mit der Umsetzung.</>
+              ? <><strong>✅ {istUpdate ? t(kunde, 'Du hast die neuen Anzeigen freigegeben.', 'Sie haben die neuen Anzeigen freigegeben.') : t(kunde, 'Du hast die Entwürfe freigegeben.', 'Sie haben die Entwürfe freigegeben.')}</strong><br/>Vielen Dank! Wir schalten sie zeitnah live.</>
               : <><strong>📝 {t(kunde, 'Deine Änderungswünsche sind angekommen.', 'Ihre Änderungswünsche sind angekommen.')}</strong><br/>Wir setzen sie um und melden uns sobald die neue Version bereit ist.</>}
           </div>
         )}
 
         {/* Vorherige Runden — einklappbar */}
-        <VorherigeRunden runden={data.vorherige_runden || []} creatives={creatives} adcopies={adcopies} kunde={kunde} />
+        <VorherigeRunden runden={data.vorherige_runden || []} creatives={creatives} adcopies={adcopies} kunde={kunde} istUpdate={istUpdate} />
 
         {(data.review?.runde || 1) > 1 && !done && (
           <div style={{ padding: '10px 14px', marginBottom: 16, borderRadius: 10, background: '#fef3c7', border: '1px solid #fbbf24', color: '#92400e', fontSize: 13 }}>
-            🔄 <strong>Runde {data.review.runde}</strong> — {t(kunde, 'Danke für dein Feedback!', 'Danke für Ihr Feedback!')} Wir haben die Entwürfe überarbeitet.
+            🔄 <strong>{istUpdate ? `Update ${data.review.runde}` : `Runde ${data.review.runde}`}</strong> — {t(kunde, 'Danke für dein Feedback!', 'Danke für Ihr Feedback!')} Wir haben die Anzeigen überarbeitet.
           </div>
         )}
 
@@ -339,10 +352,11 @@ export default function PublicReview() {
  * „Dein Feedback aus Runde N" — einklappbar. Nur sichtbar, wenn es
  * mindestens eine vorherige abgeschlossene Runde gibt.
  */
-function VorherigeRunden({ runden, creatives, adcopies, kunde }) {
+function VorherigeRunden({ runden, creatives, adcopies, kunde, istUpdate }) {
   const [open, setOpen] = useState(false);
   const withKommentare = (runden || []).filter(r => r.kommentare && Object.keys(r.kommentare).length > 0);
   if (withKommentare.length === 0) return null;
+  const rundeLabel = (n) => `${istUpdate ? 'Update' : 'Runde'} ${n || 1}`;
 
   return (
     <section style={{ marginBottom: 20 }}>
@@ -356,12 +370,12 @@ function VorherigeRunden({ runden, creatives, adcopies, kunde }) {
         }}
       >
         <span>{open ? '▼' : '▶'}</span>
-        {t(kunde, 'Dein Feedback aus ', 'Ihr Feedback aus ')}{withKommentare.length === 1 ? `Runde ${withKommentare[0].runde || 1}` : `${withKommentare.length} vorherigen Runden`}
+        {t(kunde, 'Dein Feedback aus ', 'Ihr Feedback aus ')}{withKommentare.length === 1 ? rundeLabel(withKommentare[0].runde) : `${withKommentare.length} vorherigen Runden`}
       </button>
       {open && withKommentare.map(r => (
         <div key={r.id} style={{ marginTop: 10, padding: 14, borderRadius: 10, background: '#fafaf8', border: '1px solid var(--rv-line, #ddd)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--rv-ink-3, #5a5955)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.04 }}>
-            Runde {r.runde || 1} · {r.updated_at ? new Date(r.updated_at).toLocaleDateString('de-DE') : ''}
+            {rundeLabel(r.runde)} · {r.updated_at ? new Date(r.updated_at).toLocaleDateString('de-DE') : ''}
           </div>
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
             {Object.entries(r.kommentare || {}).filter(([, v]) => (v || '').trim()).map(([key, text]) => {

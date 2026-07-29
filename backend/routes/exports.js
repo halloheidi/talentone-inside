@@ -310,6 +310,135 @@ router.post('/jobs/:id/export/email', async (req, res) => {
   }
 });
 
+/* POST /api/jobs/:id/export/kampagne-update
+   Kampagnen-Update während der Live-Phase: neue/optimierte Creatives, die der Kunde
+   freigeben muss, bevor sie live gehen. Eigener Review-Strom (kontext='update') mit
+   getrennter Runden-Zählung ("Update N"). Der Projekt-Status bleibt 'live' — es wird
+   nur der Sub-Status update_feedback_status='offen' gesetzt.
+   body: { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel, resend_mode } */
+router.post('/jobs/:id/export/kampagne-update', async (req, res) => {
+  const { to, betreff, anschreiben, creative_ids, adcopy_ids, include_funnel, resend_mode } = req.body || {};
+  if (!to?.trim()) return res.status(400).json({ error: 'Empfänger-Mail fehlt.' });
+  const resendHint = normalizeResendMode(resend_mode);
+
+  try {
+    const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
+    const baseUrl = getPublicBaseUrl(kunde?.agentur);
+    const selCreatives = filterByIds(creatives, creative_ids);
+    const selAdcopies = filterByIds(adcopies, adcopy_ids);
+    const funnelUrl = !include_funnel || !funnel?.id ? null
+      : (funnel.extern && funnel.extern_url) ? funnel.extern_url
+      : `${baseUrl}/f/${funnel.id}`;
+    const sheetUrl = include_funnel && funnel?.extern_sheet_url ? funnel.extern_sheet_url : null;
+
+    const reviewToken = await ensureReviewToken(job.id, job.review_token);
+    const reviewUrl = `${baseUrl}/review/${reviewToken}?kontext=update`;
+
+    // Nur Update-Runden betrachten (getrennte Zählung von den Entwurfs-Runden)
+    const { data: latestReview } = await supabase.from('talentone_reviews')
+      .select('id, runde, status, manuell_beantwortet')
+      .eq('job_id', job.id).eq('kontext', 'update')
+      .order('runde', { ascending: false }).limit(1).maybeSingle();
+    const { data: frueherVersand } = await supabase.from('talentone_versand')
+      .select('id').eq('job_id', job.id).like('typ', 'update_runde_%').limit(1).maybeSingle();
+    const hatteVersand = !!frueherVersand;
+    const hatKundenReaktion = !!(latestReview && (
+      ['aenderungen', 'freigegeben'].includes(latestReview.status) || latestReview.manuell_beantwortet
+    ));
+    const variante = resolveVersandVariante({ resendHint, hatteVersand, hatKundenReaktion });
+    const istNeueRunde = variante === 'neue_runde';
+    const neueRundeNr = istNeueRunde
+      ? ((Number(latestReview?.runde) || 0) + 1)
+      : (Number(latestReview?.runde) || 1);
+
+    if (variante === 'erstversand' && !latestReview) {
+      await supabase.from('talentone_reviews').insert({
+        job_id: job.id, token: reviewToken, kontext: 'update',
+        status: 'offen', kommentare: null, kommentare_snapshot: null, runde: 1,
+      });
+    } else if (istNeueRunde) {
+      await supabase.from('talentone_reviews').insert({
+        job_id: job.id, token: reviewToken, kontext: 'update',
+        status: 'offen', kommentare: null, kommentare_snapshot: null, runde: neueRundeNr,
+      });
+    } else if (latestReview?.id) {
+      await supabase.from('talentone_reviews')
+        .update({ status: 'offen', kommentare: null, kommentare_snapshot: null,
+                  manuell_beantwortet: false, manuell_notiz: null,
+                  reminder_intern_gesendet_at: null,
+                  updated_at: new Date().toISOString() })
+        .eq('id', latestReview.id);
+    }
+
+    const standardBetreff = t(kunde,
+      `Neue Werbeanzeigen für deine Kampagne — Update ${neueRundeNr} 📬`,
+      `Neue Werbeanzeigen für Ihre Kampagne — Update ${neueRundeNr} 📬`);
+    const finalBetreff = (betreff || '').trim() || standardBetreff;
+    const introPrefix = t(kunde,
+      'wir haben neue Werbeanzeigen für deine Kampagne erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei, damit wir sie live schalten können:',
+      'wir haben neue Werbeanzeigen für Ihre Kampagne erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei, damit wir sie live schalten können:');
+    const finalAnschreiben = `${introPrefix}\n\n${anschreiben || ''}`.trim();
+
+    await sendEntwurfsMail({
+      to: to.trim(),
+      betreff: finalBetreff, anschreiben: finalAnschreiben,
+      job, kunde,
+      creatives: selCreatives, adcopies: selAdcopies,
+      funnelUrl, sheetUrl, reviewUrl, avvUrl: null,
+      variant: 'update',
+    });
+
+    const historyTyp = variante === 'resend' ? `update_resend_${neueRundeNr}` : `update_runde_${neueRundeNr}`;
+    await supabase.from('talentone_versand').insert({
+      job_id: job.id,
+      empfaenger: to.trim(),
+      betreff: variante === 'resend' ? `↩️ Update ${neueRundeNr} erneut gesendet — ${finalBetreff}` : finalBetreff,
+      gesendet_von: req.user?.email || null,
+      typ: historyTyp,
+      inhalte: {
+        creative_ids: selCreatives.map(c => c.id),
+        adcopy_ids: selAdcopies.map(a => a.id),
+        funnel_url: funnelUrl,
+        anschreiben: finalAnschreiben,
+        runde: neueRundeNr,
+        kontext: 'update',
+        variante,
+        resend_mode: resend_mode || null,
+      },
+    });
+
+    notifyKunde(kunde, `📬 Kampagnen-Update (Update ${neueRundeNr}) an Kunden gesendet — ${selCreatives.length} Creative(s) · ${new Date().toLocaleDateString('de-DE')}`)
+      .catch(err => console.warn('[export/kampagne-update close-note]', err.message));
+
+    // Projekt bleibt live — nur Sub-Status "Update-Feedback offen" setzen.
+    if (kunde?.id) {
+      try {
+        const { data: projekt } = await supabase.from('talentone_projekte')
+          .select('id, status').eq('kunde_id', kunde.id)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (projekt) {
+          await supabase.from('talentone_projekte').update({
+            update_feedback_status: 'offen',
+            update_feedback_seit: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', projekt.id);
+          await supabase.from('talentone_kommentare').insert({
+            projekt_id: projekt.id,
+            autor: req.user?.email || 'System',
+            text: `📬 Kampagnen-Update (Update ${neueRundeNr}) an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')} — wartet auf Freigabe`,
+            quelle: 'system',
+          });
+        }
+      } catch (err) { console.warn('[export/kampagne-update] Projekt-Sync:', err.message); }
+    }
+
+    res.json({ ok: true, runde: neueRundeNr, ist_neue_runde: istNeueRunde });
+  } catch (err) {
+    console.error('[export/kampagne-update]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
 /* POST /api/jobs/:id/export/reaktivierung
    body: { to, customText, creative_ids?, create_close_task?, ansprechpartner? } */
 router.post('/jobs/:id/export/reaktivierung', async (req, res) => {
@@ -380,9 +509,12 @@ router.get('/jobs/:id/export/versand', async (req, res) => {
    Status-Chip. `runden` ist die absteigend sortierte Liste aller
    abgeschlossenen Runden — Grundlage für die Timeline im Export-Tab. */
 router.get('/jobs/:id/export/review', async (req, res) => {
+  // Nur Entwurfs-Runden — der Review-Status-Block im Export-Tab bezieht sich auf die
+  // Entwurfsphase. Kampagnen-Update-Feedback wird über Badge/Timeline/Nächster-Schritt
+  // sichtbar gemacht, nicht hier.
   const { data, error } = await supabase
     .from('talentone_reviews')
-    .select('*').eq('job_id', req.params.id)
+    .select('*').eq('job_id', req.params.id).eq('kontext', 'entwurf')
     .order('runde', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   const runden = data || [];
@@ -591,9 +723,9 @@ router.post('/jobs/:id/export/review-manuell', async (req, res) => {
     const { data: kunde } = await supabase.from('talentone_kunden')
       .select('id, firmenname, agentur, close_lead_id, email').eq('id', job.kunde_id).maybeSingle();
 
-    // Aktuelle (hoechste) Runde suchen — analog Public-Review-Endpoint
+    // Aktuelle (hoechste) Entwurfs-Runde suchen — dieser Pfad gehört zum Entwurfs-Flow.
     const { data: existing } = await supabase
-      .from('talentone_reviews').select('id, runde').eq('job_id', job.id)
+      .from('talentone_reviews').select('id, runde').eq('job_id', job.id).eq('kontext', 'entwurf')
       .order('runde', { ascending: false }).limit(1).maybeSingle();
 
     const patch = {
@@ -635,14 +767,22 @@ router.post('/jobs/:id/export/review-manuell', async (req, res) => {
           quelle: 'review',
         });
 
-        // Kanban-Automatik: Freigabe → 'go', Aenderungen → 'feedbackschleife'
-        let newStatus = null;
-        if (status === 'freigegeben' && projekt.status !== 'live') newStatus = 'go';
-        if (status === 'aenderungen') newStatus = 'feedbackschleife';
-        if (newStatus && newStatus !== projekt.status) {
-          await supabase.from('talentone_projekte')
-            .update({ status: newStatus, updated_at: new Date().toISOString() })
-            .eq('id', projekt.id);
+        // Kanban-Automatik. Live-Kampagne bleibt live — nur Sub-Status steuern,
+        // damit eine laufende Kampagne nicht in "Feedbackschleife" zurückfällt.
+        if (projekt.status === 'live') {
+          const p = { updated_at: new Date().toISOString() };
+          if (status === 'freigegeben') { p.update_feedback_status = null; p.update_feedback_seit = null; }
+          else if (status === 'aenderungen') { p.update_feedback_status = 'ueberarbeitung'; p.update_feedback_seit = new Date().toISOString(); }
+          await supabase.from('talentone_projekte').update(p).eq('id', projekt.id);
+        } else {
+          let newStatus = null;
+          if (status === 'freigegeben') newStatus = 'go';
+          if (status === 'aenderungen') newStatus = 'feedbackschleife';
+          if (newStatus && newStatus !== projekt.status) {
+            await supabase.from('talentone_projekte')
+              .update({ status: newStatus, updated_at: new Date().toISOString() })
+              .eq('id', projekt.id);
+          }
         }
 
         // Close-Note (best-effort)

@@ -50,7 +50,7 @@ export default function JobExport() {
   // Mail-Modal
   const [showMail, setShowMail] = useState(false);
   const [mailForm, setMailForm] = useState({
-    to: '', betreff: '', anschreiben: '', include_funnel: true,
+    to: '', betreff: '', anschreiben: '', include_funnel: true, mailKontext: 'entwurf',
   });
   const [mailBusy, setMailBusy] = useState(false);
   const [mailMsg, setMailMsg] = useState('');
@@ -206,7 +206,23 @@ export default function JobExport() {
   // leitet die Variante zusaetzlich aus dem echten Zustand ab (Erstversand
   // gewinnt, neue Runde nur mit echter Kundenreaktion) — der Modus hier ist nur
   // die Absicht der UI, nicht die alleinige Wahrheit.
-  function openMailModal(mode = 'first') {
+  function openMailModal(mode = 'first', kontext = 'entwurf') {
+    if (kontext === 'update') {
+      // Kampagnen-Update: neue/optimierte Creatives während der Live-Phase.
+      // Intro-Text kommt serverseitig dazu — hier nur ein optionaler Zusatz.
+      setMailForm({
+        to: kunde?.email || '',
+        betreff: '', // Server setzt "Neue Werbeanzeigen … — Update N"
+        anschreiben: '',
+        include_funnel: !!data?.funnel_url,
+        resend_mode: mode === 'same_round' ? 'same_round' : (mode === 'new_round' ? 'new_round' : 'first'),
+        mailKontext: 'update',
+      });
+      setMailMsg('');
+      setMailErr(false);
+      setShowMail(true);
+      return;
+    }
     const istResend = mode === 'same_round';
     const istNeueRunde = mode === 'new_round';
     const anschreibenDefault = istResend
@@ -242,7 +258,8 @@ export default function JobExport() {
     setMailMsg('');
     setMailErr(false);
     try {
-      await api(`/jobs/${job.id}/export/email`, {
+      const endpoint = mailForm.mailKontext === 'update' ? 'kampagne-update' : 'email';
+      await api(`/jobs/${job.id}/export/${endpoint}`, {
         method: 'POST',
         body: {
           to: mailForm.to,
@@ -255,10 +272,11 @@ export default function JobExport() {
         },
       });
       setMailErr(false);
-      setMailMsg('Mail verschickt!');
-      // Historie + Review nachladen
+      setMailMsg(mailForm.mailKontext === 'update' ? 'Kampagnen-Update verschickt!' : 'Mail verschickt!');
+      // Historie + Review + Aktivitäts-Timeline nachladen
       api(`/jobs/${job.id}/export/versand`).then(v => setVersand(v.versand || [])).catch(() => {});
       api(`/jobs/${job.id}/export/review`).then(r => { setReview(r.review); setRunden(r.runden || []); }).catch(() => {});
+      api(`/jobs/${job.id}/aktivitaet`).then(a => setAktivitaet(a.events || [])).catch(() => {});
       setTimeout(() => setShowMail(false), 1200);
     } catch (err) {
       // Fehler sichtbar machen (rot) + Button wieder freigeben. Der stumme
@@ -343,8 +361,9 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
   const funnel = data?.funnel;
   const allCreativesSelected = creatives.length > 0 && selectedCreatives.size === creatives.length;
 
-  const letzterVersand = versand.find(v => v.typ !== 'reaktivierung' && v.typ !== 'kampagne_live' && v.typ !== 'entwurf_reminder' && v.typ !== 'kampagne_pause') || versand[0];
+  const letzterVersand = versand.find(v => (v.typ || '').startsWith('entwurf_')) || null;
   const letzterEntwurfsVersand = versand.find(v => (v.typ || '').startsWith('entwurf_runde_'));
+  const letzteKampagneUpdate = versand.find(v => (v.typ || '').startsWith('update_'));
   const letzterReminderVersand = versand.find(v => v.typ === 'entwurf_reminder');
   const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
   const letzteKampagneLive  = versand.find(v => v.typ === 'kampagne_live');
@@ -669,6 +688,20 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             </>
           );
         })()}
+        {/* Dritte Versand-Option: Kampagnen-Update während der Live-Phase.
+            Neue/optimierte Creatives, die der Kunde freigeben muss — der Projekt-
+            Status bleibt live. Nur sichtbar, wenn die Kampagne bereits live ist
+            (oder schon mal ein Update lief). */}
+        {(letzteKampagneLive || letzteKampagneUpdate) && (
+          <button
+            className="btn-ghost"
+            onClick={() => openMailModal('new_round', 'update')}
+            disabled={!kunde?.email}
+            title="Neue/optimierte Anzeigen dem Kunden zur Freigabe schicken (Kampagne läuft weiter)"
+          >
+            📬 Kampagnen-Update senden
+          </button>
+        )}
         <span
           style={{ display: 'block', flexBasis: '100%', fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}
         >
@@ -740,19 +773,27 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
       <Modal
         open={showMail}
         onClose={() => !mailBusy && setShowMail(false)}
-        title="Entwürfe an Kunden senden"
+        title={mailForm.mailKontext === 'update' ? '📬 Kampagnen-Update senden' : 'Entwürfe an Kunden senden'}
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
-            <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim()}>
-              {mailBusy ? 'Sende…' : 'Weiter zum Check…'}
-            </button>
+            {mailForm.mailKontext === 'update' ? (
+              <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim()}>
+                {mailBusy ? 'Sende…' : '📬 Update senden'}
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim()}>
+                {mailBusy ? 'Sende…' : 'Weiter zum Check…'}
+              </button>
+            )}
           </>
         }
       >
         <p className="pane-hint">
-          Mail mit den ausgewählten Creatives ({selectedCreatives.size}), Ad-Copies ({selectedAdcopies.size})
-          {mailForm.include_funnel && funnel?.veroeffentlicht ? ' und Funnel-Link' : ''} wird an den Kunden gesendet.
+          {mailForm.mailKontext === 'update'
+            ? <>Neue/optimierte Anzeigen ({selectedCreatives.size} Creatives, {selectedAdcopies.size} Ad-Copies) gehen an den Kunden zur <strong>Freigabe</strong>. Die Kampagne läuft weiter — erst nach dem Go des Kunden schalten wir die neuen Anzeigen live.</>
+            : <>Mail mit den ausgewählten Creatives ({selectedCreatives.size}), Ad-Copies ({selectedAdcopies.size})
+              {mailForm.include_funnel && funnel?.veroeffentlicht ? ' und Funnel-Link' : ''} wird an den Kunden gesendet.</>}
         </p>
         <div className="form-grid">
           <label className="field field-full">

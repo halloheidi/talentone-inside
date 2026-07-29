@@ -319,8 +319,19 @@ function escape(s = '') {
     .replace(/"/g, '&quot;');
 }
 
-export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl, avvUrl }) {
+export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl, avvUrl, variant = 'entwurf' }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const istUpdate = variant === 'update';
+  // Wortlaut je nach Variante — Entwurfs-Erstversand vs. Kampagnen-Update während der Live-Phase.
+  const eyebrow = istUpdate ? 'Kampagnen-Update zur Freigabe' : 'Entwürfe zur Freigabe';
+  const reviewHeadline = istUpdate ? 'Neue Anzeigen freigeben?' : 'Bereit für Feedback?';
+  const reviewIntro = istUpdate
+    ? t(kunde, 'Wir haben neue Werbeanzeigen erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei', 'Wir haben neue Werbeanzeigen erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei')
+    : t(kunde, 'Du kannst die Entwürfe direkt online kommentieren oder freigeben', 'Sie können die Entwürfe direkt online kommentieren oder freigeben');
+  const reviewCta = istUpdate ? 'Ansehen &amp; freigeben →' : 'Entwürfe kommentieren &amp; freigeben →';
+  const betreffFallback = istUpdate
+    ? t(kunde, 'Neue Werbeanzeigen für deine Kampagne 📬', 'Neue Werbeanzeigen für Ihre Kampagne 📬')
+    : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨');
 
   const brand = getBranding(kunde?.agentur);
   const safeAnschreiben = escape(anschreiben || '').replace(/\n/g, '<br>');
@@ -382,9 +393,9 @@ ${sortedAdcopies.map(a => `
 
   const reviewHtml = reviewUrl ? `
 <div style="margin:32px 0 8px;padding:24px;background:${brand.accent}1a;border:1px solid #ececea;border-radius:14px;text-align:center;">
-  <h2 style="font-size:17px;font-weight:700;color:${brand.primary};margin:0 0 6px;">Bereit für Feedback?</h2>
-  <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">${t(kunde, 'Du kannst die Entwürfe direkt online kommentieren oder freigeben', 'Sie können die Entwürfe direkt online kommentieren oder freigeben')} — alles in einer Übersicht.</p>
-  <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">Entwürfe kommentieren &amp; freigeben →</a>
+  <h2 style="font-size:17px;font-weight:700;color:${brand.primary};margin:0 0 6px;">${reviewHeadline}</h2>
+  <p style="font-size:13px;color:#5a5955;margin:0 0 16px;line-height:1.55;">${reviewIntro} — alles in einer Übersicht.</p>
+  <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">${reviewCta}</a>
 </div>` : '';
 
   const html = `<!doctype html>
@@ -397,7 +408,7 @@ ${sortedAdcopies.map(a => `
   </td></tr>
   <tr><td style="padding:28px 32px 8px;">
     <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${stelle}${stelle && firma ? ' · ' : ''}${firma}</h1>
-    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 22px;">Entwürfe zur Freigabe</p>
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 22px;">${eyebrow}</p>
     <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 8px;">${safeAnschreiben}</p>
   </td></tr>
   <tr><td style="padding:0 32px 24px;">
@@ -418,7 +429,7 @@ ${sortedAdcopies.map(a => `
 </table></td></tr></table></body></html>`;
 
   const textParts = [anschreiben || ''];
-  if (reviewUrl) textParts.push(`\n→ Entwürfe kommentieren & freigeben: ${reviewUrl}`);
+  if (reviewUrl) textParts.push(`\n→ ${istUpdate ? 'Neue Anzeigen ansehen & freigeben' : 'Entwürfe kommentieren & freigeben'}: ${reviewUrl}`);
   if (sortedCreatives.length) textParts.push(`\n${sortedCreatives.length} Creative(s) im Anhang/eingebettet.`);
   if (sortedAdcopies.length) {
     textParts.push('\nWerbetexte:');
@@ -438,7 +449,7 @@ ${sortedAdcopies.map(a => `
       to,
       bcc: getInternalBcc([], Array.isArray(to) ? to : [to]),
       reply_to: getMailReplyTo(brand),
-      subject: betreff || t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'),
+      subject: betreff || betreffFallback,
       html,
       text: textParts.join('\n'),
     }),

@@ -530,11 +530,14 @@ router.get('/review/:token', async (req, res) => {
     : funnel.veroeffentlicht ? `${getPublicBaseUrl(kunde?.agentur)}/f/${funnel.id}`
     : null;
   const sheetUrl = funnel?.extern_sheet_url || null;
-  // Alle Runden absteigend — neueste zuerst. `review` ist die aktuelle
+  // Kontext: 'entwurf' (Standard) oder 'update' (Kampagnen-Update während Live-Phase).
+  // Getrennte Runden-Ströme über dasselbe review_token.
+  const kontext = req.query.kontext === 'update' ? 'update' : 'entwurf';
+  // Alle Runden des Kontexts absteigend — neueste zuerst. `review` ist die aktuelle
   // (höchste runde) und wird vom Kunden bearbeitet; `vorherige_runden`
   // sind einklappbar sichtbar (abgeschlossene ältere Iterationen).
   const { data: alleReviews = [] } = await supabase
-    .from('talentone_reviews').select('*').eq('job_id', job.id)
+    .from('talentone_reviews').select('*').eq('job_id', job.id).eq('kontext', kontext)
     .order('runde', { ascending: false });
   const review = alleReviews[0] || null;
   const vorherige_runden = alleReviews.slice(1);
@@ -564,13 +567,15 @@ router.get('/review/:token', async (req, res) => {
     sheet_url: sheetUrl,
     review,
     vorherige_runden,
+    kontext,
     avv,
   });
 });
 
-// POST /api/public/review/:token  body: { status, kommentare, avv_akzeptiert?, avv_name? }
+// POST /api/public/review/:token  body: { status, kommentare, kontext?, avv_akzeptiert?, avv_name? }
 router.post('/review/:token', async (req, res) => {
   const { status, kommentare, avv_akzeptiert, avv_name } = req.body || {};
+  const kontext = (req.body?.kontext === 'update' || req.query.kontext === 'update') ? 'update' : 'entwurf';
   if (!['freigegeben', 'aenderungen'].includes(status)) {
     return res.status(400).json({ error: 'status muss "freigegeben" oder "aenderungen" sein.' });
   }
@@ -607,10 +612,10 @@ router.post('/review/:token', async (req, res) => {
     }
   }
 
-  // AKTUELLE Runde (höchste runde) suchen. Bei mehreren Runden bearbeitet
-  // der Kunde immer die neueste — alte Runden bleiben archiviert.
+  // AKTUELLE Runde (höchste runde) des jeweiligen Kontexts suchen. Bei mehreren
+  // Runden bearbeitet der Kunde immer die neueste — alte Runden bleiben archiviert.
   const { data: existing } = await supabase
-    .from('talentone_reviews').select('id, runde').eq('job_id', job.id)
+    .from('talentone_reviews').select('id, runde').eq('job_id', job.id).eq('kontext', kontext)
     .order('runde', { ascending: false }).limit(1).maybeSingle();
 
   // Snapshot der referenzierten Creatives + Adcopies zum Zeitpunkt des Reviews
@@ -643,7 +648,7 @@ router.post('/review/:token', async (req, res) => {
   } else {
     const { data, error } = await supabase
       .from('talentone_reviews')
-      .insert({ job_id: job.id, token: req.params.token, status, kommentare: kommentare || null, kommentare_snapshot })
+      .insert({ job_id: job.id, token: req.params.token, kontext, status, kommentare: kommentare || null, kommentare_snapshot })
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
     savedReview = data;
@@ -672,7 +677,7 @@ router.post('/review/:token', async (req, res) => {
 
       // ── Projekt-Sync: Kommentar + Status-Wechsel + Mail an Verantwortlichen ──
       try {
-        await logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies });
+        await logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies, kontext });
       } catch (err) { console.warn('[review-projekt-sync]', err.message); }
     } catch (err) { console.warn('[review-mail]', err.message); }
   })().catch(err => console.error('[review-mail-uncaught]', err.message));
@@ -1025,11 +1030,13 @@ async function findProjektForJob(job, kunde) {
   return null;
 }
 
-function buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies }) {
+function buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies, istUpdate }) {
   const firma = kunde?.firmenname || 'Der Kunde';
   if (status === 'freigegeben') {
     const datum = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    return `✅ Kunde ${firma} hat die Entwürfe freigegeben am ${datum}.`;
+    return istUpdate
+      ? `✅ Kunde ${firma} hat das Kampagnen-Update freigegeben am ${datum}.`
+      : `✅ Kunde ${firma} hat die Entwürfe freigegeben am ${datum}.`;
   }
   // status === 'aenderungen'
   const eintraege = [];
@@ -1059,18 +1066,23 @@ function buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies
   const body = eintraege.length
     ? eintraege.join('\n\n')
     : '(Keine spezifischen Anmerkungen — siehe Review-Seite)';
-  return `📝 Kunde ${firma} hat Änderungswünsche zu den Entwürfen gesendet:\n\n${body}`;
+  return `📝 Kunde ${firma} hat Änderungswünsche ${istUpdate ? 'zum Kampagnen-Update' : 'zu den Entwürfen'} gesendet:\n\n${body}`;
 }
 
-async function logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies }) {
+async function logFeedbackToProjekt({ kunde, job, status, kommentare, creatives, adcopies, kontext }) {
   const projekt = await findProjektForJob(job, kunde);
   if (!projekt) {
     console.log(`[review-projekt-sync] Kein Projekt zu Kunde ${kunde?.firmenname || job?.kunde_id} gefunden — skip.`);
     return;
   }
+  const istUpdate = kontext === 'update';
+  // Live-Kampagne (Update-Feedback ODER Feedback auf ein bereits live geschaltetes
+  // Projekt): Der Basis-Status bleibt 'live' — die laufende Kampagne fällt NICHT in
+  // "Feedbackschleife" zurück. Gesteuert wird nur der Sub-Status update_feedback_status.
+  const liveKampagne = istUpdate || projekt.status === 'live';
 
   // 1) Auto-Kommentar
-  const text = buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies });
+  const text = buildFeedbackKommentar({ status, kunde, kommentare, creatives, adcopies, istUpdate });
   await supabase.from('talentone_kommentare').insert({
     projekt_id: projekt.id,
     autor: 'Kundenfeedback',
@@ -1079,19 +1091,31 @@ async function logFeedbackToProjekt({ kunde, job, status, kommentare, creatives,
     erwaehnungen: projekt.verantwortlich ? [projekt.verantwortlich] : [],
   });
 
-  // 2) Status-Wechsel — aenderungen → feedbackschleife;
-  //    freigegeben → go (außer Projekt ist schon live, dann unverändert)
-  let newStatus = null;
-  if (status === 'aenderungen') {
-    newStatus = 'feedbackschleife';
-  } else if (status === 'freigegeben' && projekt.status !== 'live') {
-    newStatus = 'go';
-  }
-  if (newStatus && newStatus !== projekt.status) {
-    await supabase.from('talentone_projekte')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', projekt.id);
-    console.log(`[review-projekt-sync] Projekt ${projekt.id.slice(0,8)} → status=${newStatus}`);
+  // 2) Status-Wechsel
+  if (liveKampagne) {
+    // Status bleibt 'live' — nur Sub-Status: Freigabe hebt das offene Feedback auf,
+    // Änderungswünsche → "Update-Überarbeitung".
+    const patch = { updated_at: new Date().toISOString() };
+    if (status === 'freigegeben') {
+      patch.update_feedback_status = null;
+      patch.update_feedback_seit = null;
+    } else if (status === 'aenderungen') {
+      patch.update_feedback_status = 'ueberarbeitung';
+      if (!projekt.update_feedback_seit) patch.update_feedback_seit = new Date().toISOString();
+    }
+    await supabase.from('talentone_projekte').update(patch).eq('id', projekt.id);
+    console.log(`[review-projekt-sync] Projekt ${projekt.id.slice(0,8)} bleibt live — update_feedback_status=${patch.update_feedback_status ?? 'null'}`);
+  } else {
+    // Entwurfs-Phase: aenderungen → feedbackschleife; freigegeben → go.
+    let newStatus = null;
+    if (status === 'aenderungen') newStatus = 'feedbackschleife';
+    else if (status === 'freigegeben') newStatus = 'go';
+    if (newStatus && newStatus !== projekt.status) {
+      await supabase.from('talentone_projekte')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', projekt.id);
+      console.log(`[review-projekt-sync] Projekt ${projekt.id.slice(0,8)} → status=${newStatus}`);
+    }
   }
 
   // 3) E-Mail an Verantwortlichen (best-effort, nur bei Änderungen)

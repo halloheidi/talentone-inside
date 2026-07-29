@@ -35,6 +35,8 @@ const ALLOWED_FIELDS = [
   'agentur', 'fotograf_noetig', 'zahlung_aufgeteilt', 'garantie', 'garantie_details',
   // Migration 027
   'kickoff_termin',
+  // Migration 049: Live-Sub-Status für Kampagnen-Update-Feedback
+  'update_feedback_status', 'update_feedback_seit',
 ];
 
 function pickFields(body) {

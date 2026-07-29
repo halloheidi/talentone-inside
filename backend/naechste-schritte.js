@@ -24,6 +24,8 @@ const REGELN = [
   { key: 'ueberarbeitung',       icon: '🔄', label: 'Überarbeitung nötig',        color: 'gelb',   tab: 'export' },
   { key: 'bereit_golive',        icon: '🚀', label: 'Bereit für Go-Live',         color: 'farbig', tab: 'export' },
   { key: 'live',                 icon: '🟢', label: 'Live',                       color: 'gruen',  tab: 'export' },
+  { key: 'update_feedback_offen',icon: '📬', label: 'Update-Feedback offen',      color: 'gelb',   tab: 'export' },
+  { key: 'update_ueberarbeitung',icon: '🔄', label: 'Update-Überarbeitung',       color: 'gelb',   tab: 'export' },
   { key: 'pausiert',             icon: '⏸️', label: 'Pausiert',                   color: 'dunkelgrau', tab: 'stelle' },
   { key: 'abgeschlossen',        icon: '✅', label: 'Abgeschlossen',              color: 'dunkelgrau', tab: 'stelle' },
 ];
@@ -66,6 +68,21 @@ function berechneSchritt(ctx) {
   // arbeiten.
   // ══════════════════════════════════════════════════════════════════════
   if (projekt?.status === 'live') {
+    // Offenes Kampagnen-Update-Feedback hat Vorrang vor dem reinen Live-Badge —
+    // die Farbe (gelb/rot) sorgt dafür, dass die Kundenliste es nach oben sortiert.
+    const sub = projekt.update_feedback_status;
+    if (sub === 'offen') {
+      const seit = projekt.update_feedback_seit;
+      const tage = seit ? Math.floor((Date.now() - new Date(seit).getTime()) / 86400000) : 0;
+      return {
+        ...REGEL_BY_KEY.update_feedback_offen,
+        label: `Update-Feedback offen${tage ? ` (${tage}d)` : ''}`,
+        color: tage >= 7 ? 'rot' : 'gelb',
+      };
+    }
+    if (sub === 'ueberarbeitung') {
+      return { ...REGEL_BY_KEY.update_ueberarbeitung };
+    }
     const start = projekt.start_phase1;
     const ende  = projekt.ende_phase1;
     if (start) {
@@ -161,7 +178,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
   const [kundenRes, projekteRes, jobsRes, refbilderRes] = await Promise.all([
     supabase.from('talentone_kunden').select('id, status, agentur, upload_token').in('id', ids),
     supabase.from('talentone_projekte')
-      .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at')
+      .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at, update_feedback_status, update_feedback_seit')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
     supabase.from('talentone_jobs')
       .select('id, kunde_id, stelle, created_at, tab_status').in('kunde_id', ids)

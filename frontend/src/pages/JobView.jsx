@@ -117,13 +117,30 @@ function StatusBadge({ projekt }) {
       : (Math.floor((Date.now() - new Date(start).getTime()) / 86400000) >= 20) ? '#f59e0b'
       : '#16a34a'
     ) : '#16a34a';
+    // Sub-Status Kampagnen-Update-Feedback (Status bleibt live)
+    const sub = projekt.update_feedback_status;
+    const subBadge = sub === 'offen'
+      ? { text: '📬 Update-Feedback offen', bg: '#fef3c7', fg: '#92400e' }
+      : sub === 'ueberarbeitung'
+        ? { text: '🔄 Update-Überarbeitung', bg: '#ffedd5', fg: '#9a3412' }
+        : null;
     return (
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: color, color: '#fff',
-        padding: '4px 12px', borderRadius: 100,
-        fontSize: 12, fontWeight: 600,
-      }}>🟢 LIVE{start ? ` seit ${new Date(start).toLocaleDateString('de-DE')}` : ''}{tagInfo}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: color, color: '#fff',
+          padding: '4px 12px', borderRadius: 100,
+          fontSize: 12, fontWeight: 600,
+        }}>🟢 LIVE{start ? ` seit ${new Date(start).toLocaleDateString('de-DE')}` : ''}{tagInfo}</span>
+        {subBadge && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: subBadge.bg, color: subBadge.fg,
+            padding: '4px 12px', borderRadius: 100,
+            fontSize: 12, fontWeight: 600,
+          }}>{subBadge.text}</span>
+        )}
+      </span>
     );
   }
   const label = STATUS_LABELS[status] || status;

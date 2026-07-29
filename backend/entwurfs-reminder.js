@@ -13,47 +13,49 @@ const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de
 const SCHWELLE_TAGE = 7;
 
 async function fetchCandidates() {
-  // 1) Alle Entwurfs-Versendungen mit typ startet mit 'entwurf' (inkl. entwurf_runde_N)
+  // Entwurfs- UND Kampagnen-Update-Versendungen (getrennte Review-Ströme, gleicher
+  // 7-Tage-Mechanismus). typ 'entwurf_runde_N' → kontext 'entwurf', 'update_runde_N'
+  // → kontext 'update'.
   const seit = new Date(Date.now() - SCHWELLE_TAGE * 86400000).toISOString();
   const { data: versand } = await supabase
     .from('talentone_versand')
     .select('id, job_id, typ, created_at, empfaenger')
-    .like('typ', 'entwurf_runde_%')
+    .or('typ.like.entwurf_runde_%,typ.like.update_runde_%')
     .lt('created_at', seit)
     .order('created_at', { ascending: false });
   if (!versand?.length) return [];
 
-  // Pro Job: nur der jüngste Entwurfsversand ist relevant.
-  const juengsterProJob = new Map();
+  // Pro Job UND Kontext: nur der jüngste Versand ist relevant.
+  const juengster = new Map();
   for (const v of versand) {
-    if (!juengsterProJob.has(v.job_id)) juengsterProJob.set(v.job_id, v);
+    const kontext = v.typ.startsWith('update_') ? 'update' : 'entwurf';
+    const key = `${v.job_id}::${kontext}`;
+    if (!juengster.has(key)) juengster.set(key, { versand: v, kontext });
   }
 
   const kandidaten = [];
-  for (const [jobId, v] of juengsterProJob.entries()) {
-    // Aktueller Review (hoechste runde)
+  for (const { versand: v, kontext } of juengster.values()) {
+    // Aktueller Review (hoechste runde) des jeweiligen Kontexts
     const { data: review } = await supabase
       .from('talentone_reviews')
       .select('id, runde, status, manuell_beantwortet, reminder_intern_gesendet_at')
-      .eq('job_id', jobId)
+      .eq('job_id', v.job_id).eq('kontext', kontext)
       .order('runde', { ascending: false }).limit(1).maybeSingle();
 
     // Filter: noch keine Kunden-Reaktion UND noch kein interner Reminder
-    if (!review) {
-      // Es gab noch gar kein Review — der Versand ist ≥7 Tage her → Kandidat.
-    } else {
-      // Bereits reagiert (freigegeben/aenderungen) oder manuell geantwortet? → skip
+    if (review) {
       if (review.status && review.status !== 'offen') continue;
       if (review.manuell_beantwortet) continue;
       if (review.reminder_intern_gesendet_at) continue;
     }
-    kandidaten.push({ versand: v, review });
+    kandidaten.push({ versand: v, review, kontext });
   }
   return kandidaten;
 }
 
-async function processOne({ versand, review }) {
+async function processOne({ versand, review, kontext = 'entwurf' }) {
   const jobId = versand.job_id;
+  const istUpdate = kontext === 'update';
   const { data: job } = await supabase.from('talentone_jobs')
     .select('id, stelle, kunde_id').eq('id', jobId).maybeSingle();
   if (!job) return { jobId, sent: false, error: 'Job nicht gefunden' };
@@ -70,11 +72,14 @@ async function processOne({ versand, review }) {
   const tage = Math.floor((Date.now() - new Date(versand.created_at).getTime()) / 86400000);
   const link = projekt ? `${INSIDE_BASE}/projekte?open=${projekt.id}` : INSIDE_BASE;
 
+  const was = istUpdate ? 'das Kampagnen-Update' : 'Entwürfe';
   try {
     await sendTeamAlertMail({
-      subject:   `⏳ ${firma} hat Entwürfe seit ${tage} Tagen nicht freigegeben`,
-      headline:  `Entwürfe warten auf Freigabe — ${tage} Tage ohne Reaktion`,
-      lead:      `${firma} · ${stelle}\n\nEntwürfe gesendet am ${versandDatum} an ${versand.empfaenger || '—'}. Der Kunde hat weder freigegeben noch Änderungswünsche geschickt.`,
+      subject:   istUpdate
+        ? `⏳ ${firma} hat das Kampagnen-Update seit ${tage} Tagen nicht freigegeben`
+        : `⏳ ${firma} hat Entwürfe seit ${tage} Tagen nicht freigegeben`,
+      headline:  `${istUpdate ? 'Kampagnen-Update' : 'Entwürfe'} wartet auf Freigabe — ${tage} Tage ohne Reaktion`,
+      lead:      `${firma} · ${stelle}\n\n${istUpdate ? 'Kampagnen-Update' : 'Entwürfe'} gesendet am ${versandDatum} an ${versand.empfaenger || '—'}. Der Kunde hat ${was} weder freigegeben noch Änderungswünsche geschickt.`,
       linkUrl:   link,
       linkLabel: 'Zum Projekt',
     });
@@ -89,7 +94,7 @@ async function processOne({ versand, review }) {
       // ersetzt/upgraded den Datensatz wenn der Kunde spaeter reagiert.
       const { randomUUID } = await import('node:crypto');
       await supabase.from('talentone_reviews').insert({
-        job_id: jobId, token: randomUUID(),
+        job_id: jobId, token: randomUUID(), kontext,
         status: 'offen', runde: 0,
         reminder_intern_gesendet_at: new Date().toISOString(),
       });
