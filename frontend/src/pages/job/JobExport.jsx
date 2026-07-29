@@ -391,7 +391,6 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
 
   const letzterVersand = versand.find(v => (v.typ || '').startsWith('entwurf_')) || null;
   const letzterEntwurfsVersand = versand.find(v => (v.typ || '').startsWith('entwurf_runde_'));
-  const letzteKampagneUpdate = versand.find(v => (v.typ || '').startsWith('update_'));
   const letzterReminderVersand = versand.find(v => v.typ === 'entwurf_reminder');
   const letzteReaktivierung = versand.find(v => v.typ === 'reaktivierung');
   const letzteKampagneLive  = versand.find(v => v.typ === 'kampagne_live');
@@ -712,16 +711,17 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             </>
           );
         })()}
-        {/* Dritte Versand-Option: Kampagnen-Update während der Live-Phase.
-            Neue/optimierte Creatives, die der Kunde freigeben muss — der Projekt-
-            Status bleibt live. Nur sichtbar, wenn die Kampagne bereits live ist
-            (oder schon mal ein Update lief). */}
-        {(letzteKampagneLive || letzteKampagneUpdate) && (
+        {/* Dritte Versand-Option: Kampagnen-Update. Neue/optimierte Creatives, die
+            der Kunde freigeben muss — eigener Review-Strom ("Update N"), der Projekt-
+            Status bleibt unverändert (kein Rücksturz in Feedbackschleife). Sichtbar,
+            sobald Creatives da sind — auch bei Bestandskunden, die im Tool nie live
+            waren (z. B. neu angelegter Altkunde, für den wir frische Entwürfe machen). */}
+        {(data?.creatives || []).length > 0 && (
           <button
             className="btn-ghost"
             onClick={() => openMailModal('new_round', 'update')}
             disabled={!kunde?.email}
-            title="Neue/optimierte Anzeigen dem Kunden zur Freigabe schicken (Kampagne läuft weiter)"
+            title="Neue/optimierte Anzeigen dem Kunden zur Freigabe schicken — getrennt von den Erstentwürfen, Projekt-Status bleibt unverändert"
           >
             📬 Kampagnen-Update senden
           </button>
