@@ -174,27 +174,15 @@ const RECRUITER_STATUS_LABELS = {
   neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessiert',
   abgesagt: 'Abgesagt', weitergeleitet: 'Weitergeleitet',
 };
-function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [], kunde }) {
-  const werte = sync?.vorqualifizierung_werte && typeof sync.vorqualifizierung_werte === 'object'
-    ? sync.vorqualifizierung_werte : {};
-  // Reihenfolge + Sichtbarkeit kommen zentral vom Backend (vorqual_spalten):
-  // befüllte Felder + wichtige Kriterien immer (auch leer → "—").
-  const vqZeilen = vorqualSpalten.length
-    ? vorqualSpalten.map(s => {
-        const v = werte[s.name];
-        const hat = v != null && String(v).trim() !== '';
-        return { name: s.name, wert: hat ? String(v) : null, wichtig: s.wichtig };
-      })
-    : Object.entries(werte)
-        .filter(([, v]) => v != null && String(v).trim() !== '')
-        .map(([k, v]) => ({ name: k, wert: String(v), wichtig: false }));
-  const hatVqWert = vqZeilen.some(z => z.wert);
+function RecruiterSyncSection({ sync, brandName, kunde }) {
+  // Nur die vom Recruiter gepflegten (read-only) Felder. Die Vorqual-/Kriterien-
+  // Felder sind in VorqualEditSection ausgelagert (dort vom Kunden editierbar).
   const kontaktversuche = Array.isArray(sync?.kontaktversuche) ? sync.kontaktversuche : [];
   const kurzDatum = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); } catch { return d; } };
-  if (!sync && !vqZeilen.length) return null;
+  if (!sync) return null;
   const hasData = sync?.recruiter_status || sync?.vg_vereinbart_am || (sync?.eingestellt && sync.eingestellt !== 'offen')
     || sync?.kunde_kontaktiert || sync?.vorqual_gehaltswunsch || sync?.vorqual_verfuegbarkeit
-    || sync?.vorqual_notiz || hatVqWert || vqZeilen.some(z => z.wichtig) || kontaktversuche.length;
+    || sync?.vorqual_notiz || kontaktversuche.length;
   if (!hasData) return null;
   return (
     <section className="pub-recruiter-sync">
@@ -206,10 +194,6 @@ function RecruiterSyncSection({ sync, brandName, vorqualSpalten = [], kunde }) {
         {sync?.eingestellt && sync.eingestellt !== 'offen' && <><dt>Eingestellt</dt><dd>{sync.eingestellt === 'ja' ? '✓ Ja' : '✗ Nein'}</dd></>}
         {sync?.vorqual_gehaltswunsch && <><dt>Gehaltswunsch</dt><dd>{sync.vorqual_gehaltswunsch}</dd></>}
         {sync?.vorqual_verfuegbarkeit && <><dt>Verfügbarkeit</dt><dd>{sync.vorqual_verfuegbarkeit}</dd></>}
-        {vqZeilen.map(z => (
-          <FragmentRow key={z.name} label={`${z.wichtig ? '⭐ ' : ''}${z.name}`}
-            value={z.wert ?? '—'} muted={!z.wert} />
-        ))}
       </dl>
       {kontaktversuche.length > 0 && (
         <div style={{ marginTop: 10, padding: '10px 12px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
@@ -235,8 +219,38 @@ function FragmentRow({ label, value, muted = false }) {
   return (<><dt>{label}</dt><dd className={muted ? 'pub-muted' : undefined}>{value}</dd></>);
 }
 
+// Vom Kunden editierbare Vorqual-/Kriterien-Felder. Vorbelegt mit dem effektiven
+// Wert (Kunden-Wert > Recruiter-Wert); "vom Kunden"-Badge wenn der Kunde eingetragen hat.
+function VorqualEditSection({ vorqualSpalten = [], recruiterWerte = {}, kundeWerte = {}, kunde, onSave }) {
+  if (!vorqualSpalten.length) return null;
+  return (
+    <section>
+      <h3>Kriterien / Vorqualifizierung</h3>
+      <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px' }}>
+        {t(kunde, 'Du kannst hier eigene Ergänzungen eintragen (z. B. nach deinem Gespräch).', 'Sie können hier eigene Ergänzungen eintragen (z. B. nach Ihrem Gespräch).')}
+      </p>
+      <div className="pub-slideover-form">
+        {vorqualSpalten.map(s => {
+          const kundeVal = kundeWerte[s.name];
+          const istKunde = kundeVal != null && String(kundeVal).trim() !== '';
+          const effektiv = istKunde ? kundeVal : (recruiterWerte[s.name] ?? '');
+          return (
+            <label key={s.name} className="pub-full">
+              <span>
+                {s.wichtig ? '⭐ ' : ''}{s.name}
+                {istKunde && <span style={{ marginLeft: 6, fontSize: 10, background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: 4 }}>vom Kunden</span>}
+              </span>
+              <DebouncedInput value={effektiv} placeholder={s.anforderung || '—'} onSave={v => onSave(s.name, v)} />
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 /* ─── Slide-Over für Bewerber-Detail ─── */
-function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], kunde, onPatchFeedback, onSetWert, onClose }) {
+function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], kunde, onPatchFeedback, onSetWert, onPatchVorqualKunde, onClose }) {
   if (!bewerbung) return null;
   const norm = normalized || {};
   const fb = feedback || {};
@@ -269,7 +283,16 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
           </section>
 
           {/* Vom Recruiter (sync) */}
-          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} vorqualSpalten={vorqualSpalten} kunde={kunde} />
+          <RecruiterSyncSection sync={recruiterSync} brandName={brandName} kunde={kunde} />
+
+          {/* Kriterien / Vorqualifizierung — vom Kunden editierbar */}
+          <VorqualEditSection
+            vorqualSpalten={vorqualSpalten}
+            recruiterWerte={recruiterSync?.vorqualifizierung_werte || {}}
+            kundeWerte={fb.vorqual_werte_kunde || {}}
+            kunde={kunde}
+            onSave={(name, v) => onPatchVorqualKunde(name, v)}
+          />
 
           {/* Funnel-Antworten */}
           {norm.antworten?.length > 0 && (
@@ -380,6 +403,15 @@ export default function PublicBewerbungen() {
         updateFeedback(bewId, j.feedback);
       }
     } catch (err) { console.error(err); }
+  }
+
+  // Vom Kunden gepflegter Vorqual-/Kriterien-Wert (getrennt von den Recruiter-Werten).
+  async function patchVorqualKunde(bewId, feldName, wert) {
+    const fb = data.feedback[bewId] || {};
+    const merged = { ...(fb.vorqual_werte_kunde || {}) };
+    const clean = (wert ?? '').toString().trim();
+    if (clean) merged[feldName] = clean; else delete merged[feldName];
+    await patchFeedback(bewId, { vorqual_werte_kunde: merged });
   }
 
   /* ─── Custom Spalten ─── */
@@ -607,11 +639,16 @@ export default function PublicBewerbungen() {
                         <td>{b.ko_kriterium ? <span className="pub-ko-badge">KO</span> : ''}</td>
                         {frageSpalten.map(f => <td key={f} className="pub-td-antwort">{antwortFor(b.id, f) || <span className="pub-muted">—</span>}</td>)}
                         {(data.vorqual_spalten || []).map(s => {
-                          const v = data.recruiter_sync?.[b.id]?.vorqualifizierung_werte?.[s.name];
-                          const hat = v != null && String(v).trim() !== '';
+                          const recruiterVal = data.recruiter_sync?.[b.id]?.vorqualifizierung_werte?.[s.name];
+                          const kundeVal = fb.vorqual_werte_kunde?.[s.name];
+                          const istKunde = kundeVal != null && String(kundeVal).trim() !== '';
+                          const effektiv = istKunde ? kundeVal : (recruiterVal ?? '');
                           return (
-                            <td key={`vq-${s.name}`} className="pub-td-vorqual">
-                              {hat ? String(v) : <span className="pub-muted">—</span>}
+                            <td key={`vq-${s.name}`} className="pub-td-vorqual" onClick={e => e.stopPropagation()}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <DebouncedInput value={effektiv} placeholder="—" onSave={v => patchVorqualKunde(b.id, s.name, v)} />
+                                {istKunde && <span title="vom Kunden eingetragen" style={{ fontSize: 9, background: '#dbeafe', color: '#1e40af', padding: '1px 4px', borderRadius: 4, whiteSpace: 'nowrap' }}>Kunde</span>}
+                              </div>
                             </td>
                           );
                         })}
@@ -702,6 +739,7 @@ export default function PublicBewerbungen() {
         kunde={data.kunde}
         onPatchFeedback={body => selected && patchFeedback(selected.id, body)}
         onSetWert={(spalteId, v) => selected && setSpalteWert(selected.id, spalteId, v)}
+        onPatchVorqualKunde={(name, v) => selected && patchVorqualKunde(selected.id, name, v)}
         onClose={() => setSelectedId(null)}
       />
 

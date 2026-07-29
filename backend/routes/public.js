@@ -892,14 +892,28 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
 
   const patch = { bewerbung_id: bew.id, updated_at: new Date().toISOString() };
   const body = req.body || {};
+  const changes = []; // fuer den internen Projekt-Kommentar
   if (body.status !== undefined) {
     patch.status = FEEDBACK_STATI.includes(body.status) ? body.status : 'neu';
+    changes.push('Status');
   }
   if (body.vorstellungsgespraech_am !== undefined) {
     patch.vorstellungsgespraech_am = body.vorstellungsgespraech_am || null;
+    changes.push('VG-Termin');
   }
   if (body.notizen !== undefined) {
     patch.notizen = body.notizen?.toString().trim() || null;
+    changes.push('Notiz');
+  }
+  // Vom Kunden gepflegte Vorqual-/Kriterien-Werte (getrennte Ablage — überschreibt
+  // die internen Recruiter-Werte NICHT).
+  if (body.vorqual_werte_kunde !== undefined && body.vorqual_werte_kunde && typeof body.vorqual_werte_kunde === 'object') {
+    const clean = {};
+    for (const [k, v] of Object.entries(body.vorqual_werte_kunde)) {
+      if (v != null && String(v).trim() !== '') clean[String(k)] = String(v).slice(0, 500);
+    }
+    patch.vorqual_werte_kunde = clean;
+    changes.push('Vorqual-Feld');
   }
 
   const { data, error } = await supabase
@@ -907,8 +921,32 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
     .upsert(patch, { onConflict: 'bewerbung_id' })
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
+
+  // Interne Transparenz: Projekt-Kommentar (kein Mail-Spam). Best-effort.
+  if (changes.length) {
+    logKundenBewerberAenderung({ jobId: job.id, kundeId: job.kunde_id, bewId: bew.id, changes })
+      .catch(err => console.warn('[bewerber-kunde-change]', err.message));
+  }
   res.json({ feedback: data });
 });
+
+// Interner Projekt-Kommentar bei Kunden-Änderungen an Bewerbern (gebündelt pro
+// PATCH, keine Mail). Spiegelt das Muster der Kriterien-/Review-Hinweise.
+async function logKundenBewerberAenderung({ jobId, kundeId, bewId, changes }) {
+  const { data: job } = await supabase.from('talentone_jobs').select('id, stelle, kunde_id').eq('id', jobId).maybeSingle();
+  const { data: kunde } = await supabase.from('talentone_kunden').select('id, firmenname').eq('id', kundeId).maybeSingle();
+  const projekt = await findProjektForJob(job, kunde);
+  if (!projekt) return;
+  const { data: bew } = await supabase.from('talentone_bewerbungen').select('name').eq('id', bewId).maybeSingle();
+  const feld = [...new Set(changes)].join(', ');
+  await supabase.from('talentone_kommentare').insert({
+    projekt_id: projekt.id,
+    autor: 'Kundenfeedback',
+    text: `Kunde hat "${bew?.name || 'Bewerber'}": ${feld} geändert.`,
+    quelle: 'bewerber',
+    erwaehnungen: [],
+  });
+}
 
 /* ════════════════════ Public Anfragen-Dashboard (Neukundengewinnung) ════════════════════
  * Analoges Muster wie Bewerbungen, aber mit Kunden-Anfragen aus dem
