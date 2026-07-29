@@ -45,6 +45,50 @@ const PROJEKTE_STATI = [
   'live', 'pausiert', 'hold', 'abgeschlossen',
 ];
 
+// Nur-Extraktion für den Bestätigungs-Schritt ("Erkannte Daten prüfen").
+// Legt NICHTS an — liefert die erkannten Kern-Felder + die vollständigen Rohdaten
+// zurück, damit das Frontend Firmenname/Ansprechpartner/E-Mail/Stelle prüfen und
+// ggf. korrigieren lässt, bevor mit mode='confirmed' angelegt wird.
+router.post('/quick-create/extract', async (req, res) => {
+  const { mode, url, fileData, fileType } = req.body || {};
+  try {
+    let extracted;
+    if (mode === 'url') {
+      if (!url?.trim()) return res.status(400).json({ error: 'Bitte URL eingeben.' });
+      extracted = await extractFromUrl(url.trim());
+    } else if (mode === 'file') {
+      if (!fileData) return res.status(400).json({ error: 'Bitte Datei auswählen.' });
+      extracted = await extractFromFile(fileData, fileType);
+    } else {
+      return res.status(400).json({ error: 'Nur url oder file.' });
+    }
+    const em = mode === 'url' ? 'url' : 'pdf';
+    const kunde = toKunde(extracted);
+    const job = toJob(extracted, em, em === 'url' ? url.trim() : null);
+    res.json({
+      extracted,
+      eingabe_methode: em,
+      url: mode === 'url' ? url.trim() : null,
+      firmenname_erkannt: !!kunde.firmenname?.trim(),
+      kunde: {
+        firmenname: kunde.firmenname || '',
+        ansprechpartner: kunde.ansprechpartner || '',
+        email: kunde.email || '',
+        telefon: kunde.telefon || '',
+        branche: kunde.branche || '',
+      },
+      job: {
+        stelle: job.stelle || '',
+        region: job.region || '',
+        gehalt: job.gehalt || '',
+      },
+    });
+  } catch (err) {
+    console.error('[quick-create/extract]', err);
+    res.status(500).json({ error: err.message || 'Extraktion fehlgeschlagen.' });
+  }
+});
+
 router.post('/quick-create', async (req, res) => {
   const {
     mode, logo, agentur, projekt_status, projektart, verantwortlich,
@@ -97,6 +141,32 @@ router.post('/quick-create', async (req, res) => {
       jobData = toJob(extracted, 'pdf');
       if (!kundeData.firmenname) return res.status(422).json({ error: 'Firmenname konnte nicht ermittelt werden.', extracted });
       if (!jobData.stelle) jobData.stelle = 'Unbenannte Stelle';
+    } else if (mode === 'confirmed') {
+      // Bestätigter Zwischenschritt: Extraktion lief bereits im Frontend
+      // (/quick-create/extract), die Kern-Felder wurden im "Erkannte Daten prüfen"-
+      // Schritt geprüft/korrigiert. Rohdaten (extracted) kommen mit, damit die reichen
+      // Job-Felder (Benefits, USP, Kultur …) erhalten bleiben.
+      const { kunde = {}, job = {}, extracted = {}, eingabe_methode, url } = req.body;
+      if (!kunde.firmenname?.trim()) return res.status(400).json({ error: 'Firmenname ist Pflicht.' });
+      if (kunde.close_lead_id && !/^lead_/.test(kunde.close_lead_id)) {
+        return res.status(400).json({ error: 'close_lead_id muss mit lead_ beginnen.' });
+      }
+      const em = eingabe_methode === 'url' ? 'url' : 'pdf';
+      urlForColors = em === 'url' ? (url || null) : null;
+      const baseKunde = toKunde(extracted);
+      const baseJob = toJob(extracted, em, em === 'url' ? url : null);
+      kundeData = {
+        ...baseKunde,
+        agentur: finalAgentur,
+        firmenname: kunde.firmenname.trim(),
+        ansprechpartner: (kunde.ansprechpartner?.trim() || baseKunde.ansprechpartner) || null,
+        email: (kunde.email?.trim() || baseKunde.email) || null,
+        close_lead_id: kunde.close_lead_id?.trim() || null,
+      };
+      jobData = {
+        ...baseJob,
+        stelle: (job.stelle?.trim() || baseJob.stelle || 'Unbenannte Stelle'),
+      };
     } else {
       return res.status(400).json({ error: 'Unbekannter Modus.' });
     }

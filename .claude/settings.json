@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/kloeckner-verify.png https://fhvkbnbjnorsmsvrjizl.supabase.co/storage/v1/object/public/talentone-creatives/3fbe5249-8914-4008-bc9d-608e13e4b9a6/quadrat-1785191893402-d8ftd2.png)",
+      "Bash(awk '{print $5\"B\"}')",
+      "Bash(SCRATCH=\"/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad\" *)",
+      "Bash(git -C .. add extractor.js)",
+      "Bash(git -C .. commit -q -m \"refactor\\(extract\\): extractFromText als geteilter Kern \\(URL/File\\) + testbar\")",
+      "Bash(git -C .. push origin main)",
+      "Bash(curl -s \"https://inside.talent-one.de/api/public/bewerbungen/769b18b1-3028-4c6f-bd55-5583aa7b07a1\")",
+      "Bash(python3 -c ' *)",
+      "Bash(node --check backend/routes/webhooks.js)",
+      "Bash(node --input-type=module -e 'import { buildWerbebudgetHinweis } from \"./offer-easybill-builder.js\"; console.log\\(\"30er:\", buildWerbebudgetHinweis\\(30\\)\\); console.log\\(\"leer:\", buildWerbebudgetHinweis\\(null\\)\\);')",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(awk 'NR>=683 && NR<=970 && /router\\\\.\\(get|post|patch|put|delete\\)/ {print NR\": \"$0}' routes/public.js)",
+      "Bash(curl -s \"https://inside.talent-one.de/api/public/bewerbungen/dd43e38b-d880-4476-9ae3-9bc18928e2a8\")",
+      "Bash(curl -s -X PATCH https://inside.talent-one.de/api/public/bewerbungen/dd43e38b-d880-4476-9ae3-9bc18928e2a8/7ae60a9b-52bd-473f-a304-256748038a43 -H 'Content-Type: application/json' -d '{\"vorqual_werte_kunde\":{\"Aktuelle Situation\":\"TEST vom Kunden — bitte ignorieren\"}}')"
+    ],
+    "additionalDirectories": [
+      "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"
+    ]
+  }
+}

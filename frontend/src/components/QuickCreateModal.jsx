@@ -99,6 +99,12 @@ export default function QuickCreateModal({ open, onClose }) {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // Bestätigungs-Schritt "Erkannte Daten prüfen" (nur url/file):
+  // null = noch nicht extrahiert; Objekt = Extraktion liegt vor, Kern-Felder werden geprüft.
+  // { kunde:{firmenname,ansprechpartner,email,telefon,branche}, job:{stelle,region,gehalt},
+  //   extracted, eingabe_methode, url, firmenname_erkannt }
+  const [preview, setPreview] = useState(null);
+
   // Logo (optional, für alle drei Modi)
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
@@ -124,6 +130,7 @@ export default function QuickCreateModal({ open, onClose }) {
     setVerantwortlich('');
     setUrl('');
     setFile(null);
+    setPreview(null);
     setManual(EMPTY_MANUAL);
     if (logoPreview) URL.revokeObjectURL(logoPreview);
     setLogoFile(null);
@@ -143,6 +150,69 @@ export default function QuickCreateModal({ open, onClose }) {
     if (busy) return;
     reset();
     onClose();
+  }
+
+  // Logo + Projekt-Eckdaten an einen Create-Body hängen (manual & confirmed teilen sich das).
+  async function applyCommonBody(body) {
+    if (logoFile) {
+      const logoData = await fileToBase64(logoFile);
+      body.logo = {
+        fileData: logoData,
+        fileName: logoFile.name,
+        contentType: logoFile.type || 'image/png',
+      };
+    }
+    body.agentur = agentur;
+    body.projekt_status = projektStatus;
+    body.kickoff_termin = projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null;
+    body.projektart = projektart || null;
+    body.projektdauer = projektFlags.projektdauer || null;
+    body.fotograf_noetig = !!projektFlags.fotograf_noetig;
+    body.zahlung_aufgeteilt = !!projektFlags.zahlung_aufgeteilt;
+    body.garantie = !!projektFlags.garantie;
+    body.garantie_details = projektFlags.garantie ? (projektFlags.garantie_details || null) : null;
+    body.verantwortlich = verantwortlich || null;
+    return body;
+  }
+
+  // Schritt 2 (url/file): mit den geprüften Kern-Feldern anlegen.
+  async function confirmCreate() {
+    if (!preview) return;
+    setError('');
+    if (!preview.kunde.firmenname.trim()) {
+      setError('Firmenname konnte nicht ermittelt werden — bitte eintragen.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const body = await applyCommonBody({
+        mode: 'confirmed',
+        kunde: {
+          firmenname: preview.kunde.firmenname.trim(),
+          ansprechpartner: preview.kunde.ansprechpartner?.trim() || undefined,
+          email: preview.kunde.email?.trim() || undefined,
+        },
+        job: { stelle: preview.job.stelle?.trim() || undefined },
+        extracted: preview.extracted,
+        eingabe_methode: preview.eingabe_methode,
+        url: preview.url || undefined,
+      });
+      const res = await api('/kunden/quick-create', { method: 'POST', body });
+      reset();
+      onClose();
+      nav(`/kunden/${res.kunde.id}/jobs/${res.job.id}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setPreviewKunde(patch) {
+    setPreview(p => (p ? { ...p, kunde: { ...p.kunde, ...patch } } : p));
+  }
+  function setPreviewJob(patch) {
+    setPreview(p => (p ? { ...p, job: { ...p.job, ...patch } } : p));
   }
 
   async function submit() {
@@ -175,57 +245,51 @@ export default function QuickCreateModal({ open, onClose }) {
         return;
       }
 
-      let body;
-      if (tab === 'url') {
-        if (!url.trim()) throw new Error('Bitte URL eingeben.');
-        body = { mode: 'url', url: url.trim() };
-      } else if (tab === 'file') {
-        if (!file) throw new Error('Bitte Datei auswählen.');
-        const fileType = detectFileType(file);
-        if (!fileType) throw new Error('Nur PDF oder DOCX werden unterstützt.');
-        const fileData = await fileToBase64(file);
-        body = { mode: 'file', fileType, fileData };
-      } else {
-        if (!manual.firmenname.trim()) throw new Error('Firmenname ist Pflicht.');
-        if (!manual.stelle.trim()) throw new Error('Stelle ist Pflicht.');
-        const closeLead = manual.close_lead_id.trim();
-        if (agentur === 'nowagwirth' && !closeLead) throw new Error('Close Lead ID ist bei Nowag & Wirth Pflicht.');
-        if (closeLead && !closeLead.startsWith('lead_')) throw new Error('Close Lead ID muss mit lead_ beginnen.');
-        body = {
-          mode: 'manual',
-          kunde: {
-            firmenname: manual.firmenname,
-            ansprechpartner: manual.ansprechpartner,
-            email: manual.email,
-            telefon: manual.telefon,
-            branche: manual.branche,
-            notizen: manual.notizen,
-            close_lead_id: closeLead || undefined,
-          },
-          job: { stelle: manual.stelle, region: manual.region, gehalt: manual.gehalt },
-        };
+      // url/file: NICHT sofort anlegen — erst extrahieren und den Bestätigungs-
+      // Schritt "Erkannte Daten prüfen" zeigen (confirmCreate legt danach an).
+      if (tab === 'url' || tab === 'file') {
+        let extractBody;
+        if (tab === 'url') {
+          if (!url.trim()) throw new Error('Bitte URL eingeben.');
+          extractBody = { mode: 'url', url: url.trim() };
+        } else {
+          if (!file) throw new Error('Bitte Datei auswählen.');
+          const fileType = detectFileType(file);
+          if (!fileType) throw new Error('Nur PDF oder DOCX werden unterstützt.');
+          const fileData = await fileToBase64(file);
+          extractBody = { mode: 'file', fileType, fileData };
+        }
+        const res = await api('/kunden/quick-create/extract', { method: 'POST', body: extractBody });
+        setPreview({
+          kunde: res.kunde,
+          job: res.job,
+          extracted: res.extracted,
+          eingabe_methode: res.eingabe_methode,
+          url: res.url,
+          firmenname_erkannt: !!res.firmenname_erkannt,
+        });
+        return;
       }
 
-      // Optionales Logo — gilt für alle drei Modi
-      if (logoFile) {
-        const logoData = await fileToBase64(logoFile);
-        body.logo = {
-          fileData: logoData,
-          fileName: logoFile.name,
-          contentType: logoFile.type || 'image/png',
-        };
-      }
-
-      body.agentur = agentur;
-      body.projekt_status = projektStatus;
-      body.kickoff_termin = projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null;
-      body.projektart = projektart || null;
-      body.projektdauer = projektFlags.projektdauer || null;
-      body.fotograf_noetig = !!projektFlags.fotograf_noetig;
-      body.zahlung_aufgeteilt = !!projektFlags.zahlung_aufgeteilt;
-      body.garantie = !!projektFlags.garantie;
-      body.garantie_details = projektFlags.garantie ? (projektFlags.garantie_details || null) : null;
-      body.verantwortlich = verantwortlich || null;
+      // manual: unverändert in einem Schritt anlegen
+      if (!manual.firmenname.trim()) throw new Error('Firmenname ist Pflicht.');
+      if (!manual.stelle.trim()) throw new Error('Stelle ist Pflicht.');
+      const closeLead = manual.close_lead_id.trim();
+      if (agentur === 'nowagwirth' && !closeLead) throw new Error('Close Lead ID ist bei Nowag & Wirth Pflicht.');
+      if (closeLead && !closeLead.startsWith('lead_')) throw new Error('Close Lead ID muss mit lead_ beginnen.');
+      const body = await applyCommonBody({
+        mode: 'manual',
+        kunde: {
+          firmenname: manual.firmenname,
+          ansprechpartner: manual.ansprechpartner,
+          email: manual.email,
+          telefon: manual.telefon,
+          branche: manual.branche,
+          notizen: manual.notizen,
+          close_lead_id: closeLead || undefined,
+        },
+        job: { stelle: manual.stelle, region: manual.region, gehalt: manual.gehalt },
+      });
       const res = await api('/kunden/quick-create', { method: 'POST', body });
       reset();
       onClose();
@@ -249,7 +313,14 @@ export default function QuickCreateModal({ open, onClose }) {
       open={open}
       onClose={close}
       title="Neuer Kunde / neues Projekt"
-      footer={inviteSuccess ? null : (
+      footer={inviteSuccess ? null : preview ? (
+        <>
+          <button className="btn-ghost" onClick={() => { setPreview(null); setError(''); }} disabled={busy}>Zurück</button>
+          <button className="btn-primary" onClick={confirmCreate} disabled={busy || !preview.kunde.firmenname.trim()}>
+            {busy ? 'Lege an…' : 'Kunde anlegen'}
+          </button>
+        </>
+      ) : (
         <>
           <button className="btn-ghost" onClick={close} disabled={busy}>Abbrechen</button>
           <button className="btn-primary" onClick={submit} disabled={busy}>
@@ -257,7 +328,7 @@ export default function QuickCreateModal({ open, onClose }) {
               ? (tab === 'invite' || tab === 'manual' ? 'Sende…' : 'Analysiere…')
               : (tab === 'invite' ? 'Formular senden'
                 : tab === 'manual' ? 'Anlegen'
-                : 'Analysieren & Anlegen')}
+                : 'Analysieren')}
           </button>
         </>
       )}
@@ -321,6 +392,7 @@ export default function QuickCreateModal({ open, onClose }) {
         </div>
       )}
 
+      {!preview && (<>
       <div className="modal-tabs">
         {TABS.map(t => (
           <button
@@ -540,6 +612,55 @@ export default function QuickCreateModal({ open, onClose }) {
           </div>
         </div>
       )}
+      </>)}
+
+      {/* Bestätigungs-Schritt: erkannte Kern-Daten prüfen, bevor der Kunde angelegt wird */}
+      {preview && (
+        <div className="modal-pane">
+          <p className="pane-hint">
+            <strong>Erkannte Daten prüfen</strong> — bitte kurz kontrollieren und ggf. korrigieren, dann anlegen.
+            {preview.firmenname_erkannt
+              ? ' Firmenname wurde automatisch erkannt.'
+              : ''}
+          </p>
+          {!preview.kunde.firmenname.trim() && (
+            <div className="alert alert-error" style={{ marginBottom: 12 }}>
+              Firmenname konnte nicht ermittelt werden — bitte eintragen.
+            </div>
+          )}
+          <div className="form-section">
+            <div className="form-grid">
+              <label className="field field-full">
+                <span>Firmenname <em style={{ color: '#dc2626', fontStyle: 'normal' }}>*</em></span>
+                <input
+                  value={preview.kunde.firmenname}
+                  onChange={e => setPreviewKunde({ firmenname: e.target.value })}
+                  placeholder="Firmenname eintragen"
+                  autoFocus={!preview.firmenname_erkannt}
+                  style={!preview.kunde.firmenname.trim()
+                    ? { borderColor: '#dc2626', background: '#fff5f5' }
+                    : undefined}
+                />
+              </label>
+              <label className="field">
+                <span>Ansprechpartner</span>
+                <input value={preview.kunde.ansprechpartner} onChange={e => setPreviewKunde({ ansprechpartner: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>E-Mail</span>
+                <input type="email" value={preview.kunde.email} onChange={e => setPreviewKunde({ email: e.target.value })} />
+              </label>
+              <label className="field field-full">
+                <span>Stelle</span>
+                <input value={preview.job.stelle} onChange={e => setPreviewJob({ stelle: e.target.value })} placeholder="Unbenannte Stelle" />
+              </label>
+            </div>
+          </div>
+          <p className="pane-hint" style={{ fontSize: 12, color: '#5a5955' }}>
+            Weitere erkannte Details (Benefits, Kultur, Anforderungen …) werden automatisch übernommen und lassen sich später im Projekt bearbeiten.
+          </p>
+        </div>
+      )}
 
       {/* Logo-Upload (für alle Modi gemeinsam — außer "Kunde füllt aus") */}
       {tab !== 'invite' && <div className="logo-upload-row">
@@ -573,7 +694,7 @@ export default function QuickCreateModal({ open, onClose }) {
       </div>}
 
       {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
-      {busy && (tab === 'url' || tab === 'file') && (
+      {busy && !preview && (tab === 'url' || tab === 'file') && (
         <div className="extract-hint">
           {tab === 'url' ? 'Lade Seite und extrahiere Daten — kann 10-30 Sekunden dauern…' : 'Lese Datei und extrahiere Daten…'}
         </div>
