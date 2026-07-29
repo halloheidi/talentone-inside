@@ -88,16 +88,25 @@ function reviewEvents(reviews) {
   return out;
 }
 
-// Creatives im selben Erstellungs-Schub (gleiche Minute) zu einem Event bündeln.
+// Creatives eines Generierungs-Schubs (aufeinanderfolgend, Lücke ≤ 30 Min) zu
+// EINEM Event bündeln — sonst überfluten Einzel-Creatives die Timeline.
 function creativeEvents(creatives) {
-  const groups = new Map();
-  for (const c of creatives) {
-    const key = (c.created_at || '').slice(0, 16);
-    if (!groups.has(key)) groups.set(key, { at: c.created_at, count: 0 });
-    groups.get(key).count++;
+  const GAP_MS = 30 * 60 * 1000;
+  const sorted = (creatives || [])
+    .filter(c => c.created_at)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const clusters = [];
+  for (const c of sorted) {
+    const ts = new Date(c.created_at).getTime();
+    const last = clusters[clusters.length - 1];
+    if (last && ts - last.lastTs <= GAP_MS) {
+      last.count++; last.lastTs = ts; last.at = c.created_at;
+    } else {
+      clusters.push({ at: c.created_at, firstTs: ts, lastTs: ts, count: 1 });
+    }
   }
-  return [...groups.values()].map((g, i) => ({
-    id: `creatives_${g.at}_${i}`,
+  return clusters.map((g, i) => ({
+    id: `creatives_${g.firstTs}_${i}`,
     kind: 'creatives',
     icon: '🎨',
     at: g.at,

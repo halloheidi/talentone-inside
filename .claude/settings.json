@@ -18,7 +18,8 @@
       "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|method: 'POST'\\\\|onSave\\\\|function save\\\\|async function\\\\|handleSave\\\\|debounce\\\\|setTimeout\" pages/job/JobCreatives.jsx)",
       "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|method: 'POST'\\\\|onSave\\\\|function save\\\\|async function\\\\|handleSave\\\\|debounce\\\\|setTimeout\" pages/job/JobExport.jsx)",
       "Bash(grep -n \"Speicher\\\\|Übernehmen\\\\|Gespeichert\\\\|btn-primary\\\\|api\\(\\\\`\\\\|api\\('\\\\|onBlur\\\\|method: 'PATCH'\\\\|method: 'PUT'\\\\|onSave\\\\|async function\\\\|handleSave\\\\|function save\\\\|Farben\\\\|Firmendaten\\\\|onSubmit\\\\|setTimeout\" pages/KundeDetail.jsx)",
-      "Bash(node --check aktivitaet.js)"
+      "Bash(node --check aktivitaet.js)",
+      "Bash(node --check backend/aktivitaet.js)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"
