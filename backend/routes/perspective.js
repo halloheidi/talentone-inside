@@ -69,14 +69,27 @@ router.post('/create', async (req, res) => {
     const prompt = buildRecruitingPrompt({ job, kunde: kundenMitDomain, schema, bildUrls });
     const funnelName = `${kundenMitDomain.firmenname} — ${job.stelle || 'Recruiting-Funnel'}`.slice(0, 120);
 
-    // 4. Funnel-Row anlegen (im polling-Status), damit das UI sofort was hat
-    const { data: funnelRow, error: fErr } = await supabase.from('talentone_funnels').insert({
+    // 4. Funnel-Row anlegen ODER die (per Typ-Auswahl vorab angelegte) Row
+    //    wiederverwenden — sonst entstehen zwei Funnel-Rows pro Job.
+    const { data: bestehendeRow } = await supabase.from('talentone_funnels')
+      .select('id').eq('job_id', job.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    const rowPatch = {
       job_id: job.id,
       extern: false,
+      funnel_typ: 'perspective',
       perspective_status: 'creating',
       perspective_schema: schema,
       perspective_prompt: prompt,
-    }).select().single();
+    };
+    let funnelRow, fErr;
+    if (bestehendeRow) {
+      ({ data: funnelRow, error: fErr } = await supabase.from('talentone_funnels')
+        .update(rowPatch).eq('id', bestehendeRow.id).select().single());
+    } else {
+      ({ data: funnelRow, error: fErr } = await supabase.from('talentone_funnels')
+        .insert(rowPatch).select().single());
+    }
     if (fErr) return res.status(500).json({ error: `Funnel-Row: ${fErr.message}` });
 
     // 5. create_funnel triggern (blockend, aber schnell — nur job_id abholen)

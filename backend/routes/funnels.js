@@ -8,7 +8,7 @@ const router = Router();
 
 const ALLOWED = [
   'fragen', 'pixel_id', 'conversion_ziel', 'bilder', 'veroeffentlicht', 'screens',
-  'capi_access_token', 'extern', 'extern_url', 'extern_sheet_url',
+  'capi_access_token', 'extern', 'extern_url', 'extern_sheet_url', 'funnel_typ',
 ];
 
 // Vordefinierte Meta-Pixel (Dataset-IDs) zur schnellen Auswahl in der
@@ -42,7 +42,9 @@ async function loadJobAndKunde(job_id) {
   return { job, kunde };
 }
 
-// GET /api/funnels?job_id=… — liefert oder erstellt einen Funnel für den Job
+// GET /api/funnels?job_id=… — liefert den Funnel des Jobs oder null.
+// KEINE Auto-Anlage mehr: ist noch keiner da, zeigt das Frontend die Typ-Auswahl
+// (Perspective / onepage / Tool-Funnel intern) und legt erst nach der Wahl an.
 router.get('/', async (req, res) => {
   const { job_id } = req.query;
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
@@ -50,12 +52,35 @@ router.get('/', async (req, res) => {
   const { data: existing, error: e1 } = await supabase
     .from('talentone_funnels').select('*').eq('job_id', job_id).order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (e1) return res.status(500).json({ error: e1.message });
-  if (existing) return res.json({ funnel: existing });
+  res.json({ funnel: existing || null });
+});
 
-  // Auto-create wenn keiner existiert
-  const { data: created, error: e2 } = await supabase
-    .from('talentone_funnels').insert({ job_id, fragen: [], bilder: {} }).select().single();
-  if (e2) return res.status(500).json({ error: e2.message });
+// POST /api/funnels — legt den Funnel mit gewähltem Typ an (idempotent pro Job).
+// body: { job_id, funnel_typ: 'perspective'|'onepage'|'intern' }
+router.post('/', async (req, res) => {
+  const { job_id, funnel_typ } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  const typ = ['perspective', 'onepage', 'intern'].includes(funnel_typ) ? funnel_typ : 'intern';
+
+  const { data: existing } = await supabase
+    .from('talentone_funnels').select('*').eq('job_id', job_id)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (existing) {
+    // Bereits vorhanden → Typ nachtragen, wenn noch keiner gesetzt ist.
+    if (!existing.funnel_typ) {
+      const { data: upd, error } = await supabase.from('talentone_funnels')
+        .update({ funnel_typ: typ, extern: typ === 'onepage' ? true : existing.extern })
+        .eq('id', existing.id).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ funnel: upd });
+    }
+    return res.json({ funnel: existing });
+  }
+
+  const { data: created, error } = await supabase.from('talentone_funnels')
+    .insert({ job_id, funnel_typ: typ, extern: typ === 'onepage', fragen: [], bilder: {} })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ funnel: created });
 });
 

@@ -40,6 +40,45 @@ function normalizeOptions(options) {
   return options.map(o => typeof o === 'string' ? { text: o } : (o || { text: '' }));
 }
 
+const FUNNEL_TYP_OPTIONEN = [
+  { key: 'perspective', icon: '🚀', label: 'Perspective', desc: 'High-Performance-Funnel über Perspective. Wird per Claude erstellt — die veröffentlichte URL wird hier eingetragen.' },
+  { key: 'onepage',     icon: '🌐', label: 'onepage.io',  desc: 'Externer Funnel via onepage.io o. ä. — externe URL eintragen, Webhook-Adresse für Bewerbungen wird angezeigt.' },
+  { key: 'intern',      icon: '🧩', label: 'Tool-Funnel (intern)', desc: 'Eigener Funnel direkt im Tool. Die Screens (Intro, Benefits, Aufgaben, Kontakt) werden nach der Wahl automatisch generiert.' },
+];
+
+function FunnelTypPicker({ title, onPick, current, onCancel }) {
+  return (
+    <div className="card">
+      <h2 className="section-title" style={{ marginTop: 0 }}>{title}</h2>
+      <p className="section-sub">Wähle, wie der Bewerber-Funnel für dieses Projekt läuft. Der interne Tool-Funnel wird erst nach der Wahl generiert — vorher passiert nichts automatisch.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 14 }}>
+        {FUNNEL_TYP_OPTIONEN.map(o => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onPick(o.key)}
+            style={{
+              textAlign: 'left', cursor: 'pointer',
+              border: `2px solid ${current === o.key ? 'var(--brand, #2563eb)' : 'var(--line, #e5e5e5)'}`,
+              background: current === o.key ? 'var(--gray-50, #f7f7f5)' : '#fff',
+              borderRadius: 12, padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 6,
+            }}
+          >
+            <div style={{ fontSize: 30, lineHeight: 1 }}>{o.icon}</div>
+            <strong style={{ fontSize: 15 }}>{o.label}{current === o.key ? ' · aktuell' : ''}</strong>
+            <span style={{ fontSize: 12, color: 'var(--ink-3, #666)', lineHeight: 1.5 }}>{o.desc}</span>
+          </button>
+        ))}
+      </div>
+      {onCancel && (
+        <div style={{ marginTop: 12 }}>
+          <button type="button" className="btn-ghost btn-sm" onClick={onCancel}>Abbrechen</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function JobFunnel() {
   const { job, kunde, reload } = useJob();
   const [funnel, setFunnel] = useState(null);
@@ -80,8 +119,17 @@ export default function JobFunnel() {
     ])
       .then(async ([f, r]) => {
         let funnelData = f.funnel;
-        // Auto-generate Initial-Screens beim ersten Öffnen
-        if (!Array.isArray(funnelData.screens) || funnelData.screens.length === 0) {
+        setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
+        // Kein Funnel → Leerzustand mit Typ-Auswahl (kein Auto-Anlegen mehr).
+        if (!funnelData) {
+          setFunnel(null);
+          return;
+        }
+        // Auto-Generierung der Initial-Screens NUR für interne Tool-Funnel
+        // (funnel_typ 'intern' oder Alt-Bestand ohne Typ und ohne externe URL).
+        const istIntern = funnelData.funnel_typ === 'intern'
+          || (!funnelData.funnel_typ && !funnelData.extern);
+        if (istIntern && (!Array.isArray(funnelData.screens) || funnelData.screens.length === 0)) {
           setInitBusy(true);
           try {
             const init = await api(`/funnels/${funnelData.id}/initial-screens`, { method: 'POST' });
@@ -107,7 +155,6 @@ export default function JobFunnel() {
         setExternUrl(funnelData.extern_url || '');
         setExternSheetUrl(funnelData.extern_sheet_url || '');
         setBewerbungEmail(job?.bewerbung_email || '');
-        setReferenzen((r.referenzbilder || []).filter(x => x.typ === 'foto'));
         // Default: Startseite ausgewählt
         if (Array.isArray(funnelData.screens) && funnelData.screens[0]) {
           setActiveScreenId(funnelData.screens[0].id);
@@ -117,6 +164,32 @@ export default function JobFunnel() {
       .finally(() => setLoading(false));
   }
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [job.id]);
+
+  const [showTypPicker, setShowTypPicker] = useState(false);
+  // Leerzustand: Typ wählen → Funnel anlegen (intern generiert Screens).
+  async function pickTyp(typ) {
+    setError('');
+    setInitBusy(true);
+    try {
+      await api('/funnels', { method: 'POST', body: { job_id: job.id, funnel_typ: typ } });
+      loadAll();
+    } catch (e) {
+      setError(e.message);
+      setInitBusy(false);
+    }
+  }
+  // Typ nachträglich wechseln (Funnel existiert bereits).
+  async function changeTyp(typ) {
+    setError('');
+    setShowTypPicker(false);
+    try {
+      const patch = { funnel_typ: typ };
+      if (typ === 'onepage') patch.extern = true;
+      if (typ === 'intern') patch.extern = false;
+      await api(`/funnels/${funnel.id}`, { method: 'PATCH', body: patch });
+      loadAll();
+    } catch (e) { setError(e.message); }
+  }
 
   /* ───── Kundenkommentar aus Review (Funnel + allgemein) ───── */
   const [reviewFunnelKommentar, setReviewFunnelKommentar] = useState('');
@@ -252,7 +325,18 @@ export default function JobFunnel() {
   if (loading || initBusy) {
     return <div className="card empty">{initBusy ? 'KI generiert die Funnel-Texte… (~10–20 Sekunden)' : 'Lade Funnel…'}</div>;
   }
-  if (!funnel) return <div className="alert alert-error">{error || 'Funnel nicht gefunden.'}</div>;
+  // Leerzustand: erst Typ wählen, dann bauen.
+  if (!funnel) {
+    return (
+      <div className="funnel-editor">
+        {error && <div className="alert alert-error" style={{ marginBottom: 12 }}>{error}</div>}
+        <FunnelTypPicker
+          title="Welchen Funnel-Typ nutzt dieses Projekt?"
+          onPick={pickTyp}
+        />
+      </div>
+    );
+  }
 
   const brandBase = getBrandBaseUrl(kunde?.agentur);
   const internalUrl = `${brandBase}/f/${funnel.id}`;
@@ -275,6 +359,26 @@ export default function JobFunnel() {
               <strong>Allgemein:</strong> {reviewAllgemeinKommentar}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Funnel-Typ — nachträglich wechselbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, fontSize: 13, color: 'var(--ink-3)' }}>
+        <span>Funnel-Typ: <strong style={{ color: 'var(--ink)' }}>
+          {FUNNEL_TYP_OPTIONEN.find(o => o.key === (funnel.funnel_typ || (funnel.extern ? 'onepage' : 'intern')))?.label || 'Tool-Funnel (intern)'}
+        </strong></span>
+        <button type="button" className="btn-ghost btn-sm" onClick={() => setShowTypPicker(v => !v)}>
+          {showTypPicker ? 'Abbrechen' : 'Typ ändern'}
+        </button>
+      </div>
+      {showTypPicker && (
+        <div style={{ marginBottom: 16 }}>
+          <FunnelTypPicker
+            title="Funnel-Typ wechseln"
+            current={funnel.funnel_typ || (funnel.extern ? 'onepage' : 'intern')}
+            onPick={changeTyp}
+            onCancel={() => setShowTypPicker(false)}
+          />
         </div>
       )}
 
@@ -932,7 +1036,7 @@ function PerspectiveSection({ job, kunde }) {
   async function load() {
     try {
       const res = await api(`/funnels?job_id=${job.id}`);
-      const row = (res.funnels || []).find(f => !!f.perspective_job_id) || null;
+      const row = res.funnel && res.funnel.perspective_job_id ? res.funnel : null;
       setFunnelRow(row);
     } catch (e) { console.warn('[perspective/load]', e.message); }
   }
@@ -1088,10 +1192,9 @@ function CreateModal({ job, kunde, onClose, onDone }) {
         method: 'POST',
         body: { job_id: job.id, schema, website_domain: domain.trim() || null },
       });
-      // Nach Anlegen: erste Row-Version zurueckziehen
-      const { funnels } = await api(`/funnels?job_id=${job.id}`);
-      const row = (funnels || []).find(f => f.id === res.funnel_row_id) || (funnels || [])[0];
-      onDone(row);
+      // Nach Anlegen: aktuelle Funnel-Row zurueckziehen
+      const { funnel } = await api(`/funnels?job_id=${job.id}`);
+      onDone(funnel || null);
     } catch (e) { setErr(e.message); setBusy(false); }
   }
 
