@@ -826,11 +826,11 @@ router.post('/pruefung/:token', async (req, res) => {
     reisebereitschaft: reiseBool,
     quereinsteiger: typeof jobPatch.quereinsteiger === 'boolean' ? jobPatch.quereinsteiger : job.quereinsteiger,
     formdata_komplett: newFd,
-    updated_at: new Date().toISOString(),
   };
   if (neukunden_daten && typeof neukunden_daten === 'object') update.neukunden_daten = neukunden_daten;
   if (creativesVorhanden) update.daten_geaendert_nach_creatives_at = new Date().toISOString();
-  await supabase.from('talentone_jobs').update(update).eq('id', job.id);
+  const { error: updErr } = await supabase.from('talentone_jobs').update(update).eq('id', job.id);
+  if (updErr) return res.status(500).json({ error: `Job aktualisieren: ${updErr.message}` });
 
   // Kunden-Felder, die der Kunde ergänzen darf.
   const kUpd = {};
