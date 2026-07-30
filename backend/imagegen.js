@@ -366,7 +366,11 @@ const EBENEN_TIEFE_REGEL =
   'Banner liegt HINTER der Person, nicht davor. ' + TEXT_GESICHT_REGEL;
 
 // Prompt für Modus "ki" — komplett neues Bild generieren, optional mit Person als Vorlage.
-function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
+// Hinweis für eine hochgeladene Stil-Vorlage (referenzbild_nutzen). Das Bild wird
+// als LETZTES Referenzbild in image[] mitgeschickt.
+const STIL_VORLAGE_HINWEIS = `STIL-VORLAGE: Das ZULETZT beigefügte Bild (Dateiname "stilbeispiel") ist eine STIL-VORLAGE. Übernimm dessen Layout-Aufbau, Text-Anordnung, Gestaltungsprinzipien und visuelle Sprache — aber mit den Inhalten, Farben und dem Logo DIESES Kunden. Kopiere KEINE Texte, Personen oder Logos aus der Vorlage.`;
+
+function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll' }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
@@ -424,7 +428,7 @@ FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung 
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur.
 
-${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${hatStilbeispiel ? STIL_VORLAGE_HINWEIS + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
 ${motiv}
 - Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
 - Branche: ${branche}
@@ -441,7 +445,7 @@ ${person ? `- ${EBENEN_TIEFE_REGEL}\n` : ''}- HIERARCHIE der Größen: STELLENBE
 }
 
 // Prompt für Modus "foto" — Foto als Hintergrund unverändert übernehmen, nur Overlay hinzufügen.
-function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
+function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll' }) {
   const stelle = stelleDisplay(job.stelle);
   const ort = cleanOrt(job.region);
   const firmenname = kunde?.firmenname || '';
@@ -485,7 +489,7 @@ FLEXIBLER BEREICH OBEN (ca. obere 65% — du wählst Stil & Anordnung der Overla
   return `Erstelle ein professionelles Recruiting-Ad-Overlay ${orientation} im Stil einer hochwertigen Recruiting-Agentur.
 
 ${refLines}
-
+${hatStilbeispiel ? '\n' + STIL_VORLAGE_HINWEIS + '\n' : ''}
 ${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
 ${layoutBlock}
@@ -504,12 +508,12 @@ DESIGN-REGELN:
 // Wrapper — wählt den passenden Prompt anhand des Projekttyps und Modus.
 // Projekttyp „neukundengewinnung" → Lead-Gen-Layout (Produkt/Ergebnis im Fokus,
 // CTA „Kostenloses Angebot", keine Stellenbezeichnung). Sonst Recruiting.
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll' }) {
   if (job?.projekttyp === 'neukundengewinnung') {
     return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
   }
-  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, logoAufKleidung, logoModus });
-  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, logoAufKleidung, logoModus });
+  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
 }
 
 // Prompt für Neukundengewinnung (Lead-Gen-Ad).
@@ -663,6 +667,7 @@ async function loadReferenceImages(refs) {
       ext: norm.ext,
       name: ref.name || 'ref',
       isLogo: !!ref.isLogo,
+      isStyle: !!ref.isStyle,
     });
   }
   return out;
@@ -681,22 +686,25 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
-  if (mode === 'foto' && !referenceImages.some(r => !r.isLogo)) {
+  if (mode === 'foto' && !referenceImages.some(r => !r.isLogo && !r.isStyle)) {
     throw new Error('Modus "foto" benötigt ein Hintergrund-Foto.');
   }
 
   const refs = await loadReferenceImages(referenceImages);
   const hasLogo = !!referenceImages[0]?.isLogo;
-  const person = referenceImages.find(r => !r.isLogo) || null;
+  const person = referenceImages.find(r => !r.isLogo && !r.isStyle) || null;
+  const hatStilbeispiel = referenceImages.some(r => r.isStyle);
   // Logo-auf-Kleidung nur, wenn ueberhaupt ein Logo mitgeht.
   const logoImMotiv = logoAufKleidung && hasLogo;
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage, logoAufKleidung: logoImMotiv, logoModus });
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung: logoImMotiv, logoModus });
 
   let response;
   if (refs.length > 0) {
-    // Sortierung erzwingen: Logo IMMER zuerst → so erwartet's auch der Prompt
-    refs.sort((a, b) => (b.isLogo ? 1 : 0) - (a.isLogo ? 1 : 0));
-    console.log(`[imagegen] format=${format} mode=${mode} refs=[${refs.map(r => r.isLogo ? 'logo' : 'person').join(', ')}]`);
+    // Sortierung: Logo IMMER zuerst, Stil-Vorlage IMMER zuletzt (Prompt referenziert
+    // das "zuletzt beigefügte Bild") — Person/Foto dazwischen.
+    const rang = (r) => r.isLogo ? 0 : r.isStyle ? 2 : 1;
+    refs.sort((a, b) => rang(a) - rang(b));
+    console.log(`[imagegen] format=${format} mode=${mode} refs=[${refs.map(r => r.isLogo ? 'logo' : r.isStyle ? 'stil' : 'person').join(', ')}]`);
 
     const form = new FormData();
     form.append('model', 'gpt-image-2');
@@ -706,7 +714,9 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     form.append('n', '1');
     refs.forEach((r) => {
       // Nach normalizeImageForOpenAI ist jedes Ref ein sRGB-PNG.
-      const fileName = r.isLogo ? `firmenlogo.${r.ext}` : (mode === 'foto' ? `hintergrundfoto.${r.ext}` : `person.${r.ext}`);
+      const fileName = r.isStyle ? `stilbeispiel.${r.ext}`
+        : r.isLogo ? `firmenlogo.${r.ext}`
+        : (mode === 'foto' ? `hintergrundfoto.${r.ext}` : `person.${r.ext}`);
       form.append('image[]', bufferToFile(r.buffer, fileName, r.contentType));
     });
     response = await fetch(OPENAI_EDITS_API, {

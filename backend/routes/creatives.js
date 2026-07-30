@@ -376,6 +376,12 @@ router.post('/generate', async (req, res) => {
     stilvorlage = data || null;
   }
 
+  // Stil-Vorlage als zusätzliches Referenzbild (LETZTES im image[]) — nur wenn die
+  // Vorlage ein Beispielbild hat und referenzbild_nutzen aktiv ist.
+  if (stilvorlage?.referenzbild_nutzen && stilvorlage?.vorschau_url) {
+    referenceImages.push({ url: stilvorlage.vorschau_url, name: 'stilbeispiel', isLogo: false, isStyle: true });
+  }
+
   const expected = n * 2; // jede Variante × 2 Formate
   // Alte Fehlermeldung clearen damit das Frontend nicht den Fehler vom letzten Run sieht
   clearGenError(job_id);
@@ -500,6 +506,10 @@ router.post('/:id/regenerate', async (req, res) => {
       const { data } = await supabase.from('talentone_stilvorlagen')
         .select('*').eq('id', vorlageId).maybeSingle();
       stilvorlage = data || null;
+    }
+    // Stil-Vorlage als zusätzliches (letztes) Referenzbild, wenn aktiviert.
+    if (stilvorlage?.referenzbild_nutzen && stilvorlage?.vorschau_url) {
+      referenceImages.push({ url: stilvorlage.vorschau_url, name: 'stilbeispiel', isLogo: false, isStyle: true });
     }
 
     const { generateOneCreative } = await import('../imagegen.js');

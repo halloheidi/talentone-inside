@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
+import { fileToBase64 } from '../../lib/files.js';
 import Lightbox from '../../components/Lightbox.jsx';
 
 // Admin-Verwaltung fuer die Stilvorlagen der Creative-Generierung.
@@ -10,6 +11,73 @@ export default function StilvorlagenAdmin() {
   const [busyId, setBusyId] = useState(null);
   const [edit, setEdit] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [visionBusy, setVisionBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  // Vorlage muss existieren, bevor Bilder hochgeladen werden können.
+  // Legt bei Bedarf an (name + layout_prompt Pflicht) und liefert die Vorlage mit id.
+  async function ensureSaved() {
+    if (edit.id) return edit;
+    if (!edit.name || !edit.layout_prompt) {
+      throw new Error('Bitte zuerst Name und Layout-Prompt ausfüllen (dann kann hochgeladen werden).');
+    }
+    const res = await api('/stilvorlagen', {
+      method: 'POST',
+      body: {
+        name: edit.name, beschreibung: edit.beschreibung || null,
+        layout_prompt: edit.layout_prompt, vorschau_url: edit.vorschau_url || null,
+        referenzbild_nutzen: !!edit.referenzbild_nutzen,
+        aktiv: true, reihenfolge: Number(edit.reihenfolge) || 100,
+      },
+    });
+    const created = res.stilvorlage;
+    setEdit(created);
+    return created;
+  }
+
+  async function uploadBeispiel(files) {
+    if (!files?.length) return;
+    setUploadBusy(true);
+    try {
+      const vorlage = await ensureSaved();
+      let last = vorlage;
+      for (const file of files) {
+        const fileData = await fileToBase64(file);
+        const res = await api(`/stilvorlagen/${vorlage.id}/beispielbild`, {
+          method: 'POST',
+          body: { fileData, fileName: file.name, contentType: file.type || 'image/png' },
+        });
+        last = res.stilvorlage;
+      }
+      setEdit(last);
+      load();
+    } catch (err) { alert(err.body?.error || err.message); }
+    finally { setUploadBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+  }
+
+  async function removeBeispiel(url) {
+    if (!edit?.id) return;
+    setUploadBusy(true);
+    try {
+      const res = await api(`/stilvorlagen/${edit.id}/beispielbild`, { method: 'DELETE', body: { url } });
+      setEdit(res.stilvorlage);
+      load();
+    } catch (err) { alert(err.body?.error || err.message); }
+    finally { setUploadBusy(false); }
+  }
+
+  async function layoutAusBild() {
+    const imageUrl = edit?.vorschau_url || (Array.isArray(edit?.beispielbild_urls) ? edit.beispielbild_urls[0] : null);
+    if (!imageUrl) { alert('Bitte zuerst ein Beispielbild hochladen.'); return; }
+    if (edit.layout_prompt?.trim() && !confirm('Der bestehende Layout-Prompt wird durch die KI-Beschreibung ersetzt. Fortfahren?')) return;
+    setVisionBusy(true);
+    try {
+      const res = await api('/stilvorlagen/layout-vorschlag', { method: 'POST', body: { imageUrl } });
+      setEdit(e => ({ ...e, layout_prompt: res.layout_prompt || e.layout_prompt }));
+    } catch (err) { alert(err.body?.error || err.message); }
+    finally { setVisionBusy(false); }
+  }
 
   async function load() {
     try {
@@ -152,19 +220,54 @@ export default function StilvorlagenAdmin() {
                 <input value={edit.beschreibung || ''} onChange={e => setEdit({ ...edit, beschreibung: e.target.value })} />
               </label>
               <label className="field">
-                <span>Vorschau-URL (optional)</span>
-                <input type="url" value={edit.vorschau_url || ''} onChange={e => setEdit({ ...edit, vorschau_url: e.target.value })} placeholder="https://…" />
-              </label>
-              <label className="field">
                 <span>Reihenfolge</span>
                 <input type="number" value={edit.reihenfolge} onChange={e => setEdit({ ...edit, reihenfolge: e.target.value })} />
               </label>
+              <label className="field">
+                <span>Vorschau-URL <small style={{ color: 'var(--ink-3)' }}>(wird beim Upload automatisch gesetzt)</small></span>
+                <input type="url" value={edit.vorschau_url || ''} onChange={e => setEdit({ ...edit, vorschau_url: e.target.value })} placeholder="https://…" />
+              </label>
+
+              {/* Beispiel-Creatives (Bild-Upload) */}
+              <div className="field field-full">
+                <span>Beispiel-Creatives <small style={{ color: 'var(--ink-3)' }}>(ein oder mehrere Bilder des gewünschten Stils — erstes wird Thumbnail + KI-Stil-Referenz)</small></span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                  {(Array.isArray(edit.beispielbild_urls) ? edit.beispielbild_urls : []).map(url => (
+                    <div key={url} style={{ position: 'relative', width: 84, height: 84 }}>
+                      <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+                      <button type="button" onClick={() => removeBeispiel(url)} disabled={uploadBusy}
+                        title="Bild entfernen"
+                        style={{ position: 'absolute', top: -8, right: -8, width: 22, height: 22, borderRadius: '50%', border: 'none', background: '#b91c1c', color: '#fff', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadBusy}
+                    style={{ width: 84, height: 84, borderRadius: 8, border: '2px dashed var(--line)', background: '#fafaf8', cursor: 'pointer', fontSize: 12, color: 'var(--ink-3)' }}>
+                    {uploadBusy ? '…' : '+ Bild'}
+                  </button>
+                  <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple style={{ display: 'none' }}
+                    onChange={e => uploadBeispiel(Array.from(e.target.files || []))} />
+                </div>
+              </div>
+
               <label className="field-checkbox field-full">
                 <input type="checkbox" checked={!!edit.referenzbild_nutzen} onChange={e => setEdit({ ...edit, referenzbild_nutzen: e.target.checked })} />
-                <span>Vorschau-Bild als Style-Referenz an gpt-image-2 mitschicken</span>
+                <span>Beispielbild als Stil-Referenz an die KI übergeben <small style={{ color: 'var(--ink-3)' }}>(wird als letztes Referenzbild in die Generierung aufgenommen)</small></span>
               </label>
+
+              {(Array.isArray(edit.beispielbild_urls) && edit.beispielbild_urls.length > 0) && (
+                <div className="field-full" style={{ fontSize: 12, color: 'var(--ink-3)', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '8px 12px' }}>
+                  ℹ️ Die KI übernimmt den Stil und Aufbau der Vorlage — Ergebnisse sind stilistisch angelehnt, keine exakte Kopie.
+                </div>
+              )}
               <label className="field field-full">
-                <span>Layout-Prompt (der Text ersetzt den festen Layout-Block)</span>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <span>Layout-Prompt (der Text ersetzt den festen Layout-Block)</span>
+                  <button type="button" className="btn-ghost btn-sm" onClick={layoutAusBild}
+                    disabled={visionBusy || uploadBusy || !(edit.vorschau_url || (edit.beispielbild_urls || []).length)}
+                    title="Claude analysiert das Beispielbild und schreibt die Layout-Beschreibung">
+                    {visionBusy ? 'Analysiere Bild…' : '✨ Layout-Beschreibung aus Bild generieren'}
+                  </button>
+                </span>
                 <textarea
                   value={edit.layout_prompt || ''}
                   onChange={e => setEdit({ ...edit, layout_prompt: e.target.value })}
