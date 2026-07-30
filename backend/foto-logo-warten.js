@@ -47,6 +47,12 @@ export async function getFotoLogoWartenForJob(jobId) {
     .select('id, logo_url, upload_token').eq('id', job.kunde_id).maybeSingle();
   if (!kunde) return null;
 
+  // Sind für DIESEN Job schon Creatives da, haben wir ohne Kundenfotos gearbeitet —
+  // dann kein Warte-Badge mehr (deckungsgleich mit dem "Nächster Schritt"-Skip).
+  const { count: creativesCount } = await supabase.from('talentone_creatives')
+    .select('id', { count: 'exact', head: true }).eq('job_id', jobId).neq('archiviert', true);
+  if ((creativesCount || 0) > 0) return null;
+
   const { data: kundeJobs } = await supabase.from('talentone_jobs')
     .select('id').eq('kunde_id', kunde.id);
   const jobIds = (kundeJobs || []).map(j => j.id);
