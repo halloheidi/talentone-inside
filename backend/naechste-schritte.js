@@ -44,9 +44,9 @@ function kurznameFor(stelle) {
 
 /**
  * Ermittelt den nächsten Schritt für einen einzelnen Job.
- * ctx = { kunde, projekt, refbilderCount, versandTypen(Set),
- *         anfrageDatum (ISO oder null), creativesCount,
- *         adcopiesCount, funnels, review, letzterEntwurfsversandDatum }
+ * ctx = { kunde, projekt, refbilderCount, hatFotos, hatLogo, fotoLogoWarten,
+ *         versandTypen(Set), creativesCount, adcopiesCount, funnels, review,
+ *         letzterEntwurfsversandDatum }
  */
 function berechneSchritt(ctx) {
   const { kunde, projekt, tabStatus, refbilderCount, hatFotos, hatLogo, fotoLogoWarten,
