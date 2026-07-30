@@ -21,7 +21,8 @@
       "Bash(node --check aktivitaet.js)",
       "Bash(node --check backend/aktivitaet.js)",
       "Bash(npx vite *)",
-      "Bash(node --check backend/foto-logo-warten.js)"
+      "Bash(node --check backend/foto-logo-warten.js)",
+      "Bash(node --check backend/routes/stilvorlagen.js)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

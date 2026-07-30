@@ -14,6 +14,29 @@ export default function StilvorlagenAdmin() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [visionBusy, setVisionBusy] = useState(false);
   const fileRef = useRef(null);
+  const bulkRef = useRef(null);
+  const [bulk, setBulk] = useState(null); // { done, total } während des Direkt-Uploads
+
+  // Direkt-Weg: pro Bild eine fertige, aktive Vorlage (Name + Layout per Vision).
+  async function uploadVorlagen(files) {
+    if (!files?.length) return;
+    setBulk({ done: 0, total: files.length });
+    let fehler = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const fileData = await fileToBase64(files[i]);
+        await api('/stilvorlagen/aus-bild', {
+          method: 'POST',
+          body: { fileData, fileName: files[i].name, contentType: files[i].type || 'image/png' },
+        });
+      } catch (err) { fehler++; console.warn('[bulk-upload]', err.body?.error || err.message); }
+      setBulk({ done: i + 1, total: files.length });
+      load();
+    }
+    setBulk(null);
+    if (bulkRef.current) bulkRef.current.value = '';
+    if (fehler) alert(`${fehler} von ${files.length} Bild(ern) konnten nicht verarbeitet werden.`);
+  }
 
   // Vorlage muss existieren, bevor Bilder hochgeladen werden können.
   // Legt bei Bedarf an (name + layout_prompt Pflicht) und liefert die Vorlage mit id.
@@ -144,10 +167,19 @@ export default function StilvorlagenAdmin() {
           <h1 className="page-title">🎨 Stil-Vorlagen</h1>
           <p className="page-sub">Layout-Vorlagen für die Creative-Generierung. Der layout_prompt ersetzt den festen Layout-Block im gpt-image-2-Prompt und kann Platzhalter wie <code>{`{stelle_gross}`}</code>, <code>{`{meta_leiste}`}</code>, <code>{`{hook_anweisung}`}</code>, <code>{`{benefits_liste}`}</code>, <code>{`{logo_platzierung}`}</code>, <code>{`{firmenname}`}</code>, <code>{`{meta_leiste_farbe_hinweis}`}</code>, <code>{`{stellenbereich_farb_hinweis}`}</code>, <code>{`{stellenbereich_farb_hinweis_alternative}`}</code> nutzen.</p>
         </div>
-        <button className="btn-primary" onClick={() => setEdit({
-          name: '', beschreibung: '', layout_prompt: '', vorschau_url: '',
-          referenzbild_nutzen: false, aktiv: true, reihenfolge: 100,
-        })}>+ Neue Vorlage</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {bulk && <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>Verarbeite {bulk.done}/{bulk.total}…</span>}
+          <button className="btn-primary" onClick={() => bulkRef.current?.click()} disabled={!!bulk}
+            title="Bilder wählen — pro Bild wird automatisch eine fertige, aktive Vorlage angelegt (Name + Layout per KI)">
+            {bulk ? 'Lädt…' : '⬆️ Vorlage(n) hochladen'}
+          </button>
+          <button className="btn-ghost" onClick={() => setEdit({
+            name: '', beschreibung: '', layout_prompt: '', vorschau_url: '',
+            referenzbild_nutzen: false, aktiv: true, reihenfolge: 100,
+          })} disabled={!!bulk}>+ Neue Vorlage</button>
+          <input ref={bulkRef} type="file" accept="image/png,image/jpeg,image/webp" multiple style={{ display: 'none' }}
+            onChange={e => uploadVorlagen(Array.from(e.target.files || []))} />
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

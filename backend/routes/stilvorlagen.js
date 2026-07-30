@@ -3,7 +3,7 @@ import { supabase } from '../supabase.js';
 import { requireAdmin } from '../auth.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem, ensureBucket } from '../storage.js';
 import { normalizeImageForStorage } from '../imageops.js';
-import { callClaudeWithRetry } from '../claude.js';
+import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 
 const router = Router();
 const BUCKET = 'talentone-creatives'; // öffentlicher Bucket, wird für Beispielbilder mitgenutzt
@@ -150,6 +150,64 @@ WICHTIG: Beschreibe NUR Aufbau/Stil. Übernimm KEINE konkreten Texte, Namen, Per
   } catch (err) {
     console.error('[layout-vorschlag]', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/stilvorlagen/aus-bild  body: { fileData(base64), fileName?, contentType? }
+   Ein-Klick-Weg: legt aus EINEM Bild direkt eine fertige, aktive Vorlage an —
+   Bild normalisieren+hochladen, per Claude-Vision Name + layout_prompt ableiten,
+   referenzbild_nutzen=true. Kein Formular. */
+const FALLBACK_LAYOUT = `Orientiere dich am beigefügten Stilbeispiel. Baue das Creative in klaren Zonen auf: {stelle_gross} prominent und formatfüllend, {hook_anweisung}, {benefits_liste} als kompakte runde Badges, {logo_platzierung}, {meta_leiste} dezent. {farben_hinweis} Moderne, gut lesbare Typografie; Person/Bildmotiv im Vordergrund.`;
+
+router.post('/aus-bild', requireAdmin, async (req, res) => {
+  const { fileData, fileName, contentType } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'Kein Bild übergeben.' });
+  try {
+    const raw = Buffer.from(String(fileData).replace(/^data:.*?;base64,/, ''), 'base64');
+    const norm = await normalizeImageForStorage(raw, { kind: 'foto', label: fileName || 'Stilvorlage' });
+    await ensureBucket(BUCKET, { isPublic: true });
+    const stem = safeFilenameStem(fileName || 'stilvorlage');
+    const path = `stilvorlagen/neu/${Date.now()}-${stem}.${norm.ext}`;
+    const url = await uploadBuffer({ bucket: BUCKET, path, buffer: norm.buffer, contentType: norm.contentType, upsert: true });
+
+    // Vision: Name + Layout-Beschreibung ableiten (best-effort, mit Fallback).
+    let name = null;
+    let layout_prompt = null;
+    try {
+      const anweisung = `Analysiere das beigefügte Beispiel-Creative (Recruiting-Anzeige) und liefere ZWEI Dinge:
+1) "name": ein kurzer, prägnanter Stil-Name (2–4 Wörter, beschreibt den Look, z. B. "Bold Typo dunkel", "Foto-Fokus hell", "Pinselstrich orange").
+2) "layout_prompt": eine wiederverwendbare Layout-/Gestaltungs-Anweisung für eine KI-Bildgenerierung — Grundaufbau/Zonen, Größen-Hierarchie (Stellenbezeichnung, Hook, Benefit-Badges, Firmenname/Logo, Meta-Leiste), Typografie-Stil, Gestaltungsprinzipien (Formen, Farbeinsatz, Person-Platzierung, Ebenen). Nutze wo sinnvoll Platzhalter: {stelle_gross}, {meta_leiste}, {benefits_liste}, {firmenname}, {hook_anweisung}, {logo_platzierung}, {farben_hinweis}. Beschreibe NUR Aufbau/Stil — übernimm KEINE konkreten Texte, Namen, Personen oder Logos aus dem Bild.
+
+Antworte AUSSCHLIESSLICH als JSON: {"name": "...", "layout_prompt": "..."}`;
+      const data = await callClaudeWithRetry({
+        model: CLAUDE_MODEL,
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'url', url } },
+          { type: 'text', text: anweisung },
+        ] }],
+      });
+      const parsed = parseJsonContent(data);
+      if (parsed?.name) name = String(parsed.name).trim().slice(0, 80);
+      if (parsed?.layout_prompt) layout_prompt = String(parsed.layout_prompt).trim();
+    } catch (e) { console.warn('[stilvorlage-aus-bild vision]', e.message); }
+
+    if (!name) name = `Vorlage ${new Date().toLocaleDateString('de-DE')}`;
+    if (!layout_prompt) layout_prompt = FALLBACK_LAYOUT;
+
+    const { data: saved, error } = await supabase.from('talentone_stilvorlagen').insert({
+      name, layout_prompt,
+      vorschau_url: url,
+      beispielbild_urls: [url],
+      referenzbild_nutzen: true,
+      aktiv: true,
+      reihenfolge: 100,
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json({ stilvorlage: saved });
+  } catch (err) {
+    console.error('[stilvorlage-aus-bild]', err.message);
+    res.status(err.userMessage ? 400 : 500).json({ error: err.userMessage || err.message });
   }
 });
 
