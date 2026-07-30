@@ -3,6 +3,7 @@
 // als Badge angezeigt (Icon + Label + Farbe + Ziel-Tab).
 
 import { supabase } from './supabase.js';
+import { computeFotoLogoWarten, fotoLogoWartenLabel } from './foto-logo-warten.js';
 
 // Farb-Keys werden im Frontend auf konkrete CSS-Farben gemappt:
 // - grau (wartet auf Kunde)
@@ -48,8 +49,8 @@ function kurznameFor(stelle) {
  *         adcopiesCount, funnels, review, letzterEntwurfsversandDatum }
  */
 function berechneSchritt(ctx) {
-  const { kunde, projekt, tabStatus, refbilderCount, versandTypen, anfrageDatum,
-          creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
+  const { kunde, projekt, tabStatus, refbilderCount, hatFotos, hatLogo, fotoLogoWarten,
+          versandTypen, creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
 
   // Manuell abgehaktes Tab (tab_status[tab] === true) → zugehöriger Workflow-Schritt
   // wird übersprungen (Schritt wurde ausserhalb des Tools erledigt).
@@ -113,27 +114,25 @@ function berechneSchritt(ctx) {
   // Kunde wartet auf Formular
   if (kunde?.status === 'wartend') return { ...REGEL_BY_KEY.wartet_formular };
 
-  // 2. Foto-Logik — mit Skip-Regel bei bereits vorhandenen Creatives:
+  // 2. Foto-/Logo-Logik — gemeinsame Quelle mit dem Kopf-Badge (fotoLogoWarten).
   //   a) Wenn Creatives existieren → Foto-Schritt komplett überspringen
   //      (wir haben ja offensichtlich ohne Kundenfotos gearbeitet).
-  //   b) Sonst: keine Fotos + noch keine Anfrage → 📸 Fotos anfragen
-  //   c) Sonst: keine Fotos + Anfrage bereits raus → ⏳ Wartet auf Fotos ({Datum})
-  if (!tabErledigt('stelle') && creativesCount === 0 && refbilderCount === 0) {
-    // Anfrage-Nachweis: entweder Versand-Log ODER upload_token am Kunden
-    // (der Token wird nur beim ersten anfrage-Aufruf generiert — deckt
-    // Bestandsdaten ab, wo Versand-Log noch nicht mitgeschrieben wurde).
+  //   b) Angefragtes fehlt noch → ⏳ Warten auf Fotos/Logo/beides ({Datum})
+  //   c) Noch nichts da und noch nichts angefragt → 📸 Fotos anfragen
+  if (!tabErledigt('stelle') && creativesCount === 0) {
+    if (fotoLogoWarten) {
+      const wartet = { ...REGEL_BY_KEY.wartet_fotos, label: fotoLogoWartenLabel(fotoLogoWarten) };
+      if (fotoLogoWarten.angefragt_am) {
+        const datum = new Date(fotoLogoWarten.angefragt_am).toLocaleDateString('de-DE');
+        wartet.label = `${fotoLogoWartenLabel(fotoLogoWarten)} (angefragt ${datum})`;
+      }
+      if (fotoLogoWarten.ueberfaellig) { wartet.icon = '⚠️'; wartet.color = 'rot'; }
+      return wartet;
+    }
     const anfrageRaus = versandTypen.has('anfrage') || !!kunde?.upload_token;
-    if (!anfrageRaus) {
+    if (!anfrageRaus && !hatFotos && !hatLogo && refbilderCount === 0) {
       return { ...REGEL_BY_KEY.fotos_anfragen };
     }
-    const wartet = { ...REGEL_BY_KEY.wartet_fotos };
-    if (anfrageDatum) {
-      const datum = new Date(anfrageDatum).toLocaleDateString('de-DE');
-      wartet.label = `Wartet auf Fotos (angefragt ${datum})`;
-      const tage = Math.floor((Date.now() - new Date(anfrageDatum).getTime()) / 86400000);
-      if (tage >= 5) { wartet.icon = '⚠️'; wartet.color = 'rot'; }
-    }
-    return wartet;
   }
 
   // 3. Keine Creatives
@@ -176,7 +175,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
 
   // Bulk-Loads
   const [kundenRes, projekteRes, jobsRes, refbilderRes] = await Promise.all([
-    supabase.from('talentone_kunden').select('id, status, agentur, upload_token').in('id', ids),
+    supabase.from('talentone_kunden').select('id, status, agentur, upload_token, logo_url').in('id', ids),
     supabase.from('talentone_projekte')
       .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at, update_feedback_status, update_feedback_seit')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
@@ -204,7 +203,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
       ? supabase.from('talentone_funnels').select('job_id, veroeffentlicht, extern, extern_url').in('job_id', jobIds)
       : { data: [] },
     jobIds.length
-      ? supabase.from('talentone_versand').select('job_id, typ, created_at').in('job_id', jobIds)
+      ? supabase.from('talentone_versand').select('job_id, typ, created_at, inhalte').in('job_id', jobIds)
       : { data: [] },
     jobIds.length
       ? supabase.from('talentone_reviews')
@@ -227,7 +226,13 @@ export async function ermittleNaechsteSchritte(kundeIds) {
     if (newPrio < curPrio) primaeresProjektByKunde[p.kunde_id] = p;
   }
   const refCountByKunde = {};
-  for (const r of refbilder) refCountByKunde[r.kunde_id] = (refCountByKunde[r.kunde_id] || 0) + 1;
+  const hatFotosByKunde = {};
+  for (const r of refbilder) {
+    refCountByKunde[r.kunde_id] = (refCountByKunde[r.kunde_id] || 0) + 1;
+    if (r.typ !== 'logo') hatFotosByKunde[r.kunde_id] = true;
+  }
+  // Job → Kunde (für die kunde-weite Anfrage-Zuordnung)
+  const kundeIdByJob = Object.fromEntries(jobs.map(j => [j.id, j.kunde_id]));
 
   const creativesCountByJob = {};
   for (const c of (creativesRes.data || [])) creativesCountByJob[c.job_id] = (creativesCountByJob[c.job_id] || 0) + 1;
@@ -237,7 +242,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
   for (const f of (funnelsRes.data || [])) (funnelsByJob[f.job_id] ||= []).push(f);
   const versandByJob = {};
   const entwurfsversandDatumByJob = {};
-  const anfrageDatumByJob = {};
+  const anfrageVersandByKunde = {}; // kunde-weit: neueste typ='anfrage' (inkl. inhalte.umfang)
   for (const v of (versandRes.data || [])) {
     (versandByJob[v.job_id] ||= []).push(v);
     if ((v.typ || '').startsWith('entwurf_runde_')) {
@@ -245,8 +250,9 @@ export async function ermittleNaechsteSchritte(kundeIds) {
       if (!d || v.created_at > d) entwurfsversandDatumByJob[v.job_id] = v.created_at;
     }
     if (v.typ === 'anfrage') {
-      const d = anfrageDatumByJob[v.job_id];
-      if (!d || v.created_at > d) anfrageDatumByJob[v.job_id] = v.created_at;
+      const kId = kundeIdByJob[v.job_id];
+      const cur = anfrageVersandByKunde[kId];
+      if (!cur || v.created_at > cur.created_at) anfrageVersandByKunde[kId] = v;
     }
   }
   const reviewTopByJob = {};
@@ -276,14 +282,21 @@ export async function ermittleNaechsteSchritte(kundeIds) {
       continue;
     }
 
+    const hatFotos = !!hatFotosByKunde[kId];
+    const hatLogo = !!kunde?.logo_url;
+    const fotoLogoWarten = computeFotoLogoWarten({
+      anfrageVersand: anfrageVersandByKunde[kId] || null,
+      uploadToken: kunde?.upload_token,
+      hatLogo, hatFotos,
+    });
+
     const items = kJobs.map(job => {
       const versandTypen = new Set((versandByJob[job.id] || []).map(v => v.typ));
       const schritt = berechneSchritt({
         kunde, projekt,
         tabStatus: job.tab_status,
-        refbilderCount,
+        refbilderCount, hatFotos, hatLogo, fotoLogoWarten,
         versandTypen,
-        anfrageDatum: anfrageDatumByJob[job.id] || null,
         creativesCount: creativesCountByJob[job.id] || 0,
         adcopiesCount: adcopyCountByJob[job.id] || 0,
         funnels: funnelsByJob[job.id] || [],

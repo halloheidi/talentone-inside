@@ -242,6 +242,8 @@ export default function JobView() {
   const [error, setError] = useState('');
   const [tabStatus, setTabStatus] = useState(null); // { auto, manual, effective }
   const [letzteAktivitaet, setLetzteAktivitaet] = useState(null); // jüngstes Aktivitäts-Event (tab-übergreifend)
+  const [fotoWarten, setFotoWarten] = useState(null); // { fehlt_fotos, fehlt_logo, angefragt_am, ueberfaellig } | null
+  const [fotoReminderBusy, setFotoReminderBusy] = useState(false);
 
   const loadTabStatus = useCallback(
     () => api(`/jobs/${jobId}/tab-status`).then(setTabStatus).catch(() => {}),
@@ -363,6 +365,25 @@ export default function JobView() {
       .catch(() => setLetzteAktivitaet(null));
   }, [jobId, job?.id]);
 
+  // Warten auf Fotos/Logo (gemeinsame Quelle mit "Nächster Schritt").
+  const loadFotoWarten = useCallback(() => {
+    if (!jobId) return;
+    api(`/jobs/${jobId}/foto-status`)
+      .then(r => setFotoWarten(r.warten || null))
+      .catch(() => setFotoWarten(null));
+  }, [jobId]);
+  useEffect(() => { loadFotoWarten(); }, [loadFotoWarten, job?.id]);
+
+  async function fotoErinnern() {
+    if (!kundeId) return;
+    setFotoReminderBusy(true);
+    try {
+      await api(`/kunden/${kundeId}/anfrage`, { method: 'POST', body: { reminder: true } });
+      loadFotoWarten();
+    } catch (err) { alert(`Erinnern fehlgeschlagen: ${err.message}`); }
+    finally { setFotoReminderBusy(false); }
+  }
+
   if (loading) return <div className="card empty">Lade…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!job) return <div className="card empty"><h2>Projekt nicht gefunden</h2></div>;
@@ -442,6 +463,30 @@ export default function JobView() {
             <span style={{ color: 'var(--ink-4, #999)' }}>
               · {new Date(letzteAktivitaet.at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Warten auf Fotos/Logo — tab-übergreifend im Status-Block */}
+      {fotoWarten && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          marginBottom: 12, padding: '8px 14px', borderRadius: 8,
+          background: fotoWarten.ueberfaellig ? '#fffbeb' : '#eff6ff',
+          border: `1px solid ${fotoWarten.ueberfaellig ? '#fde68a' : '#bfdbfe'}`,
+          borderLeft: `4px solid ${fotoWarten.ueberfaellig ? '#f59e0b' : '#3b82f6'}`,
+          fontSize: 13, color: fotoWarten.ueberfaellig ? '#92400e' : '#1e40af',
+        }}>
+          <span aria-hidden>{fotoWarten.ueberfaellig ? '⚠️' : '📸'}</span>
+          <span style={{ flex: 1, minWidth: 200 }}>
+            <strong>Warten auf {[fotoWarten.fehlt_fotos && 'Fotos', fotoWarten.fehlt_logo && 'Logo'].filter(Boolean).join(' & ')}</strong>
+            {fotoWarten.angefragt_am && ` (angefragt am ${new Date(fotoWarten.angefragt_am).toLocaleDateString('de-DE')}${fotoWarten.tage != null ? `, ${fotoWarten.tage} Tage` : ''})`}
+          </span>
+          {fotoWarten.ueberfaellig && (
+            <button type="button" className="btn-ghost btn-sm" onClick={fotoErinnern} disabled={fotoReminderBusy}
+              title="Die bestehende Anfrage-Mail erneut senden">
+              {fotoReminderBusy ? 'Sende…' : '🔔 Erinnern'}
+            </button>
           )}
         </div>
       )}

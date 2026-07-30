@@ -1030,17 +1030,33 @@ router.post('/formular-anlegen', async (req, res) => {
 
 /* ─────────────────── Upload-Anfrage per Mail ─────────────────── */
 
-// POST /api/kunden/:id/anfrage  body: { customText? } — schickt Mail mit Upload-Link
+// POST /api/kunden/:id/anfrage  body: { customText?, umfang?, reminder? }
+//   reminder=true: erneuter Versand der bestehenden Anfrage (Umfang aus dem noch
+//   Fehlenden abgeleitet), protokolliert als typ='anfrage_reminder' — die ursprüngliche
+//   Anfrage (typ='anfrage') bleibt Datums-Quelle für die Überfälligkeit.
 router.post('/:id/anfrage', async (req, res) => {
-  const { customText } = req.body || {};
-  const umfang = ['beides', 'logo', 'fotos'].includes(req.body?.umfang) ? req.body.umfang : 'beides';
-  const umfangLabel = umfang === 'logo' ? 'Logo-Anfrage'
-    : umfang === 'fotos' ? 'Foto-Anfrage'
-      : 'Foto- & Logo-Anfrage';
+  const { customText, reminder } = req.body || {};
   const { data: kunde, error: kErr } = await supabase
     .from('talentone_kunden').select('*').eq('id', req.params.id).maybeSingle();
   if (kErr || !kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
   if (!kunde.email) return res.status(400).json({ error: 'Kunde hat keine E-Mail-Adresse.' });
+
+  let umfang;
+  if (reminder) {
+    // Nur das noch Fehlende erneut anfragen.
+    const { data: refs } = await supabase.from('talentone_referenzbilder')
+      .select('typ').eq('kunde_id', kunde.id);
+    const hatFotos = (refs || []).some(r => r.typ !== 'logo');
+    const fehltFotos = !hatFotos;
+    const fehltLogo = !kunde.logo_url;
+    umfang = (fehltFotos && fehltLogo) ? 'beides' : fehltLogo ? 'logo' : fehltFotos ? 'fotos' : null;
+    if (!umfang) return res.status(400).json({ error: 'Es wurde bereits alles hochgeladen.' });
+  } else {
+    umfang = ['beides', 'logo', 'fotos'].includes(req.body?.umfang) ? req.body.umfang : 'beides';
+  }
+  const umfangLabel = umfang === 'logo' ? 'Logo-Anfrage'
+    : umfang === 'fotos' ? 'Foto-Anfrage'
+      : 'Foto- & Logo-Anfrage';
 
   // Upload-Token erzeugen falls noch keiner existiert
   let token = kunde.upload_token;
@@ -1074,13 +1090,13 @@ router.post('/:id/anfrage', async (req, res) => {
       await supabase.from('talentone_versand').insert({
         job_id: firstJob.id,
         empfaenger: kunde.email,
-        betreff: umfangLabel,
+        betreff: reminder ? `Erinnerung: ${umfangLabel}` : umfangLabel,
         gesendet_von: req.user?.email || null,
-        typ: 'anfrage',
+        typ: reminder ? 'anfrage_reminder' : 'anfrage',
         inhalte: { customText: customText || null, upload_url: uploadUrl, umfang },
       });
     }
-    notifyKunde(kunde, `📸 ${umfangLabel} an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
+    notifyKunde(kunde, `📸 ${reminder ? 'Erinnerung — ' : ''}${umfangLabel} an Kunden gesendet am ${new Date().toLocaleDateString('de-DE')}`)
       .catch(err => console.warn('[anfrage close-note]', err.message));
     res.json({ ok: true, uploadUrl });
   } catch (err) {

@@ -490,6 +490,18 @@ router.post('/:id/send-creative-auftrag', async (req, res) => {
   }
 });
 
+/* GET /api/jobs/:id/foto-status — Warte-Zustand für Fotos/Logo (gemeinsame Quelle
+   mit dem "Nächster Schritt"-Badge). null = nichts offen. */
+router.get('/:id/foto-status', async (req, res) => {
+  try {
+    const { getFotoLogoWartenForJob } = await import('../foto-logo-warten.js');
+    const warten = await getFotoLogoWartenForJob(req.params.id);
+    res.json({ warten });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /* POST /api/jobs/:id/send-pruefung  body: { to?, betreff?, customText? }
    Schickt dem Kunden den Prüf-Link zu den bereits erfassten Stellendaten.
    Legt bei Bedarf pruefung_token an, protokolliert typ='daten_pruefung'. */

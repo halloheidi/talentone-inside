@@ -19,6 +19,8 @@ function versandEvent(v) {
   else if ((m = /^update_runde_(\d+)$/.exec(typ)))    { icon = '📬'; titel = `Kampagnen-Update verschickt (Update ${m[1]})`; }
   else if (typ === 'entwurf_reminder')               { icon = '⏰'; titel = 'Reminder an Kunden'; }
   else if (typ === 'daten_pruefung')                 { icon = '📋'; titel = 'Daten-Prüfung an Kunden geschickt'; }
+  else if (typ === 'anfrage')                        { icon = '📸'; titel = 'Foto-/Logo-Anfrage an Kunden'; }
+  else if (typ === 'anfrage_reminder')               { icon = '🔔'; titel = 'Foto-/Logo-Anfrage erinnert'; }
   else if (typ === 'reaktivierung')                  { icon = '🔔'; titel = 'Reaktivierung an Kunden'; }
   else if (typ === 'kampagne_live')                  { icon = '🚀'; titel = 'Kampagne-Live gemeldet'; }
   else if (typ === 'kampagne_pause')                 { icon = '⏸️'; titel = 'Kampagne pausiert (Kunde informiert)'; }
