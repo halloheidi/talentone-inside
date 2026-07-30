@@ -10,7 +10,7 @@ import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
-import { notifyKunde } from '../close.js';
+import { notifyKunde, findLead, addTask, getUserIdByName } from '../close.js';
 import { findMemberByName } from '../team.js';
 import { protokolliereAnnahme, getAktuelleVersion, getAnnahme } from '../avv.js';
 import { getPersonalizedAvvPdf } from '../avv-pdf.js';
@@ -869,6 +869,136 @@ router.post('/pruefung/:token', async (req, res) => {
       });
     } catch (err) { console.warn('[pruefung-sync]', err.message); }
   })().catch(err => console.error('[pruefung-sync-uncaught]', err.message));
+});
+
+/* ════════════════ Zufriedenheits-Feedback (feedback_token) ════════════════
+   Öffentliches Formular. GET liefert Kunden-/Kampagnen-Kontext, POST speichert
+   die Antwort, benachrichtigt intern + eskaliert bei Unzufriedenheit. */
+
+const FEEDBACK_QUALITAET_LABEL = { sehr_gut: 'Sehr gut', okay: 'Okay', zu_wenig: 'Zu wenig passende' };
+const FEEDBACK_EINSTELLUNG_LABEL = { eingestellt: 'Ja, eingestellt', gespraeche: 'Gespräche laufen', noch_nicht: 'Noch nicht' };
+
+function isoWocheNow() {
+  const date = new Date();
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((d.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${d.getUTCFullYear()}-KW${String(week).padStart(2, '0')}`;
+}
+
+// GET /api/public/feedback/:token
+router.get('/feedback/:token', async (req, res) => {
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, ansprechpartner, agentur, anrede_form, anrede_titel, nachname')
+    .eq('feedback_token', req.params.token).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+  const { data: projekt } = await supabase.from('talentone_projekte')
+    .select('id, projekt, start_phase1, live_termin').eq('kunde_id', kunde.id).eq('status', 'live')
+    .order('start_phase1', { ascending: true }).limit(1).maybeSingle();
+  const start = projekt?.start_phase1 || projekt?.live_termin || null;
+  const liveTag = start ? Math.floor((Date.now() - new Date(String(start).length <= 10 ? start + 'T00:00:00Z' : start).getTime()) / 86400000) : null;
+  res.json({ kunde, projekt: projekt || null, live_tag: liveTag });
+});
+
+// POST /api/public/feedback/:token  body: { sterne, qualitaet, einstellung, freitext }
+router.post('/feedback/:token', async (req, res) => {
+  const { sterne, qualitaet, einstellung, freitext } = req.body || {};
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('*').eq('feedback_token', req.params.token).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Link ungültig.' });
+  const sterneNum = Number(sterne);
+  if (!(sterneNum >= 1 && sterneNum <= 5)) return res.status(400).json({ error: 'Bitte 1–5 Sterne wählen.' });
+
+  const { data: projekt } = await supabase.from('talentone_projekte')
+    .select('id, projekt, verantwortlich').eq('kunde_id', kunde.id).eq('status', 'live')
+    .order('start_phase1', { ascending: true }).limit(1).maybeSingle();
+
+  const antworten = {
+    qualitaet: FEEDBACK_QUALITAET_LABEL[qualitaet] ? qualitaet : null,
+    einstellung: FEEDBACK_EINSTELLUNG_LABEL[einstellung] ? einstellung : null,
+  };
+  const { data: saved, error: sErr } = await supabase.from('talentone_feedback').insert({
+    kunde_id: kunde.id,
+    projekt_id: projekt?.id || null,
+    woche: isoWocheNow(),
+    sterne: sterneNum,
+    antworten,
+    freitext: (freitext || '').toString().trim() || null,
+  }).select().single();
+  if (sErr) return res.status(500).json({ error: sErr.message });
+
+  // Rhythmus zurücksetzen — Kunde hat geantwortet.
+  await supabase.from('talentone_kunden').update({ feedback_unbeantwortet: 0 }).eq('id', kunde.id);
+
+  res.status(201).json({ ok: true });
+
+  // Hintergrund: interne Mail + Projekt-Kommentar + Eskalation (best-effort).
+  (async () => {
+    const firma = kunde.firmenname || 'Kunde';
+    const qLabel = FEEDBACK_QUALITAET_LABEL[qualitaet] || '—';
+    const eLabel = FEEDBACK_EINSTELLUNG_LABEL[einstellung] || '—';
+    const sterneStr = '★'.repeat(sterneNum) + '☆'.repeat(5 - sterneNum);
+    const zusammenfassung = [
+      `⭐ Gesamtzufriedenheit: ${sterneStr} (${sterneNum}/5)`,
+      `Bewerbungs-Qualität: ${qLabel}`,
+      `Gespräche/Einstellung: ${eLabel}`,
+      saved.freitext ? `Freitext: „${saved.freitext}"` : null,
+    ].filter(Boolean).join('\n');
+
+    const unzufrieden = sterneNum <= 2 || qualitaet === 'zu_wenig';
+    const erfolg = einstellung === 'eingestellt';
+    const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+    const projektUrl = `${insideBase}/kunden/${kunde.id}`;
+
+    try {
+      // Projekt-Kommentar
+      if (projekt?.id) {
+        await supabase.from('talentone_kommentare').insert({
+          projekt_id: projekt.id,
+          autor: 'Kunden-Feedback',
+          text: `📊 Wöchentliches Zufriedenheits-Feedback:\n\n${zusammenfassung}`,
+          quelle: 'feedback',
+          erwaehnungen: projekt.verantwortlich ? [projekt.verantwortlich] : [],
+        });
+      }
+      // Interne Team-Mail (+ Daniel bei Unzufriedenheit)
+      const danielMail = findMemberByName('Daniel N.')?.email;
+      await sendTeamAlertMail({
+        subject: unzufrieden
+          ? `⚠️ Unzufriedenheits-Feedback von ${firma} (${sterneNum}/5)`
+          : erfolg
+            ? `🎉 ${firma}: Einstellung gemeldet!`
+            : `📊 Feedback von ${firma} (${sterneNum}/5)`,
+        headline: unzufrieden ? 'Unzufriedenheits-Feedback' : erfolg ? 'Erfolg: Einstellung gemeldet' : 'Neues Kunden-Feedback',
+        lead: `${firma}${projekt?.projekt ? ' · ' + projekt.projekt : ''}\n\n${zusammenfassung}`,
+        linkUrl: projektUrl,
+        linkLabel: 'Zum Kunden',
+        extraTo: unzufrieden && danielMail ? [danielMail] : [],
+      });
+
+      // Close-Note
+      notifyKunde(kunde, `📊 Feedback (${sterneNum}/5): ${qLabel} · ${eLabel}`).catch(() => {});
+
+      // Eskalation Unzufriedenheit: Close-Task für Daniel, fällig morgen.
+      if (unzufrieden) {
+        try {
+          const lead = await findLead({ closeLeadId: kunde.close_lead_id, email: kunde.email });
+          if (lead?.id) {
+            const assignedTo = await getUserIdByName('Daniel Nowag');
+            const morgen = new Date(); morgen.setDate(morgen.getDate() + 1);
+            await addTask({
+              leadId: lead.id,
+              text: `Unzufriedenheits-Feedback ${firma} — anrufen (${sterneNum}/5, ${qLabel})`,
+              assignedTo,
+              dueIso: morgen.toISOString(),
+            });
+          }
+        } catch (err) { console.warn('[feedback close-task]', err.message); }
+      }
+    } catch (err) { console.warn('[feedback-sync]', err.message); }
+  })().catch(err => console.error('[feedback-sync-uncaught]', err.message));
 });
 
 /* ════════════════════ Public Bewerberliste (Token) ════════════════════ */

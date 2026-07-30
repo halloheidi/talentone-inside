@@ -155,6 +155,10 @@ export default function ControllingDashboard() {
             <Stat label="🟡 Achtung" value={data.totals.gelb} color={AMPEL.gelb.color} />
             <Stat label="🟢 Läuft" value={data.totals.gruen} color={AMPEL.gruen.color} />
             <Stat label="Bewerbungen (Zeitraum)" value={data.totals.bewerbungen} />
+            {data.totals.zufriedenheit_schnitt != null && (
+              <Stat label={`⭐ Ø Zufriedenheit (${data.totals.zufriedenheit_anzahl})`} value={`${data.totals.zufriedenheit_schnitt} / 5`}
+                color={data.totals.zufriedenheit_schnitt <= 2 ? AMPEL.rot.color : data.totals.zufriedenheit_schnitt < 4 ? AMPEL.gelb.color : AMPEL.gruen.color} />
+            )}
           </div>
 
           {/* ── Ampel-Liste ── */}
@@ -179,6 +183,15 @@ export default function ControllingDashboard() {
                           <span style={{ color: '#5a5955', fontSize: 13 }}>· {r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}</span>
                           {r.agentur && <span style={badge}>{AGENTUR_LABEL[r.agentur] || r.agentur}</span>}
                           {r.funnel_extern === true && <span style={badge}>extern</span>}
+                          {r.zufriedenheit && (
+                            <span style={{
+                              ...badge,
+                              background: r.zufriedenheit.score <= 2 ? '#fde8e8' : r.zufriedenheit.score < 4 ? '#fff3cd' : '#e0f5df',
+                              color: r.zufriedenheit.score <= 2 ? '#9b1c1c' : r.zufriedenheit.score < 4 ? '#8a6d00' : '#0a7a3d',
+                            }} title={`Zufriedenheit ${r.zufriedenheit.score}/5${r.zufriedenheit.anzahl > 1 ? ` · ${r.zufriedenheit.anzahl} Antworten` : ''}`}>
+                              ⭐ {r.zufriedenheit.score}/5{r.zufriedenheit.trend > 0 ? ' ↑' : r.zufriedenheit.trend < 0 ? ' ↓' : ''}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 12, color: meta.color, marginTop: 2 }}>{r.ampel_grund}</div>
                       </div>

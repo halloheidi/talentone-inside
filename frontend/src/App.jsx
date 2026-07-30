@@ -10,6 +10,7 @@ import PublicBewerbungen from './pages/PublicBewerbungen.jsx';
 import PublicAnfragen from './pages/PublicAnfragen.jsx';
 import PublicPortal from './pages/PublicPortal.jsx';
 import PublicAvv from './pages/PublicAvv.jsx';
+import PublicFeedback from './pages/PublicFeedback.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
 import KundenList from './pages/KundenList.jsx';
 import KundeDetail from './pages/KundeDetail.jsx';
@@ -54,6 +55,7 @@ export default function App() {
       <Route path="/upload/:token" element={<PublicUpload />} />
       <Route path="/formular/:token" element={<PublicFormular />} />
       <Route path="/pruefung/:token" element={<PublicFormular variant="pruefung" />} />
+      <Route path="/feedback/:token" element={<PublicFeedback />} />
       <Route path="/f/:funnelId" element={<PublicFunnel />} />
       <Route path="/review/:token" element={<PublicReview />} />
       <Route path="/bewerbungen/:token" element={<PublicBewerbungen />} />

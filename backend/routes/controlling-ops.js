@@ -158,6 +158,18 @@ router.get('/overview', async (req, res) => {
       if (kid) (bewsByKunde[kid] ||= []).push(b);
     }
 
+    // 5b) Zufriedenheits-Feedback je Kunde — jüngste zuerst (Score + Trend)
+    const feedbackByKunde = {};
+    if (finalKundeIds.length) {
+      for (let i = 0; i < finalKundeIds.length; i += 150) {
+        const chunk = finalKundeIds.slice(i, i + 150);
+        const { data: fbs } = await supabase.from('talentone_feedback')
+          .select('kunde_id, sterne, created_at').in('kunde_id', chunk)
+          .order('created_at', { ascending: false });
+        for (const f of fbs || []) (feedbackByKunde[f.kunde_id] ||= []).push(f);
+      }
+    }
+
     const sparkAxis = dateAxis(new Date(now.getTime() - 13 * DAY), now); // letzte 14 Tage
     const rangeAxis = dateAxis(start, end);
 
@@ -196,6 +208,14 @@ router.get('/overview', async (req, res) => {
       const jobFunnels = jobs.flatMap(j => funnelByJob[j.id] || []);
       const primaryJob = jobs[0] || null;
 
+      const fbList = feedbackByKunde[p.kunde_id] || [];
+      const zufriedenheit = fbList.length ? {
+        score: fbList[0].sterne,
+        trend: fbList.length >= 2 ? (fbList[0].sterne - fbList[1].sterne) : 0,
+        stand: fbList[0].created_at,
+        anzahl: fbList.length,
+      } : null;
+
       return {
         projekt_id: p.id,
         kunde_id: p.kunde_id,
@@ -217,6 +237,7 @@ router.get('/overview', async (req, res) => {
         ampel, ampel_grund: grund,
         funnel_extern: funnelTyp(jobFunnels) === 'extern' ? true
           : funnelTyp(jobFunnels) === 'intern' ? false : null,
+        zufriedenheit,
       };
     }).sort((a, b) => {
       if (AMPEL_RANG[a.ampel] !== AMPEL_RANG[b.ampel]) return AMPEL_RANG[a.ampel] - AMPEL_RANG[b.ampel];
@@ -229,6 +250,7 @@ router.get('/overview', async (req, res) => {
     const rangeBews = alleBews.filter(b => jobKunde[b.job_id] && finalKundeIds.includes(jobKunde[b.job_id]) && within(b.created_at, start, end));
     const charts = verteilungen(rangeBews, rangeAxis);
 
+    const mitFeedback = rows.filter(r => r.zufriedenheit);
     const totals = {
       projekte: rows.length,
       rot: rows.filter(r => r.ampel === 'rot').length,
@@ -236,6 +258,10 @@ router.get('/overview', async (req, res) => {
       gruen: rows.filter(r => r.ampel === 'gruen').length,
       grau: rows.filter(r => r.ampel === 'grau').length,
       bewerbungen: rangeBews.length,
+      zufriedenheit_schnitt: mitFeedback.length
+        ? Math.round((mitFeedback.reduce((s, r) => s + r.zufriedenheit.score, 0) / mitFeedback.length) * 10) / 10
+        : null,
+      zufriedenheit_anzahl: mitFeedback.length,
     };
 
     const kundenListe = finalKundeIds

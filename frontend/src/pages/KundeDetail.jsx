@@ -145,6 +145,7 @@ export default function KundeDetail() {
       strasse: kunde?.strasse || '',
       plz: kunde?.plz || '',
       ort: kunde?.ort || '',
+      feedback_mails: kunde?.feedback_mails !== false,
     });
     setEditMode(true);
     setEditMsg('');
@@ -172,6 +173,7 @@ export default function KundeDetail() {
           strasse: editForm.strasse.trim() || null,
           plz: editForm.plz.trim() || null,
           ort: editForm.ort.trim() || null,
+          feedback_mails: editForm.feedback_mails !== false,
         },
       });
       setKunde(res.kunde);
@@ -710,6 +712,11 @@ export default function KundeDetail() {
                 <label className="field field-full">
                   <span>Notizen</span>
                   <textarea rows={2} value={editForm.notizen} onChange={e => setEditForm({ ...editForm, notizen: e.target.value })} />
+                </label>
+                <label className="field field-full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={editForm.feedback_mails !== false}
+                    onChange={e => setEditForm({ ...editForm, feedback_mails: e.target.checked })} style={{ width: 'auto' }} />
+                  <span style={{ fontWeight: 400 }}>📊 Wöchentliche Zufriedenheits-Feedback-Mails senden <small style={{ color: 'var(--ink-3)' }}>(nur bei Live-Projekten; abschalten, wenn der Kunde keine Mails wünscht)</small></span>
                 </label>
               </div>
               <div className="form-actions">

@@ -154,12 +154,17 @@ export async function buildAktivitaet(jobId) {
   }
   if (projektId) {
     const { data: koms } = await supabase.from('talentone_kommentare')
-      .select('id, created_at, autor, text, quelle').eq('projekt_id', projektId).in('quelle', ['intern', 'pruefung']);
+      .select('id, created_at, autor, text, quelle').eq('projekt_id', projektId).in('quelle', ['intern', 'pruefung', 'feedback']);
     for (const k of (koms || [])) {
       if (k.quelle === 'pruefung') {
         events.push({
           id: `kom_${k.id}`, kind: 'pruefung', icon: '📋', at: k.created_at,
           titel: 'Kunde hat die Daten geprüft/ergänzt', detail: k.text || null,
+        });
+      } else if (k.quelle === 'feedback') {
+        events.push({
+          id: `kom_${k.id}`, kind: 'feedback', icon: '📊', at: k.created_at,
+          titel: 'Zufriedenheits-Feedback vom Kunden', detail: k.text || null,
         });
       } else {
         events.push({
