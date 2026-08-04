@@ -103,6 +103,16 @@ export async function deleteLead(leadId) {
   return closeFetch(`/lead/${leadId}/`, { method: 'DELETE' });
 }
 
+/** Aktualisiert einen Lead (z.B. Anzeige-Name). */
+export async function updateLead(leadId, patch) {
+  return closeFetch(`/lead/${leadId}/`, { method: 'PUT', body: JSON.stringify(patch) });
+}
+
+/** Aktualisiert einen Kontakt (Name/Telefon korrigieren). */
+export async function updateContact(contactId, patch) {
+  return closeFetch(`/contact/${contactId}/`, { method: 'PUT', body: JSON.stringify(patch) });
+}
+
 /** Findet einen Lead per Email — oder per ID wenn closeLeadId gegeben. */
 export async function findLead({ closeLeadId, email }) {
   if (closeLeadId) {

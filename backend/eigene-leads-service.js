@@ -26,21 +26,41 @@ const matchHeader = (header, aliases) => {
   return !!h && aliases.some(a => { const n = norm(a); return n && (h === n || h.includes(n) || n.includes(h)); });
 };
 
-const IS_NAME    = h => matchHeader(h, ['full name', 'vollstaendiger name', 'name', 'vor und nachname', 'vorname nachname']);
-const IS_VORNAME = h => matchHeader(h, ['first name', 'vorname', 'firstname']);
-const IS_NACHNAME= h => matchHeader(h, ['last name', 'nachname', 'lastname', 'surname']);
+// Meta-/Anzeigen-Spalten (ad_name, adset_name, campaign_name, form_name, company_name,
+// platform …) dürfen NICHT als Personen-Name erkannt werden — "ad_name" enthält sonst
+// via includes den Alias "name".
+const AD_META = h => norm(h).split(' ').some(w =>
+  ['ad', 'adset', 'adgroup', 'campaign', 'kampagne', 'anzeige', 'form', 'formular', 'company', 'firma', 'platform'].includes(w));
+
+const IS_NAME    = h => !AD_META(h) && matchHeader(h, ['full name', 'vollstaendiger name', 'name', 'vor und nachname', 'vorname nachname']);
+const IS_VORNAME = h => !AD_META(h) && matchHeader(h, ['first name', 'vorname', 'firstname']);
+const IS_NACHNAME= h => !AD_META(h) && matchHeader(h, ['last name', 'nachname', 'lastname', 'surname']);
 const IS_EMAIL   = h => matchHeader(h, ['email', 'e-mail', 'e mail', 'mail']);
 const IS_TELEFON = h => matchHeader(h, ['phone number', 'phone', 'telefon', 'telefonnummer', 'handy', 'mobil', 'rufnummer', 'tel']);
-const IS_KAMPAGNE= h => matchHeader(h, ['campaign name', 'kampagne', 'campaign', 'ad name', 'anzeige', 'adset name']);
+// Kampagne = der lesbare Kampagnen-/Anzeigen-Name, NICHT eine ID-Spalte.
+const IS_KAMPAGNE= h => !/\bid\b/.test(norm(h)) && matchHeader(h, ['campaign name', 'kampagne', 'anzeige', 'adset name', 'ad name']);
 // interne Sheet-/Meta-Spalten, die nicht als Formular-Antwort in die Note sollen
-const IS_INTERN  = h => matchHeader(h, ['id', 'lead id', 'created', 'created time', 'zeitstempel', 'timestamp', 'importiert am', 'importiert']);
+const IS_INTERN  = h => matchHeader(h, ['id', 'lead id', 'created', 'created time', 'zeitstempel', 'timestamp', 'importiert am', 'importiert', 'platform', 'is organic', 'lead status']);
+
+// Meta-Export-Präfixe entfernen: p:+49… (Telefon), c:… (Campaign-ID), l:/ag:/ad:/fb:/ig: …
+export function stripMetaPrefix(val) {
+  if (val == null) return val;
+  return String(val).replace(/^\s*(p|l|c|ag|ad|fb|ig):\s*/i, '').trim();
+}
+
+// Meta-Testlead erkennen: E-Mail test@meta.com oder "dummy data"/"test lead" in Feldern.
+export function istMetaTestlead(mapped) {
+  if (String(mapped?.email || '').trim().toLowerCase() === 'test@meta.com') return true;
+  const hay = [mapped?.email, mapped?.telefon, mapped?.name, JSON.stringify(mapped?.daten || {})].join(' ').toLowerCase();
+  return /dummy data|test lead/.test(hay);
+}
 
 /** Wandelt eine Sheet-Zeile (header + Werte) in einen strukturierten Lead. */
 export function mapRow(header, row) {
   let name = null, vorname = null, nachname = null, email = null, telefon = null, kampagne = null;
   const daten = {};
   header.forEach((h, i) => {
-    const val = (row[i] == null ? '' : String(row[i])).trim();
+    const val = stripMetaPrefix((row[i] == null ? '' : String(row[i])).trim());
     if (!val) return;
     if (IS_EMAIL(h) && !email)       { email = val; return; }
     if (IS_TELEFON(h) && !telefon)   { telefon = val; return; }
@@ -210,12 +230,14 @@ export async function pollQuelle(quelle) {
     if (gesehen.has(hash)) continue;
     gesehen.add(hash);
 
+    const istTest = istMetaTestlead(mapped);
     const { data: lead, error } = await supabase.from('talentone_eigene_leads')
       .insert({
         quelle_id: quelle.id, quelle_name: quelle.name,
         name: mapped.name, email: mapped.email, telefon: mapped.telefon,
         kampagne: mapped.kampagne, daten: mapped.daten, row_hash: hash,
-        close_status: 'ausstehend',
+        close_status: istTest ? 'uebersprungen' : 'ausstehend',
+        ist_test: istTest,
       }).select().single();
     if (error) {
       if (error.code === '23505') continue; // Race: parallel schon angelegt
@@ -223,6 +245,8 @@ export async function pollQuelle(quelle) {
       continue;
     }
     neu++;
+    // Meta-Testleads NICHT nach Close syncen (und nie retryen/benachrichtigen).
+    if (istTest) { console.log(`[eigene-leads] Testlead erkannt (${mapped.email || mapped.telefon || mapped.name}) — kein Close-Sync.`); continue; }
     const r = await syncLeadToClose(lead, quelle);
     if (r.ok) await neuerLeadMail(quelle, { ...lead, ...mapped }, r.close_lead_id);
   }
