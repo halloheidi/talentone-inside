@@ -72,6 +72,16 @@ export default function EigeneLeads() {
     catch (e) { flash(e.body?.error || e.message, true); }
     finally { setBusy(false); }
   }
+  async function syncQuelle(q) {
+    setBusy(true);
+    try {
+      const r = await api(`/eigene-leads/quellen/${q.id}/sync`, { method: 'POST' });
+      await load();
+      if (r.error) flash(`Quelle "${q.name}": Fehler — ${r.error}`, true);
+      else flash(`Quelle "${q.name}": ${r.neu || 0} neue Lead(s)${r.sheet ? ` (Blatt: ${r.sheet})` : ''}.`);
+    } catch (e) { flash(e.body?.error || e.message, true); }
+    finally { setBusy(false); }
+  }
   async function deleteLead(lead) {
     if (!confirm(`Lead "${lead.name || '—'}" löschen?${lead.ist_test && lead.close_lead_id ? ' (inkl. Close-Test-Lead)' : ''}`)) return;
     try {
@@ -143,8 +153,16 @@ export default function EigeneLeads() {
                 <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
                   Sheet: {q.spreadsheet_id?.slice(0, 18)}… {q.sheet_name ? `· ${q.sheet_name}` : ''} · {(q.close_fixed_fields || []).length} feste Felder · Task: {q.close_task_text ? '✓' : '—'}
                 </div>
+                {q.letzter_poll_at && (
+                  <div style={{ fontSize: 11, marginTop: 4, color: q.letzter_fehler ? '#b91c1c' : '#0a8043' }}>
+                    {q.letzter_fehler
+                      ? `⚠️ Fehler (${new Date(q.letzter_poll_at).toLocaleString('de-DE')}): ${q.letzter_fehler}`
+                      : `✓ Zuletzt geprüft: ${new Date(q.letzter_poll_at).toLocaleString('de-DE')}`}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button className="btn-primary btn-sm" onClick={() => syncQuelle(q)} disabled={busy}>🔄 Jetzt synchronisieren</button>
                 <button className="btn-ghost btn-sm" onClick={() => testLead(q)} disabled={busy}>🧪 Test-Lead</button>
                 <button className="btn-ghost btn-sm" onClick={() => setEdit({ ...leerQuelle(), ...q })}>Bearbeiten</button>
                 <button className="btn-ghost btn-sm" onClick={() => deleteQuelle(q)}>Löschen</button>

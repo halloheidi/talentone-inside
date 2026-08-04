@@ -42,6 +42,18 @@ export function isConfigured() {
   return !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 }
 
+/** Extrahiert die Spreadsheet-ID — akzeptiert eine reine ID ODER eine komplette
+ *  Google-Sheets-URL (…/spreadsheets/d/<ID>/edit…). Ohne Treffer bleibt der
+ *  Eingabewert (bereits eine reine ID). */
+export function parseSpreadsheetId(input) {
+  const s = String(input || '').trim();
+  const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) return m[1];
+  const key = s.match(/[?&]key=([a-zA-Z0-9-_]+)/);
+  if (key) return key[1];
+  return s;
+}
+
 /** E-Mail des Service Accounts — die Adresse, fuer die das Sheet freigegeben wird. */
 export function serviceAccountEmail() {
   try { return creds().client_email; } catch { return null; }
@@ -93,29 +105,33 @@ function a1(sheetName, range) {
 
 /** Titel des ersten Tabellenblatts (wenn sheet_name leer gelassen wird). */
 export async function firstSheetName(spreadsheetId) {
-  const j = await api(`/${spreadsheetId}?fields=sheets.properties.title`);
+  const id = parseSpreadsheetId(spreadsheetId);
+  const j = await api(`/${id}?fields=sheets.properties.title`);
   return j.sheets?.[0]?.properties?.title || null;
 }
 
 /** Kopfzeile (Zeile 1) lesen — Basis fuer das header-basierte Mapping. */
 export async function readHeaderRow(spreadsheetId, sheetName) {
+  const id = parseSpreadsheetId(spreadsheetId);
   const range = encodeURIComponent(a1(sheetName, '1:1'));
-  const j = await api(`/${spreadsheetId}/values/${range}`);
+  const j = await api(`/${id}/values/${range}`);
   return (j.values && j.values[0]) || [];
 }
 
 /** Alle Werte eines Bereichs lesen (z.B. fuer Backfill-Abgleich). */
 export async function readValues(spreadsheetId, sheetName, range = 'A:Z') {
+  const id = parseSpreadsheetId(spreadsheetId);
   const r = encodeURIComponent(a1(sheetName, range));
-  const j = await api(`/${spreadsheetId}/values/${r}`);
+  const j = await api(`/${id}/values/${r}`);
   return j.values || [];
 }
 
 /** Eine Zeile ans Ende anhaengen. Gibt die 1-basierte Zeilennummer zurueck. */
 export async function appendRow(spreadsheetId, sheetName, valuesRow) {
+  const id = parseSpreadsheetId(spreadsheetId);
   const range = encodeURIComponent(a1(sheetName, 'A1'));
   const j = await api(
-    `/${spreadsheetId}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    `/${id}/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     { method: 'POST', body: { values: [valuesRow] } },
   );
   // updatedRange z.B. "Bewerbungen!A57:W57" -> Zeilennummer aus dem Ende ziehen.
@@ -128,6 +144,7 @@ export async function appendRow(spreadsheetId, sheetName, valuesRow) {
  *  Schreibt NUR die genannten Spalten (nie zusammenhaengende Bereiche) — so
  *  bleiben vom Kunden gepflegte Nachbarspalten unberuehrt. */
 export async function updateCells(spreadsheetId, sheetName, rowNumber, cells) {
+  const id = parseSpreadsheetId(spreadsheetId);
   const data = cells
     .filter(c => Number.isInteger(c.colIndex) && c.colIndex >= 0)
     .map(c => ({
@@ -135,7 +152,7 @@ export async function updateCells(spreadsheetId, sheetName, rowNumber, cells) {
       values: [[c.value == null ? '' : String(c.value)]],
     }));
   if (!data.length) return;
-  await api(`/${spreadsheetId}/values:batchUpdate`, {
+  await api(`/${id}/values:batchUpdate`, {
     method: 'POST',
     body: { valueInputOption: 'RAW', data },
   });

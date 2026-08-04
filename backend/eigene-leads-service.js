@@ -6,7 +6,7 @@
 
 import crypto from 'node:crypto';
 import { supabase } from './supabase.js';
-import { readValues, isConfigured as sheetsConfigured } from './google-sheets.js';
+import { readValues, firstSheetName, parseSpreadsheetId, isConfigured as sheetsConfigured } from './google-sheets.js';
 import {
   findLeadByContact, createLead, addNote, addTask, deleteLead,
 } from './close.js';
@@ -185,8 +185,15 @@ async function neuerLeadMail(quelle, lead, closeLeadId) {
 /** Liest eine Quelle, legt neue Leads an und synct sie nach Close. */
 export async function pollQuelle(quelle) {
   if (!sheetsConfigured()) return { neu: 0, error: 'GOOGLE_SERVICE_ACCOUNT_JSON fehlt' };
-  const values = await readValues(quelle.spreadsheet_id, quelle.sheet_name || '', 'A:Z');
-  if (!values.length) return { neu: 0 };
+  // Leeres sheet_name → erstes Tabellenblatt (auflösen, damit wir loggen können,
+  // welches Blatt gelesen wird).
+  let sheetName = (quelle.sheet_name || '').trim();
+  if (!sheetName) {
+    try { sheetName = (await firstSheetName(quelle.spreadsheet_id)) || ''; } catch { /* readValues nutzt implizit das erste Blatt */ }
+  }
+  console.log(`[eigene-leads] Quelle "${quelle.name}" liest Blatt "${sheetName || '(erstes Blatt)'}" (id=${parseSpreadsheetId(quelle.spreadsheet_id)})`);
+  const values = await readValues(quelle.spreadsheet_id, sheetName, 'A:Z');
+  if (!values.length) return { neu: 0, sheet: sheetName || '(erstes Blatt)' };
   const header = values[0];
   const rows = values.slice(1);
 
@@ -219,7 +226,25 @@ export async function pollQuelle(quelle) {
     const r = await syncLeadToClose(lead, quelle);
     if (r.ok) await neuerLeadMail(quelle, { ...lead, ...mapped }, r.close_lead_id);
   }
-  return { neu };
+  return { neu, sheet: sheetName || '(erstes Blatt)' };
+}
+
+/** Poll einer Quelle inkl. Persistenz von letzter_poll_at + letzter_fehler.
+ *  Fehler werden NIE verschluckt — sie landen in der Quelle (UI-sichtbar). */
+export async function pollQuelleUndPersist(quelle) {
+  const stamp = { letzter_poll_at: new Date().toISOString() };
+  try {
+    const r = await pollQuelle(quelle);
+    await supabase.from('talentone_lead_quellen')
+      .update({ ...stamp, letzter_fehler: r.error || null }).eq('id', quelle.id);
+    return r;
+  } catch (err) {
+    const msg = (err.message || String(err)).slice(0, 500);
+    await supabase.from('talentone_lead_quellen')
+      .update({ ...stamp, letzter_fehler: msg }).eq('id', quelle.id);
+    console.warn(`[eigene-leads] Quelle "${quelle.name}" Fehler:`, msg);
+    return { neu: 0, error: msg };
+  }
 }
 
 /** Erneuter Versuch für alle offenen (ausstehend/fehler) Leads. */
@@ -246,8 +271,8 @@ export async function pollAllQuellen() {
     .select('*').eq('aktiv', true);
   let neuGesamt = 0;
   for (const q of (quellen || [])) {
-    try { const r = await pollQuelle(q); neuGesamt += r.neu || 0; }
-    catch (err) { console.warn(`[eigene-leads] Quelle "${q.name}" Fehler:`, err.message); }
+    const r = await pollQuelleUndPersist(q);
+    neuGesamt += r.neu || 0;
   }
   await retryPending().catch(err => console.warn('[eigene-leads] retry:', err.message));
   if (neuGesamt) console.log(`[eigene-leads] Poll fertig — ${neuGesamt} neue Lead(s).`);

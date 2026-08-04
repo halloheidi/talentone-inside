@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { requireAdmin } from '../auth.js';
 import { listUsers, listLeadCustomFields, listLeadStatuses, deleteLead } from '../close.js';
 import { serviceAccountEmail } from '../google-sheets.js';
-import { pollAllQuellen, pollQuelle, createTestLead } from '../eigene-leads-service.js';
+import { pollAllQuellen, pollQuelleUndPersist, createTestLead } from '../eigene-leads-service.js';
 
 const router = Router();
 
@@ -98,13 +98,22 @@ router.post('/quellen/:id/test', requireAdmin, async (req, res) => {
   }
 });
 
+// "Jetzt synchronisieren" pro Quelle — führt den Poll sofort aus, persistiert
+// letzter_poll_at/letzter_fehler und liefert das Ergebnis (X neue Leads / Fehler).
+router.post('/quellen/:id/sync', requireAdmin, async (req, res) => {
+  const { data: q } = await supabase.from('talentone_lead_quellen').select('*').eq('id', req.params.id).maybeSingle();
+  if (!q) return res.status(404).json({ error: 'Quelle nicht gefunden.' });
+  const r = await pollQuelleUndPersist(q);
+  res.json({ neu: r.neu || 0, sheet: r.sheet || null, error: r.error || null });
+});
+
 // Manueller Poll (eine Quelle oder alle).
 router.post('/poll', requireAdmin, async (req, res) => {
   try {
     if (req.body?.quelle_id) {
       const { data: q } = await supabase.from('talentone_lead_quellen').select('*').eq('id', req.body.quelle_id).maybeSingle();
       if (!q) return res.status(404).json({ error: 'Quelle nicht gefunden.' });
-      const r = await pollQuelle(q);
+      const r = await pollQuelleUndPersist(q);
       return res.json(r);
     }
     const r = await pollAllQuellen();
