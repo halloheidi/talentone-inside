@@ -37,8 +37,9 @@ const IS_VORNAME = h => !AD_META(h) && matchHeader(h, ['first name', 'vorname', 
 const IS_NACHNAME= h => !AD_META(h) && matchHeader(h, ['last name', 'nachname', 'lastname', 'surname']);
 const IS_EMAIL   = h => matchHeader(h, ['email', 'e-mail', 'e mail', 'mail']);
 const IS_TELEFON = h => matchHeader(h, ['phone number', 'phone', 'telefon', 'telefonnummer', 'handy', 'mobil', 'rufnummer', 'tel']);
-// Kampagne = der lesbare Kampagnen-/Anzeigen-Name, NICHT eine ID-Spalte.
-const IS_KAMPAGNE= h => !/\bid\b/.test(norm(h)) && matchHeader(h, ['campaign name', 'kampagne', 'anzeige', 'adset name', 'ad name']);
+// Kampagne = der lesbare Kampagnen-Name (campaign_name), NICHT eine ID-Spalte und
+// NICHT ad_name/adset_name (die stehen weiter unten in den daten).
+const IS_KAMPAGNE= h => !/\bid\b/.test(norm(h)) && matchHeader(h, ['campaign name', 'kampagne']);
 // interne Sheet-/Meta-Spalten, die nicht als Formular-Antwort in die Note sollen
 const IS_INTERN  = h => matchHeader(h, ['id', 'lead id', 'created', 'created time', 'zeitstempel', 'timestamp', 'importiert am', 'importiert', 'platform', 'is organic', 'lead status']);
 
