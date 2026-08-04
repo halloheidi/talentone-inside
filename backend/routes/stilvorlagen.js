@@ -29,7 +29,7 @@ router.get('/:id', async (req, res) => {
 });
 
 const ALLOWED = ['name', 'beschreibung', 'layout_prompt', 'vorschau_url',
-                 'referenzbild_nutzen', 'aktiv', 'reihenfolge', 'beispielbild_urls'];
+                 'referenzbild_nutzen', 'aktiv', 'reihenfolge', 'beispielbild_urls', 'farben_fix'];
 
 router.post('/', async (req, res) => {
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => ALLOWED.includes(k)));

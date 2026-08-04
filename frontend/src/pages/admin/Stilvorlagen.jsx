@@ -130,6 +130,7 @@ export default function StilvorlagenAdmin() {
             name: edit.name, beschreibung: edit.beschreibung,
             layout_prompt: edit.layout_prompt, vorschau_url: edit.vorschau_url || null,
             referenzbild_nutzen: !!edit.referenzbild_nutzen,
+            farben_fix: !!edit.farben_fix,
             aktiv: !!edit.aktiv, reihenfolge: Number(edit.reihenfolge) || 100,
           },
         });
@@ -140,6 +141,7 @@ export default function StilvorlagenAdmin() {
             name: edit.name, beschreibung: edit.beschreibung || null,
             layout_prompt: edit.layout_prompt, vorschau_url: edit.vorschau_url || null,
             referenzbild_nutzen: !!edit.referenzbild_nutzen,
+            farben_fix: !!edit.farben_fix,
             aktiv: true, reihenfolge: Number(edit.reihenfolge) || 100,
           },
         });
@@ -284,6 +286,11 @@ export default function StilvorlagenAdmin() {
               <label className="field-checkbox field-full">
                 <input type="checkbox" checked={!!edit.referenzbild_nutzen} onChange={e => setEdit({ ...edit, referenzbild_nutzen: e.target.checked })} />
                 <span>Beispielbild als Stil-Referenz an die KI übergeben <small style={{ color: 'var(--ink-3)' }}>(wird als letztes Referenzbild in die Generierung aufgenommen)</small></span>
+              </label>
+
+              <label className="field-checkbox field-full">
+                <input type="checkbox" checked={!!edit.farben_fix} onChange={e => setEdit({ ...edit, farben_fix: e.target.checked })} />
+                <span>Vorlagenfarben beibehalten <small style={{ color: 'var(--ink-3)' }}>(Standard aus: Farben werden an die Kunden-CI angepasst. Nur setzen, wenn die Farbe selbst der Stil ist — z. B. „Pinselstrich Neongrün".)</small></span>
               </label>
 
               {(Array.isArray(edit.beispielbild_urls) && edit.beispielbild_urls.length > 0) && (

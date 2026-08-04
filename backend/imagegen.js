@@ -196,6 +196,30 @@ function buildFarbenHinweis(kunde) {
   return `MARKENFARBEN: ${parts.join(', ')}. Verwende diese Farben für Text-Overlay, Benefit-Tags, Akzent-Linien und den dunklen Verlauf — das Design soll zur Corporate Identity des Unternehmens passen. Die Hauttöne und natürlichen Bildelemente bleiben davon unberührt.`;
 }
 
+// Farb-Anweisung wenn eine STILVORLAGE genutzt wird: Layout/Komposition/Typografie
+// kommen aus der Vorlage, die FARBEN aber aus der Kunden-CI (nicht aus dem
+// Referenzbild) — außer farben_fix ist gesetzt (dann bleibt die Vorlagenfarbe).
+function buildStilFarbAnweisung({ kunde, hasLogo, farbenFix, hatStilbeispiel }) {
+  const quelle = hatStilbeispiel ? 'des Referenzbilds' : 'der Stilvorlage';
+  if (farbenFix) {
+    return `FARBEN: Behalte die Farbgebung ${quelle} bewusst bei — die Farbe ist hier fester Teil des Stils. (Das echte Kundenlogo wird separat als Overlay oben rechts eingefügt.)`;
+  }
+  const f = kunde?.farben;
+  const werte = [];
+  if (f?.primaer)   werte.push(`Primär ${f.primaer}`);
+  if (f?.sekundaer) werte.push(`Sekundär ${f.sekundaer}`);
+  if (f?.akzent)    werte.push(`Akzent ${f.akzent}`);
+  const kopf = `FARBEN — WICHTIG: Übernimm ${quelle} NUR Layout, Komposition, Typografie-Charakter und grafische Stilelemente (z. B. Pinselstrich-Optik, Block-Anordnung). `;
+  const kontrast = ` Achte auf ausreichenden Kontrast für Textlesbarkeit (ggf. Weiß oder Schwarz als Textfarbe auf den CI-Flächen).`;
+  if (werte.length) {
+    return `${kopf}Ersetze SÄMTLICHE Farben ${quelle} durch diese Kundenfarben: ${werte.join(', ')}.${kontrast}`;
+  }
+  if (hasLogo) {
+    return `${kopf}Der Kunde hat keine Markenfarben hinterlegt: Leite die Farbpalette aus dem mitgelieferten Firmenlogo ab (dominante Logo-Farbe + neutrale Ergänzung) und ersetze damit SÄMTLICHE Farben ${quelle}.${kontrast}`;
+  }
+  return `${kopf}Nutze NICHT die Farben ${quelle}. Verwende stattdessen ein neutrales Schema: Anthrazit/Dunkelgrau als Basis, Weiß für Text, EINE kräftige Akzentfarbe.${kontrast}`;
+}
+
 // Sorgt für korrekte Stellendarstellung mit Geschlechtskürzel: "Bauhelfer" → "Bauhelfer (m/w/d)"
 function stelleDisplay(stelle) {
   if (!stelle) return 'Mitarbeiter:in (m/w/d)';
@@ -258,12 +282,13 @@ export function renderLayoutPrompt(template, ctx) {
   );
 }
 
-function buildLayoutCtx({ job, kunde, hasLogo, spruch }) {
+function buildLayoutCtx({ job, kunde, hasLogo, spruch, farbenFix = false }) {
   const firmenname = kunde?.firmenname || '';
   const benefits = pickBenefits(job);
   const benefitsListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const farbenHinweis = buildFarbenHinweis(kunde);
-  const hatFarben = !!farbenHinweis;
+  // Bei farben_fix bleibt die Vorlagenfarbe der Stil → keine CI-Farb-Hints erzwingen.
+  const hatFarben = !farbenFix && !!farbenHinweis;
   const stelleGross = stelleClean(job.stelle).toUpperCase();
   const metaLeiste = buildMetaLeiste(job);
   const hookAnweisung = spruch?.trim()
@@ -273,6 +298,10 @@ function buildLayoutCtx({ job, kunde, hasLogo, spruch }) {
     ? 'LOGO wird NACHTRÄGLICH per Code oben rechts eingefügt — den Bereich oben rechts (ca. 22% Breite × 18% Höhe) VÖLLIG FREI halten, kein Firmenname-Text im Bild'
     : `FIRMENNAME-SCHRIFTZUG dezent oben: "${firmenname}" als sauberer Text-Schriftzug, klein (max. 10% Bildhöhe). KEIN Logo-Element`;
 
+  const farbenHinweisText = farbenFix
+    ? 'Behalte die Farbgebung der Vorlage bei (die Farbe ist Teil des Stils).'
+    : (farbenHinweis || 'Wähle 1–2 kräftige, zur Marke passende Akzentfarben; neutraler dunkler Grund.');
+
   return {
     stelle_gross:                             stelleGross,
     meta_leiste:                              metaLeiste,
@@ -280,6 +309,7 @@ function buildLayoutCtx({ job, kunde, hasLogo, spruch }) {
     firmenname,
     hook_anweisung:                           hookAnweisung,
     logo_platzierung:                         logoPlatzierung,
+    farben_hinweis:                           farbenHinweisText,
     meta_leiste_farbe_hinweis:                hatFarben
       ? 'der Markenfarbe als Hintergrund (kontrastreich)' : 'dunklem Hintergrund (#0a0a0a)',
     stellenbereich_farb_hinweis:              hatFarben
@@ -379,6 +409,12 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, sti
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
   const farben = buildFarbenHinweis(kunde);
+  // Mit Stilvorlage: Farben aus der Kunden-CI erzwingen (nicht aus dem Referenzbild),
+  // außer farben_fix ist gesetzt. Ohne Stilvorlage: bisheriger Markenfarben-Hinweis.
+  const farbenFix = !!stilvorlage?.farben_fix;
+  const farbBlock = stilvorlage
+    ? buildStilFarbAnweisung({ kunde, hasLogo, farbenFix, hatStilbeispiel })
+    : farben;
 
   const refHinweis = [];
   const LOGO_FREI_HINWEIS = `KRITISCH — LOGO-REGEL: Zeichne im gesamten Bild KEIN Logo, KEIN Firmenlogo, KEIN Signet, KEIN Markenzeichen, KEINEN Firmenname-Text, KEINE Wortmarke, KEINE Buchstaben-Grafik, die an ein Logo erinnert. Das echte Original-Logo wird nachträglich per Code oben rechts als Overlay eingefügt. Halte im Bereich oben rechts (ca. 22% Breite × 18% Höhe, mit ~3% Abstand zum Rand) einen ruhigen, weitgehend flächigen Bereich frei (keine Gesichter, keine wichtigen Details, keine Text-Elemente) — der Bereich darf farblich Teil der Szene sein, aber ohne kritische Bildinhalte. Farb-Balance darf sich am mitgelieferten Logo orientieren, das Logo selbst darf NIRGENDS ins Bild.`;
@@ -403,7 +439,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, sti
 
   // Layout-Block: entweder aus Stilvorlage rendern, sonst Default (Job-Block unten)
   const layoutBlock = stilvorlage?.layout_prompt
-    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch }))
+    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch, farbenFix }))
     : `${buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben })}
 
 ═══════════════════════════════════════════════════════════════
@@ -428,7 +464,7 @@ FLEXIBLER BEREICH OBEN (die oberen ca. 65% der Bildfläche — Stil & Anordnung 
 
   return `Erstelle ein hochwertiges Social Media Recruiting Ad ${orientation} im Stil einer professionellen Recruiting-Agentur.
 
-${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${hatStilbeispiel ? STIL_VORLAGE_HINWEIS + '\n\n' : ''}${farben ? farben + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}${hatStilbeispiel ? STIL_VORLAGE_HINWEIS + '\n\n' : ''}${farbBlock ? farbBlock + '\n\n' : ''}BILDMOTIV (Hintergrund / Szene):
 ${motiv}
 - Fotorealistisch, cinematic Look, warme Farben, leichter Bokeh-Effekt
 - Branche: ${branche}
@@ -438,7 +474,7 @@ ${layoutBlock}
 
 DESIGN-REGELN:
 ${person ? `- ${EBENEN_TIEFE_REGEL}\n` : ''}- HIERARCHIE der Größen: STELLENBEZEICHNUNG (am größten, formatfüllend) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
-- ${farben ? 'Markenfarben konsequent.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot).'}
+- ${stilvorlage && !farbenFix ? 'Farben streng nach Kunden-CI (siehe oben) — NICHT die Farben der Vorlage übernehmen.' : farben ? 'Markenfarben konsequent.' : 'Wähle 1-2 kräftige Akzentfarben (z.B. orange/türkis/rot).'}
 - Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine QR-Codes, keine Rahmen ums ganze Bild
 - Muss auf dem Handy sofort ins Auge springen und Scroll-Stop erzeugen`;
@@ -453,6 +489,10 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hat
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
   const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
   const farben = buildFarbenHinweis(kunde);
+  const farbenFix = !!stilvorlage?.farben_fix;
+  const farbBlock = stilvorlage
+    ? buildStilFarbAnweisung({ kunde, hasLogo, farbenFix, hatStilbeispiel })
+    : farben;
 
   const logoZeile = logoAufKleidung
     ? `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. ${logoKleidungHinweis(logoModus)}`
@@ -467,7 +507,7 @@ ${logoZeile}
   const metaLeiste = buildMetaLeiste(job);
 
   const layoutBlock = stilvorlage?.layout_prompt
-    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch }))
+    ? renderLayoutPrompt(stilvorlage.layout_prompt, buildLayoutCtx({ job, kunde, hasLogo, spruch, farbenFix }))
     : `${buildFixerJobBlock({ stelleGross, metaLeiste, farben: !!farben })}
 
 ═══════════════════════════════════════════════════════════════
@@ -490,7 +530,7 @@ FLEXIBLER BEREICH OBEN (ca. obere 65% — du wählst Stil & Anordnung der Overla
 
 ${refLines}
 ${hatStilbeispiel ? '\n' + STIL_VORLAGE_HINWEIS + '\n' : ''}
-${farben ? farben + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
+${farbBlock ? farbBlock + '\n\n' : ''}Falls das Hintergrundfoto nicht im Zielformat ist, beschneide es respektvoll (Person/wesentliche Bildelemente sichtbar lassen).
 
 ${layoutBlock}
 
@@ -498,7 +538,7 @@ DESIGN-REGELN:
 - HIERARCHIE der Größen: STELLENBEZEICHNUNG (formatfüllend im unteren Job-Block) > Hook (groß) > Benefits (kompakt) > Meta-Leiste & Logo (dezent)
 - Dunkler halbtransparenter Gradient/Schatten hinter Overlay-Texten falls nötig für Lesbarkeit — das Foto bleibt der Held
 - ${TEXT_GESICHT_REGEL} Große Text-Elemente in ruhige Bildzonen (Himmel, Wand, unscharfer Hintergrund), nicht auf Personen/Gesichter.
-- ${farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (orange/türkis/rot) für Pinselstriche und Stellen-Bereich.'}
+- ${stilvorlage && !farbenFix ? 'Farben streng nach Kunden-CI (siehe oben) — NICHT die Farben der Vorlage übernehmen.' : farben ? 'Markenfarben konsequent — Pinselstriche, Meta-Leiste, Stellen-Bereich.' : 'Wähle 1-2 kräftige Akzentfarben (orange/türkis/rot) für Pinselstriche und Stellen-Bereich.'}
 - Schrift modern, sehr lesbar. Stellenbezeichnung in fetten Großbuchstaben.
 - Keine zusätzlichen Filter aufs Foto, keine Verfremdung
 - Keine QR-Codes, keine Rahmen ums ganze Bild
