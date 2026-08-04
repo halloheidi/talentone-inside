@@ -17,7 +17,7 @@ const MAX_VERSUCHE_WARN = 3; // ab so vielen Fehlversuchen: interne Warn-Mail
 
 function norm(s) {
   return String(s || '').toLowerCase()
-    .replace(/[.:()\/\-–—]/g, ' ')
+    .replace(/[._:()\/\-–—]/g, ' ')   // Unterstrich MIT — sonst bleibt "ad_name" ein Token
     .replace(/[äöü]/g, m => ({ ä: 'ae', ö: 'oe', ü: 'ue' }[m]))
     .replace(/ß/g, 'ss').replace(/\s+/g, ' ').trim();
 }
