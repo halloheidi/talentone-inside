@@ -131,7 +131,7 @@ export default function ProjektFlagsFields({ value, onChange, agentur }) {
       {v.garantie && istNw && (
         <label className="field field-full" style={{ marginTop: -6 }}>
           <span>Erfolgsgarantie-Frist</span>
-          <select value={aktuelleFrist} onChange={e => setFrist(e.target.value)} style={{ flex: '0 0 220px' }}>
+          <select value={aktuelleFrist} onChange={e => setFrist(e.target.value)} style={{ maxWidth: 240, alignSelf: 'flex-start' }}>
             {GARANTIE_FRISTEN.map(f => <option key={f} value={f}>{f}</option>)}
             <option value="Individuell">Individuell (Freitext)</option>
           </select>
