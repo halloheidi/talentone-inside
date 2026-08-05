@@ -41,9 +41,9 @@ function normalizeOptions(options) {
 }
 
 const FUNNEL_TYP_OPTIONEN = [
-  { key: 'perspective', icon: '🚀', label: 'Perspective', desc: 'High-Performance-Funnel über Perspective. Wird per Claude erstellt — die veröffentlichte URL wird hier eingetragen.' },
-  { key: 'onepage',     icon: '🌐', label: 'onepage.io',  desc: 'Externer Funnel via onepage.io o. ä. — externe URL eintragen, Webhook-Adresse für Bewerbungen wird angezeigt.' },
-  { key: 'intern',      icon: '🧩', label: 'Tool-Funnel (intern)', desc: 'Eigener Funnel direkt im Tool. Die Screens (Intro, Benefits, Aufgaben, Kontakt) werden nach der Wahl automatisch generiert.' },
+  { key: 'intern',      icon: '🛠', label: 'Interner Editor', desc: 'Eigener Funnel direkt im Tool. Die Screens (Intro, Benefits, Aufgaben, Kontakt) werden nach der Wahl automatisch generiert.' },
+  { key: 'perspective', icon: '🚀', label: 'Perspective', desc: 'Funnel über Perspective. Nach dem Publish die Funnel-URL hier eintragen; Webhook + Pixel-Hilfe werden angezeigt.' },
+  { key: 'onepage',     icon: '🔗', label: 'Extern (Onepage, Heyflow o.ä.)', desc: 'Externer Funnel-Builder — externe URL eintragen, die Webhook-Adresse für Bewerbungen wird angezeigt.' },
 ];
 
 function FunnelTypPicker({ title, onPick, current, onCancel }) {
@@ -184,8 +184,7 @@ export default function JobFunnel() {
     setShowTypPicker(false);
     try {
       const patch = { funnel_typ: typ };
-      if (typ === 'onepage') patch.extern = true;
-      if (typ === 'intern') patch.extern = false;
+      patch.extern = typ !== 'intern'; // Perspective + Extern = externer Funnel
       await api(`/funnels/${funnel.id}`, { method: 'PATCH', body: patch });
       loadAll();
     } catch (e) { setError(e.message); }
@@ -338,6 +337,13 @@ export default function JobFunnel() {
     );
   }
 
+  // Funnel-Variante: eine einzige Auswahl (intern | perspective | onepage=Extern).
+  // Alt-Bestand ohne funnel_typ: extern → 'onepage', sonst 'intern'.
+  const variante = funnel.funnel_typ === 'perspective' ? 'perspective'
+    : funnel.funnel_typ === 'intern' ? 'intern'
+    : (extern || funnel.funnel_typ === 'onepage') ? 'onepage'
+    : 'intern';
+
   const brandBase = getBrandBaseUrl(kunde?.agentur);
   const internalUrl = `${brandBase}/f/${funnel.id}`;
   const funnelUrl = extern && externUrl.trim() ? externUrl.trim() : internalUrl;
@@ -362,52 +368,24 @@ export default function JobFunnel() {
         </div>
       )}
 
-      {/* Funnel-Typ — nachträglich wechselbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, fontSize: 13, color: 'var(--ink-3)' }}>
-        <span>Funnel-Typ: <strong style={{ color: 'var(--ink)' }}>
-          {FUNNEL_TYP_OPTIONEN.find(o => o.key === (funnel.funnel_typ || (funnel.extern ? 'onepage' : 'intern')))?.label || 'Tool-Funnel (intern)'}
-        </strong></span>
-        <button type="button" className="btn-ghost btn-sm" onClick={() => setShowTypPicker(v => !v)}>
-          {showTypPicker ? 'Abbrechen' : 'Typ ändern'}
-        </button>
+      {/* Eine Auswahl: Funnel-Variante (ersetzt Typ-Picker + intern/extern-Toggle) */}
+      <div className="funnel-mode-toggle" style={{ marginBottom: 16 }}>
+        <button type="button" className={`funnel-mode-btn ${variante === 'intern' ? 'is-active' : ''}`}
+          onClick={() => variante !== 'intern' && changeTyp('intern')}>🛠 Interner Editor</button>
+        <button type="button" className={`funnel-mode-btn ${variante === 'perspective' ? 'is-active' : ''}`}
+          onClick={() => variante !== 'perspective' && changeTyp('perspective')}>🚀 Perspective</button>
+        <button type="button" className={`funnel-mode-btn ${variante === 'onepage' ? 'is-active' : ''}`}
+          onClick={() => variante !== 'onepage' && changeTyp('onepage')}>🔗 Extern (Onepage, Heyflow o.ä.)</button>
       </div>
-      {showTypPicker && (
-        <div style={{ marginBottom: 16 }}>
-          <FunnelTypPicker
-            title="Funnel-Typ wechseln"
-            current={funnel.funnel_typ || (funnel.extern ? 'onepage' : 'intern')}
-            onPick={changeTyp}
-            onCancel={() => setShowTypPicker(false)}
-          />
-        </div>
-      )}
 
-      <PerspectiveSection job={job} kunde={kunde} />
-
-      {/* Toggle: Eigener vs. externer Funnel */}
-      <div className="funnel-mode-toggle">
-        <button
-          type="button"
-          className={`funnel-mode-btn ${!extern ? 'is-active' : ''}`}
-          onClick={() => setExtern(false)}
-          disabled={extern && externUrl.trim().length > 0}
-          title={extern && externUrl.trim() ? 'Externe URL erst entfernen, um zurück zum eigenen Funnel zu wechseln' : ''}
-        >
-          🛠 Eigenen Funnel verwenden
-        </button>
-        <button
-          type="button"
-          className={`funnel-mode-btn ${extern ? 'is-active' : ''}`}
-          onClick={() => setExtern(true)}
-        >
-          🔗 Externen Funnel verwenden
-        </button>
-      </div>
+      {variante === 'perspective' && <PerspectiveSection job={job} kunde={kunde} />}
 
       {extern && (
         <fieldset className="formular-section">
-          <legend>Externer Funnel</legend>
-          <p className="pane-hint">Wenn ihr einen externen Funnel-Builder nutzt (Perspective, Heyflow o.ä.), trag die URLs hier ein. Der interne Editor unten ist dann deaktiviert.</p>
+          <legend>{variante === 'perspective' ? 'Perspective-Funnel' : 'Externer Funnel'}</legend>
+          <p className="pane-hint">{variante === 'perspective'
+            ? 'Funnel-URL nach dem Publish in Perspective hier eintragen. Bewerbungen kommen per Webhook (siehe unten).'
+            : 'Externen Funnel-Builder (Onepage, Heyflow o.ä.) verknüpfen — URL eintragen; Bewerbungen kommen per Webhook (siehe unten).'}</p>
           <div className="form-grid">
             <label className="field field-full">
               <span>Externe Funnel-URL *</span>
@@ -419,8 +397,8 @@ export default function JobFunnel() {
             </label>
           </div>
 
-          <PixelPresetCopyList presets={pixelPresets} />
-          <WebhookInfo jobId={job.id} />
+          {variante === 'perspective' && <PixelPresetCopyList presets={pixelPresets} />}
+          <WebhookInfo jobId={job.id} perspective={variante === 'perspective'} />
           <MultiStellenMapping kunde={kunde} />
         </fieldset>
       )}
@@ -1080,8 +1058,7 @@ function PerspectiveSection({ job, kunde }) {
       )}
       {!funnelRow && perspectiveEnabled === false && (
         <p className="pane-hint">
-          Perspective-Funnels werden aktuell über Claude erstellt — Funnel-URL nach dem Publish
-          hier als externe URL eintragen.
+          Perspective-Funnel verknüpfen: Funnel-URL nach dem Publish hier eintragen.
         </p>
       )}
       {funnelRow && (
@@ -1439,7 +1416,7 @@ function MultiStellenMapping({ kunde }) {
   );
 }
 
-function WebhookInfo({ jobId }) {
+function WebhookInfo({ jobId, perspective = true }) {
   const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
   async function copyToClipboard() {
@@ -1451,7 +1428,7 @@ function WebhookInfo({ jobId }) {
   }
   return (
     <div className="webhook-info">
-      <div className="webhook-info-title">Webhook-URL für Perspective</div>
+      <div className="webhook-info-title">Webhook-URL für Bewerbungen</div>
       <div className="webhook-info-row">
         <code className="webhook-url">{webhookUrl}</code>
         <button type="button" className="btn-ghost btn-sm" onClick={copyToClipboard}>
@@ -1459,10 +1436,12 @@ function WebhookInfo({ jobId }) {
         </button>
       </div>
       <p className="webhook-info-hint">
-        Diese URL in Perspective unter <strong>Integrationen → Webhook</strong> eintragen. Bei jeder neuen Bewerbung
-        werden die Daten automatisch übermittelt und der Kunde benachrichtigt (Branding nach Agentur-Einstellung).
+        {perspective
+          ? <>Diese URL in Perspective unter <strong>Integrationen → Webhook</strong> eintragen. Bei jeder neuen Bewerbung werden die Daten automatisch übermittelt und der Kunde benachrichtigt (Branding nach Agentur-Einstellung).</>
+          : <>Diese URL im Webhook-/Integrations-Bereich deines Funnel-Builders eintragen. Bei jeder neuen Bewerbung werden die Daten automatisch übermittelt und der Kunde benachrichtigt (Branding nach Agentur-Einstellung).</>}
       </p>
 
+      {perspective && (
       <details className="webhook-guide">
         <summary className="webhook-guide-summary">
           <span className="webhook-guide-icon">📖</span>
@@ -1497,6 +1476,7 @@ function WebhookInfo({ jobId }) {
           und der Kunde wird per Mail benachrichtigt.
         </p>
       </details>
+      )}
     </div>
   );
 }
