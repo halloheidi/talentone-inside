@@ -8,6 +8,7 @@ import { fetchAsBuffer } from './storage.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
 import { getInternalBcc } from './mail.js';
 import { anrede, t, anredePromptHinweis } from './anrede.js';
+import { renderEmail } from './email-templates.js';
 
 const VORQUAL_BCC = 'jessica.buchmueller@nowagwirth.de';
 
@@ -329,9 +330,10 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
     ? t(kunde, 'Wir haben neue Werbeanzeigen erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei', 'Wir haben neue Werbeanzeigen erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei')
     : t(kunde, 'Du kannst die Entwürfe direkt online kommentieren oder freigeben', 'Sie können die Entwürfe direkt online kommentieren oder freigeben');
   const reviewCta = istUpdate ? 'Ansehen &amp; freigeben →' : 'Entwürfe kommentieren &amp; freigeben →';
-  const betreffFallback = istUpdate
+  const _tpl = await renderEmail(istUpdate ? 'kampagne_update' : 'entwurf_runde', kunde, { stelle: job?.stelle || '' });
+  const betreffFallback = _tpl?.subject || (istUpdate
     ? t(kunde, 'Neue Werbeanzeigen für deine Kampagne 📬', 'Neue Werbeanzeigen für Ihre Kampagne 📬')
-    : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨');
+    : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'));
 
   const brand = getBranding(kunde?.agentur);
   const safeAnschreiben = escape(anschreiben || '').replace(/\n/g, '<br>');

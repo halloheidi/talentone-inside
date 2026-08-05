@@ -3,6 +3,7 @@
 
 import { getBranding, getMailFrom, getMailReplyTo, getOfferMailFrom, getOfferMailReplyTo, agenturForOfferBrand } from './branding.js';
 import { anrede, t } from './anrede.js';
+import { renderEmail } from './email-templates.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 
@@ -72,11 +73,16 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
   const wantLogo  = umfang !== 'fotos';
   const wantFotos = umfang !== 'logo';
 
-  const subject = umfang === 'logo'
+  // DB-Vorlage nur für die Standard-Variante (Logo + Fotos); logo/fotos behalten
+  // ihren exakten Code-Text als Fallback.
+  const tpl = umfang === 'beides' ? await renderEmail('upload_anfrage', k, {}) : null;
+
+  const subjectDefault = umfang === 'logo'
     ? t(k, 'Wir brauchen noch euer Logo für die Kampagne', 'Wir brauchen noch Ihr Logo für die Kampagne')
     : umfang === 'fotos'
       ? t(k, 'Wir brauchen noch ein paar Fotos für eure Kampagne', 'Wir brauchen noch ein paar Fotos für Ihre Kampagne')
       : t(k, 'Wir brauchen noch Logo und Fotos für eure Kampagne', 'Wir brauchen noch Logo und Fotos für Ihre Kampagne');
+  const subject = tpl?.subject || subjectDefault;
 
   const defaultIntro = umfang === 'logo'
     ? t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür noch euer Logo. Über den unten stehenden Link könnt ihr es ganz einfach hochladen.`,
@@ -86,7 +92,7 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
             `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link können Sie sie ganz einfach hochladen.`)
       : t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`,
             `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von Ihnen. Über den unten stehenden Link können Sie ganz einfach Ihr Logo und Fotos vom Team / Arbeitsplatz hochladen.`);
-  const intro = (customText || '').trim() || defaultIntro;
+  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
 
   const bulletLogo  = `<li><strong>${t(k, 'Euer Logo', 'Ihr Logo')}</strong> in guter Qualität (PNG, JPG, SVG)</li>`;
   const bulletFotos = `<li><strong>3–5 Fotos vom Arbeitsplatz, Team oder typische Tätigkeiten</strong> — gerne auch Handy-Schnappschüsse</li>`;
@@ -150,11 +156,12 @@ export async function sendDatenPruefungMail({ to, betreff, customText, kunde, jo
   const k = kunde || {};
   const grusszeile = anrede(k);
   const stelleTxt = job?.stelle ? `„${job.stelle}"` : '';
+  const tpl = await renderEmail('daten_pruefung', k, { stelle_txt: stelleTxt, stelle: job?.stelle || '' });
   const defaultIntro = t(k,
     `wir haben die Informationen zu deiner Stelle ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
     `wir haben die Informationen zu Ihrer Stelle ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`);
-  const intro = (customText || '').trim() || defaultIntro;
-  const subject = (betreff || '').trim()
+  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
+  const subject = (betreff || '').trim() || tpl?.subject
     || t(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle');
 
   const content = `
@@ -201,10 +208,11 @@ export async function sendFeedbackAnfrage({ to, kunde, liveTage, feedbackUrl }) 
   const k = kunde || {};
   const grusszeile = anrede(k);
   const tageTxt = (liveTage != null && liveTage >= 0) ? `${liveTage} Tagen` : 'einigen Tagen';
-  const intro = t(k,
+  const tpl = await renderEmail('feedback_anfrage', k, { tage_txt: tageTxt, live_tage: liveTage ?? '' });
+  const intro = tpl?.body || t(k,
     `deine Kampagne läuft jetzt seit ${tageTxt} — wie zufrieden bist du bisher? Dein kurzes Feedback hilft uns, die Kampagne weiter zu optimieren (dauert keine 60 Sekunden).`,
     `Ihre Kampagne läuft jetzt seit ${tageTxt} — wie zufrieden sind Sie bisher? Ihr kurzes Feedback hilft uns, die Kampagne weiter zu optimieren (dauert keine 60 Sekunden).`);
-  const subject = t(k, 'Kurzes Feedback zu deiner Kampagne?', 'Kurzes Feedback zu Ihrer Kampagne?');
+  const subject = tpl?.subject || t(k, 'Kurzes Feedback zu deiner Kampagne?', 'Kurzes Feedback zu Ihrer Kampagne?');
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -252,12 +260,16 @@ export async function sendAvvAnfrage({ to, kunde, avvUrl, customText, agentur })
   const grusszeile = anrede(k);
   const firma = escape(k.firmenname || 'euer Unternehmen');
 
-  const subject = t(k, 'Bitte noch bestätigen: Auftragsverarbeitungsvertrag (AVV)',
+  const tpl = await renderEmail('avv_anfrage', k, {
+    firma_du: k.firmenname || 'eurem Unternehmen',
+    firma_sie: k.firmenname || 'Ihrem Unternehmen',
+  });
+  const subject = tpl?.subject || t(k, 'Bitte noch bestätigen: Auftragsverarbeitungsvertrag (AVV)',
                        'Bitte noch bestätigen: Auftragsverarbeitungsvertrag (AVV)');
   const defaultIntro = t(k,
     `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten kannst du den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'eurem Unternehmen'} akzeptieren.`,
     `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten können Sie den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'Ihrem Unternehmen'} akzeptieren.`);
-  const intro = (customText || '').trim() || defaultIntro;
+  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -306,6 +318,7 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
   const grusszeile = t(kunde,
     `Hallo ${(akzeptiert_von || '').toString().split(' ')[0] || 'zusammen'}`,
     anrede(kunde));
+  const tpl = await renderEmail('avv_bestaetigung', kunde, { version: version?.version || '' });
 
   const content = `
     <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">Auftragsverarbeitungsvertrag bestätigt</h1>
@@ -342,7 +355,7 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
       to: [to].flat(),
       bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
-      subject: `Ihre AVV-Kopie für die Unterlagen (${brand.name})`,
+      subject: tpl?.subject || `Ihre AVV-Kopie für die Unterlagen (${brand.name})`,
       html,
       ...(attachments ? { attachments } : {}),
     }),
@@ -362,13 +375,15 @@ export async function sendFormularEinladung({ to, kunde, ansprechpartner, formul
   const k = kunde || { ansprechpartner };
   const grusszeile = anrede(k);
   const isNeukunden = projekttyp === 'neukundengewinnung';
+  // DB-Vorlage nur für die Recruiting-Variante; Neukunden behält seinen Code-Text.
+  const tpl = !isNeukunden ? await renderEmail('formular_einladung', k, {}) : null;
 
   const defaultIntro = isNeukunden
     ? t(k, `wir freuen uns auf eure Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um euer Angebot, eure Zielgruppe und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
             `wir freuen uns auf Ihre Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihr Angebot, Ihre Zielgruppe und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`)
     : t(k, `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
             `wir freuen uns auf Ihre Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihre offene Stelle, Ihre Benefits und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`);
-  const intro = (customText || '').trim() || defaultIntro;
+  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
 
   const bullets = isNeukunden
     ? [
@@ -386,9 +401,9 @@ export async function sendFormularEinladung({ to, kunde, ansprechpartner, formul
           `<strong>Tipp:</strong> Falls Sie eine bestehende Landingpage oder ein Angebots-PDF haben, können Sie die URL oder Datei oben im Formular einfügen — wir lesen sie automatisch aus, Sie passen nur noch an.`)
     : t(k, `<strong>Tipp:</strong> Falls ihr eine bestehende Stellenanzeige als URL oder PDF habt, könnt ihr sie oben im Formular einfügen — wir lesen sie automatisch aus, ihr passt nur noch an.`,
           `<strong>Tipp:</strong> Falls Sie eine bestehende Stellenanzeige als URL oder PDF haben, können Sie sie oben im Formular einfügen — wir lesen sie automatisch aus, Sie passen nur noch an.`);
-  const subject = isNeukunden
+  const subject = tpl?.subject || (isNeukunden
     ? t(k, 'Kurzes Briefing-Formular für eure Neukunden-Kampagne', 'Kurzes Briefing-Formular für Ihre Neukunden-Kampagne')
-    : t(k, 'Kurzes Briefing-Formular für eure Recruiting-Kampagne', 'Kurzes Briefing-Formular für Ihre Recruiting-Kampagne');
+    : t(k, 'Kurzes Briefing-Formular für eure Recruiting-Kampagne', 'Kurzes Briefing-Formular für Ihre Recruiting-Kampagne'));
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -966,9 +981,11 @@ export async function sendReaktivierungsMail({ to, replyTo, kunde, job, ansprech
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
   const stelle = job?.stelle || 'eure offene Stelle';
+  const _calSatzLink = calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl;
+  const tpl = await renderEmail('reaktivierung', k, { stelle, anrede: anrede(k), cal_link: _calSatzLink });
 
   // Standard-Text falls Mitarbeiter nichts eintippt
-  const introText = (customText || '').trim() || `${anrede(k)},
+  const introText = (customText || '').trim() || tpl?.body || `${anrede(k)},
 
 wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
 
@@ -1026,7 +1043,7 @@ ${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch 
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: replyTo || getMailReplyTo(brand),
-      subject: `Frische KI-Werbeanzeigen für ${stelle} — reaktivieren?`,
+      subject: tpl?.subject || `Frische KI-Werbeanzeigen für ${stelle} — reaktivieren?`,
       html, text,
     }),
   });
@@ -1045,8 +1062,9 @@ export async function sendKampagneLiveMail({ to, kunde, job, ansprechpartner, cu
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
   const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
+  const tpl = await renderEmail('kampagne_live', k, { stelle, anrede: anrede(k) });
 
-  const introText = (customText || '').trim() || t(k, `${anrede(k)},
+  const introText = (customText || '').trim() || tpl?.body || t(k, `${anrede(k)},
 
 gute Neuigkeiten — deine Recruiting-Kampagne für ${stelle} ist ab jetzt online! 🚀
 
@@ -1093,7 +1111,7 @@ Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: '🚀 Deine Kampagne ist live!',
+      subject: tpl?.subject || '🚀 Deine Kampagne ist live!',
       html, text,
     }),
   });
@@ -1221,10 +1239,11 @@ export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUr
   const k = kunde || { ansprechpartner };
   const gruss = anrede(k);
 
+  const tpl = await renderEmail('entwurf_reminder', k, {});
   const defaultText = t(k,
     `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`,
     `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Hatten Sie schon Gelegenheit reinzuschauen?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback:`);
-  const intro = (customText || '').trim() || defaultText;
+  const intro = (customText || '').trim() || tpl?.body || defaultText;
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -1254,7 +1273,7 @@ export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUr
       to: recipients,
       bcc: bccList,
       reply_to: getMailReplyTo(brand),
-      subject: `Kurze Erinnerung: deine Entwürfe warten auf Freigabe`,
+      subject: tpl?.subject || `Kurze Erinnerung: deine Entwürfe warten auf Freigabe`,
       html, text,
     }),
   });
@@ -1335,6 +1354,7 @@ export async function sendPortalEinladung({ to, kunde, name, portalUrl, setupUrl
   const brand = getBranding(agentur);
   const k = kunde || { ansprechpartner: name };
   const gruss = anrede(k);
+  const tpl = await renderEmail('portal_zugang', k, { portal_name: brand.name });
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -1367,7 +1387,7 @@ export async function sendPortalEinladung({ to, kunde, name, portalUrl, setupUrl
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: t(k, `Dein Zugang zum ${brand.name}-Portal`, `Ihr Zugang zum ${brand.name}-Portal`),
+      subject: tpl?.subject || t(k, `Dein Zugang zum ${brand.name}-Portal`, `Ihr Zugang zum ${brand.name}-Portal`),
       html, text,
     }),
   });
@@ -1384,11 +1404,12 @@ export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, custom
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
 
+  const tpl = await renderEmail('kampagne_pause', k, { anrede: anrede(k) });
   const introText = customText && customText.trim()
     ? customText.trim()
-    : t(k,
+    : (tpl?.body || t(k,
         `${anrede(k)},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`,
-        `${anrede(k)},\n\nwir müssen Sie kurz informieren: Ihre Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — Ihnen entsteht kein Nachteil.`);
+        `${anrede(k)},\n\nwir müssen Sie kurz informieren: Ihre Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — Ihnen entsteht kein Nachteil.`));
 
   const introHtml = introText
     .split(/\n\s*\n/)
@@ -1415,7 +1436,7 @@ export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, custom
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: '⏸ Deine Kampagne ist kurz pausiert',
+      subject: tpl?.subject || '⏸ Deine Kampagne ist kurz pausiert',
       html, text,
     }),
   });
@@ -1694,8 +1715,9 @@ export async function sendKriterienAnfrage({ to, kunde, job, portalUrl, customTe
   const brand = getBranding(kunde?.agentur);
   const k = kunde || {};
   const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
+  const tpl = await renderEmail('kriterien_anfrage', k, { stelle });
 
-  const intro = (customText || '').trim() || t(k,
+  const intro = (customText || '').trim() || tpl?.body || t(k,
     `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was dir wichtig ist: Was sind deine wichtigsten Kriterien?\n\nÜber den Link unten kannst du sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`,
     `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was Ihnen wichtig ist: Was sind Ihre wichtigsten Kriterien?\n\nÜber den Link unten können Sie sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`);
 
@@ -1730,7 +1752,7 @@ export async function sendKriterienAnfrage({ to, kunde, job, portalUrl, customTe
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: t(k, `Worauf sollen wir achten? — ${stelle}`, `Worauf sollen wir achten? — ${stelle}`),
+      subject: tpl?.subject || t(k, `Worauf sollen wir achten? — ${stelle}`, `Worauf sollen wir achten? — ${stelle}`),
       html, text,
     }),
   });
