@@ -26,7 +26,10 @@
       "Bash(grep -n \"farben ?\\\\|\\\\${farben\\\\|farben:\" imagegen.js)",
       "Bash(node --check eigene-leads-service.js)",
       "Bash(node --check backend/eigene-leads-service.js)",
-      "Bash(scp -q scratch-recon.mjs root@69.62.116.44:/root/scratch-recon.mjs)"
+      "Bash(scp -q scratch-recon.mjs root@69.62.116.44:/root/scratch-recon.mjs)",
+      "Bash(sed -i \"s#import kundenRouter from './routes/kunden.js';#import kundenRouter from './routes/kunden.js';\\\\nimport sucheRouter from './routes/suche.js';#\" server.js)",
+      "Bash(sed -i \"s#app.use\\('/api/projekte', requireAuth, projekteRouter\\);#app.use\\('/api/projekte', requireAuth, projekteRouter\\);\\\\napp.use\\('/api/suche', requireAuth, sucheRouter\\);#\" server.js)",
+      "Bash(node --check routes/suche.js)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

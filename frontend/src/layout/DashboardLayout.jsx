@@ -4,6 +4,9 @@ import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import { PageWidthProvider } from '../components/PageContainer.jsx';
+import GlobalSearch from '../components/GlobalSearch.jsx';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 
 function GlobalNav({ isAdmin }) {
   return (
@@ -129,9 +132,21 @@ export default function DashboardLayout() {
           <span className="brand-accent">One</span>
           <span className="brand-sub">Inside</span>
         </Link>
+        <button
+          type="button"
+          className="sidebar-search"
+          onClick={() => window.dispatchEvent(new Event('open-global-search'))}
+          title="Globale Suche"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', margin: '4px 0 12px', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line, #e5e5e5)', background: 'var(--gray-50, #f5f5f3)', color: 'var(--ink-3, #888)', cursor: 'pointer', fontSize: 13 }}
+        >
+          <span aria-hidden>🔍</span>
+          <span style={{ flex: 1, textAlign: 'left' }}>Suchen…</span>
+          <kbd style={{ fontSize: 10, border: '1px solid var(--line,#ddd)', borderRadius: 4, padding: '1px 5px' }}>{isMac ? '⌘' : 'Ctrl'} K</kbd>
+        </button>
         {kundeId ? <KundeNav kundeId={kundeId} /> : <GlobalNav isAdmin={isAdmin} />}
         <div className="sidebar-foot">v0.2 · intern</div>
       </aside>
+      <GlobalSearch />
       <main className="main">
         <header className="topbar">
           <div className="topbar-spacer" />

@@ -166,18 +166,15 @@ export default function KundenList() {
       )}
 
       {!loading && filtered.length > 0 && view === 'liste' && (
-        <div className="bewerbungen-table-scroll">
-          <table className="bewerbungen-table">
+        <div style={{ width: '100%' }}>
+          <table className="bewerbungen-table" style={{ width: '100%', tableLayout: 'auto' }}>
             <thead>
               <tr>
                 <th style={{ width: 44 }}></th>
-                <th>Firma</th>
-                <th>Branche</th>
-                <th>Ansprechpartner</th>
-                <th>E-Mail</th>
-                <th>Telefon</th>
-                <th>Agentur</th>
-                <th style={{ minWidth: 260 }}>Nächster Schritt</th>
+                <th style={{ width: '24%' }}>Firma</th>
+                <th style={{ width: '16%' }}>Branche</th>
+                <th style={{ width: '12%' }}>Agentur</th>
+                <th>Nächster Schritt</th>
               </tr>
             </thead>
             <tbody>
@@ -196,9 +193,6 @@ export default function KundenList() {
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAvvKunde(k); }}>⚠️</span>
                   )}</td>
                   <td>{k.branche || '—'}</td>
-                  <td>{k.ansprechpartner || '—'}</td>
-                  <td>{k.email ? <a href={`mailto:${k.email}`} onClick={e => e.stopPropagation()}>{k.email}</a> : '—'}</td>
-                  <td>{k.telefon ? <a href={`tel:${k.telefon}`} onClick={e => e.stopPropagation()}>{k.telefon}</a> : '—'}</td>
                   <td>{k.agentur === 'nowagwirth' ? 'Nowag & Wirth' : k.agentur === 'talentone' ? 'TalentOne' : '—'}</td>
                   <td onClick={e => e.stopPropagation()}>
                     <NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={3} />
