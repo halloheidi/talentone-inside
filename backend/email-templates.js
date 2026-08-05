@@ -29,6 +29,23 @@ function replacePlaceholders(str, ctx, key) {
   });
 }
 
+// Baut den Ersetzungs-Kontext (Standard-Variablen + daten) — auch für Vorschau.
+export function buildContext(kunde, daten = {}) {
+  const brand = getBranding(agenturOf(kunde));
+  return {
+    ansprechpartner: kunde?.ansprechpartner || '',
+    firmenname: kunde?.firmenname || '',
+    agentur_name: brand?.name || '',
+    ...daten,
+  };
+}
+
+// Ersetzt {{platzhalter}} in einem beliebigen String (für Live-Vorschau/Test-Mail
+// mit noch nicht gespeicherten Editor-Inhalten).
+export function renderString(str, kunde, daten = {}, key = 'preview') {
+  return replacePlaceholders(str, buildContext(kunde, daten), key);
+}
+
 export async function renderEmail(key, kunde, daten = {}) {
   const agentur = agenturOf(kunde);
   let tpl = null;

@@ -28,6 +28,7 @@ import controllingOpsRouter from './routes/controlling-ops.js';
 import brandAssetsRouter from './routes/brand-assets.js';
 import anfragenRouter from './routes/anfragen.js';
 import stilvorlagenRouter from './routes/stilvorlagen.js';
+import emailVorlagenRouter from './routes/email-vorlagen.js';
 import { ensureBucket } from './storage.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
@@ -98,6 +99,7 @@ app.use('/api/controlling', requireAuth, controllingRouter);
 app.use('/api/controlling-ops', requireAuth, controllingOpsRouter);
 app.use('/api/anfragen', requireAuth, anfragenRouter);
 app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
+app.use('/api/email-vorlagen', requireAuth, emailVorlagenRouter);
 app.use('/api/eigene-leads', requireAuth, eigeneLeadsRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 

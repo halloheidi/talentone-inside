@@ -31,7 +31,10 @@
       "Bash(sed -i \"s#app.use\\('/api/projekte', requireAuth, projekteRouter\\);#app.use\\('/api/projekte', requireAuth, projekteRouter\\);\\\\napp.use\\('/api/suche', requireAuth, sucheRouter\\);#\" server.js)",
       "Bash(node --check routes/suche.js)",
       "Bash(scp -q scratch-suche.mjs root@69.62.116.44:/root/scratch-suche.mjs)",
-      "Bash(node --check email-templates.js)"
+      "Bash(node --check email-templates.js)",
+      "Bash(scp -q verify-render.mjs root@69.62.116.44:/root/verify-render.mjs)",
+      "Bash(node --check email-template-defaults.js)",
+      "Bash(node --check routes/email-vorlagen.js)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

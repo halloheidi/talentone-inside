@@ -29,6 +29,7 @@ import OfferKatalog from './pages/admin/OfferKatalog.jsx';
 import StilvorlagenAdmin from './pages/admin/Stilvorlagen.jsx';
 import EigeneLeads from './pages/admin/EigeneLeads.jsx';
 import Controlling from './pages/admin/Controlling.jsx';
+import EmailVorlagen from './pages/admin/EmailVorlagen.jsx';
 import ControllingDashboard from './pages/ControllingDashboard.jsx';
 import OfferWizard from './pages/OfferWizard.jsx';
 import OffersList from './pages/OffersList.jsx';
@@ -84,6 +85,7 @@ export default function App() {
         <Route path="admin/eigene-leads" element={<AdminOnly><EigeneLeads /></AdminOnly>} />
         <Route path="controlling" element={<ControllingDashboard />} />
         <Route path="admin/controlling" element={<AdminOnly><Controlling /></AdminOnly>} />
+        <Route path="admin/email-vorlagen" element={<AdminOnly><EmailVorlagen /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />
