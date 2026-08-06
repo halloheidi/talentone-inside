@@ -26,6 +26,7 @@ router.get('/suche', async (req, res) => {
 });
 
 import { getPublicBaseUrl } from '../branding.js';
+import { anlageKundeProjektJob, PROJEKTE_STATI } from '../projekt-anlage.js';
 
 function decodeBase64File(fileData) {
   return Buffer.from(fileData, 'base64');
@@ -39,11 +40,6 @@ function decodeBase64File(fileData) {
 //   url     → req.body.url                  (Puppeteer + Claude + Farb-Scrape)
 //   file    → req.body.fileData (base64) + req.body.fileType
 //   logo (alle): req.body.logo = { fileData, fileName?, contentType? }
-const PROJEKTE_STATI = [
-  'vorbereitung', 'kickoff_vereinbart', 'onboarding', 'golive_vereinbart',
-  'warte_auf_go', 'feedbackschleife', 'go',
-  'live', 'pausiert', 'hold', 'abgeschlossen',
-];
 
 // Nur-Extraktion für den Bestätigungs-Schritt ("Erkannte Daten prüfen").
 // Legt NICHTS an — liefert die erkannten Kern-Felder + die vollständigen Rohdaten
@@ -171,51 +167,19 @@ router.post('/quick-create', async (req, res) => {
       return res.status(400).json({ error: 'Unbekannter Modus.' });
     }
 
-    const { data: kunde, error: kErr } = await supabase
-      .from('talentone_kunden')
-      .insert(kundeData)
-      .select()
-      .single();
-    if (kErr) return res.status(500).json({ error: `Kunde anlegen: ${kErr.message}` });
-
-    const { data: job, error: jErr } = await supabase
-      .from('talentone_jobs')
-      .insert({
-        ...jobData,
-        kunde_id: kunde.id,
-        vorqualifizierung: kunde.agentur === 'nowagwirth',
-      })
-      .select()
-      .single();
-    if (jErr) {
-      // Kunde wieder löschen, damit kein Halb-Zustand bleibt
-      await supabase.from('talentone_kunden').delete().eq('id', kunde.id);
-      return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
+    let anlage;
+    try {
+      anlage = await anlageKundeProjektJob({
+        kundeData, jobData,
+        meta: {
+          status: projekt_status, projektart, projektdauer, verantwortlich,
+          fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details, kickoff_termin,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-
-    // Projekt in Kanban anlegen (Kanban/Liste-Übersicht)
-    const status = PROJEKTE_STATI.includes(projekt_status) ? projekt_status : 'vorbereitung';
-    const projektName = job.stelle || kunde.firmenname || 'Neues Projekt';
-    await supabase.from('talentone_projekte').insert({
-      projekt: projektName,
-      kunde: kunde.firmenname,
-      kunde_id: kunde.id,
-      status,
-      projektart: projektart || (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
-      projektdauer: projektdauer || null,
-      agentur: finalAgentur,
-      fotograf_noetig: finalAgentur === 'nowagwirth' ? !!fotograf_noetig : false,
-      zahlung_aufgeteilt: !!zahlung_aufgeteilt,
-      garantie: !!garantie,
-      garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
-      kickoff_termin: kickoff_termin || null,
-      gesuchte_positionen: job.stelle || null,
-      standorte: job.region || null,
-      verantwortlich: verantwortlich || null,
-      email: kunde.email || null,
-      close_lead_id: kunde.close_lead_id || null,  // Punkt 8: Kunde ist primär, Projekt sync
-      updated_at: new Date().toISOString(),
-    });
+    const { kunde, job } = anlage;
 
     // Antwort sofort raus — Logo + Farb-Extraktion sind best-effort und blockieren nicht.
     res.status(201).json({ kunde, job });

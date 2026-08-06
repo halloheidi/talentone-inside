@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import { PageWidthProvider } from '../components/PageContainer.jsx';
 import GlobalSearch from '../components/GlobalSearch.jsx';
+import AssistentWidget from '../components/AssistentWidget.jsx';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 
@@ -151,6 +152,7 @@ export default function DashboardLayout() {
         <div className="sidebar-foot">v0.2 · intern</div>
       </aside>
       <GlobalSearch />
+      <AssistentWidget />
       <main className="main">
         <header className="topbar">
           <div className="topbar-spacer" />
