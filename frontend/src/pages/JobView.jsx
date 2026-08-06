@@ -60,7 +60,7 @@ const TABS = [
   { to: 'creatives', label: 'Creatives' },
   { to: 'adcopies', label: 'Ad Copies' },
   { to: 'funnel', label: 'Funnel' },
-  { to: 'export', label: 'Export' },
+  { to: 'export', label: 'Freigabe & Go-Live' },
 ];
 
 const STATUS_LABELS = {

@@ -37,7 +37,9 @@
       "Bash(node --check routes/email-vorlagen.js)",
       "Bash(scp -q verify-admin.mjs root@69.62.116.44:/root/verify-admin.mjs)",
       "Bash(node --check projekt-anlage.js)",
-      "Bash(node --check routes/assistent.js)"
+      "Bash(node --check routes/assistent.js)",
+      "Bash(scp -q verify-assistent.mjs root@69.62.116.44:/root/verify-assistent.mjs)",
+      "Bash(scp -q verify-verlauf.mjs root@69.62.116.44:/root/verify-verlauf.mjs)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

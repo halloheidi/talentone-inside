@@ -381,7 +381,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
     }
   }
 
-  if (loading) return <div className="card empty">Lade Export…</div>;
+  if (loading) return <div className="card empty">Lade Freigabe & Go-Live…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
 
   const creatives = data?.creatives || [];
