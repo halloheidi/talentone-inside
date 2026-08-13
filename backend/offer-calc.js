@@ -109,13 +109,21 @@ export function calculateOfferTotals({
     });
   }
 
+  return finalizeTotals(lines, { ad_budget_monthly, vat_rate, discount_type, discount_value });
+}
+
+/**
+ * Aggregiert eine fertige Positionsliste (lines mit category/line_total) zu den
+ * Angebots-Summen inkl. Rabatt/Werbebudget/USt. Gemeinsam genutzt von
+ * calculateOfferTotals (Katalog-Pfad) und aggregateSnapshot (Snapshot-Pfad),
+ * damit beide garantiert dieselbe Rechenlogik verwenden.
+ */
+export function finalizeTotals(lines, { ad_budget_monthly = null, vat_rate = 19, discount_type = null, discount_value = 0 } = {}) {
   const setup_before_discount = round2(
-    lines.filter(l => SETUP_CATEGORIES.has(l.category))
-         .reduce((sum, l) => sum + l.line_total, 0)
+    lines.filter(l => SETUP_CATEGORIES.has(l.category)).reduce((sum, l) => sum + l.line_total, 0)
   );
   const monthly_total_service = round2(
-    lines.filter(l => MONTHLY_CATEGORIES.has(l.category))
-         .reduce((sum, l) => sum + l.line_total, 0)
+    lines.filter(l => MONTHLY_CATEGORIES.has(l.category)).reduce((sum, l) => sum + l.line_total, 0)
   );
 
   // Rabatt auf setup_total anwenden. Bleibt bei 0 wenn kein Rabatt gesetzt.
@@ -132,8 +140,6 @@ export function calculateOfferTotals({
     ? round2(+ad_budget_monthly)
     : 0;
 
-  // monthly_total = die wiederkehrende Service-Rate OHNE Werbebudget-Durchleitung.
-  // first_month_total = Setup (nach Rabatt) + 1. Monat (Service) + (nur TalentOne) Werbebudget.
   const monthly_total = monthly_total_service;
   const first_month_total = round2(setup_total + monthly_total_service + adBudget);
 
@@ -163,6 +169,86 @@ export function calculateOfferTotals({
       first_month_gross: round2(first_month_total * (1 + vatFactor)),
     },
   };
+}
+
+const VALID_CATEGORIES = new Set(['setup', 'monthly', 'option_setup', 'option_monthly']);
+
+// Normalisiert eine Snapshot-Zeile in die kanonische Form (Euro-Preis auf 2
+// Nachkommastellen, Menge als ganze Zahl ≥ 1, line_total berechnet).
+export function normalizeSnapshotLine(l) {
+  const unit_price = round2(Number(l?.unit_price) || 0);
+  const quantity = Math.max(1, Math.floor(Number(l?.quantity) || 1));
+  const category = VALID_CATEGORIES.has(l?.category) ? l.category : 'setup';
+  return {
+    product_id: l?.product_id ?? null,
+    sku: l?.sku ?? null,
+    category,
+    custom: !!l?.custom || !l?.product_id,
+    title: String(l?.title || '').trim(),
+    description: String(l?.description || ''),
+    unit_price,
+    quantity,
+    line_total: round2(unit_price * quantity),
+  };
+}
+
+/**
+ * Summen aus einem Positions-Snapshot (übersteuerte Werte + freie Positionen).
+ * Rabatt/Werbebudget/USt kommen wie im Katalog-Pfad über opts hinzu.
+ */
+export function aggregateSnapshot({ positions = [], ad_budget_monthly = null, vat_rate = 19, discount_type = null, discount_value = 0 } = {}) {
+  const lines = (Array.isArray(positions) ? positions : []).map(normalizeSnapshotLine);
+  return finalizeTotals(lines, { ad_budget_monthly, vat_rate, discount_type, discount_value });
+}
+
+// Validierung für gespeicherte/übergebene Positionen: Bezeichnung nicht leer,
+// Einzelpreis ≥ 0, Menge ganze Zahl ≥ 1. Fehlermeldung nennt die Position.
+export function validatePositions(positions) {
+  if (!Array.isArray(positions) || positions.length === 0) {
+    return { ok: false, error: 'Mindestens eine Position ist erforderlich.' };
+  }
+  for (let i = 0; i < positions.length; i++) {
+    const l = positions[i];
+    const name = (l?.title || '').trim() || `Position ${i + 1}`;
+    if (!(l?.title || '').toString().trim()) return { ok: false, error: `Position ${i + 1}: Bezeichnung darf nicht leer sein.` };
+    const price = Number(l?.unit_price);
+    if (!Number.isFinite(price) || price < 0) return { ok: false, error: `Position „${name}“: Einzelpreis (netto) muss ≥ 0 sein.` };
+    const qty = Number(l?.quantity);
+    if (!Number.isFinite(qty) || Math.floor(qty) < 1) return { ok: false, error: `Position „${name}“: Menge muss eine ganze Zahl ≥ 1 sein.` };
+  }
+  return { ok: true };
+}
+
+const EXTRA_JOB_SKUS_BY_BRAND = {
+  talentone:   ['TO-OPT-EXTRA-JOB-SETUP', 'TO-OPT-EXTRA-JOB'],
+  nowag_wirth: ['NW-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB'],
+};
+
+/**
+ * Liefert die maßgeblichen Positionen eines Angebots:
+ *  - hat das Angebot einen positions_snapshot → dieser (übersteuerte Werte).
+ *  - sonst (Alt-Angebot) → aus dem Katalog abgeleitet (Bezeichnung/Beschreibung/
+ *    Preis/Menge wie zum Erstell-Zeitpunkt), damit Bestandsangebote weiter
+ *    korrekt abgerechnet werden.
+ * Katalog (aktive Positionen der Marke) muss vom Aufrufer geladen werden.
+ */
+export function resolveOfferPositions(offer, catalog = []) {
+  const snap = offer?.positions_snapshot;
+  if (Array.isArray(snap) && snap.length) return snap.map(normalizeSnapshotLine);
+
+  const totals = calculateOfferTotals({
+    products: catalog,
+    selected: Array.isArray(offer?.selected_product_ids) ? offer.selected_product_ids : [],
+    additional_positions_count: offer?.additional_positions_count || 0,
+    ad_budget_monthly: null,
+    vat_rate: Number(offer?.vat_rate) || 19,
+    extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[offer?.brand] || [],
+  });
+  const byId = new Map((catalog || []).map(p => [p.id, p]));
+  return totals.positions.map(l => normalizeSnapshotLine({
+    ...l,
+    description: byId.get(l.product_id)?.description || '',
+  }));
 }
 
 function round2(n) {

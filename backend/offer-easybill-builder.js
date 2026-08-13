@@ -13,7 +13,7 @@
 // Positionstitel + Volltext werden per "\n\n" in ein einziges `description`-
 // Feld gepackt (easybill kennt kein separates title-Feld pro Position).
 
-import { calculateOfferTotals } from './offer-calc.js';
+import { calculateOfferTotals, aggregateSnapshot } from './offer-calc.js';
 
 const SETUP_CATS   = new Set(['setup', 'option_setup']);
 const MONTHLY_CATS = new Set(['monthly', 'option_monthly']);
@@ -68,6 +68,7 @@ export function buildEasybillOfferPayload({
   brand,
   products = [],
   selected = [],
+  positions = null,                 // Snapshot-Zeilen (übersteuerte Werte). Wenn gesetzt, maßgeblich.
   additional_positions_count = 0,
   ad_budget_monthly = null,
   vat_rate = 19,
@@ -88,36 +89,50 @@ export function buildEasybillOfferPayload({
   const istEmpfehlung = werbebudget_modus === 'empfehlung';
   const effektivesAdBudget = istEmpfehlung ? null : ad_budget_monthly;
 
-  // Erst: durch den Rechner laufen lassen, damit wir konsistente
-  // Mengen/Beträge haben — genau die Zahlen, die auf dem PDF stehen sollen.
-  const totals = calculateOfferTotals({
-    products, selected,
-    additional_positions_count,
-    ad_budget_monthly: effektivesAdBudget,
-    vat_rate,
-    extra_job_skus: extraSkus,
-    discount_type,
-    discount_value,
-  });
+  const useSnapshot = Array.isArray(positions) && positions.length > 0;
+
+  // Erst: durch den Rechner laufen lassen, damit wir konsistente Mengen/Beträge
+  // haben — genau die Zahlen, die auf dem PDF stehen sollen. Snapshot-Pfad nutzt
+  // die übersteuerten Positionen (Bezeichnung/Beschreibung/Preis 1:1), Alt-Pfad
+  // den Katalog.
+  const totals = useSnapshot
+    ? aggregateSnapshot({ positions, ad_budget_monthly: effektivesAdBudget, vat_rate, discount_type, discount_value })
+    : calculateOfferTotals({
+        products, selected,
+        additional_positions_count,
+        ad_budget_monthly: effektivesAdBudget,
+        vat_rate,
+        extra_job_skus: extraSkus,
+        discount_type,
+        discount_value,
+      });
 
   const productById = new Map(products.map(p => [p.id, p]));
   const isSetup   = l => SETUP_CATS.has(l.category);
   const isMonthly = l => MONTHLY_CATS.has(l.category);
 
-  const setupLines   = totals.positions.filter(isSetup);
-  const monthlyLines = totals.positions.filter(isMonthly);
+  // Zeilen mit Titel/Beschreibung auflösen: Snapshot bringt beides mit,
+  // Katalog-Pfad joint es aus productById + behält die sort_order-Reihenfolge.
+  const resolved = totals.positions.map(l => useSnapshot
+    ? { ...l }
+    : { ...l, description: productById.get(l.product_id)?.description || '', _sort: productById.get(l.product_id)?.sort_order || 0 });
+
+  let setupLines   = resolved.filter(isSetup);
+  let monthlyLines = resolved.filter(isMonthly);
+  if (!useSnapshot) {
+    setupLines   = setupLines.sort((a, b) => (a._sort || 0) - (b._sort || 0));
+    monthlyLines = monthlyLines.sort((a, b) => (a._sort || 0) - (b._sort || 0));
+  }
 
   const items = [];
   let pos = 1;
 
-  // Setup zuerst (Reihenfolge nach sort_order)
-  setupLines.sort(sortByCatalogOrder(productById));
+  // Setup zuerst
   for (const l of setupLines) {
-    const p = productById.get(l.product_id);
     items.push(makePosition({
       pos: pos++,
-      titleWithSuffix: p.title, // Setup: kein Suffix
-      description: p.description,
+      titleWithSuffix: l.title, // Setup: kein Suffix
+      description: l.description,
       quantity: l.quantity,
       unit_price: l.unit_price,
       vat_percent: vat_rate,
@@ -125,13 +140,11 @@ export function buildEasybillOfferPayload({
   }
 
   // Monatlich als Nächstes, mit "(monatlich)"-Suffix
-  monthlyLines.sort(sortByCatalogOrder(productById));
   for (const l of monthlyLines) {
-    const p = productById.get(l.product_id);
     items.push(makePosition({
       pos: pos++,
-      titleWithSuffix: `${p.title} (monatlich)`,
-      description: p.description,
+      titleWithSuffix: `${l.title} (monatlich)`,
+      description: l.description,
       quantity: l.quantity,
       unit_price: l.unit_price,
       vat_percent: vat_rate,

@@ -22,7 +22,7 @@ import {
 import { getPdfTemplate } from './easybill-templates.js';
 import { createInvoice as paypalCreateInvoice } from './paypal.js';
 import { evaluateMonthlyBilling } from './billing-rules.js';
-import { getEffectiveAdBudget, validateAdBudget } from './offer-calc.js';
+import { getEffectiveAdBudget, validateAdBudget, resolveOfferPositions } from './offer-calc.js';
 import { AD_BUDGET_DESCRIPTION } from './offer-easybill-builder.js';
 
 const EUR_VAT_DEFAULT = 19;
@@ -157,28 +157,20 @@ export async function createSetupInvoice(offerId, { createdBy = null, usePaypal 
     fetchCatalog(offer.brand),
     fetchKunde(offer.customer_id),
   ]);
-  const productsById = new Map(products.map(p => [p.id, p]));
+  // Positionen aus dem Snapshot (übersteuerte Werte); Alt-Angebote → Katalog.
   const setupCats = new Set(['setup', 'option_setup']);
-
-  const selected = Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [];
-  const extraJobSkus = new Set([
-    'TO-OPT-EXTRA-JOB-SETUP', 'NW-OPT-EXTRA-JOB-SETUP', // Setup-Positionen der Extra-Jobs
-  ]);
-  const addCount = Number(offer.additional_positions_count || 0);
+  const positions = resolveOfferPositions(offer, products);
 
   const items = [];
   let pos = 1;
-  for (const s of selected) {
-    const p = productsById.get(s.product_id);
-    if (!p || !setupCats.has(p.category)) continue;
-    const isExtra = extraJobSkus.has(p.sku);
-    const quantity = isExtra && addCount > 0 ? addCount : 1;
+  for (const l of positions) {
+    if (!setupCats.has(l.category)) continue;
     items.push(makePosition({
       pos: pos++,
-      titleWithSuffix: p.title,
-      description: p.description,
-      quantity,
-      unitPriceEur: Number(p.unit_price),
+      titleWithSuffix: l.title,
+      description: l.description,
+      quantity: l.quantity,
+      unitPriceEur: Number(l.unit_price),
       vatPercent: EUR_VAT_DEFAULT,
     }));
   }
@@ -325,21 +317,17 @@ async function linkExistingEasybillInvoice(offer, doc, { createdBy = null } = {}
 
 // ─────────────────────── Monatliches Abo (RECURRING) ───────────────────────
 /** Baut die Positionen fürs monatliche RECURRING-Doc. */
-function buildRecurringItems({ brand, products, selected, adBudget }) {
-  const byId = new Map(products.map(p => [p.id, p]));
+function buildRecurringItems({ brand, positions, adBudget }) {
   const items = [];
   let pos = 1;
   const monthlyCats = new Set(['monthly', 'option_monthly']);
 
-  for (const s of selected) {
-    const p = byId.get(s.product_id);
-    if (!p || !monthlyCats.has(p.category)) continue;
-    const isExtra = ['TO-OPT-EXTRA-JOB', 'NW-OPT-EXTRA-JOB'].includes(p.sku);
-    const quantity = isExtra && s.quantity ? Number(s.quantity) : (Number(s.quantity) || 1);
+  for (const l of positions || []) {
+    if (!monthlyCats.has(l.category)) continue;
     items.push(makePosition({
-      pos: pos++, titleWithSuffix: `${p.title} (monatlich)`,
-      description: p.description, quantity,
-      unitPriceEur: Number(p.unit_price), vatPercent: EUR_VAT_DEFAULT,
+      pos: pos++, titleWithSuffix: `${l.title} (monatlich)`,
+      description: l.description, quantity: l.quantity,
+      unitPriceEur: Number(l.unit_price), vatPercent: EUR_VAT_DEFAULT,
     }));
   }
   if (brand === 'talentone' && adBudget > 0) {
@@ -546,8 +534,7 @@ export async function activateMonthlyBilling(offerId, { startDate = null } = {})
   const products = await fetchCatalog(offer.brand);
   const items = buildRecurringItems({
     brand: offer.brand,
-    products,
-    selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+    positions: resolveOfferPositions(offer, products),
     adBudget: Number(offer.ad_budget_monthly) || 0,
   });
   if (!items.length) throw new Error('Keine monatlichen Positionen im Angebot.');
@@ -700,9 +687,10 @@ export async function runMonthlyBillingForOffer(offerId, { today = null, periodS
   const budgetHistory = offer.brand === 'talentone' ? await loadAdBudgetHistory(offerId) : [];
   const effectiveAdBudget = getEffectiveAdBudget(offer, budgetHistory, startIso);
 
+  const offerPositions = resolveOfferPositions(offer, products);
   const buildFullItems = () => buildRecurringItems({
-    brand: offer.brand, products,
-    selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
+    brand: offer.brand,
+    positions: offerPositions,
     adBudget: effectiveAdBudget,
   });
   const buildBudgetOnlyItems = () => {

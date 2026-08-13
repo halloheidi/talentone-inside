@@ -29,6 +29,76 @@ class StepErrorBoundary extends Component {
 const eur  = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const num  = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Euro-Eingabe mit Komma → Zahl (2 Nachkommastellen). NaN wenn ungültig.
+function parseEuro(str) {
+  if (typeof str === 'number') return Math.round(str * 100) / 100;
+  const cleaned = String(str ?? '').replace(/[^\d.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+function euroStr(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(2).replace('.', ',') : '';
+}
+
+// Baut die effektive Positionsliste (UI-Variante mit Katalog-Baseline für
+// Badge/Reset). Katalog-Auswahl + Overrides + Extra-Jobs (gekoppelt) + freie.
+function buildPositionsUI({ products, selectedIds, additionalPositionsCount, brand, positionOverrides, customPositions }) {
+  const lines = [];
+  if (!brand) return lines;
+  const extraSetupSku = EXTRA_JOB_SETUP_SKU[brand];
+  const extraMonthlySku = EXTRA_JOB_MONTHLY_SKU[brand];
+  const extraSkus = new Set([extraSetupSku, extraMonthlySku]);
+  for (const p of products) {
+    if (!selectedIds.has(p.id)) continue;
+    if (extraSkus.has(p.sku)) continue;
+    lines.push(catalogLine(p, 1, false, positionOverrides));
+  }
+  if (additionalPositionsCount > 0) {
+    for (const sku of [extraSetupSku, extraMonthlySku]) {
+      const p = products.find(x => x.sku === sku);
+      if (p) lines.push(catalogLine(p, additionalPositionsCount, true, positionOverrides));
+    }
+  }
+  for (const c of customPositions) {
+    lines.push({
+      key: c.key, custom: true, isExtraJob: false,
+      product_id: null, sku: null, category: c.category || 'setup',
+      title: c.title || '', description: c.description || '',
+      unit_price: Number(c.unit_price) || 0, quantity: Math.max(1, Math.floor(Number(c.quantity) || 1)),
+      catalog: null, isOverridden: false,
+    });
+  }
+  return lines;
+}
+function catalogLine(p, baseQty, isExtraJob, overrides) {
+  const ov = overrides[p.id] || {};
+  const catUnit = Number(p.unit_price) || 0;
+  const title = ov.title ?? p.title;
+  const description = ov.description ?? (p.description || '');
+  const unit_price = ov.unit_price !== undefined ? Number(ov.unit_price) : catUnit;
+  const quantity = ov.quantity !== undefined ? Math.max(1, Math.floor(Number(ov.quantity) || 1)) : baseQty;
+  const isOverridden =
+    (ov.title !== undefined && ov.title !== p.title) ||
+    (ov.description !== undefined && (ov.description || '') !== (p.description || '')) ||
+    (ov.unit_price !== undefined && Number(ov.unit_price) !== catUnit) ||
+    (ov.quantity !== undefined && Number(ov.quantity) !== baseQty);
+  return {
+    key: p.id, custom: false, isExtraJob,
+    product_id: p.id, sku: p.sku, category: p.category,
+    title, description, unit_price, quantity, baseQty,
+    catalog: { title: p.title, description: p.description || '', unit_price: catUnit, quantity: baseQty },
+    isOverridden,
+  };
+}
+function toCleanPosition(l) {
+  return {
+    product_id: l.product_id, sku: l.sku, category: l.category, custom: !!l.custom,
+    title: l.title, description: l.description,
+    unit_price: Number(l.unit_price) || 0, quantity: Math.max(1, Math.floor(Number(l.quantity) || 1)),
+  };
+}
+
 const BRAND_META = {
   talentone: {
     key: 'talentone', label: 'TalentOne',
@@ -136,6 +206,10 @@ export default function OfferWizard() {
   const [products, setProducts] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [additionalPositionsCount, setAdditionalPositionsCount] = useState(0);
+  // Pro-Angebot-Overrides (Katalog unberührt): product_id → { title?, description?, unit_price?, quantity? }
+  const [positionOverrides, setPositionOverrides] = useState({});
+  // Freie Positionen: { key, title, description, unit_price, quantity, category }
+  const [customPositions, setCustomPositions] = useState([]);
   const [adBudget, setAdBudget] = useState('800');
   // Werbebudget-Modus (nur TalentOne): 'position' (Durchleitung, wie bisher) oder
   // 'empfehlung' (nicht abgerechnet, nur Empfehlungs-Hinweis; Kunde zahlt direkt).
@@ -219,9 +293,47 @@ export default function OfferWizard() {
       }
       setSelectedIds(initial);
       setAdditionalPositionsCount(0);
+      setPositionOverrides({});   // Overrides/freie Positionen bei Marken-Wechsel zurücksetzen
+      setCustomPositions([]);
     }).catch(err => setError(err.message));
     return () => { cancel = true; };
   }, [brand]);
+
+  // Effektive Positionsliste (Snapshot). UI-Variante trägt Katalog-Baseline für
+  // Badge/Reset; cleanSnapshot ist die für Backend/Vorschau reduzierte Form.
+  const positionsUI = useMemo(
+    () => buildPositionsUI({ products, selectedIds, additionalPositionsCount, brand, positionOverrides, customPositions }),
+    [products, selectedIds, additionalPositionsCount, brand, positionOverrides, customPositions],
+  );
+  const cleanSnapshot = useMemo(() => positionsUI.map(toCleanPosition), [positionsUI]);
+
+  function editPosition(line, patch) {
+    if (line.custom) {
+      setCustomPositions(prev => prev.map(c => (c.key === line.key ? { ...c, ...patch } : c)));
+    } else {
+      setPositionOverrides(prev => ({ ...prev, [line.product_id]: { ...prev[line.product_id], ...patch } }));
+    }
+  }
+  function resetPosition(line) {
+    if (line.custom) return;
+    setPositionOverrides(prev => { const n = { ...prev }; delete n[line.product_id]; return n; });
+  }
+  function removePosition(line) {
+    if (line.custom) { setCustomPositions(prev => prev.filter(c => c.key !== line.key)); return; }
+    if (line.isExtraJob) {
+      setAdditionalPositionsCount(0);
+      setPositionOverrides(prev => { const n = { ...prev }; delete n[line.product_id]; return n; });
+      return;
+    }
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(line.product_id); return n; });
+    setPositionOverrides(prev => { const n = { ...prev }; delete n[line.product_id]; return n; });
+  }
+  function addCustomPosition() {
+    setCustomPositions(prev => [...prev, {
+      key: `custom-${Date.now()}-${prev.length}`,
+      title: '', description: '', unit_price: 0, quantity: 1, category: 'setup',
+    }]);
+  }
 
   // Live-Berechnung (Debounce 250ms) — für Schritt 3 und 4
   const calcTimer = useRef(null);
@@ -230,10 +342,10 @@ export default function OfferWizard() {
     if (calcTimer.current) clearTimeout(calcTimer.current);
     calcTimer.current = setTimeout(async () => {
       try {
+        if (!cleanSnapshot.length) { setTotals(null); return; }
         const payload = {
           brand,
-          selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
-          additional_positions_count: additionalPositionsCount,
+          positionen_snapshot: cleanSnapshot,
           // Empfehlungs-Modus: Budget NICHT in die Kalkulation (Vorschau ohne Werbebudget).
           ad_budget_monthly: (brand === 'talentone' && werbebudgetModus !== 'empfehlung') ? parseFloat(adBudget) || 0 : null,
           discount_type: discountType || null,
@@ -244,7 +356,7 @@ export default function OfferWizard() {
       } catch (err) { setError(err.message); }
     }, 250);
     return () => calcTimer.current && clearTimeout(calcTimer.current);
-  }, [brand, products, selectedIds, additionalPositionsCount, adBudget, discountType, discountValue, werbebudgetModus]);
+  }, [brand, products, cleanSnapshot, adBudget, discountType, discountValue, werbebudgetModus]);
 
   function buildPayload() {
     return {
@@ -258,6 +370,7 @@ export default function OfferWizard() {
       },
       customer_id: customer.tool_kunde_id || null,
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
+      positionen_snapshot: cleanSnapshot,
       additional_positions_count: additionalPositionsCount,
       ad_budget_monthly: brand === 'talentone' ? parseFloat(adBudget) || 0 : null,
       werbebudget_modus: brand === 'talentone' ? werbebudgetModus : 'position',
@@ -415,6 +528,9 @@ export default function OfferWizard() {
             brand={brand} customer={customer} products={products}
             selectedIds={selectedIds} totals={totals} templates={templates}
             additionalPositionsCount={additionalPositionsCount}
+            positions={positionsUI}
+            onEditPosition={editPosition} onResetPosition={resetPosition}
+            onRemovePosition={removePosition} onAddCustom={addCustomPosition}
             guaranteeType={guaranteeType}
             guaranteeApplicationsCount={guaranteeApplicationsCount}
             guaranteeNote={guaranteeNote}
@@ -1209,11 +1325,83 @@ function PositionRow({ p, selected, onToggle, readonly, required, extraCount, on
 }
 
 // ─────────────────────── Step 4 ───────────────────────
-function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, guaranteeType, guaranteeApplicationsCount, guaranteeNote, guaranteePeriodDays, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
-  const positionsWithText = (totals?.positions || []).map(l => ({
-    ...l,
-    description: products.find(p => p.id === l.product_id)?.description || '',
-  }));
+function posBadge(bg, color) {
+  return { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.04, background: bg, color, padding: '2px 7px', borderRadius: 100 };
+}
+
+// Euro-Eingabe mit Komma; hält den Roh-String lokal, meldet gerundete Zahl.
+function PriceInput({ value, onChange, style }) {
+  const [str, setStr] = useState(euroStr(value));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setStr(euroStr(value)); }, [value]);
+  return (
+    <input
+      type="text" inputMode="decimal" value={str} style={style}
+      onFocus={() => { focused.current = true; }}
+      onChange={e => { setStr(e.target.value); const n = parseEuro(e.target.value); if (Number.isFinite(n) && n >= 0) onChange(n); }}
+      onBlur={() => {
+        focused.current = false;
+        const n = parseEuro(str);
+        const val = Number.isFinite(n) && n >= 0 ? n : 0;
+        onChange(val); setStr(euroStr(val));
+      }}
+    />
+  );
+}
+
+function PositionEditRow({ line, onEdit, onReset, onRemove }) {
+  const monthly = String(line.category || '').endsWith('monthly');
+  const lineTotal = (Number(line.unit_price) || 0) * Math.max(1, Math.floor(Number(line.quantity) || 1));
+  const titleEmpty = !String(line.title || '').trim();
+  const inp = { padding: '5px 7px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13 };
+  return (
+    <div style={{ padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 8, background: '#fff' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+        {monthly ? <span style={posBadge('#e6f2fb', '#0068a3')}>monatlich</span> : <span style={posBadge('#f0efed', '#5a5955')}>einmalig</span>}
+        {line.isExtraJob && <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>weitere Stelle</span>}
+        {line.custom && <span style={posBadge('#eef2ff', '#3730a3')}>frei</span>}
+        {line.isOverridden && <span style={posBadge('#fff7ed', '#9a3412')}>angepasst</span>}
+        <div style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>{eur.format(lineTotal)}</div>
+      </div>
+      <input
+        type="text" value={line.title} placeholder="Bezeichnung"
+        onChange={e => onEdit(line, { title: e.target.value })}
+        style={{ ...inp, width: '100%', fontSize: 14, fontWeight: 600, marginBottom: 6, border: titleEmpty ? '1px solid #e11d48' : inp.border }}
+      />
+      <textarea
+        value={line.description} placeholder="Beschreibung" rows={2}
+        onChange={e => onEdit(line, { description: e.target.value })}
+        style={{ ...inp, width: '100%', fontSize: 12, color: 'var(--ink-2)', resize: 'vertical', marginBottom: 8 }}
+      />
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>Einzelpreis (netto)
+          <PriceInput value={line.unit_price} onChange={v => onEdit(line, { unit_price: v })} style={{ ...inp, marginLeft: 6, width: 90 }} /> €
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>Menge
+          <input type="number" min={1} step={1} value={line.quantity}
+            onChange={e => onEdit(line, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+            style={{ ...inp, marginLeft: 6, width: 62 }} />
+        </label>
+        {line.custom && (
+          <label style={{ fontSize: 11, color: 'var(--ink-3)' }}>Abrechnung
+            <select value={line.category} onChange={e => onEdit(line, { category: e.target.value })} style={{ ...inp, marginLeft: 6 }}>
+              <option value="setup">einmalig</option>
+              <option value="monthly">monatlich</option>
+            </select>
+          </label>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {line.isOverridden && !line.custom && (
+            <button type="button" className="btn-ghost btn-sm" onClick={() => onReset(line)} title="Katalog-Standard wiederherstellen">↩ Auf Standard</button>
+          )}
+          <button type="button" className="btn-ghost btn-sm" style={{ color: '#b91c1c' }} onClick={() => onRemove(line)}>Entfernen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Step4Preview({ brand, customer, products, selectedIds, totals, templates, additionalPositionsCount, positions = [], onEditPosition, onResetPosition, onRemovePosition, onAddCustom, guaranteeType, guaranteeApplicationsCount, guaranteeNote, guaranteePeriodDays, savingDraft, onSaveDraft, creatingOffer, onCreateEasybill, onCreateEasybillOrder }) {
   const brandMeta = BRAND_META[brand];
   // Vorschau spiegelt die Builder-Logik: Garantie nur bei type != 'none';
   // Text = gepflegter Note-Text > generierter Default; Platzhalter gefuellt.
@@ -1247,21 +1435,20 @@ function Step4Preview({ brand, customer, products, selectedIds, totals, template
             <div style={{ marginTop: 8, fontSize: 11, color: 'var(--ink-3)' }}>Marke: <strong>{brandMeta.label}</strong></div>
           </div>
 
-          <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', margin: '18px 0 8px' }}>Positionen</h3>
-          {positionsWithText.map(l => (
-            <div key={l.product_id} style={{ padding: '12px 14px', border: '1px solid var(--line)', borderRadius: 10, marginBottom: 8, background: '#fff' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    {l.title}
-                    {l.category.endsWith('monthly') && <span style={{ marginLeft: 8, fontSize: 10, color: '#0068a3' }}>(monatlich)</span>}
-                    {l.quantity > 1 && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--ink-3)' }}>× {l.quantity}</span>}
-                  </div>
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>{eur.format(l.line_total)}</div>
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.55, margin: 0 }}>{l.description}</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '18px 0 8px' }}>
+            <h3 style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', margin: 0 }}>Positionen</h3>
+            <button type="button" className="btn-ghost btn-sm" onClick={onAddCustom}>+ Eigene Position</button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--ink-4)', margin: '0 0 10px' }}>
+            Bezeichnung, Beschreibung, Einzelpreis &amp; Menge sind pro Angebot editierbar — der Katalog bleibt unberührt. „angepasst" markiert Abweichungen.
+          </p>
+          {positions.length === 0 && (
+            <div style={{ padding: 14, border: '1px dashed var(--line)', borderRadius: 10, fontSize: 13, color: '#9a3412', background: '#fff7ed', marginBottom: 8 }}>
+              Keine Positionen — füge mindestens eine hinzu, bevor du das Angebot erzeugst.
             </div>
+          )}
+          {positions.map(l => (
+            <PositionEditRow key={l.key} line={l} onEdit={onEditPosition} onReset={onResetPosition} onRemove={onRemovePosition} />
           ))}
           {brand === 'talentone' && totals.ad_budget_monthly > 0 && (
             <div style={{ padding: '12px 14px', border: '1px dashed var(--line)', borderRadius: 10, marginBottom: 8, background: '#fafaf8' }}>

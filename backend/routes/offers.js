@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { anrede } from '../anrede.js';
-import { calculateOfferTotals, validateAdBudget } from '../offer-calc.js';
+import { calculateOfferTotals, validateAdBudget, aggregateSnapshot, resolveOfferPositions, validatePositions } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
@@ -71,13 +71,13 @@ async function loadAnredeKunde(offer) {
 async function buildEckdatenForOffer(offer) {
   const { data: products } = await supabase
     .from('talentone_offer_products').select('*').eq('brand', offer.brand).eq('active', true);
-  const totals = calculateOfferTotals({
-    products:                   products || [],
-    selected:                   Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
-    additional_positions_count: offer.additional_positions_count || 0,
-    ad_budget_monthly:          offer.ad_budget_monthly,
-    vat_rate:                   Number(offer.vat_rate) || 19,
-    extra_job_skus:             EXTRA_JOB_SKUS_BY_BRAND[offer.brand] || [],
+  const positions = resolveOfferPositions(offer, products || []);
+  const totals = aggregateSnapshot({
+    positions,
+    ad_budget_monthly:  offer.werbebudget_modus === 'empfehlung' ? null : offer.ad_budget_monthly,
+    vat_rate:           Number(offer.vat_rate) || 19,
+    discount_type:      offer.discount_type || null,
+    discount_value:     Number(offer.discount_value) || 0,
   });
   return buildEckdatenBlock({
     brand:              offer.brand,
@@ -440,20 +440,36 @@ router.post('/calculate', async (req, res) => {
   const b = req.body || {};
   if (!BRANDS.has(b.brand)) return res.status(400).json({ error: 'brand ungültig.' });
   try {
-    const products = await loadProductsForBrand(b.brand);
-    const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
     // Werbebudget-Validierung — 300..5000 in 50-€-Schritten (nur TalentOne)
     const budgetVal = validateAdBudget(b.ad_budget_monthly);
     if (!budgetVal.ok) return res.status(400).json({ error: budgetVal.error });
 
+    const discountType = ['percent', 'flat'].includes(b.discount_type) ? b.discount_type : null;
+    const discountVal  = Number(b.discount_value) || 0;
+    const vatRate      = Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19;
+
+    // Snapshot-Pfad (übersteuerte Positionen aus dem Wizard) — sonst Katalog-Pfad.
+    if (Array.isArray(b.positionen_snapshot)) {
+      const v = validatePositions(b.positionen_snapshot);
+      if (!v.ok) return res.status(400).json({ error: v.error });
+      const totals = aggregateSnapshot({
+        positions: b.positionen_snapshot,
+        ad_budget_monthly: b.ad_budget_monthly ?? null,
+        vat_rate: vatRate, discount_type: discountType, discount_value: discountVal,
+      });
+      return res.json({ brand: b.brand, totals });
+    }
+
+    const products = await loadProductsForBrand(b.brand);
+    const selected = Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [];
     const totals = calculateOfferTotals({
       products, selected,
       additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
       ad_budget_monthly: b.ad_budget_monthly ?? null,
-      vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
+      vat_rate: vatRate,
       extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
-      discount_type: ['percent', 'flat'].includes(b.discount_type) ? b.discount_type : null,
-      discount_value: Number(b.discount_value) || 0,
+      discount_type: discountType,
+      discount_value: discountVal,
     });
     res.json({ brand: b.brand, totals });
   } catch (err) {
@@ -605,15 +621,38 @@ router.post('/', async (req, res) => {
     const werbebudgetModus = b.werbebudget_modus === 'empfehlung' ? 'empfehlung' : 'position';
     const tagesbudget = werbebudgetModus === 'empfehlung' ? (Number(b.tagesbudget_empfehlung) || null) : null;
 
-    const totals = calculateOfferTotals({
-      products, selected,
-      additional_positions_count: Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
-      ad_budget_monthly: werbebudgetModus === 'empfehlung' ? null : (b.ad_budget_monthly ?? null),
-      vat_rate: Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19,
-      extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
-      discount_type: discountType,
-      discount_value: discountVal,
-    });
+    const addCountPost = Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0;
+    const vatRatePost  = Number.isFinite(+b.vat_rate) ? +b.vat_rate : 19;
+    const adBudgetForCalc = werbebudgetModus === 'empfehlung' ? null : (b.ad_budget_monthly ?? null);
+
+    // Positions-Snapshot: aus dem Wizard übersteuerte Positionen (falls
+    // mitgeschickt) — sonst aus dem Katalog abgeleitet. In beiden Fällen wird der
+    // Snapshot gespeichert, damit Downstream nie erneut auf den Katalog angewiesen ist.
+    let totals, positionsSnapshot;
+    if (Array.isArray(b.positionen_snapshot)) {
+      const v = validatePositions(b.positionen_snapshot);
+      if (!v.ok) return res.status(400).json({ error: v.error });
+      totals = aggregateSnapshot({
+        positions: b.positionen_snapshot,
+        ad_budget_monthly: adBudgetForCalc, vat_rate: vatRatePost,
+        discount_type: discountType, discount_value: discountVal,
+      });
+      positionsSnapshot = totals.positions;
+    } else {
+      totals = calculateOfferTotals({
+        products, selected,
+        additional_positions_count: addCountPost,
+        ad_budget_monthly: adBudgetForCalc,
+        vat_rate: vatRatePost,
+        extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[b.brand] || [],
+        discount_type: discountType,
+        discount_value: discountVal,
+      });
+      positionsSnapshot = resolveOfferPositions(
+        { brand: b.brand, selected_product_ids: selected, additional_positions_count: addCountPost, vat_rate: vatRatePost },
+        products,
+      );
+    }
 
     // Garantie-Art (explizit): none | hire | applications. Steuert OB + WELCHE
     // Garantie-Position erscheint. Bewerbungs-Garantie nur bei TalentOne.
@@ -638,8 +677,9 @@ router.post('/', async (req, res) => {
       customer_snapshot:           b.customer_snapshot || {},
       close_lead_id:               b.close_lead_id || null,
       selected_product_ids:        Array.isArray(b.selected_product_ids) ? b.selected_product_ids : [],
+      positions_snapshot:          positionsSnapshot,
       ad_budget_monthly:           totals.ad_budget_monthly || null,
-      additional_positions_count:  Number.isFinite(+b.additional_positions_count) ? +b.additional_positions_count : 0,
+      additional_positions_count:  addCountPost,
       setup_total:                 totals.setup_total,
       monthly_total:               totals.monthly_total,
       first_month_total:           totals.first_month_total,
@@ -703,19 +743,40 @@ router.patch('/:id', async (req, res) => {
       ? (b.tagesbudget_empfehlung !== undefined ? (Number(b.tagesbudget_empfehlung) || null) : (cur.tagesbudget_empfehlung ?? null))
       : null;
 
-    const totals = calculateOfferTotals({
-      products, selected,
-      additional_positions_count: addCount,
-      ad_budget_monthly: werbebudgetModus === 'empfehlung' ? null : adBudget,
-      vat_rate: vatRate,
-      extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[brand] || [],
-      discount_type: discountType,
-      discount_value: discountVal,
-    });
+    const adBudgetForCalc = werbebudgetModus === 'empfehlung' ? null : adBudget;
+
+    // Snapshot: übersteuerte Positionen aus dem Body (falls vorhanden) — sonst
+    // aus dem Katalog abgeleitet (Selektion/Menge des Drafts).
+    let totals, positionsSnapshot;
+    if (Array.isArray(b.positionen_snapshot)) {
+      const v = validatePositions(b.positionen_snapshot);
+      if (!v.ok) return res.status(400).json({ error: v.error });
+      totals = aggregateSnapshot({
+        positions: b.positionen_snapshot,
+        ad_budget_monthly: adBudgetForCalc, vat_rate: vatRate,
+        discount_type: discountType, discount_value: discountVal,
+      });
+      positionsSnapshot = totals.positions;
+    } else {
+      totals = calculateOfferTotals({
+        products, selected,
+        additional_positions_count: addCount,
+        ad_budget_monthly: adBudgetForCalc,
+        vat_rate: vatRate,
+        extra_job_skus: EXTRA_JOB_SKUS_BY_BRAND[brand] || [],
+        discount_type: discountType,
+        discount_value: discountVal,
+      });
+      positionsSnapshot = resolveOfferPositions(
+        { brand, selected_product_ids: selected, additional_positions_count: addCount, vat_rate: vatRate },
+        products,
+      );
+    }
 
     const patch = {
       brand,
       selected_product_ids:        selected,
+      positions_snapshot:          positionsSnapshot,
       additional_positions_count:  addCount,
       ad_budget_monthly:           totals.ad_budget_monthly || null,
       setup_total:                 totals.setup_total,
@@ -824,12 +885,16 @@ router.post('/:id/create-easybill', async (req, res) => {
       return res.status(409).json({ error: gWarn.message, warning: gWarn.issue, sample: gWarn.sample });
     }
 
+    // Positionen aus dem Snapshot (übersteuerte Werte); Alt-Angebote → Katalog.
+    const positions = resolveOfferPositions(offer, products || []);
+    const vPos = validatePositions(positions);
+    if (!vPos.ok) return res.status(400).json({ error: vPos.error });
+
     // Payload deterministisch bauen — Summen recomputed, kein Trust auf DB-Werte
     const { items } = buildEasybillOfferPayload({
       brand: offer.brand,
       products: products || [],
-      selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
-      additional_positions_count: offer.additional_positions_count || 0,
+      positions,
       ad_budget_monthly: offer.ad_budget_monthly,
       vat_rate: Number(offer.vat_rate) || 19,
       templates: templates || [],
@@ -916,11 +981,14 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       return res.status(409).json({ error: gWarnAb.message, warning: gWarnAb.issue, sample: gWarnAb.sample });
     }
 
+    const positions = resolveOfferPositions(offer, products || []);
+    const vPos = validatePositions(positions);
+    if (!vPos.ok) return res.status(400).json({ error: vPos.error });
+
     const { items } = buildEasybillOfferPayload({
       brand: offer.brand,
       products: products || [],
-      selected: Array.isArray(offer.selected_product_ids) ? offer.selected_product_ids : [],
-      additional_positions_count: offer.additional_positions_count || 0,
+      positions,
       ad_budget_monthly: offer.ad_budget_monthly,
       vat_rate: Number(offer.vat_rate) || 19,
       templates: templates || [],
