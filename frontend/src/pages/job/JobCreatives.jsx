@@ -11,6 +11,21 @@ import LogoPositionModal from '../../components/LogoPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 import CreativeEditModal from '../../components/CreativeEditModal.jsx';
 
+// Spruch-Vorschläge kommen als { text, kategorie } (KI-verbesserte Varianten als
+// String) — beides defensiv behandeln.
+const spruchText = s => (typeof s === 'string' ? s : (s?.text || ''));
+const spruchKat = s => (typeof s === 'string' ? '' : (s?.kategorie || ''));
+// Nach Schmerz-Kategorie gruppieren, Reihenfolge des ersten Auftretens beibehalten.
+function groupSprueche(list) {
+  const groups = new Map();
+  for (const s of list || []) {
+    const k = spruchKat(s) || 'Vorschläge';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  return [...groups.entries()];
+}
+
 export default function JobCreatives() {
   const { job, kunde, reload: reloadJob, startCreatives, startReel } = useJob();
   // Ein-Mal-Default: wenn Kunde KI-Bilder ablehnt, direkt in Overlay-Modus starten.
@@ -668,16 +683,28 @@ export default function JobCreatives() {
                 <span>Diese Vorschläge basieren auf der Bildanalyse</span>
               </div>
             )}
-            <div className="spruch-grid">
-              {spruchVorschlaege.map((s, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  className={`spruch-card ${spruch === s ? 'is-active' : ''}`}
-                  onClick={() => setSpruch(s)}
-                >{s}</button>
-              ))}
-            </div>
+            {groupSprueche(spruchVorschlaege).map(([kat, items]) => (
+              <div key={kat} style={{ marginTop: 10 }}>
+                {kat && (
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.06, textTransform: 'uppercase', color: 'var(--ink-3)', margin: '0 0 6px' }}>
+                    {kat}
+                  </div>
+                )}
+                <div className="spruch-grid">
+                  {items.map((s, i) => {
+                    const txt = spruchText(s);
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        className={`spruch-card ${spruch === txt ? 'is-active' : ''}`}
+                        onClick={() => setSpruch(txt)}
+                      >{txt}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </>
         )}
 

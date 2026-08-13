@@ -19,6 +19,7 @@ export default function JobAdCopies() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(null);
+  const [copiedUeb, setCopiedUeb] = useState(null);
   const [funnelUrl, setFunnelUrl] = useState(null);
   const [updateLinksBusy, setUpdateLinksBusy] = useState(false);
 
@@ -220,6 +221,17 @@ export default function JobAdCopies() {
     }
   }
 
+  // Einzelne Meta-Überschrift kopieren (key = `${adcopyId}:${idx}`).
+  async function copyUeberschrift(key, text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedUeb(key);
+      setTimeout(() => setCopiedUeb(null), 1500);
+    } catch (err) {
+      alert('Kopieren fehlgeschlagen.');
+    }
+  }
+
   const hasItems = items.length > 0;
   const hasPlaceholder = hasItems && items.some(i => (drafts[i.stil] || i.text || '').includes('[Funnel-Link wird ergänzt]'));
   const hasOldLink = hasItems && funnelUrl && items.some(i => {
@@ -368,6 +380,30 @@ export default function JobAdCopies() {
                     rows={s.id === 'kompakt' ? 6 : (s.id === 'benefit' ? 12 : 14)}
                     disabled={busy}
                   />
+                )}
+
+                {item && Array.isArray(item.ueberschriften) && item.ueberschriften.length > 0 && (
+                  <div style={{ marginTop: 10, borderTop: '1px dashed var(--line, #e5e5e5)', paddingTop: 10 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: 'var(--ink-3)', marginBottom: 6 }}>
+                      Überschriften · Meta (~40 Zeichen)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {item.ueberschriften.map((u, i) => {
+                        const key = `${item.id}:${i}`;
+                        const tooLong = (u || '').length > 40;
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ flex: 1, fontSize: 13 }} title={tooLong ? 'Länger als 40 Zeichen — wird bei Meta ggf. abgeschnitten' : undefined}>
+                              {u}{tooLong && <span style={{ color: 'var(--ink-4, #b26b00)', marginLeft: 6, fontSize: 11 }}>· {u.length}</span>}
+                            </span>
+                            <button type="button" className="btn-ghost btn-sm" onClick={() => copyUeberschrift(key, u)} title="In Zwischenablage kopieren">
+                              {copiedUeb === key ? '✓ Kopiert' : 'Kopieren'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
 
                 {!item && !busy && (

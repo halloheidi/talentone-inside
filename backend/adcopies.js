@@ -190,7 +190,7 @@ Zeile 1: Provokante Frage oder Neugier-Hook + Emoji am Ende (🤔 / 💡 / 🚀 
 👉 CTA (Kauf-Intent): "Jetzt kostenlos anfragen" / "Angebot sichern"`,
 };
 
-function buildPrompt(job, kunde, style, funnelUrl) {
+function buildPrompt(job, kunde, style, funnelUrl, spruchKontext) {
   // Weiche: für Neukundengewinnung eigenen Prompt-Pfad mit Kauf-CTA.
   if (job?.projekttyp === 'neukundengewinnung') {
     return buildPromptNeukunden(job, kunde, style, funnelUrl);
@@ -214,16 +214,24 @@ In der CTA-Zeile am Ende verwende DIESEN Platzhalter EXAKT (wird später automat
 ${LINK_PLACEHOLDER}
 Beispiel: "👉 Jetzt bewerben: ${LINK_PLACEHOLDER}"`;
 
-  return buildFinalPrompt({ briefing: buildBriefing(job, kunde), linkBlock, spec, kunde });
+  return buildFinalPrompt({ briefing: buildBriefing(job, kunde), linkBlock, spec, kunde, spruchKontext });
 }
 
-function buildFinalPrompt({ briefing, linkBlock, spec, kunde }) {
+function buildFinalPrompt({ briefing, linkBlock, spec, kunde, spruchKontext }) {
+  const konsistenzBlock = spruchKontext?.trim()
+    ? `\nKONSISTENZ ZUM CREATIVE (sehr wichtig): Für dieses Projekt gibt es bereits diese finale(n) Bild-Sprüche/Hooks:\n${spruchKontext.trim()}\nÜberschriften UND Fließtext müssen dieselbe Botschaft/denselben Wechsel-Schmerz weiterführen — kein neues Thema aufmachen.\n`
+    : '';
   return `${briefing}
 
 ${linkBlock}
-
+${konsistenzBlock}
 AUFGABE
-Schreibe EINE deutsche Social-Media-Recruiting-Ad für Facebook und Instagram. Diese Ad muss beim Scrollen sofort catchen — sie ist standalone (auch ohne Bild verständlich) und visuell strukturiert mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
+Schreibe EINE deutsche Recruiting-Ad (Meta). Sie muss beim Scrollen sofort catchen — standalone (auch ohne Bild verständlich), visuell strukturiert mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
+
+ZIELGRUPPE & HOOK (Schmerz-first)
+- Zielgruppe: ANGESTELLTE, latent wechselwillige Fachkräfte — KEINE Arbeitssuchenden. Der Text darf implizit ansprechen, dass man sich "nur mal umschaut".
+- Die ERSTEN 1–2 Zeilen (vor dem "Mehr dazu"-Umbruch bei Meta) entscheiden: Steig über einen KONKRETEN Wechsel-Schmerz ein (Montage/Pendeln, veraltete Technik/Langeweile, anonyme Führung/fehlende Wertschätzung, Chaos/schlechte Vorbereitung, Kontrolle statt Vertrauen, Gehalt, geopferter Feierabend) — nicht mit einer Zustandsbeschreibung.
+- Danach der Payoff aus den ECHTEN Stellendaten oben (Benefits, Besonderheiten, Region) — konkret, kein Corporate-Filler.
 
 ${spec}
 
@@ -235,10 +243,17 @@ GLOBALE REGELN
 - Referenz-Vorbilder im Stil: Performance Recruiting, Terbeek, Schilling — kurze visuelle Häppchen, jede Zeile ein Wert
 - Stellenbezeichnung IMMER mit "(m/w/d)" am Ende — z.B. "Fahrzeugaufbereiter (m/w/d)", "Pflegefachkraft (m/w/d)". Niemals ohne.
 - Standort: NUR den Ort nennen (z.B. "📍 Essen"), KEINEN Umkreis / Radius / "+30km" / "(Umkreis 50km)".
+- Curiosity Gap wahren: Nenne NIEMALS "Social Media", "Instagram" oder "Facebook" als Lösungsweg — sprich stattdessen von "einem komplett anderen Weg".
+- Nenne KEINE Jobbörsen-Namen (Indeed, StepStone o. Ä.) — nur "Jobbörsen" / "Stellenportale" (§6 UWG).
+
+ÜBERSCHRIFTEN (Meta-Headline-Feld)
+- Zusätzlich zum Fließtext: 3–5 Überschriften, je max. ~40 Zeichen (wird sonst abgeschnitten).
+- Gleiche Schmerz-first-Mechanik wie im Text, ABER normale Groß-/Kleinschreibung (KEINE Versalien-Pflicht — es ist das Meta-Headline-Feld).
+- Beispiele (Mechanik übertragen, nicht kopieren): "Feierabend wieder zu Hause" · "Dein Können, endlich bezahlt" · "Bewerben ohne Lebenslauf".
 
 FORMAT
 Antworte NUR mit JSON, keine Markdown-Backticks:
-{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>" }`;
+{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>", "ueberschriften": ["Überschrift 1", "Überschrift 2", "Überschrift 3"] }`;
 }
 
 // Neukunden-Ad-Copy: gleicher AUFGABE-Rahmen, aber mit Lead-Gen-Regeln.
@@ -274,9 +289,12 @@ GLOBALE REGELN
 - Standort: NUR den Ort/das Gebiet nennen, KEINE Umkreisangabe.
 - KEINE „(m/w/d)"-Notation — das hier ist keine Stellenanzeige.
 
+ÜBERSCHRIFTEN (Meta-Headline-Feld)
+- Zusätzlich zum Fließtext: 3–5 Überschriften, je max. ~40 Zeichen, normale Groß-/Kleinschreibung, Nutzen/Anlass-fokussiert (kein Corporate-Filler).
+
 FORMAT
 Antworte NUR mit JSON, keine Markdown-Backticks:
-{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>" }`;
+{ "text": "<dein fertiger Ad-Text mit echten Zeilenumbrüchen als \\n>", "ueberschriften": ["Überschrift 1", "Überschrift 2", "Überschrift 3"] }`;
 }
 
 /* ───────────────────── Headlines / Überschriften ─────────────────────
@@ -322,19 +340,22 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 }
 
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
-export async function generateAdCopy({ job, kunde, style, funnelUrl }) {
+export async function generateAdCopy({ job, kunde, style, funnelUrl, spruchKontext }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
-    max_tokens: 1500, // mehr Puffer wegen Emojis (mehrere Tokens pro Symbol)
-    messages: [{ role: 'user', content: buildPrompt(job, kunde, style, funnelUrl) }],
+    max_tokens: 1800, // mehr Puffer wegen Emojis + Überschriften-Array
+    messages: [{ role: 'user', content: buildPrompt(job, kunde, style, funnelUrl, spruchKontext) }],
   });
   const parsed = parseJsonContent(data);
   let text = (parsed.text || '').trim();
   if (!text) throw new Error('Claude lieferte leeren Text.');
   // Sicherheitsnetz: falls Claude den Platzhalter / Link doch nicht eingebaut hat
   text = ensureLinkInText(text, funnelUrl);
-  return { stil: style, text };
+  const ueberschriften = Array.isArray(parsed.ueberschriften)
+    ? parsed.ueberschriften.map(u => String(u || '').trim()).filter(Boolean).slice(0, 5)
+    : [];
+  return { stil: style, text, ueberschriften };
 }
 
 // Stellt sicher, dass der Funnel-Link (oder Platzhalter) im Text steht. Idempotent.

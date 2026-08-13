@@ -13,13 +13,13 @@ const INTERNAL_FROM = 'TalentOne Inside <noreply@talent-one.de>';
 /**
  * Interne BCC-Liste — geht bei jeder Kunden-Mail mit, unsichtbar.
  * Konfiguriert via INTERNAL_BCC env var (Komma-getrennt). Fallback:
- * info@nowagwirth.de + andrea.saltaleggio@nowagwirth.de.
+ * info@nowagwirth.de.
  * Optional extra-Empfänger (z.B. Jessica bei Vorqualifizierung).
  * Filtert leere Strings + Duplikate, und schließt die `to`-Empfänger aus,
  * damit niemand doppelt zugestellt wird.
  */
 export function getInternalBcc(extra = [], excludeTo = []) {
-  const fromEnv = (process.env.INTERNAL_BCC ?? 'info@nowagwirth.de,andrea.saltaleggio@nowagwirth.de')
+  const fromEnv = (process.env.INTERNAL_BCC ?? 'info@nowagwirth.de')
     .split(',').map(s => s.trim()).filter(Boolean);
   const extras = Array.isArray(extra) ? extra : (extra ? [extra] : []);
   const exclude = new Set((Array.isArray(excludeTo) ? excludeTo : [excludeTo]).filter(Boolean).map(s => s.toLowerCase()));

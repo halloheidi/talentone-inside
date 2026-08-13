@@ -67,53 +67,71 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
  *  - opts.kontextHinweis: optionale Mitarbeiter-Notiz zum Bild ("Das sind die zwei Chefs, die rumblödeln")
  *  - opts.motiv:          optionaler Motiv-Beschreibungstext (KI-Modus)
  */
+// Wechsel-Schmerz-Framework — gemeinsam für Spruch-Vorschläge & Verbesserung.
+// Zielgruppe: angestellte, wechselwillige Fachkräfte (KEINE Arbeitssuchenden).
+const SPRUCH_FRAMEWORK = `ZIELGRUPPE: angestellte, wechselWILLIGE Fachkräfte — KEINE Arbeitssuchenden. Sie haben einen Job und einen Grund, wechseln zu wollen. Adressiere GENAU diesen Wechsel-Schmerz und liefere aus den ECHTEN Stellendaten (Benefits, Besonderheiten, Region) den passenden Gegenpol — nichts erfinden.
+
+WECHSEL-SCHMERZEN — jeder Spruch adressiert GENAU einen. Nutze exakt eines dieser Kategorie-Labels:
+- "Montage / Pendeln" → Gegenpol: wohnortnah, kein Pendeln, feste Region, abends zu Hause
+- "Technik / Langeweile" → moderne Technik, Abwechslung, Zukunft statt Stillstand
+- "Führung / Wertschätzung" → nahbare Chefs, kurze Wege, gesehen werden statt anonym
+- "Chaos / Vorbereitung" → klare Abläufe, gute Vorbereitung, Material ist da
+- "Kontrolle / Vertrauen" → Eigenverantwortung, Vertrauen statt Kontrolle
+- "Gehalt" → konkrete Zahl / faire, pünktliche Bezahlung
+- "Feierabend" → planbarer Feierabend, Familienzeit, kein geopferter Feierabend
+- "Bewerbungs-Hürde senken" → niederschwelliger Einstieg, erst kennenlernen, Lebenslauf später
+
+STRUKTUR jedes Spruchs:
+- EIN kurzer String mit Kontrast-Mechanik (Setup + Payoff): "X RAUS. Y REIN." · "X STATT Y." · "X? Y." · "KEIN X. DAFÜR Y."
+- VERSALIEN (Großbuchstaben), KEINE Zeilenumbrüche im Text
+- Keine Ausrufezeichen-Ketten, keine Floskeln ("Werde Teil unseres Teams", "Wir suchen dich", "Jetzt bewerben"), kein reines Wiederholen des Stellentitels
+
+QUALITÄTS-ANKER (Mechanik übertragen, NICHT kopieren):
+"DEIN ARBEITSWEG? BEGINNT VOR DER HAUSTÜR." · "ALLES DABEI. AUSSER CHAOS." · "DEINE NEUEN CHEFS. DIREKT ANSPRECHBAR." · "PAPIERKRAM RAUS. TABLET REIN." · "DU KANNST HEIZUNG. WIR ZEIGEN DIR ZUKUNFT." · "ERST MAL KENNENLERNEN. PAPIERKRAM SPÄTER."`;
+
+const SPRUCH_JSON_HINT = `Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "sprueche": [ { "kategorie": "<exakt eines der Kategorie-Labels>", "text": "DER SPRUCH IN VERSALIEN" } ] }`;
+
+// Normalisiert die Claude-Antwort → [{ text, kategorie }]. Verträgt auch
+// Alt-Format (Array von Strings) defensiv.
+function normalizeSprueche(parsed) {
+  const arr = Array.isArray(parsed?.sprueche) ? parsed.sprueche : [];
+  return arr.map(s => {
+    if (typeof s === 'string') return { text: s.trim(), kategorie: '' };
+    if (s && typeof s === 'object') return { text: String(s.text || '').trim(), kategorie: String(s.kategorie || '').trim() };
+    return null;
+  }).filter(s => s && s.text).slice(0, 10);
+}
+
 export async function generateSpruchVorschlaege(job, kunde, opts = {}) {
   const { bildUrl, kontextHinweis, motiv } = opts;
   const stelle = job.stelle || 'Mitarbeiter:in';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
-  const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean).slice(0, 4) : [];
+  const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean).slice(0, 6) : [];
   const region = job.region || '';
+  const besonderheiten = (job.besonderheiten || '').trim();
 
-  const baseRules = `ANFORDERUNGEN an JEDEN Spruch:
-- Max. 5-8 Wörter — knapp und auf den Punkt
-- Emotional, neugierig machend (Curiosity) oder unerwartet
-- Sprich den Kandidaten direkt an (Du-Form möglich, aber nicht zwingend)
-- KEIN "Wir suchen dich"-Klischee, KEIN "Jetzt bewerben", KEIN reines Stellentitel-Wiederholen
-- Stil: leicht provokant, augenzwinkernd, oder eine starke Frage — Hauptsache scroll-stoppend
+  const kontextZeile = `Stelle: "${stelle}"${branche ? ` · Branche ${branche}` : ''}${region ? ` · Region ${region}` : ''}${benefits.length ? ` · Benefits: ${benefits.join(', ')}` : ''}${besonderheiten ? ` · Besonderheiten: ${besonderheiten}` : ''}${motiv?.trim() ? ` · Motiv: "${motiv.trim()}"` : ''}`;
 
-Gute Beispiele für andere Stellen (zur Inspiration, nicht 1:1 kopieren):
-- "Hände, die was bewegen."
-- "Schluss mit Schichtdienst-Bullshit."
-- "Dein Werkzeug. Deine Regeln."
-- "Wo Pflege noch Pflege ist."
-- "Mehr als nur ein Job."
-
-Liefere 4 UNTERSCHIEDLICHE Varianten — verschiedene Tonalitäten (1× emotional, 1× provokant/direkt, 1× Frage, 1× Benefit-fokussiert).
-
-Antworte NUR mit JSON, keine Markdown-Backticks:
-
-{ "sprueche": ["Spruch 1", "Spruch 2", "Spruch 3", "Spruch 4"] }`;
-
-  const kontextZeile = `Stelle: "${stelle}"${branche ? ` · Branche ${branche}` : ''}${region ? ` · ${region}` : ''}${benefits.length ? ` · Benefits: ${benefits.join(', ')}` : ''}${motiv?.trim() ? ` · Motiv: "${motiv.trim()}"` : ''}`;
-
-  // ── Variante 1: MIT Bild (Vision) ──
+  // ── Variante 1: MIT Bild/Motiv (Vision) — Spruch muss zum Bildinhalt passen ──
   if (bildUrl) {
     const kontextNote = kontextHinweis?.trim()
       ? `\n\nHINWEIS VOM MITARBEITER zum Bild (sehr wichtig — beachten!): "${kontextHinweis.trim()}"`
       : '';
-    const visionPrompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram).
+    const visionPrompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
 
 KONTEXT: ${kontextZeile}${kontextNote}
 
 AUFGABE:
-1. Schau dir das Bild GENAU an: Was siehst du? Welche Stimmung? Welche Personen, Tätigkeit, Atmosphäre, welcher Moment ist eingefangen?
-2. Schlage dann 4 starke deutsche Sprüche/Headlines vor, die DIREKT auf diese Bildszene Bezug nehmen — z.B. eine Tätigkeit, eine Geste, eine Mimik, ein Detail. Die Sprüche sollen sich anfühlen als wären sie speziell für GENAU dieses Bild geschrieben.
+1. Schau dir das Bild GENAU an: Personen, Tätigkeit, Objekte, Stimmung.
+2. Wähle die Wechsel-Schmerzen, die zum BILDINHALT passen, und schreibe Sprüche, die sich anfühlen als wären sie für GENAU dieses Bild gemacht. Orientierung: Chef-/Team-Foto → "Führung / Wertschätzung" (kurze Wege, ansprechbar); Fahrzeug → Ausstattung/Region/"Feierabend"; Technik-Nahaufnahme → "Technik / Langeweile" (Können, Zukunft).
+3. Liefere 8–10 Sprüche, mindestens einer aus der Kategorie "Bewerbungs-Hürde senken".
 
-${baseRules}`;
+${SPRUCH_JSON_HINT}`;
 
     const data = await callClaudeWithRetry({
       model: CLAUDE_MODEL,
-      max_tokens: 700,
+      max_tokens: 1000,
       messages: [{
         role: 'user',
         content: [
@@ -122,53 +140,47 @@ ${baseRules}`;
         ],
       }],
     });
-    const parsed = parseJsonContent(data);
-    return Array.isArray(parsed.sprueche) ? parsed.sprueche.slice(0, 4) : [];
+    return normalizeSprueche(parseJsonContent(data));
   }
 
-  // ── Variante 2: OHNE Bild — Fallback wie bisher ──
-  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads (Facebook/Instagram). Schlage 4 starke deutsche Sprüche/Headlines vor.
+  // ── Variante 2: OHNE Bild — über mehrere Schmerz-Kategorien streuen ──
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
 
 KONTEXT: ${kontextZeile}
 
-${baseRules}`;
+AUFGABE: Liefere 8–10 Sprüche, GESTREUT über mehrere Wechsel-Schmerz-Kategorien (nicht alle aus derselben), mindestens einer aus "Bewerbungs-Hürde senken". Jeder Spruch mit dem passenden Kategorie-Label.
+
+${SPRUCH_JSON_HINT}`;
 
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
-    max_tokens: 500,
+    max_tokens: 900,
     messages: [{ role: 'user', content: prompt }],
   });
-  const parsed = parseJsonContent(data);
-  return Array.isArray(parsed.sprueche) ? parsed.sprueche.slice(0, 4) : [];
+  return normalizeSprueche(parseJsonContent(data));
 }
 
 export async function verbessereSpruch({ spruch, job, kunde }) {
   if (!spruch?.trim()) return [];
   const stelle = job?.stelle || '';
   const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const benefits = Array.isArray(job?.benefits) ? job.benefits.filter(Boolean).slice(0, 6) : [];
+  const region = job?.region || '';
 
-  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. Du bekommst einen bestehenden Spruch und sollst ihn STÄRKER, KNACKIGER und CATCHIER machen.
+  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
 
-KONTEXT: Stelle "${stelle}"${branche ? `, Branche ${branche}` : ''}.
+KONTEXT: Stelle "${stelle}"${branche ? `, Branche ${branche}` : ''}${region ? `, Region ${region}` : ''}${benefits.length ? `, Benefits: ${benefits.join(', ')}` : ''}.
 
 URSPRUNGSSPRUCH: "${spruch.trim()}"
 
-AUFGABE: Liefere 3 verbesserte Varianten — jeweils:
-- Max. 5-6 Wörter
-- Behält die Grund-Idee/Botschaft des Originals
-- ABER: schärfer, emotionaler, mehr Punch, scroll-stoppender
-- KEIN "Wir suchen dich", KEIN "Jetzt bewerben"
-- Variante 1: dieselbe Aussage, aber prägnanter
-- Variante 2: emotionaler/persönlicher
-- Variante 3: provokanter/mutiger
+AUFGABE: Liefere 3 verbesserte Varianten desselben Spruchs — jede schärfer nach der Kontrast-Mechanik oben, in VERSALIEN, mit klarem Wechsel-Schmerz + Gegenpol. Behalte die Grund-Botschaft, aber mach sie scroll-stoppender. Wenn der Original-Schmerz unklar ist, wähle den plausibelsten aus den Stellendaten.
 
 Antworte NUR mit JSON, keine Markdown-Backticks:
-
-{ "varianten": ["Variante 1", "Variante 2", "Variante 3"] }`;
+{ "varianten": ["VARIANTE 1", "VARIANTE 2", "VARIANTE 3"] }`;
 
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
-    max_tokens: 400,
+    max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
   });
   const parsed = parseJsonContent(data);

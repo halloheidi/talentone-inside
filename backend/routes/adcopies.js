@@ -47,14 +47,42 @@ async function loadJobAndKunde(job_id) {
   return { job, kunde };
 }
 
-async function generateAndStore({ job, kunde, style, funnelUrl }) {
+// Konsistenz: bereits gewählte Bild-Sprüche/Hooks aus vorhandenen (nicht
+// archivierten) Creatives ziehen, damit Ad-Copy dieselbe Botschaft weiterführt.
+// Die Sprüche stecken im prompt-Text der Creative-Zeile (Overlay-Hook bzw.
+// „Wortlaut: …"). Best-effort — kein Schema-Change.
+async function loadSpruchKontext(job_id) {
+  const { data: creatives = [] } = await supabase
+    .from('talentone_creatives')
+    .select('prompt, created_at, archiviert')
+    .eq('job_id', job_id)
+    .neq('archiviert', true)
+    .order('created_at', { ascending: false })
+    .limit(12);
+  const hooks = [];
+  const seen = new Set();
+  const re = /(?:Hook|Wortlaut)[^:"]*:\s*"([^"]{2,90})"/gi;
+  for (const c of creatives || []) {
+    const p = c?.prompt || '';
+    let m;
+    while ((m = re.exec(p)) !== null) {
+      const h = m[1].trim();
+      const key = h.toLowerCase();
+      if (h && !seen.has(key)) { seen.add(key); hooks.push(h); }
+    }
+    if (hooks.length >= 3) break;
+  }
+  return hooks.length ? hooks.slice(0, 3).map(h => `- "${h}"`).join('\n') : null;
+}
+
+async function generateAndStore({ job, kunde, style, funnelUrl, spruchKontext }) {
   // Bestehende für diesen Style+Job löschen (Replace-Semantik)
   await supabase.from('talentone_adcopies')
     .delete().eq('job_id', job.id).eq('stil', style);
-  const out = await generateAdCopy({ job, kunde, style, funnelUrl });
+  const out = await generateAdCopy({ job, kunde, style, funnelUrl, spruchKontext });
   const { data, error } = await supabase
     .from('talentone_adcopies')
-    .insert({ job_id: job.id, stil: out.stil, text: out.text, bearbeitet: false })
+    .insert({ job_id: job.id, stil: out.stil, text: out.text, ueberschriften: out.ueberschriften || [], bearbeitet: false })
     .select().single();
   if (error) throw new Error(error.message);
   return data;
@@ -75,6 +103,7 @@ router.post('/generate', async (req, res) => {
   try {
     const { job, kunde } = await loadJobAndKunde(job_id);
     const funnelUrl = await loadFunnelUrl(job_id);
+    const spruchKontext = await loadSpruchKontext(job_id);
 
     // Bestehende laden (für Skip-Logik)
     const { data: existing = [] } = await supabase
@@ -91,7 +120,7 @@ router.post('/generate', async (req, res) => {
     });
 
     const results = await Promise.allSettled(
-      toGenerate.map(s => generateAndStore({ job, kunde, style: s, funnelUrl }))
+      toGenerate.map(s => generateAndStore({ job, kunde, style: s, funnelUrl, spruchKontext }))
     );
     const generated = results.filter(r => r.status === 'fulfilled').map(r => r.value);
     const errors = results
@@ -113,10 +142,11 @@ router.post('/:id/regenerate', async (req, res) => {
     if (e1 || !existing) return res.status(404).json({ error: 'Ad-Copy nicht gefunden.' });
     const { job, kunde } = await loadJobAndKunde(existing.job_id);
     const funnelUrl = await loadFunnelUrl(existing.job_id);
-    const out = await generateAdCopy({ job, kunde, style: existing.stil, funnelUrl });
+    const spruchKontext = await loadSpruchKontext(existing.job_id);
+    const out = await generateAdCopy({ job, kunde, style: existing.stil, funnelUrl, spruchKontext });
     const { data, error } = await supabase
       .from('talentone_adcopies')
-      .update({ text: out.text, bearbeitet: false })
+      .update({ text: out.text, ueberschriften: out.ueberschriften || [], bearbeitet: false })
       .eq('id', existing.id)
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
