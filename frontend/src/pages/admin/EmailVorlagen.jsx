@@ -91,6 +91,26 @@ export default function EmailVorlagen() {
         );
       })}
 
+      {!loading && (
+        <div style={{ marginTop: 28 }}>
+          <div className="nav-section" style={{ margin: '0 0 10px' }}>Weitere Mails — im Angebots-Katalog editierbar</div>
+          <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 12, padding: 16 }}>
+            <p style={{ fontSize: 12.5, lineHeight: 1.55, color: '#5a5955', margin: '0 0 12px' }}>
+              Diese Kunden-Mails laufen bereits über ein eigenes Vorlagen-System (markenspezifische Textbausteine, mit
+              Merge-Tags statt getrennter Du-/Sie-Fassung). Sie sind unter <strong>Admin → Angebots-Katalog → Textbausteine</strong> editierbar:
+            </p>
+            <ul style={{ fontSize: 13, lineHeight: 1.7, color: '#2a2a2a', margin: '0 0 12px', paddingLeft: 18 }}>
+              <li><strong>Angebots-Versand</strong> (offer_email_subject/body)</li>
+              <li><strong>Auftragsbestätigung / AB</strong> (order_email_subject/body)</li>
+              <li><strong>easybill-Rechnung</strong> (invoice_email_subject/body)</li>
+              <li><strong>Zahlungserinnerung</strong> (reminder_email)</li>
+              <li><strong>Hire-Meilenstein</strong> — erste Einstellung / Fortschritt / Ziel erreicht (hire_email_subject + hire_email_body_first/progress/complete)</li>
+            </ul>
+            <a href="/admin/angebots-katalog" className="btn-ghost btn-sm">→ Zum Angebots-Katalog</a>
+          </div>
+        </div>
+      )}
+
       {openTemplate && (
         <Editor
           key={openTemplate.key + agentur}

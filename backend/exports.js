@@ -287,7 +287,9 @@ ${antworten.map(a => `
   if (bewerbungenUrl) textParts.push(`\nAlle Bewerbungen: ${bewerbungenUrl}`);
   if (sheetUrl) textParts.push(`\nGoogle Sheet: ${sheetUrl}`);
 
-  const subjekt = `Neue Bewerbung für ${job?.stelle || 'Stelle'}${bewerbung?.name ? ` — ${bewerbung.name}` : ''}`;
+  const _nameSuffix = bewerbung?.name ? ` — ${bewerbung.name}` : '';
+  const _tplBew = await renderEmail('bewerber_benachrichtigung', kunde, { stelle: job?.stelle || 'Stelle', name_suffix: _nameSuffix });
+  const subjekt = _tplBew?.subject || `Neue Bewerbung für ${job?.stelle || 'Stelle'}${_nameSuffix}`;
   // BCC: zentrale Empfänger + Jessica nur wenn Job mit telefonischer Vorqual läuft
   const extraBcc = job?.vorqualifizierung ? [VORQUAL_BCC] : [];
   const response = await fetch(RESEND_API, {

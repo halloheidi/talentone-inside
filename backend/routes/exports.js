@@ -7,6 +7,7 @@ import {
 } from '../exports.js';
 import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, sendEntwurfReminder, sendTerminEinladung } from '../mail.js';
 import { TERMINE, getTerminMeta } from '../termine.js';
+import { renderEmail } from '../email-templates.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 import { normalizeResendMode, resolveVersandVariante } from '../versand-variante.js';
@@ -198,10 +199,14 @@ router.post('/jobs/:id/export/email', async (req, res) => {
 
     // ── Drei klar getrennte Varianten ──
     const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
+    // Betreff + Intro-Prefix aus editierbaren Vorlagen (entwurf_runde / _neue_runde /
+    // _resend). Fehlt eine Vorlage, greift der bisherige Code-Default 1:1.
+    const roundKey = istNeueRunde ? 'entwurf_neue_runde' : (variante === 'resend' ? 'entwurf_resend' : 'entwurf_runde');
+    const tplRound = await renderEmail(roundKey, kunde, { runde: neueRundeNr, stelle: job?.stelle || '' });
     // Betreff folgt der Anrede des Kunden (Du/Sie).
-    const standardBetreff = istNeueRunde
+    const standardBetreff = tplRound?.subject || (istNeueRunde
       ? t(kunde, `Deine überarbeiteten Entwürfe — Runde ${neueRundeNr}`, `Ihre überarbeiteten Entwürfe — Runde ${neueRundeNr}`)
-      : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨');
+      : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'));
 
     // Sicherheitsnetz: Ein Client (z. B. alter Cache) darf keinen
     // "ueberarbeitet/Runde X"-Betreff auf einen Erstversand/Resend setzen.
@@ -214,9 +219,9 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     // Intro-Prefix ist variantengesteuert — nur die echte Feedback-Runde
     // bedankt sich fuers Feedback.
     const introPrefix = variante === 'neue_runde'
-      ? 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:'
+      ? (tplRound?.body || 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:')
       : variante === 'resend'
-        ? 'Hier nochmal deine Entwürfe:'
+        ? (tplRound?.body || 'Hier nochmal deine Entwürfe:')
         : null; // Erstversand: kein Bezug auf Feedback/Vorrunde
     const finalAnschreiben = introPrefix
       ? `${introPrefix}\n\n${anschreiben || ''}`.trim()
@@ -370,11 +375,12 @@ router.post('/jobs/:id/export/kampagne-update', async (req, res) => {
         .eq('id', latestReview.id);
     }
 
-    const standardBetreff = t(kunde,
+    const tplUpd = await renderEmail('kampagne_update', kunde, { runde: neueRundeNr, stelle: job?.stelle || '' });
+    const standardBetreff = tplUpd?.subject || t(kunde,
       `Neue Werbeanzeigen für deine Kampagne — Update ${neueRundeNr} 📬`,
       `Neue Werbeanzeigen für Ihre Kampagne — Update ${neueRundeNr} 📬`);
     const finalBetreff = (betreff || '').trim() || standardBetreff;
-    const introPrefix = t(kunde,
+    const introPrefix = tplUpd?.body || t(kunde,
       'wir haben neue Werbeanzeigen für deine Kampagne erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei, damit wir sie live schalten können:',
       'wir haben neue Werbeanzeigen für Ihre Kampagne erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei, damit wir sie live schalten können:');
     const finalAnschreiben = `${introPrefix}\n\n${anschreiben || ''}`.trim();
@@ -829,12 +835,15 @@ router.post('/jobs/:id/export/termin-einladung', async (req, res) => {
     const recipient = (to || kunde?.email || '').trim();
     if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
 
+    // Betreff aus editierbarer Vorlage (termin_<key>), sonst termine.js-Default.
+    const terminBetreff = subject || (await renderEmail(`termin_${terminKey}`, kunde))?.subject || meta.subject;
+
     await sendTerminEinladung({
       kunde,
       to: recipient,
       ansprechpartner: kunde?.ansprechpartner,
       agentur: kunde?.agentur,
-      subject: subject || meta.subject,
+      subject: terminBetreff,
       calLink: meta.url,
       customText,
       personLabel: meta.personLabel,
@@ -843,7 +852,7 @@ router.post('/jobs/:id/export/termin-einladung', async (req, res) => {
     await supabase.from('talentone_versand').insert({
       job_id: job.id,
       empfaenger: recipient,
-      betreff: subject || meta.subject,
+      betreff: terminBetreff,
       gesendet_von: req.user?.email || null,
       typ: 'termin_einladung',
       inhalte: {
@@ -897,12 +906,14 @@ router.post('/kunden/:id/termin-einladung', async (req, res) => {
     const recipient = (to || kunde.email || '').trim();
     if (!recipient) return res.status(400).json({ error: 'Empfänger-E-Mail fehlt.' });
 
+    const terminBetreff = subject || (await renderEmail(`termin_${terminKey}`, kunde))?.subject || meta.subject;
+
     await sendTerminEinladung({
       kunde,
       to: recipient,
       ansprechpartner: kunde.ansprechpartner,
       agentur: kunde.agentur,
-      subject: subject || meta.subject,
+      subject: terminBetreff,
       calLink: meta.url,
       customText,
       personLabel: meta.personLabel,
@@ -916,7 +927,7 @@ router.post('/kunden/:id/termin-einladung', async (req, res) => {
       await supabase.from('talentone_versand').insert({
         job_id: firstJob.id,
         empfaenger: recipient,
-        betreff: subject || meta.subject,
+        betreff: terminBetreff,
         gesendet_von: req.user?.email || null,
         typ: 'termin_einladung',
         inhalte: {

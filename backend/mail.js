@@ -73,9 +73,12 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
   const wantLogo  = umfang !== 'fotos';
   const wantFotos = umfang !== 'logo';
 
-  // DB-Vorlage nur für die Standard-Variante (Logo + Fotos); logo/fotos behalten
-  // ihren exakten Code-Text als Fallback.
-  const tpl = umfang === 'beides' ? await renderEmail('upload_anfrage', k, {}) : null;
+  // DB-Vorlage je Variante (Logo+Fotos / nur Logo / nur Fotos); fehlt eine, greift
+  // der exakte Code-Text als Fallback.
+  const uploadKey = umfang === 'logo' ? 'upload_anfrage_logo'
+    : umfang === 'fotos' ? 'upload_anfrage_fotos'
+      : 'upload_anfrage';
+  const tpl = await renderEmail(uploadKey, k, {});
 
   const subjectDefault = umfang === 'logo'
     ? t(k, 'Wir brauchen noch euer Logo für die Kampagne', 'Wir brauchen noch Ihr Logo für die Kampagne')
@@ -375,8 +378,8 @@ export async function sendFormularEinladung({ to, kunde, ansprechpartner, formul
   const k = kunde || { ansprechpartner };
   const grusszeile = anrede(k);
   const isNeukunden = projekttyp === 'neukundengewinnung';
-  // DB-Vorlage nur für die Recruiting-Variante; Neukunden behält seinen Code-Text.
-  const tpl = !isNeukunden ? await renderEmail('formular_einladung', k, {}) : null;
+  // DB-Vorlage je Projekttyp (Recruiting / Neukundengewinnung); Fallback = Code-Text.
+  const tpl = await renderEmail(isNeukunden ? 'formular_einladung_neukunden' : 'formular_einladung', k, {});
 
   const defaultIntro = isNeukunden
     ? t(k, `wir freuen uns auf eure Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um euer Angebot, eure Zielgruppe und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
@@ -760,6 +763,7 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
   const betragStr = formatEur(zahlung.betrag_cent);
   const stelle = job?.stelle || 'Projekt';
   const firma = kunde?.firmenname || 'euer Team';
+  const tpl = await renderEmail('zahlung_paypal', kunde, { stelle });
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -808,7 +812,7 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: `Rechnung Werbebudget — ${stelle}`,
+      subject: tpl?.subject || `Rechnung Werbebudget — ${stelle}`,
       html, text,
     }),
   });
@@ -828,6 +832,8 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
   const produkt = job?.stelle || (job?.neukunden_daten?.produkt) || 'Produkt';
+  const anfrageName = anfrage?.name || anfrage?.email || 'Interessent';
+  const tpl = await renderEmail('anfrage_lead', kunde, { produkt, name: anfrageName });
   const daten = anfrage?.daten || {};
   const datenRows = Object.entries(daten)
     .filter(([, v]) => v != null && String(v).trim() !== '')
@@ -873,7 +879,7 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: `🎉 Neue Anfrage für ${produkt}: ${anfrage?.name || anfrage?.email || 'Interessent'}`,
+      subject: tpl?.subject || `🎉 Neue Anfrage für ${produkt}: ${anfrageName}`,
       html, text: textLines.join('\n'),
     }),
   });
@@ -934,12 +940,14 @@ export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFile
   const recipients = Array.isArray(to) ? to : [to];
   const rechnungsNr = zahlung.easybill_invoice_number || zahlung.paypal_invoice_number || '—';
   const firma = kunde?.firmenname || 'euer Team';
+  const tpl = await renderEmail('rechnung_pdf_paypal', kunde, { rechnungsnr: String(rechnungsNr), firma });
+  const dankIntro = tpl?.body || t(kunde, 'Vielen Dank für eure Zahlung! Anbei erhaltet ihr eure Rechnung als PDF im Anhang.', 'Vielen Dank für Ihre Zahlung! Anbei erhalten Sie Ihre Rechnung als PDF im Anhang.');
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Rechnung · ${escape(brand.name)}</p>
       <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 8px;color:#0a0a0a;">${escape(String(rechnungsNr))}</h1>
-      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">${t(kunde, 'Vielen Dank für eure Zahlung! Anbei erhaltet ihr eure Rechnung als PDF im Anhang.', 'Vielen Dank für Ihre Zahlung! Anbei erhalten Sie Ihre Rechnung als PDF im Anhang.')}</p>
+      <p style="font-size:14px;color:#5a5955;margin:0 0 18px;">${escape(dankIntro)}</p>
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0 0 6px;">${escape(zahlung.beschreibung || '')}</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
@@ -958,7 +966,7 @@ export async function sendRechnungsMail({ to, kunde, zahlung, pdfBuffer, pdfFile
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: `Rechnung ${rechnungsNr} — ${firma}`,
+      subject: tpl?.subject || `Rechnung ${rechnungsNr} — ${firma}`,
       html, text,
       attachments: pdfBuffer ? [{
         filename: pdfFilename || 'rechnung.pdf',
