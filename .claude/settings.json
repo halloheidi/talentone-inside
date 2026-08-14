@@ -40,7 +40,8 @@
       "Bash(node --check routes/assistent.js)",
       "Bash(scp -q verify-assistent.mjs root@69.62.116.44:/root/verify-assistent.mjs)",
       "Bash(scp -q verify-verlauf.mjs root@69.62.116.44:/root/verify-verlauf.mjs)",
-      "Bash(scp -q verify-copy.mjs root@69.62.116.44:/root/verify-copy.mjs)"
+      "Bash(scp -q verify-copy.mjs root@69.62.116.44:/root/verify-copy.mjs)",
+      "Bash(scp -q verify-offers.mjs root@69.62.116.44:/root/verify-offers.mjs)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

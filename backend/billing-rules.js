@@ -30,6 +30,10 @@
 export function evaluateMonthlyBilling(offer, ctx) {
   const today = ctx.today || new Date();
 
+  // Extern (direkt in easybill) abgerechnet — das Tool stellt nichts in Rechnung.
+  if (offer.billing_external_at) {
+    return { action: 'skip_external_billing', reason: 'external_billing' };
+  }
   if (offer.billing_ended_at) {
     return { action: 'skip_campaign_ended', reason: 'campaign_ended' };
   }

@@ -17,6 +17,7 @@ import { supabase } from './supabase.js';
 /** Wiederholung von computeBillingPhase() aus offer-list — hier für die
  *  Server-seitige Aggregation dupliziert (kein Cross-Import auf routes/*). */
 export function billingPhaseOf(offer, hireCount = 0, today = new Date()) {
+  if (offer.billing_external_at) return 'extern';
   if (offer.billing_ended_at)   return 'ended';
   if (offer.billing_paused_at)  return 'paused';
   if (!offer.campaign_started_at) return 'inactive';
@@ -42,7 +43,10 @@ export function computeOfferMrrShareForMonth(offer, hireCount, monthStart, month
   const monthlyTotal = Number(offer.monthly_total) || 0;
   if (monthlyTotal <= 0) return { amount: 0, phase: 'inactive', days_active: 0, days_in_month: daysInMonth };
 
-  const start = offer.campaign_started_at ? new Date(offer.campaign_started_at) : null;
+  // Anker: tool-seitige Aktivierung, sonst (rein extern abgerechnet) das
+  // Extern-Datum — so zählt ein extern abgerechnetes Angebot weiter im MRR.
+  const externalAt = offer.billing_external_at ? new Date(offer.billing_external_at) : null;
+  const start = offer.campaign_started_at ? new Date(offer.campaign_started_at) : externalAt;
   const endTs = offer.billing_ended_at ? new Date(offer.billing_ended_at) : null;
   if (!start || start > monthEnd) return { amount: 0, phase: 'inactive', days_active: 0, days_in_month: daysInMonth };
 
@@ -50,6 +54,16 @@ export function computeOfferMrrShareForMonth(offer, hireCount, monthStart, month
   const activeFrom = start > monthStart ? start : monthStart;
   const activeTo   = endTs && endTs < monthEnd ? endTs : monthEnd;
   if (activeTo < activeFrom) return { amount: 0, phase: 'ended', days_active: 0, days_in_month: daysInMonth };
+
+  const dayStartUTC = d => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+
+  // Extern abgerechnet: zählt anteilig als laufender Umsatz, ohne Garantie-/
+  // Pausen-Gating (die Rechnung entsteht extern, der Umsatz bleibt).
+  if (externalAt && externalAt <= monthEnd) {
+    const daysActiveX = Math.floor((dayStartUTC(activeTo) - dayStartUTC(activeFrom)) / 86400000) + 1;
+    const amountX = Math.round(monthlyTotal * (daysActiveX / daysInMonth) * 100) / 100;
+    return { amount: amountX, phase: 'extern', days_active: daysActiveX, days_in_month: daysInMonth };
+  }
 
   // Phase-Bestimmung für MRR: billing_ended_at wird durch die
   // anteilige Berechnung abgebildet, NICHT als Phasen-Ausschluss.

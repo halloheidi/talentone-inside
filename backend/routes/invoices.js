@@ -150,6 +150,39 @@ router.post('/monthly/waive-override', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* POST /api/invoices/monthly/mark-external  body: { offer_id, note? }
+   Markiert das Angebot als extern (direkt in easybill) abgerechnet: der Cron
+   überspringt es, es zählt aber weiter im MRR. Notiz optional. */
+router.post('/monthly/mark-external', async (req, res) => {
+  const { offer_id, note } = req.body || {};
+  if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
+  try {
+    const { data, error } = await supabase.from('talentone_offers').update({
+      billing_external_at: new Date().toISOString(),
+      billing_external_note: String(note || '').trim() || null,
+      billing_external_by: req.user?.email || null,
+    }).eq('id', offer_id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ offer: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/invoices/monthly/unmark-external  body: { offer_id }
+   Hebt die Extern-Markierung wieder auf (Tool-Abrechnung wieder zuständig). */
+router.post('/monthly/unmark-external', async (req, res) => {
+  const { offer_id } = req.body || {};
+  if (!offer_id) return res.status(400).json({ error: 'offer_id ist Pflicht.' });
+  try {
+    const { data, error } = await supabase.from('talentone_offers').update({
+      billing_external_at: null,
+      billing_external_note: null,
+      billing_external_by: null,
+    }).eq('id', offer_id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ offer: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* POST /api/invoices/monthly/run-now  body: { offer_id, period_start? }
    Manueller Trigger für einzelnes Angebot — z.B. für Tests oder Ad-hoc-Läufe. */
 router.post('/monthly/run-now', async (req, res) => {

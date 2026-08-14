@@ -47,9 +47,10 @@ export async function runMonthlyBillingRound({ today = new Date(), triggerDay } 
   try {
     const { data: offers, error } = await supabase
       .from('talentone_offers')
-      .select('id, brand, billing_paused_at, billing_ended_at')
+      .select('id, brand, billing_paused_at, billing_ended_at, billing_external_at')
       .not('campaign_started_at', 'is', null)
-      .is('billing_ended_at', null);
+      .is('billing_ended_at', null)
+      .is('billing_external_at', null);   // extern abgerechnet → Tool bucht nicht
     if (error) throw new Error(error.message);
     for (const o of offers || []) {
       stats.processed++;

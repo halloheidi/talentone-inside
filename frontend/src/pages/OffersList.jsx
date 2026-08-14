@@ -29,11 +29,13 @@ export const PHASE_META = {
   paused:            { label: 'Pausiert — manuell reaktivieren', color: '#b91c1c', bg: '#fde0e0' }, // rot
   ended:             { label: 'Abrechnung beendet',       color: '#5a5955', bg: 'var(--gray-100)' },
   inactive:          { label: 'Abrechnung nicht aktiv',   color: '#5a5955', bg: 'var(--gray-100)' },
+  extern:            { label: 'Extern abgerechnet',       color: '#6d28d9', bg: '#f0e9ff' }, // lila
 };
 
 /** Reine Client-Version von computeBillingPhase — spiegelt die Backend-Logik. */
 export function computeBillingPhaseClient(offerSnap) {
   if (!offerSnap) return 'inactive';
+  if (offerSnap.billing_external_at) return 'extern';
   if (offerSnap.billing_ended_at)   return 'ended';
   if (offerSnap.billing_paused_at)  return 'paused';
   if (!offerSnap.campaign_started_at) return 'inactive';
@@ -740,6 +742,7 @@ export function BillingModal({ offer, onClose, onChanged }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [adBudget, setAdBudget] = useState('');
+  const [externNote, setExternNote] = useState('');
   const [hireModal, setHireModal] = useState(null); // { hire, preview } für Erfassungs-Modal
   const [waiveOverride, setWaiveOverride] = useState(false);
   const [waiveNote, setWaiveNote] = useState('');
@@ -767,6 +770,7 @@ export function BillingModal({ offer, onClose, onChanged }) {
   const billingActive = !!offer.campaign_started_at;
   const billingEnded  = !!offer.billing_ended_at;
   const billingPaused = !!offer.billing_paused_at;
+  const billingExternal = !!offer.billing_external_at;
   const isTalentOne   = offer.brand === 'talentone';
 
   // Garantie-Phase & Countdown
@@ -779,7 +783,8 @@ export function BillingModal({ offer, onClose, onChanged }) {
   const hasHire = hires.length > 0;
 
   let phaseBanner = null;
-  if (billingEnded)               phaseBanner = { label: `Abrechnung beendet am ${new Date(offer.billing_ended_at).toLocaleDateString('de-DE')}`, color: '#5a5955', bg: 'var(--gray-100)' };
+  if (billingExternal)            phaseBanner = { label: `Extern abgerechnet (direkt in easybill) seit ${new Date(offer.billing_external_at).toLocaleDateString('de-DE')} — automatische Abrechnung pausiert`, color: '#6d28d9', bg: '#f0e9ff' };
+  else if (billingEnded)          phaseBanner = { label: `Abrechnung beendet am ${new Date(offer.billing_ended_at).toLocaleDateString('de-DE')}`, color: '#5a5955', bg: 'var(--gray-100)' };
   else if (!billingActive)        phaseBanner = { label: 'Monatliche Abrechnung noch nicht aktiviert', color: '#5a5955', bg: 'var(--gray-100)' };
   else if (hasHire)               phaseBanner = { label: `Einstellung(en) erfasst — reguläre Abrechnung`, color: '#0a8043', bg: '#e0f5df' };
   else if (billingPaused)         phaseBanner = { label: `Servicefrei-Monat aufgebraucht — Team muss manuell reaktivieren`, color: '#b91c1c', bg: '#fde0e0' };
@@ -812,6 +817,22 @@ export function BillingModal({ offer, onClose, onChanged }) {
     setErr(''); setBusy('reactivate');
     try {
       await api('/invoices/monthly/reactivate', { method: 'POST', body: { offer_id: offer.id } });
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runMarkExternal() {
+    if (!window.confirm('Dieses Angebot als extern (direkt in easybill) abgerechnet markieren?\n\nDie automatische Monatsabrechnung im Tool wird für dieses Angebot gestoppt. Der Umsatz zählt weiterhin im Controlling/MRR.')) return;
+    setErr(''); setBusy('extern');
+    try {
+      await api('/invoices/monthly/mark-external', { method: 'POST', body: { offer_id: offer.id, note: externNote } });
+      setExternNote('');
+      onChanged();
+    } catch (e) { setErr(e.message); setBusy(''); }
+  }
+  async function runUnmarkExternal() {
+    setErr(''); setBusy('extern');
+    try {
+      await api('/invoices/monthly/unmark-external', { method: 'POST', body: { offer_id: offer.id } });
       onChanged();
     } catch (e) { setErr(e.message); setBusy(''); }
   }
@@ -932,6 +953,39 @@ export function BillingModal({ offer, onClose, onChanged }) {
             <button className="btn-ghost btn-sm" onClick={runStopMonthly} disabled={busy === 'stop'}>
               {busy === 'stop' ? 'Stoppe…' : 'Beenden'}
             </button>
+          </div>
+        )}
+      </section>
+
+      {/* Extern abgerechnet (direkt in easybill) */}
+      <section style={{ padding: 14, background: billingExternal ? '#f0e9ff' : 'var(--gray-50)', borderRadius: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>Extern abgerechnet</div>
+        {billingExternal ? (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ fontSize: 12, color: '#6d28d9', fontWeight: 600 }}>
+              ✓ Direkt in easybill abgerechnet seit {new Date(offer.billing_external_at).toLocaleDateString('de-DE')}
+              {offer.billing_external_note ? <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}> · „{offer.billing_external_note}"</span> : null}
+              {offer.billing_external_by ? <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · {offer.billing_external_by}</span> : null}
+            </div>
+            <button className="btn-ghost btn-sm" onClick={runUnmarkExternal} disabled={busy === 'extern'}>
+              {busy === 'extern' ? 'Setze zurück…' : 'Rückgängig'}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
+              Wird dieses Angebot manuell direkt über easybill abgerechnet? Dann hier markieren — das Tool stoppt die automatische Monatsabrechnung, der Umsatz zählt aber weiter im Controlling.
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                type="text" value={externNote} onChange={e => setExternNote(e.target.value)}
+                placeholder="Notiz (optional, z. B. Rechnungsnr.)"
+                style={{ flex: '1 1 200px', minWidth: 160, padding: '7px 9px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 13 }}
+              />
+              <button className="btn-ghost btn-sm" onClick={runMarkExternal} disabled={busy === 'extern'}>
+                {busy === 'extern' ? 'Markiere…' : 'Als extern abgerechnet markieren'}
+              </button>
+            </div>
           </div>
         )}
       </section>
