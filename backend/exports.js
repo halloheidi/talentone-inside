@@ -212,16 +212,26 @@ export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl }) {
   const antwortenHtml = antworten.length === 0 ? '' : `
 <h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:24px 0 10px;">Antworten</h2>
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-${antworten.map(a => `
+${antworten.map(a => {
+  const koAntwort = a?.ko === true;
+  const antwortText = escape(typeof a.antwort === 'object' ? JSON.stringify(a.antwort) : (a.antwort || '—'));
+  return `
   <tr>
-    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:45%;vertical-align:top;">${escape(a.frage_text || a.frage_id || '—')}</td>
-    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;font-weight:500;">${escape(typeof a.antwort === 'object' ? JSON.stringify(a.antwort) : (a.antwort || '—'))}</td>
-  </tr>`).join('')}
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:12px;${koAntwort ? 'color:#a15c00;font-weight:600;' : 'color:#5a5955;'}width:45%;vertical-align:top;">${escape(a.frage_text || a.frage_id || '—')}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #ececea;font-size:13px;font-weight:500;${koAntwort ? 'color:#a15c00;' : 'color:#0a0a0a;'}">${koAntwort ? '⚠️ ' : ''}${antwortText}${koAntwort ? ' <span style="font-size:11px;font-weight:700;">(KO)</span>' : ''}</td>
+  </tr>`;
+}).join('')}
 </table>`;
 
+  // Bei gerissenem Muss-Kriterium: KEINE „melde dich zeitnah"-Aufforderung,
+  // sondern der Hinweis, dass die Vorqualifizierung zuerst prüft.
+  const vorqualHinweis = job?.vorqualifizierung
+    ? 'Unsere telefonische Vorqualifizierung prüft die Bewerbung zuerst — bitte noch nicht selbst kontaktieren.'
+    : 'Bitte vor einer Kontaktaufnahme prüfen, ob die Bewerbung trotz KO-Kriterium relevant ist.';
   const koWarning = isKo ? `
 <div style="margin:20px 0;padding:14px 16px;background:#fff3cd;border:1px solid #f2d76b;border-left:4px solid #d4a800;border-radius:8px;font-size:13px;color:#5a4a00;">
-  ⚠️ <strong>Achtung:</strong> Der Bewerber hat ein KO-Kriterium ausgelöst und erfüllt damit nicht alle Anforderungen dieser Stelle.
+  ⚠️ <strong>Achtung:</strong> Der Bewerber hat ein KO-Kriterium ausgelöst und erfüllt damit nicht alle Anforderungen dieser Stelle.<br>
+  <span style="display:inline-block;margin-top:6px;">${escape(vorqualHinweis)}</span>
 </div>` : '';
 
   const bewerbungenUrl = job?.bewerbungen_token
@@ -273,7 +283,7 @@ ${antworten.map(a => `
 
   const textParts = [
     `Neue Bewerbung für ${job?.stelle || 'die Stelle'}`,
-    isKo ? '\n⚠️ KO-Kriterium ausgelöst — Bewerber erfüllt nicht alle Anforderungen.' : '',
+    isKo ? `\n⚠️ KO-Kriterium ausgelöst — Bewerber erfüllt nicht alle Anforderungen.\n${vorqualHinweis}` : '',
     `\nName: ${bewerbung?.name || '—'}`,
     `E-Mail: ${bewerbung?.email || '—'}`,
     `Telefon: ${bewerbung?.telefon || '—'}`,

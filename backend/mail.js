@@ -835,11 +835,24 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
   const anfrageName = anfrage?.name || anfrage?.email || 'Interessent';
   const tpl = await renderEmail('anfrage_lead', kunde, { produkt, name: anfrageName });
   const daten = anfrage?.daten || {};
-  const datenRows = Object.entries(daten)
-    .filter(([, v]) => v != null && String(v).trim() !== '')
-    .map(([k, v]) => `<tr>
+  // Interne/technische Felder (z. B. _raw) gehören NICHT in Kunden-Mails; ver-
+  // schachtelte Objekte sauber formatieren statt "[object Object]" zu rendern.
+  const formatWert = (v) => {
+    if (v == null) return '';
+    if (Array.isArray(v)) return v.map(x => (x && typeof x === 'object') ? (x.value ?? x.text ?? '') : x).filter(s => String(s).trim() !== '').join(', ');
+    if (typeof v === 'object') {
+      if ('value' in v) return String(v.value ?? '');
+      return Object.entries(v).filter(([, x]) => x != null && typeof x !== 'object').map(([kk, x]) => `${kk}: ${x}`).join(' · ');
+    }
+    return String(v);
+  };
+  const datenEntries = Object.entries(daten)
+    .filter(([k]) => !String(k).startsWith('_'))
+    .map(([k, v]) => [k, formatWert(v)])
+    .filter(([, val]) => val && val.trim() !== '');
+  const datenRows = datenEntries.map(([k, val]) => `<tr>
       <td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;width:35%;">${escape(k)}</td>
-      <td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;">${escape(String(v).slice(0, 300))}</td>
+      <td style="padding:6px 0;border-bottom:1px solid #ececea;font-size:13px;color:#0a0a0a;">${escape(val.slice(0, 300))}</td>
     </tr>`).join('');
 
   const content = `
@@ -867,7 +880,7 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
     anfrage?.name    ? `Name:    ${anfrage.name}`    : null,
     anfrage?.email   ? `E-Mail:  ${anfrage.email}`   : null,
     anfrage?.telefon ? `Telefon: ${anfrage.telefon}` : null,
-    ...Object.entries(daten).map(([k, v]) => `${k}: ${String(v).slice(0, 200)}`),
+    ...datenEntries.map(([k, val]) => `${k}: ${val.slice(0, 200)}`),
     anfragenUrl ? `\nAlle Anfragen: ${anfragenUrl}` : null,
   ].filter(Boolean);
 

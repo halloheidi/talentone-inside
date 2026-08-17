@@ -272,6 +272,90 @@ function matchJobFromMapping(mapping, antworten) {
    Body: beliebiges JSON von Perspective.co — wir extrahieren Name/Mail/Telefon,
    Rest landet in antworten. Bei kunde_id: ein Funnel bedient mehrere Stellen;
    die Bewerbung wird per Stellen-Mapping dem richtigen Job zugeordnet. */
+// Fragen eines Funnels (fragen[] bevorzugt, sonst screens[type=question]).
+function funnelQuestions(funnel) {
+  if (!funnel) return [];
+  const fragen = Array.isArray(funnel.fragen) ? funnel.fragen : [];
+  if (fragen.length) return fragen;
+  const screens = Array.isArray(funnel.screens) ? funnel.screens : [];
+  return screens.filter(s => s && s.type === 'question');
+}
+
+/**
+ * KO-Bewertung anhand der Funnel-Fragen: markiert je Antwort, ob die gewählte
+ * Option als KO (options[].ko === true) hinterlegt ist. Liefert die (ggf. mit
+ * `ko:true` angereicherten) Antworten + ein Gesamt-Flag.
+ * @returns {{ antworten: Array, ko: boolean }}
+ */
+export function evaluateKoKriterium(antworten, funnel) {
+  const questions = funnelQuestions(funnel);
+  const norm = s => String(s || '').trim().toLowerCase();
+  let ko = false;
+  const marked = (Array.isArray(antworten) ? antworten : []).map(a => {
+    if (!questions.length) return a;
+    const q = questions.find(q => norm(q.text) === norm(a.frage_text));
+    const opt = q && Array.isArray(q.options) ? q.options.find(o => norm(o.text) === norm(a.antwort)) : null;
+    if (opt?.ko === true) { ko = true; return { ...a, ko: true }; }
+    return a;
+  });
+  return { antworten: marked, ko };
+}
+
+/**
+ * Legt eine Bewerbung an UND löst denselben Downstream aus wie der reguläre
+ * Perspective-Pfad (Sheets-Sync, Kunden-Mail bzw. interne Warn-Mail bei unklarer
+ * Zuordnung). Gemeinsam genutzt von /perspective UND vom /leads-Perspective-Zweig
+ * — kein duplizierter Versand-/Sync-Code.
+ */
+async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar = false, warnAntwort = null, rawBody = null }) {
+  const { antworten: markedAntworten, ko } = evaluateKoKriterium(contact.antworten, funnel);
+
+  const { data: bew, error: insErr } = await supabase
+    .from('talentone_bewerbungen')
+    .insert({
+      funnel_id: funnel?.id || null,
+      job_id: job?.id || null,
+      name: contact.name,
+      email: contact.email,
+      telefon: contact.telefon,
+      antworten: markedAntworten,
+      stelle_gewaehlt: extractStelle(contact.antworten),
+      quelle: 'perspective',
+      ko_kriterium: ko,
+      zuordnung_unklar: zuordnungUnklar,
+      raw: rawBody ?? null,
+    })
+    .select().single();
+  if (insErr) throw new Error(insErr.message);
+
+  // Nachgelagert (best-effort): Google-Sheets-Sync + Mails. Blockiert nie.
+  (async () => {
+    try {
+      const kunde = job?.kunde_id
+        ? (await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle()).data
+        : null;
+
+      const { syncBewerbungToSheet } = await import('../sheets-sync.js');
+      await syncBewerbungToSheet({ bewerbung: bew, job, kunde });
+
+      const sheetsCfg = kunde?.sheets_sync;
+      const sheetUrl = (sheetsCfg?.enabled && sheetsCfg?.spreadsheet_id)
+        ? `https://docs.google.com/spreadsheets/d/${sheetsCfg.spreadsheet_id}/edit`
+        : (funnel?.extern_sheet_url || null);
+
+      if (zuordnungUnklar) {
+        const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');
+        await sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText: warnAntwort, alleAntworten: contact.antworten });
+      } else if (kunde?.email) {
+        const { sendBewerbungsMail } = await import('../exports.js');
+        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl });
+      }
+    } catch (err) { console.warn('[bewerbung-downstream]', err.message); }
+  })().catch(err => console.error('[bewerbung-downstream-uncaught]', err.message));
+
+  return bew;
+}
+
 router.post('/perspective', async (req, res) => {
   const { job_id, kunde_id, secret } = req.query || {};
 
@@ -341,54 +425,10 @@ router.post('/perspective', async (req, res) => {
       .from('talentone_funnels').select('*')
       .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
 
-    const { data: bew, error: insErr } = await supabase
-      .from('talentone_bewerbungen')
-      .insert({
-        funnel_id: funnel?.id || null,
-        job_id: job.id,
-        name: contact.name,
-        email: contact.email,
-        telefon: contact.telefon,
-        antworten: contact.antworten,
-        stelle_gewaehlt: extractStelle(contact.antworten),
-        quelle: 'perspective',
-        ko_kriterium: false,
-        zuordnung_unklar: zuordnungUnklar,
-        raw: req.body ?? null,
-      })
-      .select().single();
-    if (insErr) return res.status(500).json({ error: insErr.message });
-
-    // Nachgelagert (best-effort): Google-Sheets-Sync + Mails. Blockiert nie.
-    (async () => {
-      try {
-        const { data: kunde } = await supabase
-          .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
-
-        // Google-Sheets-Sync (append-only). Wirft nie nach aussen.
-        const { syncBewerbungToSheet } = await import('../sheets-sync.js');
-        await syncBewerbungToSheet({ bewerbung: bew, job, kunde });
-
-        // Sheet-Link fuer die Kunden-Mail: aktiver Sheets-Sync > Funnel-Extern-Sheet.
-        const sheetsCfg = kunde?.sheets_sync;
-        const sheetUrl = (sheetsCfg?.enabled && sheetsCfg?.spreadsheet_id)
-          ? `https://docs.google.com/spreadsheets/d/${sheetsCfg.spreadsheet_id}/edit`
-          : (funnel?.extern_sheet_url || null);
-
-        if (zuordnungUnklar) {
-          // Interne Warn-Mail — Kunden-Mail bewusst NICHT (mögliche Fehlzuordnung).
-          const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');
-          await sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText: warnAntwort, alleAntworten: contact.antworten });
-        } else if (kunde?.email) {
-          const { sendBewerbungsMail } = await import('../exports.js');
-          await sendBewerbungsMail({
-            kunde, job,
-            bewerbung: { ...bew, quelle: 'perspective' },
-            sheetUrl,
-          });
-        }
-      } catch (err) { console.warn('[perspective-mail]', err.message); }
-    })().catch(err => console.error('[perspective-mail-uncaught]', err.message));
+    let bew;
+    try {
+      bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar, warnAntwort, rawBody: req.body });
+    } catch (err) { return res.status(500).json({ error: err.message }); }
 
     res.status(201).json({ ok: true, bewerbung_id: bew.id, job_id: job.id, zuordnung_unklar: zuordnungUnklar });
   } catch (err) {
@@ -404,12 +444,55 @@ router.post('/perspective', async (req, res) => {
    an den Kunden. */
 router.post('/leads', async (req, res) => {
   const { job_id, secret } = req.query || {};
-  if (!job_id) return res.status(400).json({ error: 'job_id query param fehlt.' });
 
   const requiredSecret = process.env.LEADS_WEBHOOK_SECRET;
   if (requiredSecret && secret !== requiredSecret) {
     return res.status(401).json({ error: 'invalid secret' });
   }
+
+  // ── Härtung: Perspective-Payloads gehören NIE in eine Kundenanfrage ──
+  // Enthält der Payload eine Perspective-funnelId (+ Antwort-Profil), wird gegen
+  // talentone_funnels.perspective_funnel_id aufgelöst und eine BEWERBUNG angelegt.
+  // Kein Match → trotzdem Bewerbung mit zuordnung_unklar=true (nie stille Anfrage).
+  const b = req.body || {};
+  const pFunnelId = b.funnelId || b._raw?.funnelId || null;
+  const looksPerspective = !!(pFunnelId && (b.profile || b.values || b.trackingVersion != null || b._raw?.profile));
+  if (looksPerspective) {
+    try {
+      const payload = (b.profile || b.values || b.funnelId) ? b : (b._raw || b);
+      const contact = extractContact(payload);
+      if (!contact.email && !contact.telefon) {
+        return res.status(200).json({ ok: true, skipped: 'no_contact' });
+      }
+
+      const { data: funnel } = await supabase
+        .from('talentone_funnels').select('*')
+        .eq('perspective_funnel_id', String(pFunnelId))
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+      let job = null;
+      if (funnel?.job_id) {
+        job = (await supabase.from('talentone_jobs').select('*').eq('id', funnel.job_id).maybeSingle()).data || null;
+      }
+      // Fallback-Job aus ?job_id, falls Funnel/Job nicht auflösbar.
+      if (!job && job_id) {
+        job = (await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle()).data || null;
+      }
+      const zuordnungUnklar = !funnel || !job;
+      const warnAntwort = zuordnungUnklar
+        ? (contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null)
+        : null;
+
+      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar, warnAntwort, rawBody: req.body });
+      console.log(`[webhooks/leads] Perspective erkannt → Bewerbung ${bew.id} (funnelId=${pFunnelId} funnel=${funnel?.id || '-'} job=${job?.id || '-'} unklar=${zuordnungUnklar})`);
+      return res.status(201).json({ ok: true, bewerbung_id: bew.id, routed: 'bewerbung', zuordnung_unklar: zuordnungUnklar });
+    } catch (err) {
+      console.error('[webhooks/leads perspective]', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  if (!job_id) return res.status(400).json({ error: 'job_id query param fehlt.' });
 
   try {
     const { data: job, error: jE } = await supabase
