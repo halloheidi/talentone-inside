@@ -45,7 +45,9 @@
       "Bash(node -e \"const {EMAIL_TEMPLATE_CATALOG}=await import\\('./email-template-defaults.js'\\); console.log\\('Katalog-Keys:', EMAIL_TEMPLATE_CATALOG.length\\); console.log\\(EMAIL_TEMPLATE_CATALOG.map\\(t=>t.key\\).join\\(', '\\)\\);\" --input-type=module)",
       "Bash(node --input-type=module -e \"import {EMAIL_TEMPLATE_CATALOG} from './email-template-defaults.js'; console.log\\('Keys:', EMAIL_TEMPLATE_CATALOG.length\\); console.log\\(EMAIL_TEMPLATE_CATALOG.map\\(t=>t.key\\).join\\(', '\\)\\);\")",
       "Bash(node /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/gen-seed063.mjs)",
-      "Bash(grep -n \"bereiche.map\\\\|import\\\\|useNavigate\\\\|Link\\\\|return \\(\\\\|page-sub\\\\|</div>\\\\s*$\\\\|openKey\" frontend/src/pages/admin/EmailVorlagen.jsx)"
+      "Bash(grep -n \"bereiche.map\\\\|import\\\\|useNavigate\\\\|Link\\\\|return \\(\\\\|page-sub\\\\|</div>\\\\s*$\\\\|openKey\" frontend/src/pages/admin/EmailVorlagen.jsx)",
+      "Bash(scp -q verify-tpl2.mjs root@69.62.116.44:/root/verify-tpl2.mjs)",
+      "Bash(grep -n \"function load\\\\|const load\\\\|api\\(\\\\`/offers\\\\|setBusyId\\\\|const isBusy\\\\|async function openSendModal\" frontend/src/pages/OffersList.jsx)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

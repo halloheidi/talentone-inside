@@ -963,11 +963,13 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
-    if (offer.status !== 'draft') {
-      return res.status(409).json({ error: `Nur Drafts können direkt in eine AB überführt werden (aktuell: ${offer.status}).` });
+    // Aus Entwurf ODER einem bereits versendeten Angebot (created/sent) heraus:
+    // erzeugt eine AB (CHARGE_CONFIRM) und setzt das Angebot auf 'accepted'.
+    if (!['draft', 'created', 'sent'].includes(offer.status)) {
+      return res.status(409).json({ error: `Aus diesem Status kann keine Auftragsbestätigung erzeugt werden (aktuell: ${offer.status}).` });
     }
     if (!offer.easybill_customer_id) {
-      return res.status(400).json({ error: 'Kunde ohne easybill_customer_id — Draft ist inkonsistent.' });
+      return res.status(400).json({ error: 'Kunde ohne easybill_customer_id — Angebot ist inkonsistent.' });
     }
 
     const [{ data: products }, { data: templates }] = await Promise.all([
@@ -1064,6 +1066,44 @@ router.post('/:id/create-easybill-order', async (req, res) => {
     res.status(201).json({ offer: updated, easybill: { id: document.id, number: document.number } });
   } catch (err) {
     console.error('[offers/create-easybill-order]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/offers/:id/mark-accepted
+   Manuell als angenommen markieren — OHNE eine AB in easybill zu erzeugen
+   (z.B. wenn der Auftrag mündlich bestätigt oder direkt in easybill abgewickelt
+   wurde). Setzt status='accepted' + accepted_at, legt Projekt-Card an, notiert in
+   Close. Danach greifen Abrechnung + „extern abgerechnet". */
+router.post('/:id/mark-accepted', async (req, res) => {
+  try {
+    const { data: offer, error } = await supabase
+      .from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (offer.status === 'accepted') return res.status(409).json({ error: 'Angebot ist bereits als angenommen markiert.' });
+    if (offer.status === 'declined') return res.status(409).json({ error: 'Ein abgelehntes Angebot kann nicht angenommen werden.' });
+
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabase
+      .from('talentone_offers')
+      .update({ status: 'accepted', accepted_at: nowIso, last_synced_at: nowIso })
+      .eq('id', offer.id).select().single();
+    if (updErr) return res.status(500).json({ error: updErr.message });
+
+    if (updated.close_lead_id) {
+      const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+      const monat1 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(offer.first_month_total) || 0);
+      closeAddNote({ leadId: updated.close_lead_id, note: `✅ Angebot manuell als angenommen markiert: ${brandLabel} — Monat 1: ${monat1}` })
+        .catch(err => console.warn('[offers/mark-accepted close-note]', err.message));
+    }
+    ensureProjektForOffer(updated)
+      .then(r => { if (r.created) console.log(`[offers/mark-accepted] Projekt ${r.projekt.id} angelegt`); })
+      .catch(err => console.warn('[offers/mark-accepted projekt-automation]', err.message));
+
+    res.json({ offer: updated });
+  } catch (err) {
+    console.error('[offers/mark-accepted]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

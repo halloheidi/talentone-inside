@@ -115,6 +115,36 @@ export default function OffersList() {
     finally { setBusyId(null); }
   }
 
+  async function markAccepted(offer) {
+    if (!window.confirm('Dieses Angebot als angenommen markieren?\n\nEs wird KEINE Auftragsbestätigung in easybill erzeugt (z. B. weil sie manuell/direkt in easybill erstellt wird). Danach lässt sich die Abrechnung starten.')) return;
+    setBusyId(offer.id);
+    setRowError(r => ({ ...r, [offer.id]: '' }));
+    try {
+      await api(`/offers/${offer.id}/mark-accepted`, { method: 'POST' });
+      load();
+    } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
+    finally { setBusyId(null); }
+  }
+
+  async function createOrderFromList(offer) {
+    if (!window.confirm('Auftragsbestätigung in easybill erstellen?\n\nDas erzeugt eine verbindliche AB und markiert das Angebot als angenommen.')) return;
+    setBusyId(offer.id);
+    setRowError(r => ({ ...r, [offer.id]: '' }));
+    try {
+      try {
+        await api(`/offers/${offer.id}/create-easybill-order`, { method: 'POST' });
+      } catch (e) {
+        if (e.status === 409 && e.body?.warning === 'guarantee_bewerbungen') {
+          const ok = window.confirm(`⚠️ ${e.body.message}\n\nGefundene Formulierung:\n„${e.body.sample || '(nicht extrahierbar)'}"\n\nTrotzdem erstellen?`);
+          if (!ok) throw new Error('Abgebrochen — bitte Garantie-Text korrigieren.');
+          await api(`/offers/${offer.id}/create-easybill-order`, { method: 'POST', body: { confirm_guarantee_warning: true } });
+        } else { throw e; }
+      }
+      load();
+    } catch (e) { setRowError(r => ({ ...r, [offer.id]: e.message })); }
+    finally { setBusyId(null); }
+  }
+
   async function retryCreateEasybill(offerId) {
     setBusyId(offerId);
     setRowError(r => ({ ...r, [offerId]: '' }));
@@ -308,6 +338,22 @@ export default function OffersList() {
                           disabled={isBusy}
                           onClick={() => openSendOrderModal(o)}
                         >{isBusy ? '⏳' : (o.order_sent_at ? '📋 AB erneut senden' : '📋 AB senden')}</button>
+                      )}
+                      {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && !o.easybill_order_document_id && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          title="Auftragsbestätigung in easybill erstellen — markiert das Angebot als angenommen"
+                          disabled={isBusy}
+                          onClick={() => createOrderFromList(o)}
+                        >📋 AB erstellen</button>
+                      )}
+                      {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
+                        <button
+                          className="btn-primary btn-sm"
+                          title="Manuell als angenommen markieren (ohne easybill-AB)"
+                          disabled={isBusy}
+                          onClick={() => markAccepted(o)}
+                        >✅ Angenommen</button>
                       )}
                       {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
                         <button

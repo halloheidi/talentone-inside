@@ -996,6 +996,23 @@ export default function KundeDetail() {
             setSendOrderPreview({ offerId: offer.id, ...p });
           } catch (e) { alert(e.message); }
         }}
+        onMarkAccepted={async offer => {
+          if (!window.confirm('Dieses Angebot als angenommen markieren?\n\nEs wird KEINE Auftragsbestätigung in easybill erzeugt (z. B. weil sie manuell/direkt in easybill erstellt wird). Danach lässt sich die Abrechnung starten.')) return;
+          try { await api(`/offers/${offer.id}/mark-accepted`, { method: 'POST' }); loadOffers(); }
+          catch (e) { alert(e.message); }
+        }}
+        onCreateOrder={async offer => {
+          if (!window.confirm('Auftragsbestätigung in easybill erstellen?\n\nDas erzeugt eine verbindliche AB und markiert das Angebot als angenommen.')) return;
+          const run = (confirmWarn) => api(`/offers/${offer.id}/create-easybill-order`, { method: 'POST', body: confirmWarn ? { confirm_guarantee_warning: true } : undefined });
+          try { await run(false); loadOffers(); }
+          catch (e) {
+            if (e.status === 409 && e.body?.warning === 'guarantee_bewerbungen') {
+              if (window.confirm(`⚠️ ${e.body.message}\n\nGefundene Formulierung:\n„${e.body.sample || '(nicht extrahierbar)'}"\n\nTrotzdem erstellen?`)) {
+                try { await run(true); loadOffers(); } catch (e2) { alert(e2.message); }
+              }
+            } else { alert(e.message); }
+          }
+        }}
       />
 
       <InvoicesSection
@@ -1283,7 +1300,7 @@ const STATUS_META = {
   declined:  { label: 'Abgelehnt', bg: '#fde0e0', color: '#b91c1c' },
 };
 
-function OffersSection({ kundeId, offers, onOpenBilling, onOpenDecline, onSendOffer, onSendOrder }) {
+function OffersSection({ kundeId, offers, onOpenBilling, onOpenDecline, onSendOffer, onSendOrder, onMarkAccepted, onCreateOrder }) {
   return (
     <>
       <div className="section-head">
@@ -1346,6 +1363,12 @@ function OffersSection({ kundeId, offers, onOpenBilling, onOpenDecline, onSendOf
                         )}
                         {o.easybill_order_document_id && (
                           <button className="btn-ghost btn-sm" onClick={() => onSendOrder(o)}>📋 AB senden</button>
+                        )}
+                        {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && !o.easybill_order_document_id && (
+                          <button className="btn-ghost btn-sm" onClick={() => onCreateOrder(o)}>📋 AB erstellen</button>
+                        )}
+                        {(o.status === 'draft' || o.status === 'created' || o.status === 'sent') && (
+                          <button className="btn-primary btn-sm" onClick={() => onMarkAccepted(o)}>✅ Angenommen</button>
                         )}
                         {o.status === 'accepted' && (
                           <button className="btn-primary btn-sm" onClick={() => onOpenBilling(o)}>📊 Abrechnung</button>
