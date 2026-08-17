@@ -99,6 +99,12 @@ export default function JobCreatives() {
   const [reelBusy, setReelBusy] = useState(() => new Set());
   const reelPollRefs = useRef(new Map()); // parentId → intervalId
 
+  // Story-Ableitung (9:16) pro Feed-Creative-ID
+  const [storyBusy, setStoryBusy] = useState(() => new Set());
+  const [bulkStoryBusy, setBulkStoryBusy] = useState(false);
+  const storyPollRefs = useRef(new Map()); // parentId → intervalId
+  const storyErrTsRef = useRef(0);          // dedupe: nur einmal pro Fehler alerten
+
   function buildFilename(c) {
     const stelle = (job.stelle || 'creative').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
     const ts = new Date(c.created_at).toISOString().slice(0, 10);
@@ -150,6 +156,74 @@ export default function JobCreatives() {
     timer = setTimeout(tick, 6_000);
     reelPollRefs.current.set(parentId, timer);
   }
+
+  // ── Story (9:16) aus Feed-Creative ableiten ──
+  async function onDeriveStory(creative) {
+    if (storyBusy.has(creative.id)) return;
+    if (!confirm('9:16-Story aus diesem Feed-Creative ableiten?\n\nDas Motiv wird per KI nach oben/unten zu Hochformat erweitert (dauert ~30-60 Sek). Die Story erscheint automatisch in der Galerie.')) return;
+    try {
+      await api(`/creatives/${creative.id}/story-ableiten`, { method: 'POST' });
+      setStoryBusy(prev => { const n = new Set(prev); n.add(creative.id); return n; });
+      startStoryPolling(creative.id);
+      startCreatives?.(1);
+    } catch (err) {
+      alert(`Story-Ableitung fehlgeschlagen: ${err.message}`);
+    }
+  }
+
+  async function onDeriveStoriesAlle() {
+    const feed = creatives.filter(c => c.format === 'quadrat' && c.typ !== 'video');
+    const hatStory = new Set(creatives.filter(c => c.format === 'story' && c.parent_id).map(c => c.parent_id));
+    const offen = feed.filter(c => !hatStory.has(c.id));
+    if (!offen.length) { alert('Alle Feed-Creatives haben bereits eine Story-Ableitung.'); return; }
+    if (!confirm(`Aus ${offen.length} Feed-Creative(s) je eine 9:16-Story ableiten?\n\nLäuft nacheinander, je ~30-60 Sek. Die Stories erscheinen automatisch in der Galerie.`)) return;
+    setBulkStoryBusy(true);
+    try {
+      const res = await api('/creatives/story-ableiten-alle', { method: 'POST', body: { job_id: job.id } });
+      for (const c of offen) {
+        setStoryBusy(prev => { const n = new Set(prev); n.add(c.id); return n; });
+        startStoryPolling(c.id);
+      }
+      if (res.started) startCreatives?.(res.started);
+    } catch (err) {
+      alert(`Sammel-Ableitung fehlgeschlagen: ${err.message}`);
+    } finally { setBulkStoryBusy(false); }
+  }
+
+  function startStoryPolling(parentId) {
+    if (storyPollRefs.current.has(parentId)) return;
+    const startedAt = Date.now();
+    let timer = null;
+    const stop = () => { if (timer) clearTimeout(timer); storyPollRefs.current.delete(parentId); setStoryBusy(prev => { const n = new Set(prev); n.delete(parentId); return n; }); };
+    async function tick() {
+      try {
+        const res = await api(`/creatives?job_id=${job.id}`);
+        const list = res.creatives || [];
+        const story = list.find(c => c.parent_id === parentId && c.format === 'story' && c.typ !== 'video');
+        if (story) { setCreatives(list); stop(); return; }
+        const genErr = res.last_generation_error;
+        if (genErr && genErr.ts > startedAt) {
+          stop();
+          // Fehler nur einmal pro Vorfall zeigen (mehrere Poller teilen sich den Job-Fehler).
+          if (genErr.ts > storyErrTsRef.current) {
+            storyErrTsRef.current = genErr.ts;
+            alert(`Story-Ableitung fehlgeschlagen: ${genErr.friendly || genErr.error || 'Unbekannter Fehler'}\n\nÜber „Story (9:16) ableiten" erneut versuchen.`);
+            api('/creatives/clear-error', { method: 'POST', body: { job_id: job.id } }).catch(() => {});
+          }
+          return;
+        }
+      } catch (err) { console.warn('[story-poll]', err.message); }
+      const elapsedMin = (Date.now() - startedAt) / 60_000;
+      timer = setTimeout(tick, elapsedMin > 6 ? 15_000 : 5_000);
+      storyPollRefs.current.set(parentId, timer);
+    }
+    timer = setTimeout(tick, 5_000);
+    storyPollRefs.current.set(parentId, timer);
+  }
+  useEffect(() => () => {
+    storyPollRefs.current.forEach(timer => clearTimeout(timer));
+  }, []);
+
   useEffect(() => () => {
     reelPollRefs.current.forEach(timer => clearTimeout(timer));
     reelPollRefs.current.clear();
@@ -990,6 +1064,12 @@ export default function JobCreatives() {
                 🔄 Logo aktualisieren
               </button>
             )}
+            {!showArchived && creatives.some(c => c.format === 'quadrat' && c.typ !== 'video') && (
+              <button className="btn-ghost btn-sm" onClick={onDeriveStoriesAlle} disabled={bulkStoryBusy}
+                title="Aus allen Feed-Creatives (1:1) eine 9:16-Story ableiten — bereits abgeleitete werden übersprungen">
+                {bulkStoryBusy ? 'Starte…' : '📱 Stories aus Feed ableiten'}
+              </button>
+            )}
             {!showArchived && (
               <button className="btn-ghost btn-sm" onClick={() => setShowCreativeUpload(true)} title="Eigene Bilder/Videos hochladen">
                 <Icon name="plus" /> Fertiges Creative hochladen
@@ -1117,6 +1197,16 @@ export default function JobCreatives() {
                     )}
                     {c.typ !== 'video' && c.bild_ohne_logo_url && kunde?.logo_url && (
                       <button className="btn-ghost btn-sm" onClick={() => setLogoPosTarget(c)}>Logo anpassen</button>
+                    )}
+                    {!showArchived && c.format === 'quadrat' && c.typ !== 'video' && (
+                      <button
+                        className="btn-ghost btn-sm"
+                        onClick={() => onDeriveStory(c)}
+                        disabled={storyBusy.has(c.id)}
+                        title="Aus diesem Feed-Creative eine 9:16-Story ableiten (Motiv wird nach oben/unten erweitert)"
+                      >
+                        {storyBusy.has(c.id) ? '📱 Story läuft…' : '📱 Story (9:16) ableiten'}
+                      </button>
                     )}
                     {c.format === 'story' && c.typ !== 'video' && (
                       <button

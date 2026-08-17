@@ -995,3 +995,89 @@ export async function generateGezielteAenderung({ job, kunde, creative, wunsch, 
   const bildUrl = await uploadToStorage(finalBuffer, filename);
   return { bildUrl, bildOhneLogoUrl };
 }
+
+/* ─────────────── Story (9:16) aus Feed-Creative ableiten ───────────────
+   Meta-Safe-Zones bei 1080×1920: oben ~250px, unten ~340px sind für Overlays
+   reserviert. Das Logo wird in die sichere Zone gesetzt (unter dem oberen Rand).
+   Relative Position {x,y,width_pct}, x/y = Zentrum. */
+const STORY_LOGO_POSITION = { x: 0.83, y: 0.22, width_pct: 0.16 };
+
+function buildStoryOutpaintPrompt(originalPrompt, stilPrompt) {
+  const stilKontext = stilPrompt?.trim() ? `\n\nSTIL-KONTEXT (für konsistenten Look, nicht wörtlich einblenden): ${String(stilPrompt).slice(0, 700)}` : '';
+  const promptKontext = originalPrompt?.trim() ? `\n\nURSPRÜNGLICHER BILD-KONTEXT: ${String(originalPrompt).slice(0, 700)}` : '';
+  return `Erweitere dieses quadratische Motiv (BILD 1) zu einem HOCHFORMATIGEN Bild (9:16, Instagram/Reels Story).
+
+HARTE REGELN (nicht verletzen):
+1. Das gesamte vorhandene Motiv bleibt vollständig erhalten, unverändert und mittig — nichts wegschneiden, nichts stauchen, nicht einfach hochskalieren.
+2. Ergänze NUR oben und unten neue Bildbereiche, die die Szene natürlich fortsetzen: gleiche Umgebung, gleiche Beleuchtung, gleiche Farben, derselbe Stil und dieselbe Bildsprache.
+3. Füge KEINEN neuen Text, KEINE Schrift und KEIN Logo hinzu. Bereits im Motiv vorhandenen Text exakt unverändert und an gleicher Stelle lassen.
+4. Halte die erweiterten Bereiche ganz oben und ganz unten ruhig/dezent (Hintergrund, Umgebung) — dort liegen später Bedien-Overlays.${promptKontext}${stilKontext}`;
+}
+
+/**
+ * Leitet aus einem fertigen Feed-Creative (1:1) eine 9:16-Story ab: Outpainting
+ * per gpt-image-2 (vertikale Erweiterung, Motiv bleibt zentriert) → exakt
+ * 1080×1920 via extendTo9x16 → Logo neu in die Story-Safe-Zone kompositieren.
+ * Startpunkt ist die Logo-freie Version (bild_ohne_logo_url), damit die KI das
+ * Logo nicht mitverändert. Legt KEINE DB-Row an (macht der Aufrufer).
+ *
+ * @returns {Promise<{bildUrl:string, bildOhneLogoUrl:(string|null), prompt:string, logoPosition:(object|null)}>}
+ */
+export async function deriveStoryFromFeed({ job, kunde, creative, stilPrompt = '' }) {
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
+  const inputUrl = creative.bild_ohne_logo_url || creative.bild_url;
+  if (!inputUrl) throw new Error('Feed-Creative hat kein Bild.');
+
+  const { buffer: rawInput } = await fetchAsBuffer(inputUrl);
+  const norm = await normalizeImageForOpenAI(rawInput, { label: 'Feed-Creative' });
+
+  const prompt = buildStoryOutpaintPrompt(creative.prompt, stilPrompt);
+
+  const form = new FormData();
+  form.append('model', 'gpt-image-2');
+  form.append('prompt', prompt);
+  // 1024x1536 (2:3) ist die höchste von gpt-image-2 unterstützte Höhe → erzwingt
+  // vertikales Outpainting aus dem 1:1-Input; extendTo9x16 bringt es exakt auf 9:16.
+  form.append('size', '1024x1536');
+  form.append('quality', 'high');
+  form.append('n', '1');
+  form.append('image[]', bufferToFile(norm.buffer, `feed.${norm.ext}`, norm.contentType));
+
+  const response = await fetch(OPENAI_EDITS_API, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+    body: form,
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI ${response.status}: ${body.slice(0, 400)}`);
+  }
+  const data = await response.json();
+  const b64 = data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
+
+  // 2:3 → exakt 1080×1920 (dezente Ambient-Erweiterung landet in den Overlay-Zonen).
+  let rawBuffer = Buffer.from(b64, 'base64');
+  rawBuffer = await extendTo9x16(rawBuffer);
+
+  // Logo neu für die Story-Safe-Zone platzieren (Position 0..1 skaliert auf 1080×1920).
+  let finalBuffer = rawBuffer;
+  let bildOhneLogoUrl = null;
+  let logoPosition = null;
+  if (kunde?.logo_url) {
+    const rand = Math.random().toString(36).slice(2, 8);
+    const rawFilename = `${job.id}/raw-story-derived-${Date.now()}-${rand}.png`;
+    try { bildOhneLogoUrl = await uploadToStorage(rawBuffer, rawFilename); }
+    catch (err) { console.warn(`[story-derive] raw-upload skip: ${err.message}`); }
+    try {
+      const logoBuf = (await fetchAsBuffer(kunde.logo_url)).buffer;
+      const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, STORY_LOGO_POSITION);
+      logoPosition = STORY_LOGO_POSITION;
+    } catch (err) { console.warn(`[story-derive] logo-overlay skip: ${err.message}`); }
+  }
+
+  const filename = `${job.id}/story-derived-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const bildUrl = await uploadToStorage(finalBuffer, filename);
+  return { bildUrl, bildOhneLogoUrl, prompt, logoPosition };
+}

@@ -6,6 +6,7 @@ import {
   verbessereSpruch,
   generateVariant,
   generateGezielteAenderung,
+  deriveStoryFromFeed,
   neuerHookAusWunsch,
   willLogoImMotiv,
   deleteFromStorage,
@@ -629,6 +630,96 @@ router.post('/:id/reel', async (req, res) => {
       console.error('[reel-bg]', err.message);
     }
   })().catch(err => console.error('[reel-bg] uncaught:', err));
+});
+
+/* ─────────────── Story (9:16) aus Feed-Creative ableiten ───────────────
+   Hintergrund-Job (wie /reel): Outpainting via gpt-image-2, dann neue Zeile mit
+   format='story', parent_id=Ursprungs-Creative. Fehler → in-memory Fehlerstatus
+   (getGenError) fürs Frontend; es entsteht NIE eine Zeile ohne Bild-URL. */
+async function deriveStoryInBackground(existing, job, kunde) {
+  try {
+    let stilPrompt = '';
+    if (existing.stilvorlage_id) {
+      const { data: sv } = await supabase.from('talentone_stilvorlagen')
+        .select('layout_prompt').eq('id', existing.stilvorlage_id).maybeSingle();
+      stilPrompt = sv?.layout_prompt || '';
+    }
+    const { bildUrl, bildOhneLogoUrl, prompt, logoPosition } =
+      await deriveStoryFromFeed({ job, kunde, creative: existing, stilPrompt });
+
+    const { error: insErr } = await supabase.from('talentone_creatives').insert({
+      job_id: existing.job_id,
+      format: 'story',
+      typ: existing.typ === 'overlay' ? 'overlay' : 'bild', // typ analog zum Parent
+      bild_url: bildUrl,
+      bild_ohne_logo_url: bildOhneLogoUrl || null,
+      logo_position: logoPosition || null,
+      prompt,
+      status: 'fertig',
+      parent_id: existing.id,
+      stilvorlage_id: existing.stilvorlage_id || null,
+    });
+    if (insErr) { console.error('[story-derive-bg] DB-Insert:', insErr.message); recordGenError(existing.job_id, new Error(insErr.message)); }
+    else console.log(`[story-derive-bg] Story fertig für creative ${existing.id.slice(0, 8)}`);
+  } catch (err) {
+    console.error('[story-derive-bg]', err.message);
+    recordGenError(existing.job_id, err);
+  }
+}
+
+/* POST /api/creatives/:id/story-ableiten — eine Feed-Zeile → 9:16-Story. */
+router.post('/:id/story-ableiten', async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
+
+  const { data: existing, error } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (error || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.format !== 'quadrat') return res.status(400).json({ error: 'Story-Ableitung nur aus Feed-Creatives (1:1) möglich.' });
+  if (existing.typ === 'video') return res.status(400).json({ error: 'Quelle muss ein Bild sein, kein Video.' });
+  if (!existing.bild_url && !existing.bild_ohne_logo_url) return res.status(400).json({ error: 'Keine Bild-URL am Creative.' });
+
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  clearGenError(existing.job_id);
+  res.status(202).json({ accepted: true, parent_id: existing.id, message: 'Story-Ableitung gestartet — die 9:16-Version erscheint automatisch in der Galerie.' });
+
+  deriveStoryInBackground(existing, job, kunde)
+    .catch(err => console.error('[story-derive] uncaught:', err));
+});
+
+/* POST /api/creatives/story-ableiten-alle  body: { job_id }
+   Leitet aus allen Feed-Creatives (1:1, kein Video) Stories ab — überspringt
+   Feed-Creatives, die bereits eine (nicht archivierte) Story-Ableitung haben. */
+router.post('/story-ableiten-alle', async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
+  const { job_id } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+
+  const { data: creatives, error } = await supabase
+    .from('talentone_creatives').select('*').eq('job_id', job_id).neq('archiviert', true);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const list = creatives || [];
+  const feed = list.filter(c => c.format === 'quadrat' && c.typ !== 'video');
+  const hatStory = new Set(list.filter(c => c.format === 'story' && c.parent_id).map(c => c.parent_id));
+  const todo = feed.filter(c => !hatStory.has(c.id));
+
+  if (!todo.length) {
+    return res.status(200).json({ accepted: true, started: 0, message: 'Keine offenen Feed-Creatives — alle haben bereits eine Story-Ableitung.' });
+  }
+
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  clearGenError(job_id);
+  res.status(202).json({ accepted: true, started: todo.length, message: `${todo.length} Story-Ableitung(en) gestartet.` });
+
+  // Sequentiell — schont OpenAI-Rate-Limits (jede Ableitung ist ein gpt-image-Call).
+  (async () => { for (const c of todo) await deriveStoryInBackground(c, job, kunde); })()
+    .catch(err => console.error('[story-derive-alle] uncaught:', err));
 });
 
 /* PATCH /api/creatives/:id/logo-position
