@@ -356,42 +356,138 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
   return bew;
 }
 
-router.post('/perspective', async (req, res) => {
+// Legt eine Kundenanfrage an (talentone_anfragen) + benachrichtigt Best-Effort
+// (Portal-Accounts mit benachrichtige_leads, sonst Kunden-Haupt-Mail). Wird aus
+// dem Ingest-Handler für neukundengewinnungs-Jobs aufgerufen.
+async function createAnfrageUndBenachrichtige({ job, body }) {
+  // Zuerst onepage.io-Format probieren (data.fields[]), sonst Perspective/flat.
+  const onepage = extractOnepage(body);
+  let name, email, telefon, daten;
+  if (onepage) {
+    ({ name, email, telefon, daten } = onepage);
+    console.log(`[webhooks/ingest] onepage.io Anfrage — name=${name} email=${email} felder=${Object.keys(daten).length}`);
+  } else {
+    const contact = extractContact(body);
+    const restDaten = {};
+    for (const [k, v] of Object.entries(body || {})) {
+      const lk = String(k).toLowerCase();
+      if (META_KEYS.has(lk) || FLAT_CONTACT_KEYS.has(lk)) continue;
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') restDaten[k] = v;
+      else if (v && typeof v === 'object') restDaten[k] = v;
+    }
+    if (Object.keys(restDaten).length === 0 && contact.antworten?.length) {
+      for (const a of contact.antworten) restDaten[a.frage || 'antwort'] = a.antwort;
+    }
+    // Auch hier Roh-Payload speichern, damit nichts verloren geht.
+    restDaten._raw = body;
+    name = contact.name; email = contact.email; telefon = contact.telefon; daten = restDaten;
+  }
+
+  const { data: anfrage, error: insErr } = await supabase
+    .from('talentone_anfragen').insert({
+      job_id: job.id,
+      name, email, telefon, daten,
+      quelle:  'webhook',
+      status:  'neu',
+    }).select().single();
+  if (insErr) throw new Error(insErr.message);
+
+  // Best-Effort-Mail: alle aktiven Portal-Accounts mit benachrichtige_leads=true
+  // + Kunden-Haupt-Mail als Fallback, plus INTERNAL_BCC. Blockt niemals die Response.
+  (async () => {
+    try {
+      const { data: kunde } = await supabase
+        .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+      if (!kunde) return;
+
+      const { data: accounts = [] } = await supabase.from('talentone_portal_accounts')
+        .select('email, benachrichtige_leads, aktiv')
+        .eq('kunde_id', kunde.id)
+        .eq('aktiv', true)
+        .eq('benachrichtige_leads', true);
+      const emails = new Set(accounts.map(a => (a.email || '').trim().toLowerCase()).filter(Boolean));
+
+      // Kunden-Haupt-Mail nur als Fallback wenn keine Portal-Accounts benachrichtigt werden
+      // sollen — verhindert doppelte Zustellung.
+      if (emails.size === 0 && kunde.email) emails.add(kunde.email.trim().toLowerCase());
+
+      const recipients = Array.from(emails);
+      if (recipients.length === 0) {
+        console.log(`[anfrage-mail] kein Empfaenger fuer kunde=${kunde.id.slice(0,8)} — Mail skipped`);
+        return;
+      }
+
+      const { sendAnfrageMail } = await import('../mail.js');
+      const { getPublicBaseUrl } = await import('../branding.js');
+      const anfragenUrl = job.anfragen_token
+        ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${job.anfragen_token}`
+        : null;
+      await sendAnfrageMail({ to: recipients, kunde, job, anfrage, anfragenUrl });
+      console.log(`[anfrage-mail] ${recipients.length} Empfaenger benachrichtigt (${recipients.join(', ')}) + INTERNAL_BCC`);
+    } catch (err) { console.warn('[anfrage-mail]', err.message); }
+  })().catch(err => console.error('[anfrage-mail-uncaught]', err.message));
+
+  return anfrage;
+}
+
+/*
+ * Einheitlicher Ingest-Endpunkt für Funnel-/Landingpage-Einreichungen.
+ *
+ * Routing-Quelle ist das DATENMODELL (talentone_jobs.projekttyp), NICHT die URL:
+ *   projekttyp='neukundengewinnung' → Kundenanfrage (talentone_anfragen)
+ *   sonst (mitarbeitergewinnung/…)  → Bewerbung (talentone_bewerbungen)
+ * Die URL-Wahl ist bewusst keine Semantik mehr: /ingest, /perspective und /leads
+ * sind Aliasse auf denselben Handler (kein Verhaltensunterschied). So kann die
+ * falsche URL im Funnel-Builder (Kries-Vorfall) keine Fehl-Einordnung mehr
+ * verursachen.
+ *
+ * Zusätzliche Absicherung: Perspective-Payloads (funnelId) werden erkannt und
+ * gegen talentone_funnels.perspective_funnel_id aufgelöst. Bei Konflikt zwischen
+ * funnelId-Match und ?job_id gewinnt der funnelId-Match (Warn-Log) — und ein
+ * Perspective-Payload ist immer eine Bewerbung.
+ *
+ * Kein stiller Drop: unbekannter/fehlender Job + erkennbarer Bewerbungs-Payload
+ * → Bewerbung mit zuordnung_unklar=true.
+ */
+async function ingestHandler(req, res) {
   const { job_id, kunde_id, secret } = req.query || {};
 
   // IMMER roh loggen — auch bei Ablehnung. Damit "kam nichts an" nie wieder
   // Raetselraten ist. Content-Type verraet Body-Parser-Probleme (leerer Body).
   const bodyKeys = req.body && typeof req.body === 'object' ? Object.keys(req.body) : [];
-  console.log(`[webhooks/perspective] IN ct=${req.headers['content-type'] || '-'} query=${JSON.stringify(req.query || {})} bodyKeys=[${bodyKeys.join(',')}] raw=${JSON.stringify(req.body ?? null).slice(0, 4000)}`);
+  console.log(`[webhooks/ingest] IN path=${req.path} ct=${req.headers['content-type'] || '-'} query=${JSON.stringify(req.query || {})} bodyKeys=[${bodyKeys.join(',')}] raw=${JSON.stringify(req.body ?? null).slice(0, 4000)}`);
 
-  if (!job_id && !kunde_id) return res.status(400).json({ error: 'job_id oder kunde_id query param fehlt.' });
-
-  const requiredSecret = process.env.PERSPECTIVE_WEBHOOK_SECRET;
-  if (requiredSecret && secret !== requiredSecret) {
-    console.warn('[webhooks/perspective] 401 invalid secret');
+  // Secret: jedes konfigurierte Webhook-Secret wird akzeptiert (Alias-kompatibel:
+  // Perspective- ODER Leads-Secret). Ist keins gesetzt, ist der Endpunkt offen.
+  const secrets = [process.env.PERSPECTIVE_WEBHOOK_SECRET, process.env.LEADS_WEBHOOK_SECRET].filter(Boolean);
+  if (secrets.length && !secrets.includes(secret)) {
+    console.warn('[webhooks/ingest] 401 invalid secret');
     return res.status(401).json({ error: 'invalid secret' });
   }
 
+  const b = req.body || {};
   try {
-    // Format-erkennend: onepage.io (data.fields[]) ODER Perspective/flat.
-    const isOnepage = Array.isArray(req.body?.data?.fields);
-    const contact = (isOnepage ? extractOnepageContact(req.body) : extractContact(req.body))
+    // Kontakt/Antworten extrahieren (Format-erkennend: onepage vs Perspective/flat).
+    const isOnepage = Array.isArray(b?.data?.fields);
+    const contact = (isOnepage ? extractOnepageContact(b) : extractContact(b))
       || { name: null, email: null, telefon: null, antworten: [] };
 
-    // Unvollstaendige Bewerbungen ausfiltern: WEDER E-Mail NOCH Telefon → 200 OK
-    // (kein Retry), aber nicht speichern.
-    if (!contact.email && !contact.telefon) {
-      console.warn(`[webhooks/perspective] SKIP no_contact — format=${isOnepage ? 'onepage' : 'perspective'} name=${contact.name || '-'} antworten=${contact.antworten?.length || 0} bodyKeys=[${bodyKeys.join(',')}]`);
-      return res.status(200).json({ ok: true, skipped: 'no_contact' });
+    // Perspective-Payload + funnelId-Match (Absicherung, hat Vorrang vor ?job_id).
+    const pFunnelId = b.funnelId || b._raw?.funnelId || null;
+    let funnel = null;
+    if (pFunnelId) {
+      const { data } = await supabase.from('talentone_funnels').select('*')
+        .eq('perspective_funnel_id', String(pFunnelId))
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      funnel = data || null;
     }
-    console.log(`[webhooks/perspective] parsed format=${isOnepage ? 'onepage' : 'perspective'} name=${contact.name || '-'} email=${contact.email || '-'} telefon=${contact.telefon || '-'} antworten=${contact.antworten?.length || 0}`);
 
-    let job = null;
-    let zuordnungUnklar = false;
-    let warnAntwort = null;
-
+    // ── kunde_id-Pfad (Multi-Stellen-Funnel): immer Bewerbung, Job per Mapping ──
     if (kunde_id) {
-      // Kunden-Webhook: Stelle per Mapping auflösen.
+      if (!contact.email && !contact.telefon) {
+        console.warn(`[webhooks/ingest] SKIP no_contact (kunde_id=${kunde_id}) name=${contact.name || '-'} antworten=${contact.antworten?.length || 0}`);
+        return res.status(200).json({ ok: true, skipped: 'no_contact' });
+      }
       const { data: kunde } = await supabase.from('talentone_kunden')
         .select('id, funnel_stellen_mapping').eq('id', kunde_id).maybeSingle();
       if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
@@ -400,178 +496,96 @@ router.post('/perspective', async (req, res) => {
         .eq('kunde_id', kunde.id).order('created_at', { ascending: true });
       if (!kJobs?.length) return res.status(404).json({ error: 'Kunde hat keine Stellen.' });
       const jobById = Object.fromEntries(kJobs.map(j => [j.id, j]));
-
       const mapping = kunde.funnel_stellen_mapping || {};
       const match = matchJobFromMapping(mapping, contact.antworten);
+      let job, zuordnungUnklar = false, warnAntwort = null;
       if (match.job_id && jobById[match.job_id]) {
         job = jobById[match.job_id];
       } else if (mapping.default_job_id && jobById[mapping.default_job_id]) {
-        // Kein Regel-Treffer, aber expliziter Default-Job → saubere Zuordnung.
         job = jobById[mapping.default_job_id];
       } else {
-        // Kein Treffer und kein Default → ältesten Job als Auffangnetz nutzen,
-        // als "unklar" markieren + interne Warn-Mail. Nichts geht verloren.
+        // Kein Treffer und kein Default → ältesten Job als Auffangnetz, als "unklar"
+        // markieren + interne Warn-Mail. Nichts geht verloren.
         job = kJobs[0];
         zuordnungUnklar = true;
         warnAntwort = contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null;
       }
-    } else {
-      const { data: j } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
-      if (!j) return res.status(404).json({ error: 'Job nicht gefunden.' });
-      job = j;
+      // Funnel für KO-Bewertung: funnelId-Match bevorzugt, sonst über job_id.
+      let koFunnel = funnel;
+      if (!koFunnel) {
+        koFunnel = (await supabase.from('talentone_funnels').select('*')
+          .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle()).data || null;
+      }
+      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel: koFunnel, zuordnungUnklar, warnAntwort, rawBody: b });
+      return res.status(201).json({ ok: true, routed: 'bewerbung', bewerbung_id: bew.id, job_id: job.id, zuordnung_unklar: zuordnungUnklar });
     }
 
-    const { data: funnel } = await supabase
-      .from('talentone_funnels').select('*')
-      .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    // ── Job bestimmen: funnelId-Match hat Vorrang vor ?job_id (bei Konflikt Warn) ──
+    const jobIdFromFunnel = funnel?.job_id || null;
+    if (jobIdFromFunnel && job_id && String(jobIdFromFunnel) !== String(job_id)) {
+      console.warn(`[webhooks/ingest] Konflikt: funnelId-Match Job ${jobIdFromFunnel} ≠ ?job_id ${job_id} — funnelId gewinnt.`);
+    }
+    const effectiveJobId = jobIdFromFunnel || job_id || null;
+    let job = null;
+    if (effectiveJobId) {
+      job = (await supabase.from('talentone_jobs').select('*').eq('id', effectiveJobId).maybeSingle()).data || null;
+    }
 
-    let bew;
-    try {
-      bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar, warnAntwort, rawBody: req.body });
-    } catch (err) { return res.status(500).json({ error: err.message }); }
+    // Erkennbarer Bewerbungs-Payload? (Perspective-Shape oder echte Antworten)
+    const looksBewerbung = !!(pFunnelId || b.profile || b.values || (contact.antworten && contact.antworten.length));
 
-    res.status(201).json({ ok: true, bewerbung_id: bew.id, job_id: job.id, zuordnung_unklar: zuordnungUnklar });
-  } catch (err) {
-    console.error('[webhooks/perspective]', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // ── Kein Job auflösbar → nie stiller Drop ──
+    if (!job) {
+      if ((contact.email || contact.telefon) && looksBewerbung) {
+        const bew = await insertBewerbungUndBenachrichtige({
+          contact, job: null, funnel,
+          zuordnungUnklar: true,
+          warnAntwort: contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null,
+          rawBody: b,
+        });
+        console.warn(`[webhooks/ingest] kein Job (job_id=${job_id || '-'} funnelId=${pFunnelId || '-'}) → Bewerbung ${bew.id} zuordnung_unklar=true`);
+        return res.status(201).json({ ok: true, routed: 'bewerbung', bewerbung_id: bew.id, zuordnung_unklar: true });
+      }
+      // Keine Bewerbung + kein Job → Anfrage braucht job_id (NOT NULL). Log + 200 (kein Retry).
+      console.warn(`[webhooks/ingest] kein Job und kein Bewerbungs-Payload — nichts angelegt (job_id=${job_id || '-'}).`);
+      return res.status(200).json({ ok: true, skipped: 'no_job' });
+    }
 
-/* POST /api/webhooks/leads?job_id=<uuid>&secret=<optional>
-   Nimmt Kundenanfragen aus externen Landingpage-Buildern (onepage.io u. Ä.)
-   entgegen. Kontaktdaten werden extrahiert (Name/Mail/Telefon), alle
-   weiteren Felder landen in `daten` (jsonb). Anschließend Best-Effort-Mail
-   an den Kunden. */
-router.post('/leads', async (req, res) => {
-  const { job_id, secret } = req.query || {};
+    // ── Routing per projekttyp; Perspective-Payload erzwingt Bewerbung ──
+    const istNeukunden = job.projekttyp === 'neukundengewinnung';
+    const alsBewerbung = pFunnelId ? true : !istNeukunden;
 
-  const requiredSecret = process.env.LEADS_WEBHOOK_SECRET;
-  if (requiredSecret && secret !== requiredSecret) {
-    return res.status(401).json({ error: 'invalid secret' });
-  }
-
-  // ── Härtung: Perspective-Payloads gehören NIE in eine Kundenanfrage ──
-  // Enthält der Payload eine Perspective-funnelId (+ Antwort-Profil), wird gegen
-  // talentone_funnels.perspective_funnel_id aufgelöst und eine BEWERBUNG angelegt.
-  // Kein Match → trotzdem Bewerbung mit zuordnung_unklar=true (nie stille Anfrage).
-  const b = req.body || {};
-  const pFunnelId = b.funnelId || b._raw?.funnelId || null;
-  const looksPerspective = !!(pFunnelId && (b.profile || b.values || b.trackingVersion != null || b._raw?.profile));
-  if (looksPerspective) {
-    try {
-      const payload = (b.profile || b.values || b.funnelId) ? b : (b._raw || b);
-      const contact = extractContact(payload);
+    if (alsBewerbung) {
       if (!contact.email && !contact.telefon) {
+        console.warn(`[webhooks/ingest] SKIP no_contact (job=${job.id}) name=${contact.name || '-'} antworten=${contact.antworten?.length || 0}`);
         return res.status(200).json({ ok: true, skipped: 'no_contact' });
       }
-
-      const { data: funnel } = await supabase
-        .from('talentone_funnels').select('*')
-        .eq('perspective_funnel_id', String(pFunnelId))
-        .order('created_at', { ascending: false }).limit(1).maybeSingle();
-
-      let job = null;
-      if (funnel?.job_id) {
-        job = (await supabase.from('talentone_jobs').select('*').eq('id', funnel.job_id).maybeSingle()).data || null;
+      // Funnel für KO: funnelId-Match bevorzugt, sonst über job_id.
+      let koFunnel = funnel;
+      if (!koFunnel) {
+        koFunnel = (await supabase.from('talentone_funnels').select('*')
+          .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle()).data || null;
       }
-      // Fallback-Job aus ?job_id, falls Funnel/Job nicht auflösbar.
-      if (!job && job_id) {
-        job = (await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle()).data || null;
-      }
-      const zuordnungUnklar = !funnel || !job;
-      const warnAntwort = zuordnungUnklar
-        ? (contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null)
-        : null;
-
-      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar, warnAntwort, rawBody: req.body });
-      console.log(`[webhooks/leads] Perspective erkannt → Bewerbung ${bew.id} (funnelId=${pFunnelId} funnel=${funnel?.id || '-'} job=${job?.id || '-'} unklar=${zuordnungUnklar})`);
-      return res.status(201).json({ ok: true, bewerbung_id: bew.id, routed: 'bewerbung', zuordnung_unklar: zuordnungUnklar });
-    } catch (err) {
-      console.error('[webhooks/leads perspective]', err.message);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-
-  if (!job_id) return res.status(400).json({ error: 'job_id query param fehlt.' });
-
-  try {
-    const { data: job, error: jE } = await supabase
-      .from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
-    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-
-    // Zuerst onepage.io-Format probieren (data.fields[]), sonst Perspective/flat.
-    const onepage = extractOnepage(req.body);
-    let name, email, telefon, daten;
-    if (onepage) {
-      ({ name, email, telefon, daten } = onepage);
-      console.log(`[webhooks/leads] onepage.io Payload erkannt — name=${name} email=${email} felder=${Object.keys(daten).length}`);
-    } else {
-      const contact = extractContact(req.body);
-      const restDaten = {};
-      for (const [k, v] of Object.entries(req.body || {})) {
-        const lk = String(k).toLowerCase();
-        if (META_KEYS.has(lk) || FLAT_CONTACT_KEYS.has(lk)) continue;
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') restDaten[k] = v;
-        else if (v && typeof v === 'object') restDaten[k] = v;
-      }
-      if (Object.keys(restDaten).length === 0 && contact.antworten?.length) {
-        for (const a of contact.antworten) restDaten[a.frage || 'antwort'] = a.antwort;
-      }
-      // Auch hier Roh-Payload speichern, damit nichts verloren geht.
-      restDaten._raw = req.body;
-      name = contact.name; email = contact.email; telefon = contact.telefon; daten = restDaten;
+      // Perspective-Payload, aber funnelId nicht gematcht → Zuordnung unsicher.
+      const unklar = !!pFunnelId && !funnel;
+      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel: koFunnel, zuordnungUnklar: unklar, warnAntwort: null, rawBody: b });
+      return res.status(201).json({ ok: true, routed: 'bewerbung', bewerbung_id: bew.id, job_id: job.id, zuordnung_unklar: unklar });
     }
 
-    const { data: anfrage, error: insErr } = await supabase
-      .from('talentone_anfragen').insert({
-        job_id: job.id,
-        name, email, telefon, daten,
-        quelle:  'webhook',
-        status:  'neu',
-      }).select().single();
-    if (insErr) return res.status(500).json({ error: insErr.message });
-
-    // Best-Effort-Mail: alle aktiven Portal-Accounts mit benachrichtige_leads=true
-    // + Kunden-Haupt-Mail als Fallback, plus INTERNAL_BCC. Blockt niemals die Response.
-    (async () => {
-      try {
-        const { data: kunde } = await supabase
-          .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
-        if (!kunde) return;
-
-        const { data: accounts = [] } = await supabase.from('talentone_portal_accounts')
-          .select('email, benachrichtige_leads, aktiv')
-          .eq('kunde_id', kunde.id)
-          .eq('aktiv', true)
-          .eq('benachrichtige_leads', true);
-        const emails = new Set(accounts.map(a => (a.email || '').trim().toLowerCase()).filter(Boolean));
-
-        // Kunden-Haupt-Mail nur als Fallback wenn keine Portal-Accounts benachrichtigt werden
-        // sollen — verhindert doppelte Zustellung wenn der Kunde die Haupt-Adresse
-        // auch als Portal-Account angelegt hat.
-        if (emails.size === 0 && kunde.email) emails.add(kunde.email.trim().toLowerCase());
-
-        const recipients = Array.from(emails);
-        if (recipients.length === 0) {
-          console.log(`[leads-mail] kein Empfaenger fuer kunde=${kunde.id.slice(0,8)} — Mail skipped`);
-          return;
-        }
-
-        const { sendAnfrageMail } = await import('../mail.js');
-        const { getPublicBaseUrl } = await import('../branding.js');
-        const anfragenUrl = job.anfragen_token
-          ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${job.anfragen_token}`
-          : null;
-        await sendAnfrageMail({ to: recipients, kunde, job, anfrage, anfragenUrl });
-        console.log(`[leads-mail] ${recipients.length} Empfaenger benachrichtigt (${recipients.join(', ')}) + INTERNAL_BCC`);
-      } catch (err) { console.warn('[leads-mail]', err.message); }
-    })().catch(err => console.error('[leads-mail-uncaught]', err.message));
-
-    res.status(201).json({ ok: true, anfrage_id: anfrage.id });
+    // ── Kundenanfrage (neukundengewinnung) ──
+    const anfrage = await createAnfrageUndBenachrichtige({ job, body: b });
+    return res.status(201).json({ ok: true, routed: 'anfrage', anfrage_id: anfrage.id, job_id: job.id });
   } catch (err) {
-    console.error('[webhooks/leads]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[webhooks/ingest]', err.message);
+    return res.status(500).json({ error: err.message });
   }
-});
+}
+
+// Neuer Standard-Endpunkt für alle Funnel-/Landingpage-Einreichungen.
+router.post('/ingest', ingestHandler);
+// Aliasse — Alt-URLs zeigen auf denselben Handler, damit bestehende Einträge in
+// Perspective/Onepage nicht brechen. Kein Verhaltensunterschied mehr.
+router.post('/perspective', ingestHandler);
+router.post('/leads', ingestHandler);
 
 export default router;

@@ -104,6 +104,12 @@ export default function JobFunnel() {
   const [extern, setExtern] = useState(false);
   const [externUrl, setExternUrl] = useState('');
   const [externSheetUrl, setExternSheetUrl] = useState('');
+  // Perspective-spezifisch: Editor-URL (→ perspective_funnel_id parsen), KO-Fragen,
+  // manuelle Erledigungs-Haken.
+  const [perspectiveEditorUrl, setPerspectiveEditorUrl] = useState('');
+  const [fragen, setFragen] = useState([]);
+  const [manualPixelDone, setManualPixelDone] = useState(false);
+  const [manualWebhookDone, setManualWebhookDone] = useState(false);
   const [bewerbungEmail, setBewerbungEmail] = useState('');
   const [pixelPresets, setPixelPresets] = useState([]);
 
@@ -154,6 +160,12 @@ export default function JobFunnel() {
         setExtern(!!funnelData.extern);
         setExternUrl(funnelData.extern_url || '');
         setExternSheetUrl(funnelData.extern_sheet_url || '');
+        setPerspectiveEditorUrl(funnelData.perspective_editor_url || '');
+        setFragen(Array.isArray(funnelData.fragen)
+          ? funnelData.fragen.map(fr => ({ ...fr, options: normalizeOptions(fr.options) }))
+          : []);
+        setManualPixelDone(!!funnelData.manual_pixel_done);
+        setManualWebhookDone(!!funnelData.manual_webhook_done);
         setBewerbungEmail(job?.bewerbung_email || '');
         // Default: Startseite ausgewählt
         if (Array.isArray(funnelData.screens) && funnelData.screens[0]) {
@@ -288,14 +300,24 @@ export default function JobFunnel() {
   async function save(extra = {}) {
     setSaveBusy(true); setSaveMsg('');
     try {
+      const istPerspective = funnel?.funnel_typ === 'perspective';
       const body = {
         screens,
         pixel_id: pixelId.trim() || null,
         capi_access_token: capiAccessToken.trim() || null,
         conversion_ziel: conversionZiel.trim() || null,
-        extern,
+        // Perspective ist immer ein externer Funnel (eigene Live-URL + Webhook).
+        extern: istPerspective ? true : extern,
         extern_url: externUrl.trim() || null,
         extern_sheet_url: externSheetUrl.trim() || null,
+        ...(istPerspective ? {
+          perspective_editor_url: perspectiveEditorUrl.trim() || null,
+          // 24-stellige Perspective-Funnel-ID aus der Editor-URL ableiten (für Webhook-Zuordnung).
+          perspective_funnel_id: (perspectiveEditorUrl.match(/[a-f0-9]{24}/i) || [])[0] || null,
+          fragen,
+          manual_pixel_done: manualPixelDone,
+          manual_webhook_done: manualWebhookDone,
+        } : {}),
         ...extra,
       };
       const res = await api(`/funnels/${funnel.id}`, { method: 'PATCH', body });
@@ -343,10 +365,16 @@ export default function JobFunnel() {
     : funnel.funnel_typ === 'intern' ? 'intern'
     : (extern || funnel.funnel_typ === 'onepage') ? 'onepage'
     : 'intern';
+  const istPerspective = variante === 'perspective';
+  // Perspective verhält sich wie ein externer Funnel (Live-URL + Webhook), auch
+  // wenn extern (noch) false ist (frisch angelegte Zeile).
+  const externAktiv = extern || istPerspective;
+  // Live-Status aus echten Daten: veröffentlicht ODER Live-URL gesetzt.
+  const perspectiveLive = veroeffentlicht || !!externUrl.trim();
 
   const brandBase = getBrandBaseUrl(kunde?.agentur);
   const internalUrl = `${brandBase}/f/${funnel.id}`;
-  const funnelUrl = extern && externUrl.trim() ? externUrl.trim() : internalUrl;
+  const funnelUrl = externAktiv && externUrl.trim() ? externUrl.trim() : internalUrl;
   const previewFunnel = { ...funnel, screens, conversion_ziel: conversionZiel };
 
   const allImages = [
@@ -378,30 +406,71 @@ export default function JobFunnel() {
           onClick={() => variante !== 'onepage' && changeTyp('onepage')}>🔗 Extern (Onepage, Heyflow o.ä.)</button>
       </div>
 
-      {variante === 'perspective' && <PerspectiveSection job={job} kunde={kunde} reload={reload} />}
-
-      {extern && (
+      {externAktiv && (
         <fieldset className="formular-section">
-          <legend>{variante === 'perspective' ? 'Perspective-Funnel' : 'Externer Funnel'}</legend>
-          <p className="pane-hint">{variante === 'perspective'
-            ? 'Funnel-URL nach dem Publish in Perspective hier eintragen. Bewerbungen kommen per Webhook (siehe unten).'
+          <legend>{istPerspective ? '🚀 Perspective-Funnel' : 'Externer Funnel'}</legend>
+          <p className="pane-hint">{istPerspective
+            ? 'Der Perspective-Funnel wird extern (per MCP/Chat) erstellt. Live-URL + Editor-URL hier hinterlegen; Bewerbungen kommen per Webhook (siehe unten).'
             : 'Externen Funnel-Builder (Onepage, Heyflow o.ä.) verknüpfen — URL eintragen; Bewerbungen kommen per Webhook (siehe unten).'}</p>
           <div className="form-grid">
             <label className="field field-full">
-              <span>Externe Funnel-URL *</span>
-              <input type="url" placeholder="https://app.perspective.co/…" value={externUrl} onChange={e => setExternUrl(e.target.value)} />
+              <span>{istPerspective ? 'Live-URL' : 'Externe Funnel-URL *'}</span>
+              <input type="url" placeholder={istPerspective ? 'https://jobs.example.com/stelle/' : 'https://app.perspective.co/…'} value={externUrl} onChange={e => setExternUrl(e.target.value)} />
             </label>
+            {istPerspective && (
+              <label className="field field-full">
+                <span>Perspective-Editor-URL</span>
+                <input type="url" placeholder="https://app.perspective.co/funnel/6a7d9f328b6d7b5b15b573b6" value={perspectiveEditorUrl} onChange={e => setPerspectiveEditorUrl(e.target.value)} />
+                <p className="pane-hint" style={{ marginTop: 4 }}>
+                  {(() => {
+                    const pid = (perspectiveEditorUrl.match(/[a-f0-9]{24}/i) || [])[0];
+                    return pid
+                      ? <>Erkannte Funnel-ID: <code>{pid}</code> — wird beim Speichern gesetzt (Webhook-Zuordnung).</>
+                      : 'Die 24-stellige Funnel-ID wird beim Speichern automatisch aus der URL gelesen.';
+                  })()}
+                </p>
+              </label>
+            )}
             <label className="field field-full">
               <span>Google Sheet URL der Bewerber (optional)</span>
               <input type="url" placeholder="https://docs.google.com/spreadsheets/…" value={externSheetUrl} onChange={e => setExternSheetUrl(e.target.value)} />
             </label>
           </div>
 
-          {variante === 'perspective' && <PixelPresetCopyList presets={pixelPresets} />}
-          <WebhookInfo jobId={job.id} perspective={variante === 'perspective'} />
+          {istPerspective && <PixelPresetCopyList presets={pixelPresets} />}
+          <WebhookInfo jobId={job.id} perspective={istPerspective} />
+          {istPerspective && (
+            <div style={{ marginTop: 10, padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#78350f', marginBottom: 6 }}>In Perspective manuell erledigen:</div>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+                <input type="checkbox" checked={manualWebhookDone} onChange={e => setManualWebhookDone(e.target.checked)} />
+                Webhook (oben) in Perspective eingetragen
+              </label>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                <input type="checkbox" checked={manualPixelDone} onChange={e => setManualPixelDone(e.target.checked)} />
+                Meta Pixel + CAPI im Funnel hinterlegt
+              </label>
+              <p className="pane-hint" style={{ marginTop: 6, marginBottom: 0 }}>Haken werden beim Speichern übernommen.</p>
+            </div>
+          )}
           <MultiStellenMapping kunde={kunde} />
+
+          {istPerspective && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-4)', marginBottom: 6 }}>KO-Fragen (Vorqualifizierung)</div>
+              <p className="pane-hint" style={{ marginTop: 0 }}>
+                Diese Definitionen steuern die <strong>serverseitige KO-Bewertung</strong> der per Webhook eingehenden Bewerbungen.
+                Frage-Text und Optionen müssen mit dem Perspective-Funnel übereinstimmen; mit 🚩 markierte Optionen gelten als KO-Kriterium.
+              </p>
+              <KoFragenEditor fragen={fragen} onChange={setFragen} />
+            </div>
+          )}
         </fieldset>
       )}
+
+      {/* Automatische Perspective-Erstellung — derzeit deaktiviert, als graue
+          Fläche erhalten (nach dem API-Upgrade schreibt sie in dieselben Felder). */}
+      {istPerspective && <PerspectiveSection job={job} kunde={kunde} reload={reload} />}
 
       {/* Telefonische Vorqualifizierung */}
       <VorqualifizierungSection job={job} reload={reload} />
@@ -431,9 +500,9 @@ export default function JobFunnel() {
       {/* Publish-Card */}
       <div className="funnel-publish-card">
         <div className="funnel-publish-status">
-          <span className={`funnel-status-dot ${(veroeffentlicht || extern) ? 'is-live' : ''}`} />
-          <strong>{extern ? 'Extern' : (veroeffentlicht ? 'Live' : 'Entwurf')}</strong>
-          {((veroeffentlicht && !extern) || (extern && externUrl.trim()))
+          <span className={`funnel-status-dot ${(istPerspective ? perspectiveLive : (veroeffentlicht || extern)) ? 'is-live' : ''}`} />
+          <strong>{istPerspective ? (perspectiveLive ? 'Live' : 'Entwurf') : (extern ? 'Extern' : (veroeffentlicht ? 'Live' : 'Entwurf'))}</strong>
+          {(istPerspective ? !!externUrl.trim() : ((veroeffentlicht && !extern) || (extern && externUrl.trim())))
             ? <a href={funnelUrl} target="_blank" rel="noreferrer" className="funnel-url-link">{funnelUrl}</a>
             : <span className="funnel-url-link funnel-url-disabled">{funnelUrl}</span>}
         </div>
@@ -441,7 +510,7 @@ export default function JobFunnel() {
           <button className="btn-ghost btn-sm" onClick={() => save()} disabled={saveBusy}>
             {saveBusy ? 'Speichere…' : 'Speichern'}
           </button>
-          {!extern && (
+          {!externAktiv && (
             <button className={veroeffentlicht ? 'btn-ghost btn-sm' : 'btn-primary btn-sm'} onClick={togglePublish}>
               {veroeffentlicht ? 'Offline nehmen' : 'Veröffentlichen'}
             </button>
@@ -452,6 +521,10 @@ export default function JobFunnel() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      {/* Perspective: kein interner Screens-Editor — stattdessen Live-/Editor-Vorschau. */}
+      {istPerspective && <PerspectivePreview liveUrl={externUrl.trim()} editorUrl={perspectiveEditorUrl.trim()} />}
+
+      {!istPerspective && (
       <div className={`funnel-editor-cols ${extern && externUrl.trim() ? 'is-extern-active' : ''}`}>
         {/* ───────── Linke Spalte: Screen-Liste + Detail-Editor ───────── */}
         <div className="funnel-editor-left">
@@ -575,11 +648,12 @@ export default function JobFunnel() {
           </div>
         </aside>
       </div>
+      )}
 
       {/* Bewerbungen — eigener Full-Width-Container damit die Tabelle mit
           horizontalem Scroll nicht das 2-Spalten-Layout darüber sprengt.
-          Bei externem Funnel ausgeblendet (Tracking läuft dort extern). */}
-      {!(extern && externUrl.trim()) && (
+          Bei Onepage-Extern ausgeblendet; bei Perspective sichtbar (Webhook-Eingang). */}
+      {(istPerspective || !(extern && externUrl.trim())) && (
         <fieldset className="formular-section bewerbungen-section bewerbungen-fullwidth">
           <legend>Eingegangene Bewerbungen</legend>
           <KriterienPanel job={job} onJobUpdated={() => reload?.()} />
@@ -994,182 +1068,89 @@ function ScreenEditor({ screen, patch, onPickImage, onClearImage }) {
 /* ═════════════════════ Webhook-Info Box (Perspective) ═════════════════════ */
 
 /* ═══════════════════════ Perspective-Integration ═══════════════════════ */
-function PerspectiveSection({ job, kunde, reload }) {
-  const [funnelRow, setFunnelRow] = useState(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showPublish, setShowPublish] = useState(false);
-  const [showUpdate, setShowUpdate] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  // Ist die Perspective-MCP-Integration scharf (Token gesetzt)? null = noch unbekannt.
-  const [perspectiveEnabled, setPerspectiveEnabled] = useState(null);
-  // Editierbare Live-URL (extern_url) — nach dem Publish nachtragbar.
-  const [liveUrl, setLiveUrl] = useState('');
-  const [savingUrl, setSavingUrl] = useState(false);
-  const [urlMsg, setUrlMsg] = useState('');
 
-  useEffect(() => {
-    api('/perspective/config')
-      .then(r => setPerspectiveEnabled(!!r.enabled))
-      .catch(() => setPerspectiveEnabled(false));
-  }, []);
-
-  // Vorhandenen Perspective-Funnel dieses Jobs laden
-  async function load() {
-    try {
-      const res = await api(`/funnels?job_id=${job.id}`);
-      // Perspective-Funnel erkennen — auch extern angelegte/verknüpfte Zeilen, bei
-      // denen perspective_job_id (noch) NULL ist, aber perspective_funnel_id bzw.
-      // funnel_typ='perspective' gesetzt sind. Das frühere reine job_id-Gate hat
-      // solche Funnels ausgeblendet → nicht-editierbarer, leerer „verknüpfen"-Hinweis.
-      const f = res.funnel;
-      const row = f && (f.perspective_funnel_id || f.perspective_job_id || f.funnel_typ === 'perspective') ? f : null;
-      setFunnelRow(row);
-    } catch (e) { console.warn('[perspective/load]', e.message); }
+// Vorschau für Perspective-Funnel: iframe auf die Live-/Editor-URL (kein interner
+// Screens-Editor). Fällt auf einen Link-Hinweis zurück, wenn keine URL gesetzt ist.
+function PerspectivePreview({ liveUrl, editorUrl }) {
+  const url = liveUrl || editorUrl || '';
+  if (!url) {
+    return (
+      <div className="funnel-preview-head" style={{ marginBottom: 16 }}>
+        <span className="pane-hint" style={{ margin: 0 }}>
+          Noch keine Live-URL hinterlegt — trage die Perspective-URL oben ein, dann erscheint hier die Vorschau.
+        </span>
+      </div>
+    );
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
-
-  // Live-URL-Feld immer mit dem hinterlegten Stand vorbelegen (Live-URL aus
-  // extern_url, sonst die Editor-URL) — statt eines leeren Platzhalters.
-  useEffect(() => {
-    setLiveUrl(funnelRow?.extern_url || funnelRow?.perspective_editor_url || '');
-  }, [funnelRow?.id, funnelRow?.extern_url, funnelRow?.perspective_editor_url]);
-
-  async function saveLiveUrl() {
-    if (!funnelRow?.id) return;
-    setSavingUrl(true); setUrlMsg('');
-    try {
-      const url = liveUrl.trim();
-      const res = await api(`/funnels/${funnelRow.id}`, { method: 'PATCH', body: { extern_url: url || null, extern: !!url } });
-      setFunnelRow(res.funnel);
-      setUrlMsg('✓ Gespeichert');
-      setTimeout(() => setUrlMsg(''), 2000);
-      reload?.();
-    } catch (e) { alert(e.message); }
-    finally { setSavingUrl(false); }
-  }
-
-  // Polling wenn Status polling/creating
-  useEffect(() => {
-    if (!funnelRow?.id) return;
-    if (!['polling', 'creating'].includes(funnelRow.perspective_status)) return;
-    let timer;
-    async function tick() {
-      try {
-        const res = await api(`/perspective/status/${funnelRow.id}`);
-        if (res.status === 'completed') {
-          await load();
-          return;
-        }
-        if (res.status === 'error') { setErr(res.error || 'Fehler in Perspective'); await load(); return; }
-      } catch (e) { /* stay polling */ }
-      timer = setTimeout(tick, 8000);
-    }
-    timer = setTimeout(tick, 5000);
-    return () => timer && clearTimeout(timer);
-  }, [funnelRow?.id, funnelRow?.perspective_status]);
-
-  async function toggleChecklist(field, value) {
-    try {
-      const res = await api(`/perspective/checklist/${funnelRow.id}`, { method: 'PATCH', body: { [field]: value } });
-      setFunnelRow(res.funnel);
-    } catch (e) { alert(e.message); }
-  }
-
   return (
-    <fieldset className="formular-section" style={{ borderColor: '#7c3aed' }}>
-      <legend style={{ color: '#7c3aed', fontWeight: 700 }}>🚀 Perspective-Funnel (automatisch erstellen)</legend>
-      {!funnelRow && perspectiveEnabled === true && (
-        <>
-          <p className="pane-hint">Perspective baut den Funnel per KI aus deinen Job-Daten. Der Funnel bleibt Draft, bis du ihn hier veröffentlichst.</p>
-          <button className="btn-primary" onClick={() => setShowCreate(true)}>🚀 Perspective-Funnel erstellen</button>
-        </>
-      )}
-      {!funnelRow && perspectiveEnabled === false && (
-        <p className="pane-hint">
-          Perspective-Funnel verknüpfen: Funnel-URL nach dem Publish hier eintragen.
-        </p>
-      )}
-      {funnelRow && (
-        <>
-          <label className="field field-full" style={{ marginBottom: 12 }}>
-            <span>Funnel-URL (Live)</span>
+    <div className="funnel-editor-right" style={{ marginBottom: 16 }}>
+      <div className="funnel-preview-head">
+        <strong>Vorschau · Perspective-Funnel</strong>
+        <a className="btn-ghost btn-sm" href={url} target="_blank" rel="noreferrer">In neuem Tab öffnen ↗</a>
+      </div>
+      <div className="funnel-preview-stage" style={{ height: 640 }}>
+        <iframe
+          key={url}
+          src={url}
+          title="Perspective-Funnel-Vorschau"
+          style={{ width: '100%', height: '100%', border: '1px solid var(--line)', borderRadius: 10, background: '#fff' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// KO-Fragen-Editor: bearbeitet funnel.fragen ([{ text, options:[{text, ko}] }]).
+// Steuert die serverseitige KO-Bewertung der Webhook-Bewerbungen.
+function KoFragenEditor({ fragen = [], onChange }) {
+  function updateFrage(i, patch) { onChange(fragen.map((f, idx) => idx === i ? { ...f, ...patch } : f)); }
+  function removeFrage(i) { onChange(fragen.filter((_, idx) => idx !== i)); }
+  function addFrage() { onChange([...fragen, { text: '', options: [] }]); }
+  return (
+    <div className="chips-editor is-vertical" style={{ gap: 14 }}>
+      {fragen.length === 0 && <p className="pane-hint" style={{ margin: 0 }}>Noch keine KO-Fragen hinterlegt.</p>}
+      {fragen.map((f, i) => (
+        <div key={i} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 10 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
             <input
-              type="url" value={liveUrl}
-              placeholder={funnelRow.perspective_editor_url || 'https://app.perspective.co/…'}
-              onChange={e => setLiveUrl(e.target.value)}
+              value={f.text || ''}
+              onChange={e => updateFrage(i, { text: e.target.value })}
+              placeholder="Frage-Text (muss mit Perspective übereinstimmen)"
+              className="cell-input" style={{ flex: 1 }}
             />
-            <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="button" className="btn-ghost btn-sm" onClick={saveLiveUrl} disabled={savingUrl}>
-                {savingUrl ? 'Speichere…' : 'URL speichern'}
-              </button>
-              {funnelRow.perspective_editor_url && liveUrl.trim() !== funnelRow.perspective_editor_url && (
-                <button type="button" className="btn-ghost btn-sm" onClick={() => setLiveUrl(funnelRow.perspective_editor_url)}>Editor-URL übernehmen</button>
-              )}
-              {urlMsg && <span style={{ fontSize: 12, color: '#16a34a' }}>{urlMsg}</span>}
-            </div>
-            <p className="pane-hint" style={{ marginTop: 4 }}>Live-URL nach dem Publish hier eintragen/korrigieren. Bewerbungen kommen per Webhook (Perspective-URL siehe unten).</p>
-          </label>
-          {(funnelRow.perspective_status === 'creating' || funnelRow.perspective_status === 'polling') && (
-            <div style={{ padding: 14, background: '#f5f3ff', borderRadius: 8, marginBottom: 12 }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>⏳ Funnel wird generiert…</div>
-              <div style={{ fontSize: 12, color: '#5a5955' }}>Perspective braucht 3–8 Minuten. Der Status aktualisiert sich automatisch — du kannst weiterarbeiten.</div>
-            </div>
-          )}
-          {funnelRow.perspective_status === 'error' && (
-            <div style={{ padding: 14, background: '#fee2e2', color: '#991b1b', borderRadius: 8, marginBottom: 12 }}>
-              <strong>Fehler:</strong> {funnelRow.perspective_last_error || err || 'Unbekannt'}
-              <button className="btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => setShowCreate(true)}>Neu versuchen</button>
-            </div>
-          )}
-          {funnelRow.perspective_status === 'completed' && (
-            <>
-              <div style={{ padding: 14, background: '#dcfce7', borderRadius: 8, marginBottom: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>✅ Perspective-Funnel erstellt</div>
-                <div style={{ fontSize: 12, marginBottom: 8 }}>
-                  {funnelRow.perspective_editor_url && (
-                    <>Editor: <a href={funnelRow.perspective_editor_url} target="_blank" rel="noreferrer">{funnelRow.perspective_editor_url}</a></>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {!funnelRow.extern_url && (
-                    <button className="btn-primary btn-sm" onClick={() => setShowPublish(true)}>📤 Funnel veröffentlichen</button>
-                  )}
-                  <button className="btn-ghost btn-sm" onClick={() => setShowUpdate(true)}>✏️ Funnel anpassen</button>
-                </div>
-              </div>
+            <button type="button" className="btn-ghost btn-sm btn-danger" onClick={() => removeFrage(i)}>Frage löschen</button>
+          </div>
+          <OptionsEditor options={normalizeOptions(f.options)} onChange={opts => updateFrage(i, { options: opts })} />
+        </div>
+      ))}
+      <button type="button" className="btn-ghost btn-sm" onClick={addFrage} style={{ alignSelf: 'flex-start' }}>+ KO-Frage hinzufügen</button>
+    </div>
+  );
+}
 
-              {funnelRow.extern_url && (
-                <div style={{ padding: 12, background: '#eff6ff', borderRadius: 8, marginBottom: 12, fontSize: 12 }}>
-                  <strong>Live:</strong> <a href={funnelRow.extern_url} target="_blank" rel="noreferrer">{funnelRow.extern_url}</a>
-                </div>
-              )}
-
-              <ManuellChecklist funnelRow={funnelRow} onToggle={toggleChecklist} jobId={job.id} />
-            </>
-          )}
-        </>
-      )}
-
+// Automatische Perspective-Erstellung — derzeit deaktiviert (API-Upgrade ausstehend).
+// Als graue Fläche erhalten: nach dem Upgrade schreibt der Flow in dieselben Felder
+// (Live-URL, Editor-URL, Webhook), die oben manuell gepflegt werden.
+function PerspectiveSection({ job, kunde, reload }) {
+  const [showCreate, setShowCreate] = useState(false);
+  return (
+    <fieldset className="formular-section" style={{ borderColor: '#e5e5e5', opacity: 0.6 }}>
+      <legend style={{ color: '#7c3aed', fontWeight: 700 }}>🚀 Automatisch erstellen (Perspective-API)</legend>
+      <p className="pane-hint">
+        Perspective baut den Funnel per KI aus den Job-Daten und trägt Webhook/Pixel automatisch ein.
+        {' '}<strong>Derzeit deaktiviert (API-Upgrade ausstehend)</strong> — bis dahin wird der Funnel extern
+        (per MCP/Chat) erstellt und oben verknüpft. Nach dem Upgrade schreibt dieser Flow in dieselben Felder.
+      </p>
+      <button type="button" className="btn-primary" disabled
+        title="Derzeit deaktiviert (API-Upgrade ausstehend)"
+        onClick={() => setShowCreate(true)}>
+        🚀 Perspective-Funnel automatisch erstellen
+      </button>
       {showCreate && (
         <CreateModal
           job={job} kunde={kunde}
           onClose={() => setShowCreate(false)}
-          onDone={(row) => { setFunnelRow(row); setShowCreate(false); }}
-        />
-      )}
-      {showPublish && funnelRow && (
-        <PublishModal
-          funnelRow={funnelRow} kunde={kunde}
-          onClose={() => setShowPublish(false)}
-          onDone={(updated) => { setFunnelRow(updated); setShowPublish(false); }}
-        />
-      )}
-      {showUpdate && funnelRow && (
-        <UpdateModal
-          funnelRow={funnelRow}
-          onClose={() => setShowUpdate(false)}
-          onDone={() => { setShowUpdate(false); load(); }}
+          onDone={() => { setShowCreate(false); reload?.(); }}
         />
       )}
     </fieldset>
@@ -1177,10 +1158,9 @@ function PerspectiveSection({ job, kunde, reload }) {
 }
 
 function ManuellChecklist({ funnelRow, onToggle, jobId }) {
-  // Perspective-Bewerbungen MÜSSEN an den Perspective-Endpunkt (legt Bewerbungen
-  // an) — NICHT an /api/webhooks/leads (das ist der generische Kundenanfrage-
-  // Eingang). Falsche URL = Bewerbung landet als Anfrage.
-  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
+  // Einheitlicher Ingest-Endpunkt — die Einordnung (Bewerbung/Anfrage) läuft
+  // serverseitig über projekttyp, nicht mehr über die URL.
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/ingest?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
   return (
     <div style={{ padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginTop: 8 }}>
@@ -1380,7 +1360,7 @@ function MultiStellenMapping({ kunde }) {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [copied, setCopied] = useState(false);
-  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?kunde_id=${kunde?.id}`;
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/ingest?kunde_id=${kunde?.id}`;
 
   useEffect(() => {
     if (!kunde?.id) return;
@@ -1467,7 +1447,7 @@ function MultiStellenMapping({ kunde }) {
 }
 
 function WebhookInfo({ jobId, perspective = true }) {
-  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/ingest?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
   async function copyToClipboard() {
     try {

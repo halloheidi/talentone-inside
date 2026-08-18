@@ -9,6 +9,7 @@ const router = Router();
 const ALLOWED = [
   'fragen', 'pixel_id', 'conversion_ziel', 'bilder', 'veroeffentlicht', 'screens',
   'capi_access_token', 'extern', 'extern_url', 'extern_sheet_url', 'funnel_typ',
+  'perspective_editor_url', 'perspective_funnel_id', 'manual_pixel_done', 'manual_webhook_done',
 ];
 
 // Vordefinierte Meta-Pixel (Dataset-IDs) zur schnellen Auswahl in der
