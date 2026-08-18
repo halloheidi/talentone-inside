@@ -49,7 +49,8 @@
       "Bash(scp -q verify-tpl2.mjs root@69.62.116.44:/root/verify-tpl2.mjs)",
       "Bash(grep -n \"function load\\\\|const load\\\\|api\\(\\\\`/offers\\\\|setBusyId\\\\|const isBusy\\\\|async function openSendModal\" frontend/src/pages/OffersList.jsx)",
       "Bash(scp -q verify-story.mjs root@69.62.116.44:/root/verify-story.mjs)",
-      "Bash(curl -s -o story-final.png \"https://fhvkbnbjnorsmsvrjizl.supabase.co/storage/v1/object/public/talentone-creatives/75f0a1ae-5f69-42bb-9aa2-42308c498398/story-derived-1786972973467-jrthoi.png\")"
+      "Bash(curl -s -o story-final.png \"https://fhvkbnbjnorsmsvrjizl.supabase.co/storage/v1/object/public/talentone-creatives/75f0a1ae-5f69-42bb-9aa2-42308c498398/story-derived-1786972973467-jrthoi.png\")",
+      "Bash(scp -q verify-webhook.mjs root@69.62.116.44:/root/verify-webhook.mjs)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

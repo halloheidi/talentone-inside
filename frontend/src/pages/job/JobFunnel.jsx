@@ -1130,7 +1130,10 @@ function PerspectiveSection({ job, kunde }) {
 }
 
 function ManuellChecklist({ funnelRow, onToggle, jobId }) {
-  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/leads?job_id=${jobId}`;
+  // Perspective-Bewerbungen MÜSSEN an den Perspective-Endpunkt (legt Bewerbungen
+  // an) — NICHT an /api/webhooks/leads (das ist der generische Kundenanfrage-
+  // Eingang). Falsche URL = Bewerbung landet als Anfrage.
+  const webhookUrl = `${getApiBaseUrl()}/api/webhooks/perspective?job_id=${jobId}`;
   const [copied, setCopied] = useState(false);
   return (
     <div style={{ padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginTop: 8 }}>
