@@ -654,7 +654,7 @@ export default function JobFunnel() {
           horizontalem Scroll nicht das 2-Spalten-Layout darüber sprengt.
           Bei Onepage-Extern ausgeblendet; bei Perspective sichtbar (Webhook-Eingang). */}
       {(istPerspective || !(extern && externUrl.trim())) && (
-        <fieldset className="formular-section bewerbungen-section bewerbungen-fullwidth">
+        <fieldset id="bewerbungen" className="formular-section bewerbungen-section bewerbungen-fullwidth" style={{ scrollMarginTop: 80 }}>
           <legend>Eingegangene Bewerbungen</legend>
           <KriterienPanel job={job} onJobUpdated={() => reload?.()} />
           <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />

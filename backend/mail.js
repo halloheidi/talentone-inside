@@ -497,7 +497,12 @@ async function sendInternalNotification({ subject, html, text }) {
 /* ── Warnung: Bewerbung ohne eindeutige Stellenzuordnung (Multi-Stellen-Funnel) ── */
 export async function sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText, alleAntworten }) {
   const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
-  const jobUrl = job ? `${insideBase}/kunden/${kunde?.id}/jobs/${job.id}/bewerbungen` : insideBase;
+  // Die Bewerberliste eines Jobs lebt im Funnel-Tab (BewerbungenTable), es gibt
+  // KEINE /bewerbungen-Route unter dem Job — der alte Link öffnete daher eine
+  // leere Seite. #bewerbungen scrollt direkt zur Liste des zugeordneten Jobs.
+  const jobUrl = (job && kunde?.id)
+    ? `${insideBase}/kunden/${kunde.id}/jobs/${job.id}/funnel#bewerbungen`
+    : insideBase;
   const antwortenHtml = (alleAntworten || [])
     .map(a => `<li><strong>${escape(a.frage_text || '')}:</strong> ${escape(String(a.antwort || ''))}</li>`).join('');
   const html = `

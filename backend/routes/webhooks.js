@@ -503,9 +503,16 @@ async function ingestHandler(req, res) {
         job = jobById[match.job_id];
       } else if (mapping.default_job_id && jobById[mapping.default_job_id]) {
         job = jobById[mapping.default_job_id];
+      } else if (kJobs.length === 1) {
+        // Nur EINE Stelle beim Kunden → eindeutig, KEINE Warnung. (Jobs haben kein
+        // Aktiv-Flag → "aktive Jobs" = die Jobs des Kunden; Multi-Stellen-Mapping
+        // greift ohnehin nur bei mehreren.) Häufig, wenn der Funnel nur den Standort
+        // abfragt, nicht die Stelle — die Standort-Antwort steckt in `antworten` und
+        // wird regulär mitgespeichert/verschickt. Normale Kunden-Benachrichtigung.
+        job = kJobs[0];
       } else {
-        // Kein Treffer und kein Default → ältesten Job als Auffangnetz, als "unklar"
-        // markieren + interne Warn-Mail. Nichts geht verloren.
+        // Mehrere Stellen zur Auswahl, aber keine Stellen-Antwort erkennbar → vorläufig
+        // ältesten Job, als "unklar" markieren + interne Warn-Mail. Nichts geht verloren.
         job = kJobs[0];
         zuordnungUnklar = true;
         warnAntwort = contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null;
