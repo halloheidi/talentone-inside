@@ -5,6 +5,7 @@ import archiver from 'archiver';
 import PDFDocument from 'pdfkit';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
+import { supabase } from './supabase.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
 import { getInternalBcc } from './mail.js';
 import { anrede, t, anredePromptHinweis } from './anrede.js';
@@ -184,10 +185,18 @@ NUR JSON zurück, keine Markdown-Backticks:
 
 /* ───────────────────── Bewerbungs-Mail an Kunden ───────────────────── */
 
-export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl }) {
+export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
     return null;
+  }
+  // Bei nachträglichem/erneutem Versand transparent das Original-Eingangsdatum
+  // zeigen (dezent), damit der Kunde das Timing versteht. Kein Fehler-Hinweis.
+  let eingegangenLabel = null;
+  if (eingegangenAm) {
+    try {
+      eingegangenLabel = new Date(eingegangenAm).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch { eingegangenLabel = null; }
   }
   const recipientRaw = (job?.bewerbung_email?.trim() || kunde?.email?.trim() || '');
   const recipients = recipientRaw
@@ -263,6 +272,7 @@ ${antworten.map(a => {
     <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Neue Bewerbung · ${quelle}</p>
     <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 4px;color:#0a0a0a;">${name}</h1>
     <p style="font-size:13px;color:#5a5955;margin:0 0 6px;">für <strong>${stelle}</strong>${region ? ` · ${region}` : ''}</p>
+    ${eingegangenLabel ? `<p style="font-size:12px;color:#9a9994;margin:0 0 6px;">Eingegangen am ${escape(eingegangenLabel)}</p>` : ''}
     ${koWarning}
   </td></tr>
   <tr><td style="padding:6px 28px 8px;">
@@ -283,6 +293,7 @@ ${antworten.map(a => {
 
   const textParts = [
     `Neue Bewerbung für ${job?.stelle || 'die Stelle'}`,
+    eingegangenLabel ? `Eingegangen am ${eingegangenLabel}` : '',
     isKo ? `\n⚠️ KO-Kriterium ausgelöst — Bewerber erfüllt nicht alle Anforderungen.\n${vorqualHinweis}` : '',
     `\nName: ${bewerbung?.name || '—'}`,
     `E-Mail: ${bewerbung?.email || '—'}`,
@@ -320,6 +331,64 @@ ${antworten.map(a => {
     throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
   }
   return await response.json();
+}
+
+/*
+ * Lädt eine bestehende Bewerbung per ID und verschickt AUSSCHLIESSLICH die
+ * Kunden-Benachrichtigung (dieselbe Render-/Versandlogik wie im regulären Pfad,
+ * inkl. KO-Kennzeichnung + Vorqual-Hinweis). KEIN Insert, KEIN Sheets-Sync,
+ * keine sonstigen Downstream-Effekte. Genutzt vom Admin-Button „erneut senden"
+ * und vom einmaligen Nachversand-Skript.
+ *
+ * Empfänger wie im Regelfall: pro Stelle konfigurierte `job.bewerbung_email`,
+ * sonst Standard-Kundenmail. `eingegangenAm` (Default: Original-Eingang der
+ * Bewerbung) blendet dezent das Datum ein — Transparenz bei Nachversand.
+ */
+export async function sendeBewerbungsMailAnKunden(bewerbungId, { eingegangenAm } = {}) {
+  const { data: bew, error } = await supabase
+    .from('talentone_bewerbungen').select('*').eq('id', bewerbungId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!bew) throw new Error(`Bewerbung ${bewerbungId} nicht gefunden.`);
+
+  const job = bew.job_id
+    ? (await supabase.from('talentone_jobs').select('*').eq('id', bew.job_id).maybeSingle()).data
+    : null;
+  if (!job) throw new Error(`Bewerbung ${bewerbungId} hat keinen zugeordneten Job — kein Empfänger ermittelbar.`);
+  const kunde = job.kunde_id
+    ? (await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle()).data
+    : null;
+  const funnel = bew.funnel_id
+    ? (await supabase.from('talentone_funnels').select('extern_sheet_url').eq('id', bew.funnel_id).maybeSingle()).data
+    : null;
+
+  // sheetUrl-Ableitung identisch zum regulären Pfad (webhooks.js).
+  const sheetsCfg = kunde?.sheets_sync;
+  const sheetUrl = (sheetsCfg?.enabled && sheetsCfg?.spreadsheet_id)
+    ? `https://docs.google.com/spreadsheets/d/${sheetsCfg.spreadsheet_id}/edit`
+    : (funnel?.extern_sheet_url || null);
+
+  // Empfänger vorab ermitteln (fürs Log/Return) — gleiche Regel wie in sendBewerbungsMail.
+  const recipientRaw = (job?.bewerbung_email?.trim() || kunde?.email?.trim() || '');
+  const recipients = recipientRaw
+    .split(/[;,]/).map(s => s.trim())
+    .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+
+  const eingegangen = eingegangenAm ?? bew.created_at ?? null;
+  const resend = await sendBewerbungsMail({
+    kunde, job,
+    bewerbung: { ...bew, quelle: bew.quelle || 'perspective' },
+    sheetUrl,
+    eingegangenAm: eingegangen,
+  });
+
+  return {
+    recipients,
+    resendId: resend?.id || null,
+    skipped: recipients.length === 0,
+    bewerbung: { id: bew.id, name: bew.name, email: bew.email },
+    job: { id: job.id, stelle: job.stelle },
+    kunde: { id: kunde?.id, firmenname: kunde?.firmenname },
+  };
 }
 
 /* ───────────────────── Mail an Kunden senden ───────────────────── */

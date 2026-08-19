@@ -166,6 +166,32 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+/* Kleiner Aktions-Button: Kunden-Benachrichtigung zu einer bestehenden Bewerbung
+   erneut senden (Sonderfälle). Mit Bestätigungs-Dialog + Empfänger-Feedback. */
+function ResendKundeMailButton({ bewerbungId }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  async function run() {
+    if (busy) return;
+    if (!confirm('Kunden-Benachrichtigung zu dieser Bewerbung erneut senden?\n\nEs wird nur die E-Mail verschickt — kein neuer Eintrag, kein Sheets-Sync.')) return;
+    setBusy(true); setMsg('');
+    try {
+      const res = await api(`/bewerbungen/${bewerbungId}/resend-kunde-mail`, { method: 'POST' });
+      setMsg(`✓ Gesendet an: ${(res.recipients || []).join(', ') || '—'}`);
+    } catch (e) {
+      setMsg(`Fehler: ${e.message}`);
+    } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="btn-ghost btn-sm" onClick={run} disabled={busy}>
+        {busy ? 'Sende…' : '✉️ Kunden-Benachrichtigung erneut senden'}
+      </button>
+      {msg && <div style={{ fontSize: 12, marginTop: 6, color: msg.startsWith('Fehler') ? '#c1272d' : '#16a34a' }}>{msg}</div>}
+    </div>
+  );
+}
+
 /* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
 function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, wichtigeKriterien = [], kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
   if (!bewerbung) return null;
@@ -213,6 +239,7 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
                 ) : <span className="muted">—</span>}
               </dd>
             </dl>
+            <ResendKundeMailButton bewerbungId={bewerbung.id} />
           </section>
 
           {/* Stelle zuordnen (bei Multi-Stellen-Funnel) */}
@@ -764,10 +791,11 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                           : <DebouncedInput value={data.werte[b.id]?.[s.id] || ''} onSave={v => updateCustomCol(b.id, s.id, v)} />}
                       </td>
                     ))}
-                    <td>
+                    <td onClick={e => e.stopPropagation()}>
                       {fb.status ? (
                         <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span>
                       ) : <span className="muted">—</span>}
+                      {!telefonistenMode && <ResendKundeMailButton bewerbungId={b.id} />}
                     </td>
                   </tr>
                 );

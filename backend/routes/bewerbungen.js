@@ -123,6 +123,24 @@ router.patch('/:id/zuordnen', async (req, res) => {
   res.json({ bewerbung: data });
 });
 
+// POST /api/bewerbungen/:id/resend-kunde-mail — verschickt die Kunden-Benachrichtigung
+// zu einer bestehenden Bewerbung erneut (kein Insert, kein Sheets-Sync). Für Sonderfälle,
+// in denen die reguläre Mail nicht (oder nicht an alle) rausging.
+router.post('/:id/resend-kunde-mail', async (req, res) => {
+  try {
+    const { sendeBewerbungsMailAnKunden } = await import('../exports.js');
+    const result = await sendeBewerbungsMailAnKunden(req.params.id);
+    if (result.skipped) {
+      return res.status(422).json({ error: 'Kein gültiger Empfänger (weder Stellen- noch Kundenmail konfiguriert).', recipients: [] });
+    }
+    console.log(`[resend-kunde-mail] Bewerbung ${req.params.id} → ${result.recipients.join(', ')} (resend ${result.resendId || '-'})`);
+    res.json({ ok: true, recipients: result.recipients, resendId: result.resendId });
+  } catch (err) {
+    console.error('[resend-kunde-mail]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ════════════════════ Vorqualifizierungs-Felder (KI-Vorschlag) ════════════════════ */
 // VORQUAL_STANDARD lebt jetzt in ../vorqualifizierung.js (geteilt mit jobs.js + Migration).
 
