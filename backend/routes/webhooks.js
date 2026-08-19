@@ -268,6 +268,76 @@ function matchJobFromMapping(mapping, antworten) {
   return { job_id: null, antwortText: null };
 }
 
+/* Normalisiert Job-/Antwort-Texte für den Fuzzy-Vergleich: Kleinschreibung,
+   (m/w/d)-Zusätze + Sonderzeichen raus, Whitespace kollabiert. */
+function normJobText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\(\s*[mwd](?:\s*\/\s*[mwd])*\s*\)/g, ' ') // (m/w/d), (w/m/d), (m/w) …
+    .replace(/[^a-z0-9äöüß]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+// Signifikante Tokens (≥4 Zeichen) — filtert Füllwörter wie „und", „der" heraus.
+function signifikanteTokens(s) {
+  return normJobText(s).split(' ').filter(w => w.length >= 4);
+}
+
+/* Ordnet eine Bewerbung ohne explizite Stellen-Antwort einem Job zu, indem die
+   Antwort-Werte gegen die Job-Titel gematcht werden (normalisierter Substring in
+   eine Richtung ODER gemeinsame signifikante Tokens; z. B. „Bauhelfer (m/w/d)"
+   ↔ „Pflasterer / Bauhelfer"). Nur ein EINDEUTIGER Treffer zählt — bei
+   mehreren/keinem Treffer null (dann greift der unklar-Fallback). */
+export function fuzzyMatchJob(jobs, antworten) {
+  const answerTexts = (antworten || []).map(a => a?.antwort).filter(Boolean).map(String);
+  if (!answerTexts.length) return null;
+  const answerNorms = answerTexts.map(normJobText).filter(Boolean);
+  const answerTokens = new Set(answerTexts.flatMap(signifikanteTokens));
+  const treffer = [];
+  for (const j of (jobs || [])) {
+    const jn = normJobText(j?.stelle);
+    if (!jn) continue;
+    let hit = answerNorms.some(an => an && (jn.includes(an) || an.includes(jn)));
+    if (!hit) hit = signifikanteTokens(j?.stelle).some(t => answerTokens.has(t));
+    if (hit) treffer.push(j);
+  }
+  return treffer.length === 1 ? treffer[0] : null;
+}
+
+/* Zentrale Job-Zuordnung für den kunde_id-Pfad (Multi-Stellen-Funnel).
+   Reihenfolge: explizite Mapping-Regel → Ein-Job-Kurzschluss → Fuzzy-Match gegen
+   Job-Titel → expliziter Default-Job → unklar-Fallback (ältester Job + Warn-Mail).
+   Jobs haben kein Aktiv-Flag → "aktive Jobs" = die Jobs des Kunden; Multi-Stellen
+   greift ohnehin nur bei mehreren. Ein-Job-Kunden werden NIE als unklar markiert. */
+export function resolveKundeJob(kJobs, mapping, antworten) {
+  const jobs = Array.isArray(kJobs) ? kJobs : [];
+  const jobById = Object.fromEntries(jobs.map(j => [j.id, j]));
+  const map = mapping || {};
+
+  const match = matchJobFromMapping(map, antworten);
+  if (match.job_id && jobById[match.job_id]) {
+    return { job: jobById[match.job_id], zuordnungUnklar: false, warnAntwort: null };
+  }
+  // Ein-Job-Kurzschluss: genau eine Stelle → immer eindeutig, keine Warnung
+  // (z. B. Funnel fragt nur Standort/Qualifikation ab; die Antwort steckt in
+  // `antworten` und wird regulär mitgeführt).
+  if (jobs.length === 1) {
+    return { job: jobs[0], zuordnungUnklar: false, warnAntwort: null };
+  }
+  // Mehr-Job-Kunden: Fuzzy-Match gegen die Job-Titel, bevor gewarnt wird.
+  const fuzzy = fuzzyMatchJob(jobs, antworten);
+  if (fuzzy) {
+    return { job: fuzzy, zuordnungUnklar: false, warnAntwort: null };
+  }
+  // Expliziter Default-Job aus dem Mapping (Admin-Wahl, keine Warnung).
+  if (map.default_job_id && jobById[map.default_job_id]) {
+    return { job: jobById[map.default_job_id], zuordnungUnklar: false, warnAntwort: null };
+  }
+  // Erst jetzt ist die Warnung berechtigt: mehrere Stellen, keine Zuordnung möglich.
+  const warnAntwort = (antworten || []).map(a => a.antwort).filter(Boolean).join(' | ') || null;
+  return { job: jobs[0] || null, zuordnungUnklar: true, warnAntwort };
+}
+
 /* POST /api/webhooks/perspective?job_id=<uuid>  ODER  ?kunde_id=<uuid>  (&secret=<optional>)
    Body: beliebiges JSON von Perspective.co — wir extrahieren Name/Mail/Telefon,
    Rest landet in antworten. Bei kunde_id: ein Funnel bedient mehrere Stellen;
@@ -343,12 +413,17 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
         ? `https://docs.google.com/spreadsheets/d/${sheetsCfg.spreadsheet_id}/edit`
         : (funnel?.extern_sheet_url || null);
 
+      // Kunden-Benachrichtigung IMMER senden, wenn ein Kunde/Job vorhanden ist —
+      // auch bei unklarer Zuordnung (mit dem vorläufig zugeordneten Job). Die
+      // interne Warn-Mail ist ein ZUSATZ, kein Ersatz, sonst verschluckt eine
+      // unklare Zuordnung die reguläre Bewerbungs-Mail an den Kunden.
+      if (kunde?.email) {
+        const { sendBewerbungsMail } = await import('../exports.js');
+        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl });
+      }
       if (zuordnungUnklar) {
         const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');
         await sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText: warnAntwort, alleAntworten: contact.antworten });
-      } else if (kunde?.email) {
-        const { sendBewerbungsMail } = await import('../exports.js');
-        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl });
       }
     } catch (err) { console.warn('[bewerbung-downstream]', err.message); }
   })().catch(err => console.error('[bewerbung-downstream-uncaught]', err.message));
@@ -495,28 +570,9 @@ async function ingestHandler(req, res) {
         .select('id, stelle, kunde_id, created_at')
         .eq('kunde_id', kunde.id).order('created_at', { ascending: true });
       if (!kJobs?.length) return res.status(404).json({ error: 'Kunde hat keine Stellen.' });
-      const jobById = Object.fromEntries(kJobs.map(j => [j.id, j]));
       const mapping = kunde.funnel_stellen_mapping || {};
-      const match = matchJobFromMapping(mapping, contact.antworten);
-      let job, zuordnungUnklar = false, warnAntwort = null;
-      if (match.job_id && jobById[match.job_id]) {
-        job = jobById[match.job_id];
-      } else if (mapping.default_job_id && jobById[mapping.default_job_id]) {
-        job = jobById[mapping.default_job_id];
-      } else if (kJobs.length === 1) {
-        // Nur EINE Stelle beim Kunden → eindeutig, KEINE Warnung. (Jobs haben kein
-        // Aktiv-Flag → "aktive Jobs" = die Jobs des Kunden; Multi-Stellen-Mapping
-        // greift ohnehin nur bei mehreren.) Häufig, wenn der Funnel nur den Standort
-        // abfragt, nicht die Stelle — die Standort-Antwort steckt in `antworten` und
-        // wird regulär mitgespeichert/verschickt. Normale Kunden-Benachrichtigung.
-        job = kJobs[0];
-      } else {
-        // Mehrere Stellen zur Auswahl, aber keine Stellen-Antwort erkennbar → vorläufig
-        // ältesten Job, als "unklar" markieren + interne Warn-Mail. Nichts geht verloren.
-        job = kJobs[0];
-        zuordnungUnklar = true;
-        warnAntwort = contact.antworten.map(a => a.antwort).filter(Boolean).join(' | ') || null;
-      }
+      // Zuordnung inkl. Ein-Job-Kurzschluss + Fuzzy-Match (siehe resolveKundeJob).
+      const { job, zuordnungUnklar, warnAntwort } = resolveKundeJob(kJobs, mapping, contact.antworten);
       // Funnel für KO-Bewertung: funnelId-Match bevorzugt, sonst über job_id.
       let koFunnel = funnel;
       if (!koFunnel) {
