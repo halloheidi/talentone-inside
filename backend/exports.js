@@ -6,7 +6,12 @@ import PDFDocument from 'pdfkit';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
 import { supabase } from './supabase.js';
+import { anhaengeMitSignedUrls } from './anhaenge.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
+
+// Signed-URL-Lebensdauer für Mail-Links (Kunde öffnet evtl. später) — deutlich
+// länger als die UI-Auslieferung. Der durable Zugang bleibt das Bewerber-Portal.
+const MAIL_ANHANG_TTL = 60 * 60 * 24 * 30; // 30 Tage
 import { getInternalBcc } from './mail.js';
 import { anrede, t, anredePromptHinweis } from './anrede.js';
 import { renderEmail } from './email-templates.js';
@@ -185,7 +190,7 @@ NUR JSON zurück, keine Markdown-Backticks:
 
 /* ───────────────────── Bewerbungs-Mail an Kunden ───────────────────── */
 
-export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null }) {
+export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null, anhaenge = [] }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
     return null;
@@ -243,6 +248,15 @@ ${antworten.map(a => {
   <span style="display:inline-block;margin-top:6px;">${escape(vorqualHinweis)}</span>
 </div>` : '';
 
+  // Datei-Anhänge (Lebenslauf o. Ä.) als Links — Bewerberdaten, daher Signed URLs
+  // (vom Aufrufer vorab aufgelöst).
+  const anhaengeArr = Array.isArray(anhaenge) ? anhaenge.filter(a => a?.url) : [];
+  const anhaengeHtml = anhaengeArr.length === 0 ? '' : `
+<h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:24px 0 10px;">Anhänge</h2>
+<table width="100%" cellpadding="0" cellspacing="0">
+${anhaengeArr.map(a => `<tr><td style="padding:6px 0;font-size:13px;"><a href="${escape(a.url)}" target="_blank" rel="noreferrer" style="color:#0a0a0a;">📎 ${escape(a.dateiname || a.label || 'Datei')}</a></td></tr>`).join('')}
+</table>`;
+
   const bewerbungenUrl = job?.bewerbungen_token
     ? `${getPublicBaseUrl(kunde?.agentur)}/bewerbungen/${job.bewerbungen_token}`
     : null;
@@ -283,6 +297,7 @@ ${antworten.map(a => {
       ${(!email && !telefon) ? '<tr><td colspan="2" style="font-size:12px;color:#9a9994;font-style:italic;">Keine Kontaktdaten übermittelt.</td></tr>' : ''}
     </table>
     ${antwortenHtml}
+    ${anhaengeHtml}
     ${bewerbungenButtonHtml}
     ${sheetHtml}
   </td></tr>
@@ -304,6 +319,10 @@ ${antworten.map(a => {
     for (const a of antworten) {
       textParts.push(`  ${a.frage_text || '?'}: ${a.antwort || '—'}`);
     }
+  }
+  if (anhaengeArr.length > 0) {
+    textParts.push('\nAnhänge:');
+    for (const a of anhaengeArr) textParts.push(`  ${a.dateiname || a.label || 'Datei'}: ${a.url}`);
   }
   if (bewerbungenUrl) textParts.push(`\nAlle Bewerbungen: ${bewerbungenUrl}`);
   if (sheetUrl) textParts.push(`\nGoogle Sheet: ${sheetUrl}`);
@@ -374,11 +393,13 @@ export async function sendeBewerbungsMailAnKunden(bewerbungId, { eingegangenAm }
     .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
 
   const eingegangen = eingegangenAm ?? bew.created_at ?? null;
+  const anhaengeLinks = await anhaengeMitSignedUrls(bew.anhaenge, { expiresIn: MAIL_ANHANG_TTL });
   const resend = await sendBewerbungsMail({
     kunde, job,
     bewerbung: { ...bew, quelle: bew.quelle || 'perspective' },
     sheetUrl,
     eingegangenAm: eingegangen,
+    anhaenge: anhaengeLinks,
   });
 
   return {

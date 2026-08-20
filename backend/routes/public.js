@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern } from '../kriterien.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
+import { attachSignedAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -1028,12 +1029,14 @@ router.get('/bewerbungen/:token', async (req, res) => {
     .eq('id', job.kunde_id)
     .maybeSingle();
 
-  const { data: bewerbungen, error } = await supabase
+  const { data: bewerbungenRaw, error } = await supabase
     .from('talentone_bewerbungen')
-    .select('id, name, email, telefon, antworten, quelle, ko_kriterium, created_at')
+    .select('id, name, email, telefon, antworten, quelle, ko_kriterium, created_at, anhaenge')
     .eq('job_id', job.id)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
+  // Anhänge als Signed URLs ausliefern (Bewerberdaten, nie public).
+  const bewerbungen = await attachSignedAnhaenge(bewerbungenRaw);
 
   const ids = (bewerbungen || []).map(b => b.id);
   let feedback = {};

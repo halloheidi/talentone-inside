@@ -282,6 +282,21 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
             </dl>
           </section>
 
+          {/* Anhänge (Lebenslauf o. Ä.) */}
+          {Array.isArray(bewerbung.anhaenge) && bewerbung.anhaenge.filter(a => a?.url).length > 0 && (
+            <section>
+              <h3>Anhänge</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                {bewerbung.anhaenge.filter(a => a?.url).map((a, i) => (
+                  <a key={i} href={a.url} target="_blank" rel="noreferrer"
+                    style={{ fontSize: 13, color: '#2563eb', textDecoration: 'none' }}>
+                    📎 {a.dateiname || a.label || 'Datei'}
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Vom Recruiter (sync) */}
           <RecruiterSyncSection sync={recruiterSync} brandName={brandName} kunde={kunde} />
 
@@ -700,6 +715,16 @@ export default function PublicBewerbungen() {
                       {norm.email && <><dt>E-Mail</dt><dd><a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a></dd></>}
                       {norm.telefon && <><dt>Telefon</dt><dd><a href={`tel:${norm.telefon}`} onClick={e => e.stopPropagation()}>{norm.telefon}</a></dd></>}
                     </dl>
+                    {Array.isArray(b.anhaenge) && b.anhaenge.filter(a => a?.url).length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                        {b.anhaenge.filter(a => a?.url).map((a, i) => (
+                          <a key={i} href={a.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                            style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none' }}>
+                            📎 {a.dateiname || a.label || 'Datei'}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     {norm.antworten?.length > 0 && (
                       <ul className="pub-mcard-antworten">
                         {norm.antworten.map((a, i) => (

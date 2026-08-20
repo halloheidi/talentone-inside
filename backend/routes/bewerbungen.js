@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
+import { attachSignedAnhaenge } from '../anhaenge.js';
 
 const router = Router();
 
@@ -327,7 +328,11 @@ async function loadBewerbungenFuerJob(jobId) {
     werte[w.bewerbung_id][w.spalte_id] = w.wert;
   }
 
-  return { bewerbungen, notizen, feedback, werte };
+  // Anhänge als frische Signed URLs ausliefern (privat) — nur Zeilen mit Anhängen
+  // lösen Storage-Calls aus.
+  const bewerbungenMitAnhaengen = await attachSignedAnhaenge(bewerbungen);
+
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte };
 }
 
 // GET /api/bewerbungen/job/:jobId — komplette Tabellen-Daten für einen Job
@@ -393,8 +398,9 @@ router.get('/', async (req, res) => {
     if (status === 'weitergeleitet' && new Date(n?.updated_at || b.created_at) >= weekStart) weitergeleitetWoche++;
   }
 
+  const filteredMitAnhaengen = await attachSignedAnhaenge(filtered);
   res.json({
-    bewerbungen: filtered,
+    bewerbungen: filteredMitAnhaengen,
     notizen,
     feedback,
     stats: { neueHeute, offen, inBearbeitung, weitergeleitetWoche },

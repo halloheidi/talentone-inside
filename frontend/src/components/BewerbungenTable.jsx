@@ -192,6 +192,25 @@ function ResendKundeMailButton({ bewerbungId }) {
   );
 }
 
+/* Datei-Anhänge (Lebenslauf o. Ä.) als klickbare Links (📎 + Dateiname, neuer Tab).
+   `anhaenge` kommt vom Backend bereits als [{label, dateiname, url(signed)}]. */
+function AnhaengeLinks({ anhaenge, compact = false }) {
+  const arr = Array.isArray(anhaenge) ? anhaenge.filter(a => a?.url) : [];
+  if (!arr.length) return null;
+  return (
+    <div className="anhaenge-links" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: compact ? 4 : 6 }}>
+      {arr.map((a, i) => (
+        <a key={i} href={a.url} target="_blank" rel="noreferrer"
+          onClick={e => e.stopPropagation()}
+          title={a.label ? `${a.label}: ${a.dateiname || ''}`.trim() : (a.dateiname || 'Datei')}
+          style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          📎 {a.dateiname || a.label || 'Datei'}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 /* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
 function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, wichtigeKriterien = [], kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
   if (!bewerbung) return null;
@@ -241,6 +260,14 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
             </dl>
             <ResendKundeMailButton bewerbungId={bewerbung.id} />
           </section>
+
+          {/* Anhänge (Lebenslauf o. Ä.) */}
+          {Array.isArray(bewerbung.anhaenge) && bewerbung.anhaenge.length > 0 && (
+            <section>
+              <h3>Anhänge</h3>
+              <AnhaengeLinks anhaenge={bewerbung.anhaenge} />
+            </section>
+          )}
 
           {/* Stelle zuordnen (bei Multi-Stellen-Funnel) */}
           {kundeJobs.length > 1 && (
@@ -700,6 +727,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                     <td className="td-date">{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
                     <td className="td-name">
                       <strong>{norm.name || '—'}</strong>
+                      <AnhaengeLinks anhaenge={b.anhaenge} compact />
                       {b.zuordnung_unklar && kundeJobs.length > 1 && (
                         <div onClick={e => e.stopPropagation()} style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span className="avv-warn" title="Konnte keiner Stelle eindeutig zugeordnet werden">⚠️ Stelle unklar</span>

@@ -57,6 +57,29 @@ export async function uploadBuffer({ bucket, path, buffer, contentType, upsert =
   return `${process.env.SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }
 
+/** Erzeugt eine zeitlich begrenzte Signed URL für ein Objekt in einem PRIVATEN
+ *  Bucket. Für die Auslieferung von Bewerber-Anhängen an UI/Portal. */
+export async function createSignedUrl({ bucket, path, expiresIn = 3600 }) {
+  const res = await fetch(
+    `${process.env.SUPABASE_URL}/storage/v1/object/sign/${bucket}/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ expiresIn }),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Storage sign ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const j = await res.json();
+  // Supabase liefert signedURL relativ (…/object/sign/bucket/path?token=…).
+  return j?.signedURL ? `${process.env.SUPABASE_URL}/storage/v1${j.signedURL}` : null;
+}
+
 export async function deleteFromBucket(bucket, publicUrlOrPath) {
   if (!publicUrlOrPath) return;
   const marker = `/storage/v1/object/public/${bucket}/`;

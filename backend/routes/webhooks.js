@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { extractStelle } from '../sheets-mapping.js';
+import { extractAnhaenge, spiegeleAnhaenge, anhaengeMitSignedUrls } from '../anhaenge.js';
 
 const router = Router();
 
@@ -378,7 +379,26 @@ export function evaluateKoKriterium(antworten, funnel) {
  * — kein duplizierter Versand-/Sync-Code.
  */
 async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnungUnklar = false, warnAntwort = null, rawBody = null }) {
+  // Dublettenbremse: identischer Doppel-Submit (gleiche E-Mail + gleicher Job,
+  // Eingang innerhalb weniger Minuten) → bestehende Bewerbung zurückgeben statt
+  // neu anzulegen/erneut zu benachrichtigen.
+  if (job?.id && contact.email) {
+    const seit = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: dupe } = await supabase.from('talentone_bewerbungen')
+      .select('id, created_at')
+      .eq('job_id', job.id).eq('email', contact.email)
+      .gte('created_at', seit)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (dupe) {
+      console.log(`[bewerbung] Dublette übersprungen — email=${contact.email} job=${job.id} (bestehend ${dupe.id})`);
+      return dupe;
+    }
+  }
+
   const { antworten: markedAntworten, ko } = evaluateKoKriterium(contact.antworten, funnel);
+  // Datei-Anhänge (Lebenslauf o. Ä.) aus dem Roh-Payload erkennen — zunächst mit
+  // Original-URLs speichern (nichts geht verloren), Spiegelung folgt nachgelagert.
+  const anhaenge = extractAnhaenge(rawBody);
 
   const { data: bew, error: insErr } = await supabase
     .from('talentone_bewerbungen')
@@ -393,20 +413,32 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
       quelle: 'perspective',
       ko_kriterium: ko,
       zuordnung_unklar: zuordnungUnklar,
+      anhaenge,
       raw: rawBody ?? null,
     })
     .select().single();
   if (insErr) throw new Error(insErr.message);
 
-  // Nachgelagert (best-effort): Google-Sheets-Sync + Mails. Blockiert nie.
+  // Nachgelagert (best-effort): Anhänge spiegeln + Google-Sheets-Sync + Mails. Blockiert nie.
   (async () => {
     try {
+      // Anhänge in den privaten Bucket spiegeln (non-fatal je Datei) + Zeile aktualisieren.
+      let anhaengeFinal = Array.isArray(bew.anhaenge) ? bew.anhaenge : [];
+      if (anhaengeFinal.length) {
+        const { anhaenge: gespiegelteAnhaenge, gespiegelt: nOk, tot } = await spiegeleAnhaenge(bew.id, anhaengeFinal);
+        anhaengeFinal = gespiegelteAnhaenge;
+        await supabase.from('talentone_bewerbungen').update({ anhaenge: gespiegelteAnhaenge }).eq('id', bew.id);
+        console.log(`[anhaenge] Bewerbung ${bew.id}: ${nOk} gespiegelt, ${tot} tot`);
+      }
+      // Mail-Links länger gültig (Kunde öffnet evtl. später); Portal bleibt durable.
+      const anhaengeLinks = await anhaengeMitSignedUrls(anhaengeFinal, { expiresIn: 60 * 60 * 24 * 30 });
+
       const kunde = job?.kunde_id
         ? (await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle()).data
         : null;
 
       const { syncBewerbungToSheet } = await import('../sheets-sync.js');
-      await syncBewerbungToSheet({ bewerbung: bew, job, kunde });
+      await syncBewerbungToSheet({ bewerbung: { ...bew, anhaenge: anhaengeFinal }, job, kunde });
 
       const sheetsCfg = kunde?.sheets_sync;
       const sheetUrl = (sheetsCfg?.enabled && sheetsCfg?.spreadsheet_id)
@@ -419,7 +451,7 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
       // unklare Zuordnung die reguläre Bewerbungs-Mail an den Kunden.
       if (kunde?.email) {
         const { sendBewerbungsMail } = await import('../exports.js');
-        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl });
+        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl, anhaenge: anhaengeLinks });
       }
       if (zuordnungUnklar) {
         const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');
