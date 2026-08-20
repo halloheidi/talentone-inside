@@ -56,7 +56,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST \"https://inside.talent-one.de/api/webhooks/perspective\" -H 'content-type: application/json' -d '{}')",
       "Bash(curl -s -X POST https://inside.talent-one.de/api/webhooks/leads -H 'content-type: application/json' -d '{\"funnelId\":\"6a7d9f328b6d7b5b15b573b6\",\"profile\":{\"vorname\":{\"title\":\"Vorname\",\"value\":\"Test\"}},\"trackingVersion\":2}')",
       "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/regress-kunde-zuordnung.mjs root@69.62.116.44:/tmp/regress.mjs)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST \"https://inside.talent-one.de/api/bewerbungen/7021ec32-aa95-4bf7-8e5b-614d491ec9fc/resend-kunde-mail\")"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST \"https://inside.talent-one.de/api/bewerbungen/7021ec32-aa95-4bf7-8e5b-614d491ec9fc/resend-kunde-mail\")",
+      "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/verify-anhaenge.mjs root@69.62.116.44:/tmp/va.mjs)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"

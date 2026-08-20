@@ -339,6 +339,68 @@ export function resolveKundeJob(kJobs, mapping, antworten) {
   return { job: jobs[0] || null, zuordnungUnklar: true, warnAntwort };
 }
 
+/* Identifiziert den Kunden aus dem Payload (Funnel-Titel/-Name) per Namens-Match
+   gegen talentone_kunden.firmenname — der längste enthaltene Firmenname gewinnt
+   (z. B. funnelName "AZMET GmbH - Bauhelfer (m/w/d)" → Kunde "AZMET GmbH"). */
+async function identifiziereKundeAusPayload(body) {
+  const name = String(body?.funnelName || body?.funnel_name || body?._raw?.funnelName || body?.data?.funnelName || '')
+    .toLowerCase().trim();
+  if (!name) return null;
+  const { data: kunden } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, funnel_stellen_mapping');
+  let best = null;
+  for (const k of kunden || []) {
+    const fn = String(k.firmenname || '').trim().toLowerCase();
+    if (fn.length < 3) continue;
+    if (name.includes(fn) && (!best || fn.length > best._len)) best = { ...k, _len: fn.length };
+  }
+  return best;
+}
+
+/* Fallback-Zuordnung, wenn weder ?job_id/?kunde_id noch ein funnelId-Match einen
+   Job liefern: Kunde aus dem Payload erkennen und dieselbe resolveKundeJob-Logik
+   (Ein-Job-Kurzschluss + Fuzzy-Match) anwenden. Der Funnel-Titel wird als
+   synthetische Antwort eingespeist, damit der Fuzzy-Match die Stelle darin sieht.
+   Gibt { job, zuordnungUnklar, warnAntwort, kunde } oder null zurück. */
+export async function resolveJobViaKundePayload(body, antworten) {
+  const kunde = await identifiziereKundeAusPayload(body);
+  if (!kunde) return null;
+  const { data: kJobs } = await supabase.from('talentone_jobs')
+    .select('id, stelle, kunde_id, created_at, projekttyp')
+    .eq('kunde_id', kunde.id).order('created_at', { ascending: true });
+  if (!kJobs?.length) return null;
+  const funnelName = body?.funnelName || body?.funnel_name || body?._raw?.funnelName || body?.data?.funnelName || null;
+  const matchAntworten = funnelName
+    ? [...(antworten || []), { frage_text: 'Funnel', antwort: String(funnelName) }]
+    : (antworten || []);
+  const r = resolveKundeJob(kJobs, kunde.funnel_stellen_mapping || {}, matchAntworten);
+  return { ...r, kunde };
+}
+
+/* Selbstheilung: registriert eine (bislang unbekannte) Perspective-funnelId als
+   neue Funnel-Zeile, verknüpft mit dem aufgelösten Job — damit künftige Webhooks
+   direkt per perspective_funnel_id matchen. Idempotent + best-effort. */
+async function registriereFunnelSelbstheilung(pFunnelId, job) {
+  if (!pFunnelId || !job?.id) return;
+  try {
+    const { data: exists } = await supabase.from('talentone_funnels')
+      .select('id').eq('perspective_funnel_id', String(pFunnelId)).limit(1).maybeSingle();
+    if (exists) return;
+    await supabase.from('talentone_funnels').insert({
+      job_id: job.id,
+      funnel_typ: 'perspective',
+      extern: true,
+      perspective_funnel_id: String(pFunnelId),
+      veroeffentlicht: true,
+      fragen: [],
+      bilder: {},
+    });
+    console.log(`[webhooks/ingest] Selbstheilung: funnelId ${pFunnelId} → neue Funnel-Zeile für Job ${job.id} registriert.`);
+  } catch (e) {
+    console.warn('[webhooks/ingest] Selbstheilung fehlgeschlagen:', e.message);
+  }
+}
+
 /* POST /api/webhooks/perspective?job_id=<uuid>  ODER  ?kunde_id=<uuid>  (&secret=<optional>)
    Body: beliebiges JSON von Perspective.co — wir extrahieren Name/Mail/Telefon,
    Rest landet in antworten. Bei kunde_id: ein Funnel bedient mehrere Stellen;
@@ -629,6 +691,26 @@ async function ingestHandler(req, res) {
     // Erkennbarer Bewerbungs-Payload? (Perspective-Shape oder echte Antworten)
     const looksBewerbung = !!(pFunnelId || b.profile || b.values || (contact.antworten && contact.antworten.length));
 
+    // ── Fallback vor "unklar": Kunde aus dem Payload identifizieren (Funnel-Titel)
+    //    und resolveKundeJob anwenden (Ein-Job-Kurzschluss + Fuzzy). Nur wenn auch
+    //    das scheitert, wird unklar gesetzt. Bei sicherem Treffer: Selbstheilung. ──
+    let zuordnungUnklarOverride = null;
+    let warnAntwortOverride = null;
+    if (!job && (contact.email || contact.telefon) && looksBewerbung) {
+      const via = await resolveJobViaKundePayload(b, contact.antworten);
+      if (via?.job) {
+        job = via.job;
+        zuordnungUnklarOverride = via.zuordnungUnklar;
+        warnAntwortOverride = via.warnAntwort;
+        if (!via.zuordnungUnklar) {
+          console.log(`[webhooks/ingest] Fallback-Treffer: Kunde "${via.kunde.firmenname}" → Job ${job.id} (${job.stelle}); pFunnelId=${pFunnelId || '-'}.`);
+          await registriereFunnelSelbstheilung(pFunnelId, job); // damit künftige Matches direkt greifen
+        } else {
+          console.warn(`[webhooks/ingest] Fallback: Kunde "${via.kunde.firmenname}" erkannt, Stelle aber unklar → Job ${job.id} (vorläufig).`);
+        }
+      }
+    }
+
     // ── Kein Job auflösbar → nie stiller Drop ──
     if (!job) {
       if ((contact.email || contact.telefon) && looksBewerbung) {
@@ -661,9 +743,10 @@ async function ingestHandler(req, res) {
         koFunnel = (await supabase.from('talentone_funnels').select('*')
           .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle()).data || null;
       }
-      // Perspective-Payload, aber funnelId nicht gematcht → Zuordnung unsicher.
-      const unklar = !!pFunnelId && !funnel;
-      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel: koFunnel, zuordnungUnklar: unklar, warnAntwort: null, rawBody: b });
+      // Zuordnung unsicher? Override aus dem Kunde-Fallback hat Vorrang, sonst:
+      // Perspective-Payload ohne funnelId-Match.
+      const unklar = zuordnungUnklarOverride !== null ? zuordnungUnklarOverride : (!!pFunnelId && !funnel);
+      const bew = await insertBewerbungUndBenachrichtige({ contact, job, funnel: koFunnel, zuordnungUnklar: unklar, warnAntwort: warnAntwortOverride, rawBody: b });
       return res.status(201).json({ ok: true, routed: 'bewerbung', bewerbung_id: bew.id, job_id: job.id, zuordnung_unklar: unklar });
     }
 
