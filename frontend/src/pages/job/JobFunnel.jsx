@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { UNSAFE_NavigationContext } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
+import StickySaveBar from '../../components/StickySaveBar.jsx';
 import CropModal from '../../components/CropModal.jsx';
 import BewerbungenTable from '../../components/BewerbungenTable.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
@@ -38,6 +40,45 @@ function newScreen(type) {
 function normalizeOptions(options) {
   if (!Array.isArray(options)) return [];
   return options.map(o => typeof o === 'string' ? { text: o } : (o || { text: '' }));
+}
+
+// Baut das Vergleichs-Objekt für den Dirty-State (stabile Feld-Reihenfolge).
+function snapshotOf(v) {
+  return JSON.stringify({
+    externUrl: v.externUrl,
+    perspectiveEditorUrl: v.perspectiveEditorUrl,
+    externSheetUrl: v.externSheetUrl,
+    bewerbungEmail: v.bewerbungEmail,
+    pixelId: v.pixelId,
+    capiAccessToken: v.capiAccessToken,
+    conversionZiel: v.conversionZiel,
+    screens: v.screens,
+    fragen: v.fragen,
+    manualWebhookDone: v.manualWebhookDone,
+    manualPixelDone: v.manualPixelDone,
+    veroeffentlicht: v.veroeffentlicht,
+    extern: v.extern,
+  });
+}
+
+// SPA-Navigation blockieren, solange `active`. Diese App nutzt BrowserRouter
+// (kein Data-Router), daher ist react-routers useBlocker nicht verfügbar — wir
+// patchen deshalb push/replace des Navigators und fangen Link-Navigationen ab.
+function useNavigationBlocker(active) {
+  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const [pending, setPending] = useState(null); // { orig, args }
+  useEffect(() => {
+    if (!active) return;
+    const { push, replace } = navigator;
+    navigator.push = (...args) => setPending({ orig: push, args });
+    navigator.replace = (...args) => setPending({ orig: replace, args });
+    return () => { navigator.push = push; navigator.replace = replace; };
+  }, [navigator, active]);
+  const proceed = useCallback(() => {
+    setPending(p => { if (p) p.orig.apply(navigator, p.args); return null; });
+  }, [navigator]);
+  const cancel = useCallback(() => setPending(null), []);
+  return { blockedNav: !!pending, proceedNav: proceed, cancelNav: cancel };
 }
 
 const FUNNEL_TYP_OPTIONEN = [
@@ -90,6 +131,10 @@ export default function JobFunnel() {
   const [initBusy, setInitBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  // Dirty-State + Feedback für die Sticky-Speichern-Leiste.
+  const savedSnapshotRef = useRef(null);
+  const [savedAt, setSavedAt] = useState('');
+  const [saveError, setSaveError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(null); // screenId
   const [cropping, setCropping] = useState(null); // { sourceUrl, screenId }
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -152,21 +197,42 @@ export default function JobFunnel() {
         const normalizedScreens = rawScreens.map(s => s.type === 'question'
           ? { ...s, options: normalizeOptions(s.options) }
           : s);
+        const normalizedFragen = Array.isArray(funnelData.fragen)
+          ? funnelData.fragen.map(fr => ({ ...fr, options: normalizeOptions(fr.options) }))
+          : [];
+        const conv = funnelData.conversion_ziel || 'Bewerbung einreichen';
+        const email0 = job?.bewerbung_email || '';
         setScreens(normalizedScreens);
         setPixelId(funnelData.pixel_id || '');
         setCapiAccessToken(funnelData.capi_access_token || '');
-        setConversionZiel(funnelData.conversion_ziel || 'Bewerbung einreichen');
+        setConversionZiel(conv);
         setVeroeffentlicht(!!funnelData.veroeffentlicht);
         setExtern(!!funnelData.extern);
         setExternUrl(funnelData.extern_url || '');
         setExternSheetUrl(funnelData.extern_sheet_url || '');
         setPerspectiveEditorUrl(funnelData.perspective_editor_url || '');
-        setFragen(Array.isArray(funnelData.fragen)
-          ? funnelData.fragen.map(fr => ({ ...fr, options: normalizeOptions(fr.options) }))
-          : []);
+        setFragen(normalizedFragen);
         setManualPixelDone(!!funnelData.manual_pixel_done);
         setManualWebhookDone(!!funnelData.manual_webhook_done);
-        setBewerbungEmail(job?.bewerbung_email || '');
+        setBewerbungEmail(email0);
+        // Baseline-Snapshot: identische Werte wie oben gesetzt → Start = nicht dirty.
+        savedSnapshotRef.current = snapshotOf({
+          externUrl: funnelData.extern_url || '',
+          perspectiveEditorUrl: funnelData.perspective_editor_url || '',
+          externSheetUrl: funnelData.extern_sheet_url || '',
+          bewerbungEmail: email0,
+          pixelId: funnelData.pixel_id || '',
+          capiAccessToken: funnelData.capi_access_token || '',
+          conversionZiel: conv,
+          screens: normalizedScreens,
+          fragen: normalizedFragen,
+          manualWebhookDone: !!funnelData.manual_webhook_done,
+          manualPixelDone: !!funnelData.manual_pixel_done,
+          veroeffentlicht: !!funnelData.veroeffentlicht,
+          extern: !!funnelData.extern,
+        });
+        setSavedAt('');
+        setSaveError('');
         // Default: Startseite ausgewählt
         if (Array.isArray(funnelData.screens) && funnelData.screens[0]) {
           setActiveScreenId(funnelData.screens[0].id);
@@ -298,7 +364,7 @@ export default function JobFunnel() {
 
   /* ───── Save + Publish ───── */
   async function save(extra = {}) {
-    setSaveBusy(true); setSaveMsg('');
+    setSaveBusy(true); setSaveMsg(''); setSaveError('');
     try {
       const istPerspective = funnel?.funnel_typ === 'perspective';
       const body = {
@@ -331,9 +397,20 @@ export default function JobFunnel() {
         reload?.();
       }
 
+      // Neuen Baseline-Snapshot aus den AKTUELLEN State-Werten bauen
+      // (veroeffentlicht ggf. serverseitig verändert → Wert aus res übernehmen).
+      savedSnapshotRef.current = snapshotOf({
+        externUrl, perspectiveEditorUrl, externSheetUrl, bewerbungEmail,
+        pixelId, capiAccessToken, conversionZiel, screens, fragen,
+        manualWebhookDone, manualPixelDone,
+        veroeffentlicht: !!res.funnel.veroeffentlicht, extern,
+      });
+      setSavedAt(new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+      setSaveError('');
       setSaveMsg('Gespeichert.');
       setTimeout(() => setSaveMsg(''), 1800);
-    } catch (err) { setSaveMsg(err.message); }
+      return true;
+    } catch (err) { setSaveMsg(err.message); setSaveError(err.message); return false; }
     finally { setSaveBusy(false); }
   }
   async function togglePublish() {
@@ -342,6 +419,26 @@ export default function JobFunnel() {
     }
     await save({ veroeffentlicht: !veroeffentlicht });
   }
+
+  /* ───── Dirty-State + Verlassen-Schutz ───── */
+  const currentSnapshot = snapshotOf({
+    externUrl, perspectiveEditorUrl, externSheetUrl, bewerbungEmail,
+    pixelId, capiAccessToken, conversionZiel, screens, fragen,
+    manualWebhookDone, manualPixelDone, veroeffentlicht, extern,
+  });
+  const dirty = !!funnel && savedSnapshotRef.current !== null
+    && currentSnapshot !== savedSnapshotRef.current;
+
+  // a) Browser-Tab/Reload nur bei ungespeicherten Änderungen abfangen.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = e => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  // b) SPA-Navigation (Tab-Wechsel etc.) blockieren → 3-Optionen-Dialog.
+  const { blockedNav, proceedNav, cancelNav } = useNavigationBlocker(dirty);
 
   if (loading || initBusy) {
     return <div className="card empty">{initBusy ? 'KI generiert die Funnel-Texte… (~10–20 Sekunden)' : 'Lade Funnel…'}</div>;
@@ -720,6 +817,37 @@ export default function JobFunnel() {
           </div>
         </div>
       )}
+
+      {/* Sticky Speichern-Leiste — immer sichtbar am unteren Content-Rand */}
+      <StickySaveBar
+        dirty={dirty}
+        busy={saveBusy}
+        onSave={() => save()}
+        savedAt={savedAt}
+        error={saveError}
+      />
+
+      {/* Verlassen-Schutz: 3-Optionen-Dialog bei SPA-Navigation mit ungesp. Änderungen */}
+      <Modal
+        open={blockedNav}
+        onClose={cancelNav}
+        title="Ungespeicherte Änderungen"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={cancelNav}>Zurück</button>
+            <button className="btn-ghost" onClick={proceedNav}>Verwerfen</button>
+            <button
+              className="btn-primary"
+              disabled={saveBusy}
+              onClick={async () => { const ok = await save(); if (ok) proceedNav(); }}
+            >
+              {saveBusy ? 'Speichere…' : 'Speichern & verlassen'}
+            </button>
+          </>
+        }
+      >
+        <p>Du hast ungespeicherte Änderungen an diesem Funnel. Wirklich verlassen?</p>
+      </Modal>
     </div>
   );
 }

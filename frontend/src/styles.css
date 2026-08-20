@@ -3127,6 +3127,47 @@ button { font-family: inherit; }
 }
 
 /* ───────── Funnel-Editor Layout ───────── */
+/* ── Sticky Speichern-Leiste (StickySaveBar) ── */
+.sticky-save-bar {
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-w);
+  right: 0;
+  z-index: 90;
+  background: var(--surface, #fff);
+  border-top: 1px solid var(--line, #e5e5e5);
+  box-shadow: 0 -6px 20px rgba(10, 10, 10, 0.08);
+}
+@media (max-width: 600px) { .sticky-save-bar { left: 0; } }
+.sticky-save-bar-inner {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 12px 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.sticky-save-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.sticky-save-dirty { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink, #1a1a1a); }
+.sticky-save-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+.sticky-save-ok { color: #15803d; font-weight: 600; }
+.sticky-save-idle { color: var(--ink-3, #666); }
+.sticky-save-error { color: #b91c1c; font-weight: 600; }
+.sticky-save-actions { display: flex; align-items: center; gap: 10px; }
+/* Damit die fixierte Leiste den Seiteninhalt unten nicht verdeckt. */
+.funnel-editor { padding-bottom: 76px; }
+
 .funnel-editor-cols {
   display: grid;
   grid-template-columns: 1fr 380px;

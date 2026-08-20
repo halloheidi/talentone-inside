@@ -442,10 +442,11 @@ router.post('/generate', async (req, res) => {
       if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
       if (allOk.length > 0) {
-        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl }) => ({
+        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition }) => ({
           job_id, format, typ: 'bild', bild_url: bildUrl,
           bild_ohne_logo_url: bildOhneLogoUrl || null,
           prompt, status: 'fertig',
+          logo_position: logoPosition || null,
           stilvorlage_id: stilvorlage?.id || null,
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);

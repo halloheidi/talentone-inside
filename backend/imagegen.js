@@ -69,25 +69,39 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
  */
 // Wechsel-Schmerz-Framework — gemeinsam für Spruch-Vorschläge & Verbesserung.
 // Zielgruppe: angestellte, wechselwillige Fachkräfte (KEINE Arbeitssuchenden).
-const SPRUCH_FRAMEWORK = `ZIELGRUPPE: angestellte, wechselWILLIGE Fachkräfte — KEINE Arbeitssuchenden. Sie haben einen Job und einen Grund, wechseln zu wollen. Adressiere GENAU diesen Wechsel-Schmerz und liefere aus den ECHTEN Stellendaten (Benefits, Besonderheiten, Region) den passenden Gegenpol — nichts erfinden.
+// Verbotsliste — gilt für Sprüche UND Ad-Copy (in adcopies.js importiert).
+export const SPRUCH_VERBOTE = `VERBOTEN (führt zum Verwerfen des Vorschlags):
+- Image-/Floskel-Phrasen OHNE konkreten Wechsel-Schmerz: "Echte Profis. Echte Werte.", "Technik ist unser Antrieb", "Handwerk. Zukunft. Sicher.", "Werde Teil unseres Teams", "Wir suchen dich", "dynamisches Umfeld", "Jetzt bewerben" — leere Hülle ohne Schmerz = raus.
+- Wortdopplungen zwischen Setup und Payoff bzw. zwischen Headline und Subline (dasselbe Substantiv/Verb nicht zweimal).
+- "Instagram", "Facebook", "Social Media", "TikTok" o.Ä. als Lösungsweg/Thema.
+- Wettbewerber- oder Plattform-Eigennamen (§6 UWG) — nutze nur neutrale Begriffe wie "Jobbörsen" oder "Stellenportale".
+- Gehalt/Zahl als HAUPT-Hook — Bezahlung darf nur unterstützend vorkommen, nie der zentrale Aufhänger sein.`;
+
+const SPRUCH_FRAMEWORK = `ZIELGRUPPE: angestellte, wechselWILLIGE Fachkräfte — KEINE Arbeitssuchenden. Sie haben einen Job und genau EINEN Grund, wechseln zu wollen. Adressiere in jedem Spruch GENAU einen konkreten Wechsel-Schmerz und liefere den Gegenpol aus den ECHTEN Stellendaten (Benefits, Besonderheiten, Region) — nichts erfinden.
 
 WECHSEL-SCHMERZEN — jeder Spruch adressiert GENAU einen. Nutze exakt eines dieser Kategorie-Labels:
-- "Montage / Pendeln" → Gegenpol: wohnortnah, kein Pendeln, feste Region, abends zu Hause
-- "Technik / Langeweile" → moderne Technik, Abwechslung, Zukunft statt Stillstand
-- "Führung / Wertschätzung" → nahbare Chefs, kurze Wege, gesehen werden statt anonym
-- "Chaos / Vorbereitung" → klare Abläufe, gute Vorbereitung, Material ist da
-- "Kontrolle / Vertrauen" → Eigenverantwortung, Vertrauen statt Kontrolle
-- "Gehalt" → konkrete Zahl / faire, pünktliche Bezahlung
-- "Feierabend" → planbarer Feierabend, Familienzeit, kein geopferter Feierabend
-- "Bewerbungs-Hürde senken" → niederschwelliger Einstieg, erst kennenlernen, Lebenslauf später
+- "Montage / Pendeln" → Gegenpol: wohnortnah, kein Pendeln, feste Region, abends daheim
+- "Veraltete Technik" → moderne Technik/Werkzeug, Abwechslung, Zukunft statt Stillstand
+- "Führung / Versprechen" → anonyme Führung & gebrochene Versprechen raus; nahbare, ansprechbare Chefs, Wort wird gehalten
+- "Chaos / Vorbereitung" → schlechte Vorbereitung raus; klare Abläufe, Material/Plan ist da
+- "Kontrolle / Vertrauen" → Kontrolle raus; Eigenverantwortung, Vertrauen
+- "Wertschätzung" → nicht gesehen werden raus; echte Anerkennung
+- "Feierabend" → geopferter Feierabend raus; planbarer Feierabend, Familienzeit
+- "Bewerbungs-Hürde senken" → niederschwelliger Einstieg, erst kennenlernen, Lebenslauf kann warten
 
 STRUKTUR jedes Spruchs:
-- EIN kurzer String mit Kontrast-Mechanik (Setup + Payoff): "X RAUS. Y REIN." · "X STATT Y." · "X? Y." · "KEIN X. DAFÜR Y."
-- VERSALIEN (Großbuchstaben), KEINE Zeilenumbrüche im Text
-- Keine Ausrufezeichen-Ketten, keine Floskeln ("Werde Teil unseres Teams", "Wir suchen dich", "Jetzt bewerben"), kein reines Wiederholen des Stellentitels
+- Zwei kurze Teile: SETUP + PAYOFF, als Kontrast — "X RAUS. Y REIN." · "X STATT Y." · "X? Y." · "KEIN X. DAFÜR Y."
+- VERSALIEN. Kurz und scroll-stoppend. Kein Ausrufezeichen-Gewitter, kein reines Wiederholen des Stellentitels.
+
+${SPRUCH_VERBOTE}
+
+MOTIV-BINDUNG (falls ein Motiv/Bild vorliegt): Der Spruch muss zum Bildinhalt passen — Chef-/Team-Foto → Führung/Wertschätzung; Fahrzeug → Ausstattung/Region/Feierabend; Technik-Nahaufnahme → Können/Zukunft.
+PRODUKTWERBUNGS-SCHUTZ: Zeigt das Motiv ein PRODUKT (Bad, Haustür, Fenster, Heizung …), muss der Spruch die ARBEIT DARAN / das Handwerk thematisieren — NIE das Produkt bewerben. Prüf-Frage vor jedem solchen Spruch: "Könnte diese Anzeige als Verkaufs-Werbung für das abgebildete Produkt gelesen werden?" Wenn ja → verwerfen und neu formulieren (Fokus auf die Fachkraft, nicht das Produkt).
 
 QUALITÄTS-ANKER (Mechanik übertragen, NICHT kopieren):
-"DEIN ARBEITSWEG? BEGINNT VOR DER HAUSTÜR." · "ALLES DABEI. AUSSER CHAOS." · "DEINE NEUEN CHEFS. DIREKT ANSPRECHBAR." · "PAPIERKRAM RAUS. TABLET REIN." · "DU KANNST HEIZUNG. WIR ZEIGEN DIR ZUKUNFT." · "ERST MAL KENNENLERNEN. PAPIERKRAM SPÄTER."`;
+"DEIN ARBEITSWEG? BEGINNT VOR DER HAUSTÜR." · "ALLES DABEI. AUSSER CHAOS." · "DEINE NEUEN CHEFS. DIREKT ANSPRECHBAR." · "SCHON WIEDER EIN VERSPRECHEN, DAS NICHT GEHALTEN WURDE?" · "FREITAGS UM 13 UHR INS WOCHENENDE." · "ERST MAL KENNENLERNEN. PAPIERKRAM SPÄTER."
+
+SERIEN-LOGIK: über mehrere Kategorien streuen — jede Kategorie HÖCHSTENS 2× (keine Themen-Monotonie), IMMER mindestens einer aus "Bewerbungs-Hürde senken". Keine zwei Vorschläge mit nahezu identischem Wortlaut.`;
 
 const SPRUCH_JSON_HINT = `Antworte NUR mit JSON, keine Markdown-Backticks:
 { "sprueche": [ { "kategorie": "<exakt eines der Kategorie-Labels>", "text": "DER SPRUCH IN VERSALIEN" } ] }`;
@@ -103,6 +117,78 @@ function normalizeSprueche(parsed) {
   }).filter(s => s && s.text).slice(0, 10);
 }
 
+// Serien-Post-Processing: Duplikate raus (nach normalisiertem Kern), pro Kategorie
+// höchstens 2, auf max. 10 gekürzt. Frühe (bessere) Vorschläge bevorzugt.
+function finalisiereSprueche(sprueche) {
+  const seen = new Set();
+  const proKat = {};
+  const out = [];
+  for (const s of sprueche || []) {
+    const text = String(s?.text || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase().replace(/[^a-z0-9äöüß]+/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (seen.has(key)) continue;                 // nahezu identischer Wortlaut raus
+    const kat = (s.kategorie || '').trim() || 'Sonstige';
+    if ((proKat[kat] || 0) >= 2) continue;       // max. 2 pro Kategorie
+    seen.add(key);
+    proKat[kat] = (proKat[kat] || 0) + 1;
+    out.push({ text, kategorie: s.kategorie || '' });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+// Pflicht-Korrekturlauf VOR dem Ausliefern: prüft jeden Spruch auf Rechtschreibung,
+// Grammatik, Kongruenz (Genus/Kasus — "jeden Leitung"-Klasse), korrekte Fachbegriffe
+// ("Rollladen") und die Schreibweise gemäß Stammdaten. Kleine Fehler werden direkt
+// korrigiert; inhaltlich kaputte/floskelhafte/Produktwerbung-Sprüche VERWORFEN.
+async function pruefeUndKorrigiereSprueche(sprueche, ctx = {}) {
+  const liste = (sprueche || []).map(s => String(s?.text || '').trim()).filter(Boolean);
+  if (!liste.length) return [];
+  const stammdaten = [
+    ctx.stelle ? `Stelle: "${ctx.stelle}"` : '',
+    ctx.region ? `Region: "${ctx.region}"` : '',
+    ctx.benefits?.length ? `Benefits: ${ctx.benefits.join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+
+  const prompt = `Du bist ein strenger deutscher Lektor für Recruiting-Werbe-Headlines. Prüfe jeden Spruch EINZELN.
+
+STAMMDATEN (maßgebliche Schreibweise): ${stammdaten || '—'}
+
+PRÜFE:
+- Rechtschreibung & Tippfehler
+- Grammatik & Kongruenz (Genus/Kasus/Numerus — z. B. "jeden Leitung" ist FALSCH)
+- korrekte Fachbegriffe (z. B. "Rollladen"/"Rollläden" mit drei L)
+- Schreibweise von Eigennamen/Begriffen gemäß Stammdaten
+- Verbotsliste: reine Floskel/Image-Phrase ohne Schmerz, Social-Media-/Wettbewerber-Namen, Gehalt als Haupt-Hook, Produktwerbung → VERWERFEN.
+
+REGELN:
+- KLEINE sprachliche Fehler (Tippfehler, falsche Endung, fehlendes L) direkt korrigieren, "ok": true, korrigierten Text in "text" (VERSALIEN beibehalten).
+- Inhaltlich kaputte, sinnfreie, floskelhafte oder gegen die Verbotsliste verstoßende Sprüche: "ok": false.
+
+SPRÜCHE:
+${liste.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+Antworte NUR mit JSON, keine Markdown-Backticks (gleiche Reihenfolge/Anzahl wie oben):
+{ "geprueft": [ { "text": "<korrigierter Spruch in VERSALIEN>", "ok": true } ] }`;
+
+  let geprueft = [];
+  try {
+    const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 900, messages: [{ role: 'user', content: prompt }] });
+    const parsed = parseJsonContent(data);
+    geprueft = Array.isArray(parsed?.geprueft) ? parsed.geprueft : [];
+  } catch (e) {
+    return sprueche; // Prüfung ausgefallen → im Zweifel Original durchreichen, kein Totalausfall
+  }
+  const out = [];
+  geprueft.forEach((g, i) => {
+    if (g && g.ok !== false && String(g.text || '').trim()) {
+      out.push({ text: String(g.text).trim(), kategorie: sprueche[i]?.kategorie || '' });
+    }
+  });
+  return out;
+}
+
 export async function generateSpruchVorschlaege(job, kunde, opts = {}) {
   const { bildUrl, kontextHinweis, motiv } = opts;
   const stelle = job.stelle || 'Mitarbeiter:in';
@@ -113,51 +199,53 @@ export async function generateSpruchVorschlaege(job, kunde, opts = {}) {
 
   const kontextZeile = `Stelle: "${stelle}"${branche ? ` · Branche ${branche}` : ''}${region ? ` · Region ${region}` : ''}${benefits.length ? ` · Benefits: ${benefits.join(', ')}` : ''}${besonderheiten ? ` · Besonderheiten: ${besonderheiten}` : ''}${motiv?.trim() ? ` · Motiv: "${motiv.trim()}"` : ''}`;
 
-  // ── Variante 1: MIT Bild/Motiv (Vision) — Spruch muss zum Bildinhalt passen ──
-  if (bildUrl) {
-    const kontextNote = kontextHinweis?.trim()
-      ? `\n\nHINWEIS VOM MITARBEITER zum Bild (sehr wichtig — beachten!): "${kontextHinweis.trim()}"`
-      : '';
-    const visionPrompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
+  // Rohe Sprüche generieren — mit Bild (Vision) oder ohne.
+  async function generateRaw(aufgabe) {
+    if (bildUrl) {
+      const kontextNote = kontextHinweis?.trim()
+        ? `\n\nHINWEIS VOM MITARBEITER zum Bild (sehr wichtig — beachten!): "${kontextHinweis.trim()}"`
+        : '';
+      const visionPrompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
 
 KONTEXT: ${kontextZeile}${kontextNote}
 
 AUFGABE:
-1. Schau dir das Bild GENAU an: Personen, Tätigkeit, Objekte, Stimmung.
-2. Wähle die Wechsel-Schmerzen, die zum BILDINHALT passen, und schreibe Sprüche, die sich anfühlen als wären sie für GENAU dieses Bild gemacht. Orientierung: Chef-/Team-Foto → "Führung / Wertschätzung" (kurze Wege, ansprechbar); Fahrzeug → Ausstattung/Region/"Feierabend"; Technik-Nahaufnahme → "Technik / Langeweile" (Können, Zukunft).
-3. Liefere 8–10 Sprüche, mindestens einer aus der Kategorie "Bewerbungs-Hürde senken".
+1. Schau dir das Bild GENAU an: Personen, Tätigkeit, Objekte, Stimmung. Beachte MOTIV-BINDUNG und PRODUKTWERBUNGS-SCHUTZ.
+2. ${aufgabe} — die Sprüche müssen sich anfühlen, als wären sie für GENAU dieses Bild gemacht.
+3. Mindestens einer aus "Bewerbungs-Hürde senken".
 
 ${SPRUCH_JSON_HINT}`;
-
-    const data = await callClaudeWithRetry({
-      model: CLAUDE_MODEL,
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [
+      const data = await callClaudeWithRetry({
+        model: CLAUDE_MODEL, max_tokens: 1000,
+        messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'url', url: bildUrl } },
           { type: 'text', text: visionPrompt },
-        ],
-      }],
-    });
-    return normalizeSprueche(parseJsonContent(data));
-  }
-
-  // ── Variante 2: OHNE Bild — über mehrere Schmerz-Kategorien streuen ──
-  const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
+        ] }],
+      });
+      return normalizeSprueche(parseJsonContent(data));
+    }
+    const prompt = `Du bist Copywriter für High-Performance Recruiting-Ads. ${SPRUCH_FRAMEWORK}
 
 KONTEXT: ${kontextZeile}
 
-AUFGABE: Liefere 8–10 Sprüche, GESTREUT über mehrere Wechsel-Schmerz-Kategorien (nicht alle aus derselben), mindestens einer aus "Bewerbungs-Hürde senken". Jeder Spruch mit dem passenden Kategorie-Label.
+AUFGABE: ${aufgabe}, GESTREUT über mehrere Wechsel-Schmerz-Kategorien, mindestens einer aus "Bewerbungs-Hürde senken". Jeder Spruch mit dem passenden Kategorie-Label.
 
 ${SPRUCH_JSON_HINT}`;
+    const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 900, messages: [{ role: 'user', content: prompt }] });
+    return normalizeSprueche(parseJsonContent(data));
+  }
 
-  const data = await callClaudeWithRetry({
-    model: CLAUDE_MODEL,
-    max_tokens: 900,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  return normalizeSprueche(parseJsonContent(data));
+  const roh = await generateRaw('Liefere 8–10 Sprüche');
+  const geprueft = await pruefeUndKorrigiereSprueche(roh, { stelle, region, benefits });
+  let sprueche = finalisiereSprueche(geprueft);
+
+  // Top-up: wurden zu viele verworfen, neu generieren (nicht die fehlerhaften durchreichen).
+  if (sprueche.length < 6) {
+    const nach = await generateRaw('Liefere 8–10 NEUE Sprüche mit anderen Kategorien/Formulierungen');
+    const nachGeprueft = await pruefeUndKorrigiereSprueche(nach, { stelle, region, benefits });
+    sprueche = finalisiereSprueche([...geprueft, ...nachGeprueft]);
+  }
+  return sprueche;
 }
 
 export async function verbessereSpruch({ spruch, job, kunde }) {
@@ -173,7 +261,7 @@ KONTEXT: Stelle "${stelle}"${branche ? `, Branche ${branche}` : ''}${region ? `,
 
 URSPRUNGSSPRUCH: "${spruch.trim()}"
 
-AUFGABE: Liefere 3 verbesserte Varianten desselben Spruchs — jede schärfer nach der Kontrast-Mechanik oben, in VERSALIEN, mit klarem Wechsel-Schmerz + Gegenpol. Behalte die Grund-Botschaft, aber mach sie scroll-stoppender. Wenn der Original-Schmerz unklar ist, wähle den plausibelsten aus den Stellendaten.
+AUFGABE: Liefere 3 verbesserte Varianten desselben Spruchs — jede schärfer nach der Kontrast-Mechanik oben, in VERSALIEN, mit klarem Wechsel-Schmerz + Gegenpol. Behalte die Grund-Botschaft, aber mach sie scroll-stoppender. Wenn der Original-Schmerz unklar ist, wähle den plausibelsten aus den Stellendaten. Verbotsliste + Produktwerbungs-Schutz gelten.
 
 Antworte NUR mit JSON, keine Markdown-Backticks:
 { "varianten": ["VARIANTE 1", "VARIANTE 2", "VARIANTE 3"] }`;
@@ -184,7 +272,11 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
     messages: [{ role: 'user', content: prompt }],
   });
   const parsed = parseJsonContent(data);
-  return Array.isArray(parsed.varianten) ? parsed.varianten.slice(0, 3) : [];
+  const varianten = Array.isArray(parsed.varianten) ? parsed.varianten.slice(0, 3) : [];
+  // Pflicht-Korrekturlauf auch hier — fehlerhafte Varianten nicht durchreichen.
+  const geprueft = await pruefeUndKorrigiereSprueche(varianten.map(t => ({ text: t, kategorie: '' })), { stelle, region, benefits });
+  const clean = geprueft.map(g => g.text).filter(Boolean).slice(0, 3);
+  return clean.length ? clean : varianten; // Fallback: nie leer ausliefern
 }
 
 /* ───────────────────────── Prompt-Composer ───────────────────────── */
@@ -400,7 +492,7 @@ const logoKleidungHinweis = (modus) => (modus === 'icon' ? LOGO_KLEIDUNG_HINWEIS
 // Bewusst hier zentralisiert (nicht in einzelnen Prompt-Bausteinen verteilt), damit
 // künftige Prompt-Umbauten sie nicht versehentlich verdrängen (siehe Ebenen-Regression).
 // Text nie über das Gesicht — gilt in JEDEM Modus.
-const TEXT_GESICHT_REGEL = 'Lege Text, Banner oder Grafik-Elemente NIEMALS über das Gesicht der Person.';
+const TEXT_GESICHT_REGEL = 'Lege Text, Banner, Logo oder Grafik-Elemente NIEMALS über das Gesicht der Person und NIEMALS über das zentrale (Technik-)Motiv — die Technik, für die wir stehen, darf nicht durch Text oder Logo verdeckt werden. Halte diese Bereiche frei.';
 // Tiefen-/Ebeneneffekt — gilt, wenn eine Person das Hauptmotiv ist (KI-Modus).
 const EBENEN_TIEFE_REGEL =
   'EBENEN & TIEFE (PFLICHT): Die Person steht klar im VORDERGRUND und überlappt die große Headline/Typografie ' +
@@ -810,6 +902,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   let finalBuffer = rawBuffer;
   let bildOhneLogoUrl = null;
+  let logoPosition = null;
 
   // Rohbild (ohne Overlay) separat speichern — Basis für spätere Logo-Neupositionierung.
   // Wenn kein Logo verwendet wird, ist bild_url == bild_ohne_logo_url; wir speichern
@@ -824,7 +917,10 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     }
     try {
       const transparentLogo = await ensureTransparentLogo(kunde, logoRef.buffer);
-      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo);
+      // 9:16 (Story/Reel): Logo unterhalb der oberen ~250px-Zone platzieren (Meta legt
+      // dort Profilname/Overlays drüber). Feed (1:1): Default oben rechts.
+      logoPosition = format === 'story' ? STORY_LOGO_POSITION : null;
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, logoPosition || undefined);
     } catch (err) {
       console.warn(`[logo-overlay] fehlgeschlagen — fahre ohne Overlay fort: ${err.message}`);
     }
@@ -832,7 +928,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
-  return { format, bildUrl, prompt, bildOhneLogoUrl };
+  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition };
 }
 
 /**

@@ -2,6 +2,7 @@
 // Drei Styles: emotional / benefit / kompakt.
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
+import { SPRUCH_VERBOTE } from './imagegen.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -246,6 +247,8 @@ GLOBALE REGELN
 - Curiosity Gap wahren: Nenne NIEMALS "Social Media", "Instagram" oder "Facebook" als Lösungsweg — sprich stattdessen von "einem komplett anderen Weg".
 - Nenne KEINE Jobbörsen-Namen (Indeed, StepStone o. Ä.) — nur "Jobbörsen" / "Stellenportale" (§6 UWG).
 
+${SPRUCH_VERBOTE}
+
 ÜBERSCHRIFTEN (Meta-Headline-Feld)
 - Zusätzlich zum Fließtext: 3–5 Überschriften, je max. ~40 Zeichen (wird sonst abgeschnitten).
 - Gleiche Schmerz-first-Mechanik wie im Text, ABER normale Groß-/Kleinschreibung (KEINE Versalien-Pflicht — es ist das Meta-Headline-Feld).
@@ -339,6 +342,55 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
   return Array.isArray(parsed.headlines) ? parsed.headlines.slice(0, 5) : [];
 }
 
+// Pflicht-Korrekturlauf für Ad-Copy: Rechtschreibung, Grammatik, Kongruenz
+// (Genus/Kasus), korrekte Fachbegriffe ("Rollladen") + Schreibweise gemäß Stammdaten.
+// Korrigiert Text + Überschriften in place (Struktur/Emojis/Umbrüche/Link bleiben),
+// verwirft kaputte Überschriften. Fällt bei Fehler auf das Original zurück.
+async function korrigiereAdCopy({ text, ueberschriften, job }) {
+  if (!text && !(ueberschriften || []).length) return { text, ueberschriften };
+  const stammdaten = [
+    job?.stelle ? `Stelle: "${job.stelle}"` : '',
+    job?.region ? `Region: "${job.region}"` : '',
+    Array.isArray(job?.benefits) && job.benefits.length ? `Benefits: ${job.benefits.filter(Boolean).join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+
+  const prompt = `Du bist ein strenger deutscher Lektor für Recruiting-Ads. Korrigiere den folgenden Anzeigen-Text und die Überschriften.
+
+STAMMDATEN (maßgebliche Schreibweise): ${stammdaten || '—'}
+
+PRÜFE & KORRIGIERE:
+- Rechtschreibung & Tippfehler
+- Grammatik & Kongruenz (Genus/Kasus/Numerus — z. B. "jeden Leitung" ist FALSCH)
+- korrekte Fachbegriffe (z. B. "Rollladen"/"Rollläden" mit drei L)
+- Schreibweise von Eigennamen/Begriffen gemäß Stammdaten
+
+WICHTIG:
+- NUR sprachlich korrigieren. Struktur, Emojis, Zeilenumbrüche (\\n), Links/Platzhalter, Tonalität und Aussage UNVERÄNDERT lassen.
+- Überschriften: sprachlich korrigieren; eine inhaltlich kaputte Überschrift weglassen.
+
+TEXT:
+"""
+${text}
+"""
+
+ÜBERSCHRIFTEN: ${JSON.stringify(ueberschriften || [])}
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "text": "<korrigierter Text mit \\n>", "ueberschriften": ["..."] }`;
+
+  try {
+    const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 1800, messages: [{ role: 'user', content: prompt }] });
+    const parsed = parseJsonContent(data);
+    const korrText = String(parsed?.text || '').trim();
+    const korrUeber = Array.isArray(parsed?.ueberschriften)
+      ? parsed.ueberschriften.map(u => String(u || '').trim()).filter(Boolean).slice(0, 5)
+      : ueberschriften;
+    return { text: korrText || text, ueberschriften: korrUeber.length ? korrUeber : ueberschriften };
+  } catch (e) {
+    return { text, ueberschriften }; // Lektor ausgefallen → Original durchreichen
+  }
+}
+
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
 export async function generateAdCopy({ job, kunde, style, funnelUrl, spruchKontext }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
@@ -350,11 +402,15 @@ export async function generateAdCopy({ job, kunde, style, funnelUrl, spruchKonte
   const parsed = parseJsonContent(data);
   let text = (parsed.text || '').trim();
   if (!text) throw new Error('Claude lieferte leeren Text.');
-  // Sicherheitsnetz: falls Claude den Platzhalter / Link doch nicht eingebaut hat
-  text = ensureLinkInText(text, funnelUrl);
-  const ueberschriften = Array.isArray(parsed.ueberschriften)
+  let ueberschriften = Array.isArray(parsed.ueberschriften)
     ? parsed.ueberschriften.map(u => String(u || '').trim()).filter(Boolean).slice(0, 5)
     : [];
+
+  // Pflicht-Korrekturlauf (Rechtschreibung/Grammatik/Kongruenz) vor dem Ausliefern.
+  ({ text, ueberschriften } = await korrigiereAdCopy({ text, ueberschriften, job }));
+
+  // Sicherheitsnetz: falls der Link nach der Korrektur fehlt/verändert wurde.
+  text = ensureLinkInText(text, funnelUrl);
   return { stil: style, text, ueberschriften };
 }
 
