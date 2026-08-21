@@ -190,6 +190,19 @@ NUR JSON zurück, keine Markdown-Backticks:
 
 /* ───────────────────── Bewerbungs-Mail an Kunden ───────────────────── */
 
+// Quelle-Label aus der TATSÄCHLICHEN Herkunft ableiten (raw-Payload), nicht aus
+// dem generischen quelle='perspective', das der Ingest für alle Funnel setzt —
+// sonst steht "PERSPECTIVE.CO" auch über Onepage-Einreichungen.
+export function bewerbungQuelleLabel(bewerbung) {
+  const raw = bewerbung?.raw;
+  if (raw && typeof raw === 'object') {
+    if (Array.isArray(raw?.data?.fields)) return 'Onepage';
+    if (raw.funnelId || raw.profile || raw.values || raw.trackingVersion != null) return 'Perspective';
+  }
+  if (bewerbung?.quelle === 'funnel') return 'Funnel'; // interner Tool-Funnel
+  return 'Bewerbungs-Funnel';                          // neutral, wenn Herkunft unklar
+}
+
 export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null, anhaenge = [] }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
@@ -220,7 +233,7 @@ export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eing
   const name = escape(bewerbung?.name || 'Unbekannt');
   const email = escape(bewerbung?.email || '');
   const telefon = escape(bewerbung?.telefon || '');
-  const quelle = bewerbung?.quelle === 'perspective' ? 'Perspective.co' : 'Funnel';
+  const quelle = bewerbungQuelleLabel(bewerbung);
 
   const antworten = Array.isArray(bewerbung?.antworten) ? bewerbung.antworten : [];
   const antwortenHtml = antworten.length === 0 ? '' : `
@@ -257,8 +270,20 @@ ${antworten.map(a => {
 ${anhaengeArr.map(a => `<tr><td style="padding:6px 0;font-size:13px;"><a href="${escape(a.url)}" target="_blank" rel="noreferrer" style="color:#0a0a0a;">📎 ${escape(a.dateiname || a.label || 'Datei')}</a></td></tr>`).join('')}
 </table>`;
 
-  const bewerbungenUrl = job?.bewerbungen_token
-    ? `${getPublicBaseUrl(kunde?.agentur)}/bewerbungen/${job.bewerbungen_token}`
+  // Bewerberlisten-Link IMMER bauen — auch wenn der Aufrufer ein reduziertes Job-
+  // Objekt ohne bewerbungen_token übergibt (Multi-Stellen-/Fallback-Ingest-Pfad):
+  // dann den Token per job.id nachladen. So kann die Mail-Variante nie wieder ohne
+  // Link rausgehen (identischer Link wie im klassischen Pfad: /bewerbungen/<token>).
+  let bewerbungenToken = job?.bewerbungen_token || null;
+  if (!bewerbungenToken && job?.id) {
+    try {
+      const { data: jobRow } = await supabase.from('talentone_jobs')
+        .select('bewerbungen_token').eq('id', job.id).maybeSingle();
+      bewerbungenToken = jobRow?.bewerbungen_token || null;
+    } catch (err) { console.warn('[bewerbungs-mail] token-nachladen fehlgeschlagen:', err.message); }
+  }
+  const bewerbungenUrl = bewerbungenToken
+    ? `${getPublicBaseUrl(kunde?.agentur)}/bewerbungen/${bewerbungenToken}`
     : null;
 
   const bewerbungenButtonHtml = bewerbungenUrl ? `
