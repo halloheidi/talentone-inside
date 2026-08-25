@@ -29,7 +29,10 @@ export async function anlageKundeProjektJob({ kundeData, jobData, meta = {} }) {
     .insert({
       ...jobData,
       kunde_id: kunde.id,
-      vorqualifizierung: kunde.agentur === 'nowagwirth',
+      // Explizite Vorgabe aus jobData respektieren (z. B. Neukundengewinnung = keine
+      // Vorqualifizierung); sonst Default: nowagwirth-Recruiting = an.
+      vorqualifizierung: jobData.vorqualifizierung
+        ?? (kunde.agentur === 'nowagwirth' && jobData.projekttyp !== 'neukundengewinnung'),
     })
     .select()
     .single();

@@ -506,7 +506,7 @@ router.get('/:id/foto-status', async (req, res) => {
    Schickt dem Kunden den Prüf-Link zu den bereits erfassten Stellendaten.
    Legt bei Bedarf pruefung_token an, protokolliert typ='daten_pruefung'. */
 router.post('/:id/send-pruefung', async (req, res) => {
-  const { to, betreff, customText } = req.body || {};
+  const { to, betreff, customText, mitUpload, umfang: umfangReq } = req.body || {};
   const { data: job } = await supabase.from('talentone_jobs')
     .select('*').eq('id', req.params.id).maybeSingle();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
@@ -524,8 +524,21 @@ router.post('/:id/send-pruefung', async (req, res) => {
     }
     const pruefungUrl = `${getPublicBaseUrl(kunde.agentur)}/pruefung/${token}`;
 
+    // Kombinierter Versand: optional Logo/Foto-Upload-Link in DERSELBEN Mail mitschicken
+    // (statt zwei getrennter Mails). Braucht den upload_token des Kunden.
+    const umfang = ['beides', 'logo', 'fotos'].includes(umfangReq) ? umfangReq : 'beides';
+    let uploadUrl = null;
+    if (mitUpload) {
+      let uToken = kunde.upload_token;
+      if (!uToken) {
+        uToken = randomUUID();
+        await supabase.from('talentone_kunden').update({ upload_token: uToken }).eq('id', kunde.id);
+      }
+      uploadUrl = `${getPublicBaseUrl(kunde.agentur)}/upload/${uToken}`;
+    }
+
     const { sendDatenPruefungMail } = await import('../mail.js');
-    await sendDatenPruefungMail({ to: empfaenger, betreff, customText, kunde, job, pruefungUrl });
+    await sendDatenPruefungMail({ to: empfaenger, betreff, customText, kunde, job, pruefungUrl, uploadUrl, umfang });
 
     await supabase.from('talentone_versand').insert({
       job_id: job.id,
@@ -533,12 +546,21 @@ router.post('/:id/send-pruefung', async (req, res) => {
       betreff: (betreff || '').trim() || null,
       gesendet_von: req.user?.email || null,
       typ: 'daten_pruefung',
-      inhalte: { pruefung_url: pruefungUrl },
+      inhalte: { pruefung_url: pruefungUrl, ...(uploadUrl ? { upload_url: uploadUrl, umfang } : {}) },
     });
-    notifyKunde(kunde, `📋 Daten-Prüfung an Kunden gesendet (${job.stelle || 'Stelle'}) — ${new Date().toLocaleDateString('de-DE')}`)
+    // Upload-Anfrage separat protokollieren, damit die „Fotos anfragen"-/Überfälligkeits-
+    // Logik (typ='anfrage') auch bei der kombinierten Mail greift.
+    if (uploadUrl) {
+      await supabase.from('talentone_versand').insert({
+        job_id: job.id, empfaenger, gesendet_von: req.user?.email || null,
+        typ: 'anfrage', betreff: 'Foto- & Logo-Anfrage (kombiniert)',
+        inhalte: { upload_url: uploadUrl, umfang, kombiniert: true },
+      }).then(({ error }) => { if (error) console.warn('[send-pruefung anfrage-log]', error.message); });
+    }
+    notifyKunde(kunde, `📋 Daten-Prüfung${uploadUrl ? ' + Logo/Foto-Anfrage' : ''} an Kunden gesendet (${job.stelle || 'Stelle'}) — ${new Date().toLocaleDateString('de-DE')}`)
       .catch(err => console.warn('[send-pruefung close-note]', err.message));
 
-    res.json({ ok: true, pruefung_url: pruefungUrl });
+    res.json({ ok: true, pruefung_url: pruefungUrl, upload_url: uploadUrl });
   } catch (err) {
     console.error('[send-pruefung]', err.message);
     res.status(500).json({ error: err.message });

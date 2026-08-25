@@ -153,19 +153,44 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
 /* ─────────────── Daten-Prüfung durch den Kunden ─────────────── */
 // Bittet den Kunden, die bereits erfassten Stellendaten zu prüfen und zu ergänzen.
 // customText (anrede-korrekt aus dem Modal) ersetzt den Default-Intro.
-export async function sendDatenPruefungMail({ to, betreff, customText, kunde, job, pruefungUrl }) {
+export async function sendDatenPruefungMail({ to, betreff, customText, kunde, job, pruefungUrl, uploadUrl = null, umfang = 'beides' }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);
   const k = kunde || {};
   const grusszeile = anrede(k);
+  // Neukundengewinnung: Kampagnen-Labels + eigene Vorlage statt „Stelle".
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
   const stelleTxt = job?.stelle ? `„${job.stelle}"` : '';
-  const tpl = await renderEmail('daten_pruefung', k, { stelle_txt: stelleTxt, stelle: job?.stelle || '' });
-  const defaultIntro = t(k,
-    `wir haben die Informationen zu deiner Stelle ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
-    `wir haben die Informationen zu Ihrer Stelle ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`);
+  const tpl = await renderEmail(istNeukunden ? 'daten_pruefung_neukunden' : 'daten_pruefung', k, { stelle_txt: stelleTxt, stelle: job?.stelle || '' });
+  const defaultIntro = istNeukunden
+    ? t(k,
+      `wir haben die Angaben zu deiner Kampagne ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
+      `wir haben die Angaben zu Ihrer Kampagne ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`)
+    : t(k,
+      `wir haben die Informationen zu deiner Stelle ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
+      `wir haben die Informationen zu Ihrer Stelle ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`);
   const intro = (customText || '').trim() || tpl?.body || defaultIntro;
   const subject = (betreff || '').trim() || tpl?.subject
-    || t(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle');
+    || (istNeukunden
+      ? t(k, 'Bitte kurz prüfen: die Angaben zu deiner Kampagne', 'Bitte kurz prüfen: die Angaben zu Ihrer Kampagne')
+      : t(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle'));
+
+  // Optionaler Upload-Block (kombinierte Mail: Prüfung + Logo/Foto-Anfrage in EINER Mail).
+  const uploadWort = umfang === 'logo'
+    ? t(k, 'euer Logo', 'Ihr Logo')
+    : umfang === 'fotos'
+      ? t(k, 'ein paar Fotos', 'ein paar Fotos')
+      : t(k, 'euer Logo und ein paar Fotos', 'Ihr Logo und ein paar Fotos');
+  const uploadBlockHtml = uploadUrl ? `
+    <tr><td style="padding:0 32px;"><hr style="border:none;border-top:1px solid #ececea;margin:0 0 20px;"></td></tr>
+    <tr><td style="padding:0 32px 6px;">
+      <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 14px;">${escape(t(k,
+        `Außerdem brauchen wir für die Kampagne noch ${uploadWort} — das kannst du hier direkt hochladen:`,
+        `Außerdem brauchen wir für die Kampagne noch ${uploadWort} — das können Sie hier direkt hochladen:`))}</p>
+    </td></tr>
+    <tr><td align="center" style="padding:0 32px 26px;">
+      <a href="${escape(uploadUrl)}" style="display:inline-block;background:#fafaf8;color:#0a0a0a;border:1px solid #ececea;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;">Logo &amp; Fotos hochladen →</a>
+    </td></tr>` : '';
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -176,13 +201,14 @@ export async function sendDatenPruefungMail({ to, betreff, customText, kunde, jo
       <a href="${escape(pruefungUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">Angaben prüfen &amp; ergänzen →</a>
       <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link zeigt immer den aktuellen Stand — ${t(k, 'du kannst ihn jederzeit erneut öffnen', 'Sie können ihn jederzeit erneut öffnen')}.</p>
     </td></tr>
+    ${uploadBlockHtml}
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Falls etwas unklar ist, einfach auf diese Mail antworten.</p>
       <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `${grusszeile},\n\n${intro}\n\nAngaben prüfen & ergänzen: ${pruefungUrl}\n\n(Der Link zeigt immer den aktuellen Stand.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
+  const text = `${grusszeile},\n\n${intro}\n\nAngaben prüfen & ergänzen: ${pruefungUrl}\n${uploadUrl ? `\nLogo & Fotos hochladen: ${uploadUrl}\n` : ''}\n(Der Link zeigt immer den aktuellen Stand.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

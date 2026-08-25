@@ -61,6 +61,18 @@ export const EMAIL_TEMPLATE_CATALOG = [
     body_sie: 'wir haben die Informationen zu Ihrer Stelle {{stelle_txt}} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.',
   },
   {
+    key: 'daten_pruefung_neukunden',
+    bereich: 'onboarding',
+    betreffOnly: false,
+    name: 'Daten-Prüfung (Neukundengewinnung)',
+    beschreibung: 'Wie „Daten-Prüfung", aber für Neukundengewinnungs-Projekte: Kampagnen-Labels statt „Stelle" (POST /jobs/:id/send-pruefung, projekttyp=neukundengewinnung). customText aus dem Modal überschreibt den Body.',
+    platzhalter: ['stelle_txt', 'stelle'],
+    betreff_du: 'Bitte kurz prüfen: die Angaben zu deiner Kampagne',
+    betreff_sie: 'Bitte kurz prüfen: die Angaben zu Ihrer Kampagne',
+    body_du: 'wir haben die Angaben zu deiner Kampagne {{stelle_txt}} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.',
+    body_sie: 'wir haben die Angaben zu Ihrer Kampagne {{stelle_txt}} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.',
+  },
+  {
     key: 'kriterien_anfrage',
     bereich: 'onboarding',
     betreffOnly: false,

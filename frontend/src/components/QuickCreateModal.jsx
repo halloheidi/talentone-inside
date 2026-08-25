@@ -113,6 +113,9 @@ export default function QuickCreateModal({ open, onClose }) {
   // Invite-Tab: Kunde füllt selbst aus
   const [invite, setInvite] = useState({ email: '', firmenname: '', ansprechpartner: '', customText: '', close_lead_id: '' });
   const [inviteProjekttyp, setInviteProjekttyp] = useState('mitarbeitergewinnung');
+  // Direkt-Create-Pfad (URL/PDF/manual/confirmed): eigener Projekttyp-Toggle,
+  // analog zum Invite-Tab (nur relevant für Nowag & Wirth).
+  const [createProjekttyp, setCreateProjekttyp] = useState('mitarbeitergewinnung');
   const [inviteSuccess, setInviteSuccess] = useState(null); // { firmenname, formularUrl } | null
 
   // Dubletten-Check: nutzt das aktive Firmenname-Feld je nach Tab (manual / invite)
@@ -136,6 +139,7 @@ export default function QuickCreateModal({ open, onClose }) {
     setLogoFile(null);
     setLogoPreview(null);
     setInvite({ email: '', firmenname: '', ansprechpartner: '', customText: '' });
+    setCreateProjekttyp('mitarbeitergewinnung');
     setInviteSuccess(null);
   }
 
@@ -163,6 +167,7 @@ export default function QuickCreateModal({ open, onClose }) {
       };
     }
     body.agentur = agentur;
+    body.projekttyp = agentur === 'nowagwirth' ? createProjekttyp : 'mitarbeitergewinnung';
     body.projekt_status = projektStatus;
     body.kickoff_termin = projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null;
     body.projektart = projektart || null;
@@ -382,6 +387,21 @@ export default function QuickCreateModal({ open, onClose }) {
               </select>
             </label>
           </div>
+          {agentur === 'nowagwirth' && (
+            <div style={{ marginTop: 12 }}>
+              <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#5a5955', letterSpacing: 0.05, textTransform: 'uppercase', marginBottom: 6 }}>Projekttyp</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setCreateProjekttyp('mitarbeitergewinnung')}
+                  className={`pub-filter ${createProjekttyp === 'mitarbeitergewinnung' ? 'is-active' : ''}`} disabled={busy}>
+                  👥 Mitarbeitergewinnung
+                </button>
+                <button type="button" onClick={() => setCreateProjekttyp('neukundengewinnung')}
+                  className={`pub-filter ${createProjekttyp === 'neukundengewinnung' ? 'is-active' : ''}`} disabled={busy}>
+                  🎯 Neukundengewinnung
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             <ProjektFlagsFields
               value={projektFlags}

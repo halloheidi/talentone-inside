@@ -126,6 +126,7 @@ export default function PublicFormular({ variant = 'formular' }) {
   const { token } = useParams();
   const [info, setInfo] = useState(null);
   const [projekttyp, setProjekttyp] = useState('mitarbeitergewinnung');
+  const [neukundenDaten, setNeukundenDaten] = useState(null); // Prüf-Modus: vorbefüllte Kampagnen-Daten
   const [loadError, setLoadError] = useState('');
   const [done, setDone] = useState(false);
 
@@ -163,6 +164,7 @@ export default function PublicFormular({ variant = 'formular' }) {
           setAvv(res.avv || null);
           setProjekttyp(res.job?.projekttyp || 'mitarbeitergewinnung');
           const j = res.job || {};
+          setNeukundenDaten(j.neukunden_daten || {});
           const fd = j.formdata_komplett || {};
           const allBen = Array.isArray(j.benefits) ? j.benefits.filter(Boolean) : [];
           const checkBen = allBen.filter(b => BENEFIT_OPTIONS.includes(b));
@@ -466,9 +468,16 @@ export default function PublicFormular({ variant = 'formular' }) {
     );
   }
 
-  // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante
-  // (nur im Neuanlage-Formular; die Prüfung nutzt immer das Recruiting-Formular).
-  if (!istPruefung && projekttyp === 'neukundengewinnung') {
+  // Weiche: bei Neukundengewinnung zeigen wir die Produkt/Zielgruppe-Variante —
+  // im Neuanlage-Formular UND im Prüf-Modus (dort vorbefüllt aus neukunden_daten).
+  if (projekttyp === 'neukundengewinnung') {
+    if (istPruefung) {
+      return <NeukundenPruefungForm
+        token={token} info={info} avv={avv}
+        neukundenDaten={neukundenDaten || {}}
+        onDone={() => setDone(true)}
+      />;
+    }
     return <NeukundenBriefingForm
       token={token} info={info} avv={avv}
       onDone={() => setDone(true)}
@@ -1012,78 +1021,11 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
 
         {/* Manuelles Formular — immer sichtbar */}
         <form onSubmit={onSubmit} className="public-form">
-          <fieldset className="formular-section">
-            <legend>{t(info, 'Deine Firma', 'Ihre Firma')}</legend>
-            <div className="stelle-grid">
-              <label className="field"><span>Firmenname *</span>
-                <input required value={form.firmenname} onChange={e => setF('firmenname', e.target.value)} />
-              </label>
-              <label className="field"><span>Ansprechpartner</span>
-                <input value={form.ansprechpartner} onChange={e => setF('ansprechpartner', e.target.value)} />
-              </label>
-              <label className="field"><span>Telefon</span>
-                <input value={form.telefon} onChange={e => setF('telefon', e.target.value)} />
-              </label>
-              <label className="field"><span>Website</span>
-                <input type="url" placeholder="https://…" value={form.website_url} onChange={e => setF('website_url', e.target.value)} />
-              </label>
-              <label className="field"><span>Branche</span>
-                <BrancheField value={form.branche} onChange={v => setF('branche', v)} />
-              </label>
-            </div>
-          </fieldset>
-
-          <fieldset className="formular-section">
-            <legend>{t(info, 'Dein Angebot', 'Ihr Angebot')}</legend>
-            <div className="stelle-grid">
-              <label className="field field-full"><span>{t(info, 'Produkt / Dienstleistung — was bietet ihr an? *', 'Produkt / Dienstleistung — was bieten Sie an? *')}</span>
-                <input required value={form.produkt} onChange={e => setF('produkt', e.target.value)}
-                  placeholder="z. B. Photovoltaik-Komplettlösung inkl. Speicher" />
-              </label>
-              <label className="field field-full"><span>Wofür werden Kunden gesucht?</span>
-                <textarea rows={2} value={form.kundenprofil} onChange={e => setF('kundenprofil', e.target.value)}
-                  placeholder="z. B. Photovoltaik-Anlagen für Eigenheimbesitzer" />
-              </label>
-              <label className="field field-full"><span>{t(info, 'Zielgruppe — wen wollt ihr erreichen?', 'Zielgruppe — wen wollen Sie erreichen?')}</span>
-                <textarea rows={2} value={form.zielgruppe} onChange={e => setF('zielgruppe', e.target.value)}
-                  placeholder="z. B. Hausbesitzer 35-65, ländlich, mit eigenem Dach" />
-              </label>
-              <label className="field"><span>Region / Einzugsgebiet</span>
-                <input value={form.einzugsgebiet} onChange={e => setF('einzugsgebiet', e.target.value)}
-                  placeholder="z. B. Bayern, Oberpfalz" />
-              </label>
-              <label className="field"><span>Preisrahmen (optional)</span>
-                <input value={form.preisrahmen} onChange={e => setF('preisrahmen', e.target.value)}
-                  placeholder="z. B. ab 15.000 €" />
-              </label>
-            </div>
-          </fieldset>
-
-          <fieldset className="formular-section">
-            <legend>{t(info, 'Vorteile deines Produkts', 'Vorteile Ihres Produkts')}</legend>
-            <div className="benefits-list">
-              {form.vorteile.map((v, i) => (
-                <span key={i} className="benefit-chip">
-                  {v}
-                  <button type="button" className="benefit-chip-x" onClick={() => removeVorteil(i)} aria-label="Entfernen">×</button>
-                </span>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <input type="text" value={newVorteil} onChange={e => setNewVorteil(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVorteil(); } }}
-                placeholder='Neuer Vorteil, z. B. "Amortisation in 8 Jahren"' style={{ flex: 1 }} />
-              <button type="button" className="btn-ghost btn-sm" onClick={addVorteil} disabled={!newVorteil.trim()}>+ Hinzufügen</button>
-            </div>
-          </fieldset>
-
-          <fieldset className="formular-section">
-            <legend>{t(info, 'Was unterscheidet euch vom Wettbewerb?', 'Was unterscheidet Sie vom Wettbewerb?')}</legend>
-            <label className="field field-full">
-              <textarea rows={3} value={form.unterschied} onChange={e => setF('unterschied', e.target.value)}
-                placeholder="z. B. Regionaler Anbieter, keine Subunternehmen, 25 Jahre Erfahrung, eigenes Montageteam" />
-            </label>
-          </fieldset>
+          <NeukundenKampagnenFelder
+            info={info} form={form} setF={setF}
+            newVorteil={newVorteil} setNewVorteil={setNewVorteil}
+            addVorteil={addVorteil} removeVorteil={removeVorteil}
+          />
 
           <fieldset className="formular-section">
             <legend>Logo (empfohlen)</legend>
@@ -1128,6 +1070,211 @@ function NeukundenBriefingForm({ token, info, avv, onDone }) {
             <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
             <button type="submit" className="btn-primary" disabled={submitBusy || !form.firmenname.trim() || !form.produkt.trim()}>
               {submitBusy ? 'Sende…' : 'Briefing absenden'}
+            </button>
+          </div>
+        </form>
+
+        <BrandFooter agentur={info?.agentur} />
+      </div>
+    </div>
+  );
+}
+
+/* Gemeinsame Kampagnen-Felder (Firma, Angebot, Vorteile, USP) —
+   genutzt im Neuanlage-Briefing UND in der Prüf-Ansicht. */
+function NeukundenKampagnenFelder({ info, form, setF, newVorteil, setNewVorteil, addVorteil, removeVorteil }) {
+  return (
+    <>
+      <fieldset className="formular-section">
+        <legend>{t(info, 'Deine Firma', 'Ihre Firma')}</legend>
+        <div className="stelle-grid">
+          <label className="field"><span>Firmenname *</span>
+            <input required value={form.firmenname} onChange={e => setF('firmenname', e.target.value)} />
+          </label>
+          <label className="field"><span>Ansprechpartner</span>
+            <input value={form.ansprechpartner} onChange={e => setF('ansprechpartner', e.target.value)} />
+          </label>
+          <label className="field"><span>Telefon</span>
+            <input value={form.telefon} onChange={e => setF('telefon', e.target.value)} />
+          </label>
+          <label className="field"><span>Website</span>
+            <input type="url" placeholder="https://…" value={form.website_url} onChange={e => setF('website_url', e.target.value)} />
+          </label>
+          <label className="field"><span>Branche</span>
+            <BrancheField value={form.branche} onChange={v => setF('branche', v)} />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="formular-section">
+        <legend>{t(info, 'Dein Angebot', 'Ihr Angebot')}</legend>
+        <div className="stelle-grid">
+          <label className="field field-full"><span>{t(info, 'Produkt / Dienstleistung — was bietet ihr an? *', 'Produkt / Dienstleistung — was bieten Sie an? *')}</span>
+            <input required value={form.produkt} onChange={e => setF('produkt', e.target.value)}
+              placeholder="z. B. Photovoltaik-Komplettlösung inkl. Speicher" />
+          </label>
+          <label className="field field-full"><span>Wofür werden Kunden gesucht?</span>
+            <textarea rows={2} value={form.kundenprofil} onChange={e => setF('kundenprofil', e.target.value)}
+              placeholder="z. B. Photovoltaik-Anlagen für Eigenheimbesitzer" />
+          </label>
+          <label className="field field-full"><span>{t(info, 'Zielgruppe — wen wollt ihr erreichen?', 'Zielgruppe — wen wollen Sie erreichen?')}</span>
+            <textarea rows={2} value={form.zielgruppe} onChange={e => setF('zielgruppe', e.target.value)}
+              placeholder="z. B. Hausbesitzer 35-65, ländlich, mit eigenem Dach" />
+          </label>
+          <label className="field"><span>Region / Einzugsgebiet</span>
+            <input value={form.einzugsgebiet} onChange={e => setF('einzugsgebiet', e.target.value)}
+              placeholder="z. B. Bayern, Oberpfalz" />
+          </label>
+          <label className="field"><span>Preisrahmen (optional)</span>
+            <input value={form.preisrahmen} onChange={e => setF('preisrahmen', e.target.value)}
+              placeholder="z. B. ab 15.000 €" />
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset className="formular-section">
+        <legend>{t(info, 'Vorteile deines Produkts', 'Vorteile Ihres Produkts')}</legend>
+        <div className="benefits-list">
+          {form.vorteile.map((v, i) => (
+            <span key={i} className="benefit-chip">
+              {v}
+              <button type="button" className="benefit-chip-x" onClick={() => removeVorteil(i)} aria-label="Entfernen">×</button>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <input type="text" value={newVorteil} onChange={e => setNewVorteil(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addVorteil(); } }}
+            placeholder='Neuer Vorteil, z. B. "Amortisation in 8 Jahren"' style={{ flex: 1 }} />
+          <button type="button" className="btn-ghost btn-sm" onClick={addVorteil} disabled={!newVorteil.trim()}>+ Hinzufügen</button>
+        </div>
+      </fieldset>
+
+      <fieldset className="formular-section">
+        <legend>{t(info, 'Was unterscheidet euch vom Wettbewerb?', 'Was unterscheidet Sie vom Wettbewerb?')}</legend>
+        <label className="field field-full">
+          <textarea rows={3} value={form.unterschied} onChange={e => setF('unterschied', e.target.value)}
+            placeholder="z. B. Regionaler Anbieter, keine Subunternehmen, 25 Jahre Erfahrung, eigenes Montageteam" />
+        </label>
+      </fieldset>
+    </>
+  );
+}
+
+/* ═════════════════════ Neukunden-Prüf-Ansicht ═════════════════════
+   Prüf-Modus (variant='pruefung') bei projekttyp='neukundengewinnung':
+   Kampagnen-Felder vorbefüllt aus job.neukunden_daten, editierbar, speichert
+   nach POST /pruefung/:token (Endpoint persistiert neukunden_daten). */
+function NeukundenPruefungForm({ token, info, avv, neukundenDaten, onDone }) {
+  const nk = neukundenDaten || {};
+  const [form, setForm] = useState({
+    firmenname:    info.firmenname || '',
+    ansprechpartner: info.ansprechpartner || '',
+    telefon:       info.telefon || '',
+    website_url:   info.website_url || '',
+    branche:       info.branche || '',
+    produkt:       nk.produkt || '',
+    kundenprofil:  nk.kundenprofil || '',
+    zielgruppe:    nk.zielgruppe || '',
+    vorteile:      Array.isArray(nk.vorteile) ? nk.vorteile.filter(Boolean) : [],
+    unterschied:   nk.unterschied || '',
+    preisrahmen:   nk.preisrahmen || '',
+    einzugsgebiet: nk.einzugsgebiet || '',
+    funnel_url:    nk.funnel_url || '',
+  });
+  const [newVorteil, setNewVorteil] = useState('');
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [avvChecked, setAvvChecked] = useState(false);
+  const [avvName, setAvvName] = useState('');
+
+  function setF(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
+  function addVorteil() {
+    const v = newVorteil.trim();
+    if (!v) return;
+    setF('vorteile', [...form.vorteile, v]);
+    setNewVorteil('');
+  }
+  function removeVorteil(i) {
+    setF('vorteile', form.vorteile.filter((_, idx) => idx !== i));
+  }
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    setSubmitError('');
+    if (!form.firmenname.trim()) return setSubmitError('Firmenname ist Pflicht.');
+    if (!form.produkt.trim())    return setSubmitError('Produkt/Dienstleistung ist Pflicht.');
+    if (avv?.erforderlich && (!avvChecked || !avvName.trim())) {
+      return setSubmitError('Bitte den Auftragsverarbeitungsvertrag bestätigen (Haken setzen und Namen angeben).');
+    }
+    setSubmitBusy(true);
+    try {
+      await publicApi(`/pruefung/${token}`, {
+        method: 'POST',
+        body: {
+          kunde: {
+            firmenname:      form.firmenname.trim(),
+            ansprechpartner: form.ansprechpartner.trim() || null,
+            telefon:         form.telefon.trim() || null,
+            website_url:     form.website_url.trim() || null,
+            branche:         form.branche || null,
+          },
+          neukunden_daten: {
+            produkt:       form.produkt.trim(),
+            kundenprofil:  form.kundenprofil.trim(),
+            zielgruppe:    form.zielgruppe.trim(),
+            vorteile:      form.vorteile.filter(Boolean),
+            unterschied:   form.unterschied.trim(),
+            preisrahmen:   form.preisrahmen.trim(),
+            einzugsgebiet: form.einzugsgebiet.trim(),
+            funnel_url:    (form.funnel_url || '').trim(),
+          },
+          avv_akzeptiert: !!avvChecked,
+          avv_name: avvName.trim() || undefined,
+        },
+      });
+      onDone();
+    } catch (err) { setSubmitError(err.message); }
+    finally { setSubmitBusy(false); }
+  }
+
+  return (
+    <div className="public-page">
+      <div className="public-card public-card-form">
+        <BrandHeader agentur={info?.agentur} />
+        <h1 className="public-title">Angaben prüfen & ergänzen</h1>
+        <p className="public-sub">
+          {info.ansprechpartner ? anrede(info) : `Hallo ${info.firmenname || 'zusammen'}`}! {t(info,
+            'Wir haben die Angaben zu deiner Kampagne bereits zusammengetragen. Schau bitte drüber — du kannst alles ergänzen oder korrigieren und dann absenden.',
+            'Wir haben die Angaben zu Ihrer Kampagne bereits zusammengetragen. Schauen Sie bitte drüber — Sie können alles ergänzen oder korrigieren und dann absenden.')}
+        </p>
+
+        <form onSubmit={onSubmit} className="public-form">
+          <NeukundenKampagnenFelder
+            info={info} form={form} setF={setF}
+            newVorteil={newVorteil} setNewVorteil={setNewVorteil}
+            addVorteil={addVorteil} removeVorteil={removeVorteil}
+          />
+
+          {submitError && <div className="alert alert-error" style={{ marginTop: 8 }}>{submitError}</div>}
+
+          <div className="formular-submit">
+            {avv?.erforderlich && (
+              <div>
+                <AvvCheckbox avv={avv} firmenname={form.firmenname} checked={avvChecked} onChange={setAvvChecked} />
+                {avvChecked && (
+                  <input
+                    type="text"
+                    value={avvName}
+                    onChange={e => setAvvName(e.target.value)}
+                    placeholder="Dein Name (zur Bestätigung)"
+                    style={{ marginTop: 8, padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 14, width: '100%', maxWidth: 320 }}
+                  />
+                )}
+              </div>
+            )}
+            <button type="submit" className="btn-primary" disabled={submitBusy || !form.firmenname.trim() || !form.produkt.trim()}>
+              {submitBusy ? 'Sende…' : 'Änderungen absenden'}
             </button>
           </div>
         </form>

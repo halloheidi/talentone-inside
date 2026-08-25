@@ -102,55 +102,6 @@ export default function JobStelleninfos() {
   const [aiError, setAiError] = useState('');
   const [aiFields, setAiFields] = useState(new Set()); // Keys mit "KI-Vorschlag"-Badge
 
-  // Daten-Prüfung: Versand-Modal an den Kunden
-  const [showPruefung, setShowPruefung] = useState(false);
-  const [pruefungForm, setPruefungForm] = useState({ to: '', betreff: '', customText: '' });
-  const [pruefungBusy, setPruefungBusy] = useState(false);
-  const [pruefungMsg, setPruefungMsg] = useState('');
-  const [pruefungErr, setPruefungErr] = useState(false);
-  const [pruefungKunde, setPruefungKunde] = useState(null); // Kunde-Override nach Anrede-Wahl
-
-  function buildPruefungText(k) {
-    return anredeT(k,
-      'wir haben die Informationen zu deiner Stelle bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.',
-      'wir haben die Informationen zu Ihrer Stelle bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.');
-  }
-  function openPruefung() {
-    setPruefungKunde(kunde);
-    setPruefungForm({
-      to: kunde?.email || '',
-      betreff: anredeT(kunde, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle'),
-      customText: anredeOffen(kunde) ? '' : buildPruefungText(kunde),
-    });
-    setPruefungMsg(''); setPruefungErr(false);
-    setShowPruefung(true);
-  }
-  function onPruefungAnredeSaved(k) {
-    setPruefungKunde(k);
-    reload?.();
-    setPruefungForm(prev => ({
-      ...prev,
-      betreff: anredeT(k, 'Bitte kurz prüfen: die Angaben zu deiner Stelle', 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle'),
-      customText: buildPruefungText(k),
-    }));
-  }
-  async function sendPruefung() {
-    if (!pruefungForm.to.trim()) { setPruefungErr(true); setPruefungMsg('Empfänger-Mail fehlt.'); return; }
-    setPruefungBusy(true); setPruefungMsg(''); setPruefungErr(false);
-    try {
-      await api(`/jobs/${job.id}/send-pruefung`, {
-        method: 'POST',
-        body: { to: pruefungForm.to.trim(), betreff: pruefungForm.betreff, customText: pruefungForm.customText },
-      });
-      setPruefungMsg('Prüf-Link an den Kunden verschickt.');
-      setTimeout(() => setShowPruefung(false), 1200);
-    } catch (err) {
-      setPruefungErr(true);
-      setPruefungMsg(`Versand fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
-    } finally {
-      setPruefungBusy(false);
-    }
-  }
   async function dismissCreativeWarnung() {
     try {
       const res = await api(`/jobs/${job.id}`, { method: 'PATCH', body: { daten_geaendert_nach_creatives_at: null } });
@@ -343,12 +294,9 @@ export default function JobStelleninfos() {
         </div>
       )}
 
-      {/* Aktion: Kunden zur Prüfung der erfassten Daten einladen */}
+      {/* Aktion: Kunden zur Prüfung der erfassten Daten einladen (+ optional Logo/Fotos anfragen) */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-        <button type="button" className="btn-ghost btn-sm" onClick={openPruefung}
-          title="Dem Kunden einen Link schicken, um die erfassten Stellendaten zu prüfen und zu ergänzen">
-          📋 Kunden zur Prüfung schicken
-        </button>
+        <PruefungVersand job={job} kunde={kunde} reload={reload} />
       </div>
 
       {/* ───────── Logo-Header ───────── */}
@@ -587,56 +535,162 @@ export default function JobStelleninfos() {
           🗑 Projekt löschen
         </button>
       </div>
+    </form>
+  );
+}
 
-      {/* ───────── Daten-Prüfung an Kunden senden ───────── */}
+/* ═════════════════════ Prüf-/Anfrage-Versand ═════════════════════
+   Ein Dialog für BEIDE Projekttypen (Mitarbeiter- & Neukundengewinnung).
+   Zwei Optionen kombinierbar:
+     • „Daten zur Prüfung"  → POST /jobs/:id/send-pruefung (mitUpload steuert Kombi-Mail)
+     • „Logo & Fotos anfragen" → POST /kunden/:id/anfrage
+   Drei Fälle:
+     beide  → EINE Kombi-Mail (send-pruefung mit mitUpload:true)
+     nur Prüfung → send-pruefung (ohne mitUpload)
+     nur Upload  → /kunden/:id/anfrage */
+function PruefungVersand({ job, kunde, reload }) {
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
+  const [show, setShow] = useState(false);
+  const [form, setForm] = useState({ to: '', betreff: '', customText: '' });
+  const [wantPruefung, setWantPruefung] = useState(true);
+  const [wantUpload, setWantUpload] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState(false);
+  const [aKunde, setAKunde] = useState(null); // Kunde-Override nach Anrede-Wahl
+
+  const betreff = (k) => anredeT(k,
+    istNeukunden ? 'Bitte kurz prüfen: die Angaben zu deiner Kampagne' : 'Bitte kurz prüfen: die Angaben zu deiner Stelle',
+    istNeukunden ? 'Bitte kurz prüfen: die Angaben zu Ihrer Kampagne' : 'Bitte kurz prüfen: die Angaben zu Ihrer Stelle');
+  function buildText(k) {
+    return istNeukunden
+      ? anredeT(k,
+          'wir haben die Angaben zu deiner Kampagne bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.',
+          'wir haben die Angaben zu Ihrer Kampagne bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.')
+      : anredeT(k,
+          'wir haben die Informationen zu deiner Stelle bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.',
+          'wir haben die Informationen zu Ihrer Stelle bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.');
+  }
+  function openDialog() {
+    setAKunde(kunde);
+    setForm({
+      to: kunde?.email || '',
+      betreff: betreff(kunde),
+      customText: anredeOffen(kunde) ? '' : buildText(kunde),
+    });
+    setWantPruefung(true);
+    setWantUpload(false);
+    setMsg(''); setErr(false);
+    setShow(true);
+  }
+  function onAnredeSaved(k) {
+    setAKunde(k);
+    reload?.();
+    setForm(prev => ({ ...prev, betreff: betreff(k), customText: buildText(k) }));
+  }
+  async function send() {
+    if (!wantPruefung && !wantUpload) { setErr(true); setMsg('Bitte mindestens eine Option wählen.'); return; }
+    if (wantPruefung && !form.to.trim()) { setErr(true); setMsg('Empfänger-Mail fehlt.'); return; }
+    setBusy(true); setMsg(''); setErr(false);
+    try {
+      if (wantPruefung && wantUpload) {
+        await api(`/jobs/${job.id}/send-pruefung`, {
+          method: 'POST',
+          body: { to: form.to.trim(), betreff: form.betreff, customText: form.customText, mitUpload: true },
+        });
+        setMsg('Kombinierte Mail (Prüfung + Upload) verschickt.');
+      } else if (wantPruefung) {
+        await api(`/jobs/${job.id}/send-pruefung`, {
+          method: 'POST',
+          body: { to: form.to.trim(), betreff: form.betreff, customText: form.customText },
+        });
+        setMsg('Prüf-Link verschickt.');
+      } else {
+        await api(`/kunden/${job.kunde_id || kunde?.id}/anfrage`, {
+          method: 'POST',
+          body: { customText: form.customText },
+        });
+        setMsg('Logo-/Foto-Anfrage verschickt.');
+      }
+      setTimeout(() => setShow(false), 1200);
+    } catch (e) {
+      setErr(true);
+      setMsg(`Versand fehlgeschlagen: ${e.body?.error || e.message || 'Unbekannter Fehler.'}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const anredeMissing = anredeOffen(aKunde || kunde);
+  return (
+    <>
+      <button type="button" className="btn-ghost btn-sm" onClick={openDialog}
+        title="Dem Kunden einen Link zur Prüfung der Angaben schicken und/oder Logo & Fotos anfragen">
+        📋 Kunden zur Prüfung schicken
+      </button>
       <Modal
-        open={showPruefung}
-        onClose={() => !pruefungBusy && setShowPruefung(false)}
+        open={show}
+        onClose={() => !busy && setShow(false)}
         title="📋 Kunden zur Prüfung schicken"
         footer={
           <>
-            <button type="button" className="btn-ghost" onClick={() => setShowPruefung(false)} disabled={pruefungBusy}>Abbrechen</button>
-            <button type="button" className="btn-primary" onClick={sendPruefung}
-              disabled={pruefungBusy || !pruefungForm.to.trim() || anredeOffen(pruefungKunde || kunde)}>
-              {pruefungBusy ? 'Sende…' : 'Link senden'}
+            <button type="button" className="btn-ghost" onClick={() => setShow(false)} disabled={busy}>Abbrechen</button>
+            <button type="button" className="btn-primary" onClick={send}
+              disabled={busy || anredeMissing || (!wantPruefung && !wantUpload) || (wantPruefung && !form.to.trim())}>
+              {busy ? 'Sende…' : 'Absenden'}
             </button>
           </>
         }
       >
         <p className="pane-hint">
-          Der Kunde bekommt einen Link, um die erfassten Stellendaten zu prüfen und zu ergänzen. Seine Änderungen landen
-          automatisch hier im Stelle-Tab (mit interner Benachrichtigung). Der Link zeigt immer den aktuellen Stand und kann mehrfach geschickt werden.
+          Wähle, was der Kunde bekommen soll. Bei „Daten zur Prüfung" erhält er einen Link, um die erfassten Angaben zu prüfen
+          und zu ergänzen — Änderungen landen automatisch hier im Projekt. „Logo & Fotos anfragen" bittet zusätzlich um einen Upload.
+          Sind beide Optionen aktiv, geht eine kombinierte Mail raus.
         </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '4px 0 14px' }}>
+          <label className="field-checkbox">
+            <input type="checkbox" checked={wantPruefung} onChange={e => setWantPruefung(e.target.checked)} />
+            <span>Daten zur Prüfung schicken</span>
+          </label>
+          <label className="field-checkbox">
+            <input type="checkbox" checked={wantUpload} onChange={e => setWantUpload(e.target.checked)} />
+            <span>Logo &amp; Fotos anfragen</span>
+          </label>
+        </div>
         {/* Anrede zuerst — der Mail-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
-        <AnredeAbfrage kunde={pruefungKunde || kunde} onSaved={onPruefungAnredeSaved} />
-        {anredeOffen(pruefungKunde || kunde) ? (
+        <AnredeAbfrage kunde={aKunde || kunde} onSaved={onAnredeSaved} />
+        {anredeMissing ? (
           <div style={{ fontSize: 13, color: 'var(--ink-3)', padding: '4px 2px' }}>
             Bitte oben zuerst die Anrede festlegen — danach wird der Mail-Text in der passenden Form (Du/Sie) erzeugt.
           </div>
         ) : (
           <div className="form-grid">
+            {wantPruefung && (
+              <>
+                <label className="field field-full">
+                  <span>An</span>
+                  <input type="email" value={form.to} onChange={e => setForm({ ...form, to: e.target.value })} />
+                </label>
+                <label className="field field-full">
+                  <span>Betreff</span>
+                  <input value={form.betreff} onChange={e => setForm({ ...form, betreff: e.target.value })} />
+                </label>
+              </>
+            )}
             <label className="field field-full">
-              <span>An</span>
-              <input type="email" value={pruefungForm.to} onChange={e => setPruefungForm({ ...pruefungForm, to: e.target.value })} />
-            </label>
-            <label className="field field-full">
-              <span>Betreff</span>
-              <input value={pruefungForm.betreff} onChange={e => setPruefungForm({ ...pruefungForm, betreff: e.target.value })} />
-            </label>
-            <label className="field field-full">
-              <span>Nachricht (der Button „Angaben prüfen & ergänzen" wird automatisch angehängt)</span>
-              <textarea rows={5} value={pruefungForm.customText} onChange={e => setPruefungForm({ ...pruefungForm, customText: e.target.value })} />
+              <span>Nachricht{wantPruefung ? ' (der Button „Angaben prüfen & ergänzen" wird automatisch angehängt)' : ''}</span>
+              <textarea rows={5} value={form.customText} onChange={e => setForm({ ...form, customText: e.target.value })} />
             </label>
           </div>
         )}
-        {pruefungMsg && (
-          <div className={`form-msg${pruefungErr ? ' alert alert-error' : ''}`}
-            style={{ marginTop: 10, ...(pruefungErr ? { color: '#b00020', fontWeight: 600 } : {}) }}>
-            {pruefungErr ? '⚠️ ' : ''}{pruefungMsg}
+        {msg && (
+          <div className={`form-msg${err ? ' alert alert-error' : ''}`}
+            style={{ marginTop: 10, ...(err ? { color: '#b00020', fontWeight: 600 } : {}) }}>
+            {err ? '⚠️ ' : ''}{msg}
           </div>
         )}
       </Modal>
-    </form>
+    </>
   );
 }
 
@@ -716,9 +770,10 @@ function NeukundenProduktTab({ job, kunde, reload }) {
     set('vorteile', form.vorteile.filter((_, idx) => idx !== i));
   }
 
-  // Auto-Save (ohne reload). Pflichtfeld Produkt: leer wird nicht gespeichert.
+  // Auto-Save (ohne reload). Speichert IMMER — auch bei (noch) leerem Produkt,
+  // damit keine Eingabe stillschweigend verloren geht und der „✓ Gespeichert"-
+  // Status ehrlich ist. Für die Sammelfelder greift der Produkt-Fallback unten.
   async function saveNow() {
-    if (!form.produkt.trim()) return;
     const neukunden_daten = {
       produkt: form.produkt.trim(),
       kundenprofil: form.kundenprofil.trim(),
@@ -744,6 +799,10 @@ function NeukundenProduktTab({ job, kunde, reload }) {
 
   return (
     <form onSubmit={e => e.preventDefault()} className="job-stelle-form">
+      {/* Aktion: Kunden zur Prüfung der Kampagnen-Daten einladen (+ optional Logo/Fotos anfragen) */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <PruefungVersand job={job} kunde={kunde} reload={reload} />
+      </div>
       <div className="section-head">
         <div>
           <h2 className="section-title">Produkt &amp; Zielgruppe</h2>

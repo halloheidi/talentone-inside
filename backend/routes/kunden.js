@@ -87,12 +87,15 @@ router.post('/quick-create/extract', async (req, res) => {
 
 router.post('/quick-create', async (req, res) => {
   const {
-    mode, logo, agentur, projekt_status, projektart, verantwortlich,
+    mode, logo, agentur, projekt_status, projektart, verantwortlich, projekttyp,
     // Migration 025: neue Projekt-Flags direkt beim Anlegen
     projektdauer, fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details,
     // Migration 027
     kickoff_termin,
   } = req.body || {};
+  // Projekttyp sauber durchreichen (steuert u. a. das Webhook-Routing) — Default
+  // Mitarbeitergewinnung. Bislang wurde er hier verworfen → Job immer 'mitarbeitergewinnung'.
+  const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
   const finalAgentur = agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
   let kundeData = { agentur: finalAgentur };
   let jobData = {};
@@ -167,12 +170,22 @@ router.post('/quick-create', async (req, res) => {
       return res.status(400).json({ error: 'Unbekannter Modus.' });
     }
 
+    // Projekttyp auf den Job schreiben; Neukundengewinnung hat keine Vorqualifizierung.
+    jobData.projekttyp = pt;
+    if (pt === 'neukundengewinnung') {
+      jobData.vorqualifizierung = false;
+      // Für Neukunden „stelle" = Produkt/Angebot → in neukunden_daten spiegeln.
+      if (jobData.stelle && !jobData.neukunden_daten) jobData.neukunden_daten = { produkt: jobData.stelle };
+    }
+
     let anlage;
     try {
       anlage = await anlageKundeProjektJob({
         kundeData, jobData,
         meta: {
-          status: projekt_status, projektart, projektdauer, verantwortlich,
+          status: projekt_status,
+          projektart: projektart || (pt === 'neukundengewinnung' ? 'Neukundengewinnung' : undefined),
+          projektdauer, verantwortlich,
           fotograf_noetig, zahlung_aufgeteilt, garantie, garantie_details, kickoff_termin,
         },
       });
