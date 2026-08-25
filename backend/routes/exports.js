@@ -98,11 +98,29 @@ router.post('/jobs/:id/export/pdf', async (req, res) => {
   }
 });
 
-/* POST /api/jobs/:id/export/anschreiben — Claude-Vorschlag */
+/* POST /api/jobs/:id/export/anschreiben — Claude-Vorschlag (runden-bewusst) */
 router.post('/jobs/:id/export/anschreiben', async (req, res) => {
   try {
     const { job, kunde } = await loadFullJob(req.params.id);
-    const text = await generateAnschreibensVorschlag(job, kunde);
+    // Folgerunde-Erkennung: primär das Client-Signal (mode='new_round'); fehlt es,
+    // aus dem echten Zustand ableiten (schon mal ein Entwurf raus UND Kundenreaktion —
+    // gleiche Heuristik wie beim Versand). Nur dann heißt es "überarbeitet nach Feedback".
+    let neueRunde = req.body?.neueRunde === true;
+    let runde = Number(req.body?.runde) || null;
+    if (req.body?.neueRunde === undefined) {
+      const { data: latestReview } = await supabase.from('talentone_reviews')
+        .select('runde, status, manuell_beantwortet').eq('job_id', req.params.id)
+        .order('runde', { ascending: false }).limit(1).maybeSingle();
+      const { data: frueherVersand } = await supabase.from('talentone_versand')
+        .select('id').eq('job_id', req.params.id).like('typ', 'entwurf%').limit(1).maybeSingle();
+      const hatKundenReaktion = !!(latestReview && (
+        ['aenderungen', 'freigegeben'].includes(latestReview.status) || latestReview.manuell_beantwortet));
+      if (frueherVersand && hatKundenReaktion) {
+        neueRunde = true;
+        runde = runde || ((Number(latestReview?.runde) || 1) + 1);
+      }
+    }
+    const text = await generateAnschreibensVorschlag(job, kunde, { neueRunde, runde: runde || 2 });
     res.json({ text });
   } catch (err) {
     console.error('[export/anschreiben]', err.message);

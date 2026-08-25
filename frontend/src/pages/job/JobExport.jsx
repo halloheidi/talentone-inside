@@ -250,7 +250,12 @@ export default function JobExport() {
     }));
     if (!istResend) {
       setAnschreibensBusy(true);
-      api(`/jobs/${job.id}/export/anschreiben`, { method: 'POST' })
+      // Runde mitgeben, damit der Vorschlag bei einer Folgerunde „überarbeitet nach
+      // Feedback" formuliert statt „hier sind die ersten Entwürfe".
+      api(`/jobs/${job.id}/export/anschreiben`, {
+        method: 'POST',
+        body: { neueRunde: istNeueRunde, runde: (Number(review?.runde) || 1) + 1 },
+      })
         .then(r => setMailForm(prev => ({ ...prev, anschreiben: r.text || prev.anschreiben })))
         .catch(() => {})
         .finally(() => setAnschreibensBusy(false));

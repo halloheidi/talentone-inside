@@ -155,12 +155,26 @@ export async function streamAdCopiesPdf(res, { job, kunde, adcopies }) {
 
 /* ───────────────────── Anschreiben-Vorschlag (Claude) ───────────────────── */
 
-export async function generateAnschreibensVorschlag(job, kunde) {
+export async function generateAnschreibensVorschlag(job, kunde, { neueRunde = false, runde = 2 } = {}) {
   const brand = getBranding(kunde?.agentur);
   // Anrede-Form kommt vom Kunden — vorher stand hier fest "Sie-Anrede", waehrend
   // das Mail-Template duzt. Genau daraus entstand die Mischform
   // ("Deine Entwuerfe" + "schicken wir Ihnen").
-  const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel, Review-Link zum Kommentieren). Sprache: Deutsch, ${anredePromptHinweis(kunde)} (keine Floskeln wie "Sehr geehrte Damen und Herren").
+  // Runden-bewusst: bei einer Folgerunde (nach Kunden-Feedback) darf NICHT mehr
+  // "hier sind die ersten Entwürfe" stehen, sondern "überarbeitet nach Feedback".
+  const kontextSatz = neueRunde
+    ? `dem wir die ÜBERARBEITETEN Recruiting-Kampagnen-Entwürfe im Review-Link zeigen — das ist Runde ${runde} (aktualisierte Bilder, Texte, Bewerbungs-Funnel, Review-Link zum erneuten Kommentieren/Freigeben).`
+    : `dem wir die ersten Recruiting-Kampagnen-Entwürfe schicken (Bilder, Texte, Bewerbungs-Funnel, Review-Link zum Kommentieren).`;
+  // Bei Folgerunden steht das "Danke fürs Feedback / wir haben überarbeitet" bereits
+  // als Intro-Zeile VOR diesem Anschreiben (Vorlage entwurf_neue_runde) — hier also
+  // NICHT erneut danken und NICHT "die ersten Entwürfe" schreiben, sonst Widerspruch.
+  const ersterSatz = neueRunde
+    ? `- Erster Satz: verweise darauf, dass im Review-Link die AKTUALISIERTEN/überarbeiteten Entwürfe liegen. Schreibe NICHT "die ersten Entwürfe" und bedanke dich NICHT erneut fürs Feedback (das steht schon in der Zeile davor).`
+    : `- Erster Satz: hier sind die ersten Entwürfe zur Stelle`;
+  const feedbackSatz = neueRunde
+    ? `- Bitte, nochmal draufzuschauen und freizugeben oder weitere Änderungswünsche zu schicken`
+    : `- Bitte um Feedback / Änderungswünsche`;
+  const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, ${kontextSatz} Sprache: Deutsch, ${anredePromptHinweis(kunde)} (keine Floskeln wie "Sehr geehrte Damen und Herren").
 
 WICHTIG: Verwende durchgängig NUR diese eine Anredeform — niemals mischen.
 Beginne exakt mit der Grußzeile "${anrede(kunde)}," (genau so, danach Leerzeile).
@@ -171,9 +185,9 @@ Kontext:
 - Stelle: ${job?.stelle || '-'}
 
 Schreibe 3-4 Sätze Anschreiben:
-- Erster Satz: hier sind die ersten Entwürfe zur Stelle
+${ersterSatz}
 - Was drin ist (Bilder + Texte + Funnel-Link), kurz
-- Bitte um Feedback / Änderungswünsche
+${feedbackSatz}
 - Freundlicher Abschluss-Satz
 
 NUR JSON zurück, keine Markdown-Backticks:
