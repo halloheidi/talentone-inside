@@ -180,6 +180,11 @@ export default function NewProjectModal({ open, onClose, kunde }) {
                 className={`pub-filter ${projekttyp === 'neukundengewinnung' ? 'is-active' : ''}`}>
                 🎯 Neukundengewinnung
               </button>
+              <button type="button" onClick={() => setProjekttyp('sonstiges')} disabled={busy}
+                className={`pub-filter ${projekttyp === 'sonstiges' ? 'is-active' : ''}`}
+                title="Nicht-Recruiting-Projekt (z. B. Video) — zählt nicht als Bewerbungs-Ziel">
+                🎬 Sonstiges / Video
+              </button>
             </div>
           )}
 

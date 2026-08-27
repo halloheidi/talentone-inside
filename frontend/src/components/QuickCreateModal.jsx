@@ -399,6 +399,11 @@ export default function QuickCreateModal({ open, onClose }) {
                   className={`pub-filter ${createProjekttyp === 'neukundengewinnung' ? 'is-active' : ''}`} disabled={busy}>
                   🎯 Neukundengewinnung
                 </button>
+                <button type="button" onClick={() => setCreateProjekttyp('sonstiges')}
+                  className={`pub-filter ${createProjekttyp === 'sonstiges' ? 'is-active' : ''}`} disabled={busy}
+                  title="Nicht-Recruiting-Projekt (z. B. Video) — zählt nicht als Bewerbungs-Ziel">
+                  🎬 Sonstiges / Video
+                </button>
               </div>
             </div>
           )}

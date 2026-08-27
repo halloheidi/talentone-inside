@@ -43,7 +43,8 @@ router.post('/quick-create', async (req, res) => {
     projekt_status, kickoff_termin,
   } = req.body || {};
   if (!kunde_id) return res.status(400).json({ error: 'kunde_id ist Pflicht.' });
-  const pt = projekttyp === 'neukundengewinnung' ? 'neukundengewinnung' : 'mitarbeitergewinnung';
+  // 'sonstiges' = Nicht-Recruiting-Projekt (z. B. Video) — zählt NICHT als Bewerbungs-Ziel.
+  const pt = ['neukundengewinnung', 'sonstiges'].includes(projekttyp) ? projekttyp : 'mitarbeitergewinnung';
 
   const { data: kunde, error: kErr } = await supabase
     .from('talentone_kunden').select('*').eq('id', kunde_id).maybeSingle();

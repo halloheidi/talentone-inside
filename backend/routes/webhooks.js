@@ -305,13 +305,26 @@ export function fuzzyMatchJob(jobs, antworten) {
   return treffer.length === 1 ? treffer[0] : null;
 }
 
+// Projekttypen, die KEINE echten Bewerbungs-Ziele sind — sie dürfen die Job-Zählung
+// im Multi-Stellen-Match nicht verfälschen (Vorfall Schüßler: Pseudo-Job "Video"
+// machte den Ein-Stellen-Kunden zum Mehr-Stellen-Fall → Fehlwarnungen).
+const NICHT_RECRUITING_TYPEN = new Set(['neukundengewinnung', 'video', 'sonstiges']);
+export function istRecruitingJob(job) {
+  // null/undefined/'mitarbeitergewinnung' = Recruiting; alles andere ausgeschlossen.
+  return !NICHT_RECRUITING_TYPEN.has(job?.projekttyp);
+}
+
 /* Zentrale Job-Zuordnung für den kunde_id-Pfad (Multi-Stellen-Funnel).
    Reihenfolge: explizite Mapping-Regel → Ein-Job-Kurzschluss → Fuzzy-Match gegen
    Job-Titel → expliziter Default-Job → unklar-Fallback (ältester Job + Warn-Mail).
-   Jobs haben kein Aktiv-Flag → "aktive Jobs" = die Jobs des Kunden; Multi-Stellen
-   greift ohnehin nur bei mehreren. Ein-Job-Kunden werden NIE als unklar markiert. */
+   Gezählt werden NUR echte Bewerbungs-Ziele (istRecruitingJob) — Video-/Sonstiges-/
+   Neukunden-Projekte bleiben außen vor. Ein-Job-Kunden werden NIE als unklar markiert. */
 export function resolveKundeJob(kJobs, mapping, antworten) {
-  const jobs = Array.isArray(kJobs) ? kJobs : [];
+  const alle = Array.isArray(kJobs) ? kJobs : [];
+  // Nur Recruiting-Jobs zählen; falls dadurch nichts übrig bliebe (Kunde hat NUR
+  // Nicht-Recruiting-Projekte), auf die volle Liste zurückfallen → nie stiller Drop.
+  const recruiting = alle.filter(istRecruitingJob);
+  const jobs = recruiting.length ? recruiting : alle;
   const jobById = Object.fromEntries(jobs.map(j => [j.id, j]));
   const map = mapping || {};
 
@@ -661,7 +674,7 @@ async function ingestHandler(req, res) {
         .select('id, funnel_stellen_mapping').eq('id', kunde_id).maybeSingle();
       if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
       const { data: kJobs } = await supabase.from('talentone_jobs')
-        .select('id, stelle, kunde_id, created_at')
+        .select('id, stelle, kunde_id, created_at, projekttyp')
         .eq('kunde_id', kunde.id).order('created_at', { ascending: true });
       if (!kJobs?.length) return res.status(404).json({ error: 'Kunde hat keine Stellen.' });
       const mapping = kunde.funnel_stellen_mapping || {};
