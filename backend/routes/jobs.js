@@ -29,7 +29,15 @@ router.get('/:id', async (req, res) => {
     .maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  res.json({ job: data });
+  // Verknüpftes Projekt (Migration 066) additiv mitliefern — für Werbekosten-Badge,
+  // Projekt-Link und Kommentar-Bereich im Job-Detail.
+  let projekt = null;
+  if (data.projekt_id) {
+    projekt = (await supabase.from('talentone_projekte')
+      .select('id, projekt, gesuchte_positionen, werbekosten, status, kunde_id, pausiert_seit, start_phase1, startdatum_abo, live_termin')
+      .eq('id', data.projekt_id).maybeSingle()).data || null;
+  }
+  res.json({ job: data, projekt });
 });
 
 /* POST /api/jobs/quick-create
@@ -150,8 +158,8 @@ router.post('/quick-create', async (req, res) => {
       .select().single();
     if (jErr) return res.status(500).json({ error: `Job anlegen: ${jErr.message}` });
 
-    // Projekt in Kanban
-    await supabase.from('talentone_projekte').insert({
+    // Projekt in Kanban anlegen + den frischen Job direkt damit verknüpfen (projekt_id).
+    const { data: projektRow, error: pErr } = await supabase.from('talentone_projekte').insert({
       projekt: job.stelle || 'Neues Projekt',
       kunde: kunde.firmenname,
       kunde_id,
@@ -167,8 +175,12 @@ router.post('/quick-create', async (req, res) => {
       garantie: !!garantie,
       garantie_details: garantie && garantie_details ? String(garantie_details).trim() : null,
       kickoff_termin: kickoff_termin || null,
-    }).then(({ error }) => { if (error) console.error('[quick-create projekt-insert]', error.message); })
-      .catch(err => console.error('[quick-create projekt-insert]', err.message));
+    }).select('id').single();
+    if (pErr) console.error('[quick-create projekt-insert]', pErr.message);
+    if (projektRow?.id) {
+      await supabase.from('talentone_jobs').update({ projekt_id: projektRow.id }).eq('id', job.id);
+      job.projekt_id = projektRow.id;
+    }
 
     res.status(201).json({ job });
   } catch (err) {
@@ -214,6 +226,8 @@ const ALLOWED_JOB_FIELDS = [
   'arbeitshinweise',
   // Tab-Häkchen (manuelle Erledigt-Overrides pro Tab)
   'tab_status',
+  // Verknüpfung zur Projektübersicht (Migration 066)
+  'projekt_id',
   // Daten-nach-Creatives-geändert-Warnung (Migration 051) — zum Ausblenden per PATCH
   'daten_geaendert_nach_creatives_at',
 ];
@@ -413,11 +427,14 @@ router.post('/:id/create-projekt', async (req, res) => {
   if (jE) return res.status(500).json({ error: jE.message });
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
 
-  // Existiert schon eins fuer diesen Kunden? Dann bestehendes zurueckgeben.
+  // Existiert schon eins fuer diesen Kunden? Dann bestehendes zurueckgeben + Job verknüpfen.
   const { data: existing } = await supabase.from('talentone_projekte')
     .select('*').eq('kunde_id', job.kunde_id)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (existing) return res.status(200).json({ projekt: existing, already_existed: true });
+  if (existing) {
+    await supabase.from('talentone_jobs').update({ projekt_id: existing.id }).eq('id', job.id);
+    return res.status(200).json({ projekt: existing, already_existed: true });
+  }
 
   const { data: kunde } = await supabase.from('talentone_kunden')
     .select('id, firmenname, email, agentur, close_lead_id').eq('id', job.kunde_id).maybeSingle();
@@ -443,6 +460,7 @@ router.post('/:id/create-projekt', async (req, res) => {
   }).select().single();
   if (iErr) return res.status(500).json({ error: iErr.message });
 
+  await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
   res.status(201).json({ projekt: created, already_existed: false });
 });
 

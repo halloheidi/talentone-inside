@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
 
 const JobContext = createContext(null);
 export function useJob() { return useContext(JobContext); }
@@ -49,6 +50,282 @@ function ProjektGarantieInline({ projekt, onSaved }) {
             placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
             onSave={val => patch({ garantie_details: val || null })}
           />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Werbekosten-Badge (inline editierbar) ───
+   Grün/blau wenn gesetzt, auffälliger gelber Hinweis wenn kein Projekt/leer.
+   Klick → Select Kunde/N&W → PATCH /projekte/:id { werbekosten }. */
+function WerbekostenBadge({ projekt, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const val = projekt?.werbekosten || null;
+
+  async function setWert(next) {
+    if (!projekt) { setEditing(false); return; }
+    setBusy(true);
+    try {
+      const res = await api(`/projekte/${projekt.id}`, { method: 'PATCH', body: { werbekosten: next || null } });
+      onSaved?.(res.projekt);
+    } catch (err) { console.error('[werbekosten-patch]', err.message); }
+    finally { setBusy(false); setEditing(false); }
+  }
+
+  if (editing && projekt) {
+    return (
+      <select
+        autoFocus disabled={busy} value={val || ''}
+        onChange={e => setWert(e.target.value)}
+        onBlur={() => setEditing(false)}
+        style={{ fontSize: 12, padding: '4px 8px', borderRadius: 8, border: '1px solid var(--line)' }}
+      >
+        <option value="">— nicht gesetzt —</option>
+        <option value="Kunde">Kunde</option>
+        <option value="N&W">N&W</option>
+      </select>
+    );
+  }
+
+  if (!val) {
+    const clickable = !!projekt;
+    return (
+      <span
+        role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
+        onClick={() => clickable && setEditing(true)}
+        onKeyDown={e => { if (clickable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setEditing(true); } }}
+        title={clickable ? 'Klicken zum Setzen' : 'Kein Projekt verknüpft — erst zuordnen'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24',
+          padding: '4px 12px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+          cursor: clickable ? 'pointer' : 'default', whiteSpace: 'nowrap',
+        }}
+      >⚠️ Werbekosten: nicht gesetzt</span>
+    );
+  }
+
+  const label = val === 'N&W' ? 'N&W' : val === 'Kunde' ? 'Kunde' : val;
+  return (
+    <span
+      role="button" tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true); } }}
+      title="Klicken zum Ändern"
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: '#ecfdf5', color: '#065f46', border: '1px solid #6ee7b7',
+        padding: '4px 12px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', whiteSpace: 'nowrap',
+      }}
+    >💶 Werbekosten: {label}</span>
+  );
+}
+
+/* ─── Projekt-Zuordnungs-Dropdown ───
+   Optionen lazy aus GET /projekte?kunde_id=<job.kunde_id>. Auswahl → onRelink(id|null). */
+function ProjektZuordnung({ job, projekt, onRelink }) {
+  const [options, setOptions] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const kundeId = job?.kunde_id;
+
+  function ensureOptions() {
+    if (options !== null || !kundeId) return;
+    api(`/projekte?kunde_id=${kundeId}`)
+      .then(r => setOptions(r.projekte || []))
+      .catch(() => setOptions([]));
+  }
+
+  async function onChange(e) {
+    const v = e.target.value;
+    if ((v || null) === (projekt?.id || null)) return;
+    setBusy(true);
+    try { await onRelink(v || null); }
+    catch (err) { console.error('[relink]', err.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <select
+      value={projekt?.id || ''}
+      disabled={busy || !kundeId}
+      onFocus={ensureOptions}
+      onMouseDown={ensureOptions}
+      onChange={onChange}
+      title={kundeId ? 'Projekt manuell zuordnen / korrigieren' : 'Kein Kunde am Job'}
+      style={{ fontSize: 12, padding: '4px 8px', borderRadius: 8, border: '1px solid var(--line)', maxWidth: 240 }}
+    >
+      <option value="">— kein Projekt —</option>
+      {projekt && !(options || []).some(o => o.id === projekt.id) && (
+        <option value={projekt.id}>{projekt.projekt || projekt.gesuchte_positionen || 'Projekt'}</option>
+      )}
+      {(options || []).map(o => (
+        <option key={o.id} value={o.id}>
+          {(o.projekt || o.gesuchte_positionen || 'Projekt')}{o.status ? ` · ${STATUS_LABELS[o.status] || o.status}` : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/* ─── Projekt-Kommentare (einklappbar) ───
+   Zeigt/erlaubt Kommentare am verknüpften Projekt (talentone_kommentare.projekt_id),
+   inkl. @-Erwähnungen — dieselbe Mechanik wie in ProjekteOverview. */
+function ProjektKommentare({ projekt, team, defaultAutor }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [kommentare, setKommentare] = useState([]);
+  const [text, setText] = useState('');
+  const [autor, setAutor] = useState(defaultAutor || '');
+  const [posting, setPosting] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const textRef = useRef(null);
+  const projektId = projekt?.id || null;
+
+  useEffect(() => { setAutor(defaultAutor || ''); }, [defaultAutor]);
+
+  useEffect(() => {
+    if (!open || !projektId) return;
+    setLoading(true);
+    api(`/projekte/${projektId}/kommentare`)
+      .then(r => setKommentare(r.kommentare || []))
+      .catch(() => setKommentare([]))
+      .finally(() => setLoading(false));
+  }, [open, projektId]);
+
+  function onChange(e) {
+    const v = e.target.value;
+    setText(v);
+    const m = v.slice(0, e.target.selectionStart).match(/@(\w*)$/);
+    if (m) { setMentionQuery(m[1]); setMentionOpen(true); }
+    else setMentionOpen(false);
+  }
+
+  function insertMention(name) {
+    const el = textRef.current;
+    if (!el) return;
+    const pos = el.selectionStart;
+    const before = text.slice(0, pos).replace(/@\w*$/, '');
+    const after = text.slice(pos);
+    setText(`${before}@${name} ${after}`);
+    setMentionOpen(false);
+    requestAnimationFrame(() => {
+      el.focus();
+      const newPos = before.length + name.length + 2;
+      el.setSelectionRange(newPos, newPos);
+    });
+  }
+
+  function extractMentions(s) {
+    return team.map(m => m.name).filter(n => s.includes('@' + n));
+  }
+
+  async function submit() {
+    if (!text.trim() || posting || !projektId) return;
+    setPosting(true);
+    try {
+      const res = await api(`/projekte/${projektId}/kommentare`, {
+        method: 'POST',
+        body: { text: text.trim(), erwaehnungen: extractMentions(text), autor: autor.trim() || 'Mitarbeiter' },
+      });
+      setKommentare(prev => [res.kommentar, ...prev]);
+      setText('');
+    } catch (err) { alert(`Speichern fehlgeschlagen: ${err.message}`); }
+    finally { setPosting(false); }
+  }
+
+  const filteredTeam = team.filter(m => m.name.toLowerCase().includes(mentionQuery.toLowerCase()));
+
+  function highlightText(s) {
+    if (!s) return null;
+    if (!team.length) return s;
+    const parts = [];
+    let last = 0;
+    const re = new RegExp('@(' + team.map(m => m.name.replace(/[.\\+*?()|[\]{}^$]/g, '\\$&')).join('|') + ')', 'g');
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      if (m.index > last) parts.push(s.slice(last, m.index));
+      parts.push(<span key={m.index} className="mention-chip">{m[0]}</span>);
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) parts.push(s.slice(last));
+    return parts;
+  }
+
+  return (
+    <div style={{ marginBottom: 12, border: '1px solid var(--line, #ececea)', borderRadius: 10, background: '#fff' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+          background: 'transparent', border: 'none', padding: '10px 14px', cursor: 'pointer',
+          fontSize: 13, fontWeight: 700, color: 'var(--ink-1, #333)',
+        }}
+      >
+        <span aria-hidden>{open ? '▾' : '▸'}</span>
+        💬 Projekt-Kommentare
+        {open && projektId && !loading && <span style={{ fontWeight: 500, color: 'var(--ink-3)' }}>({kommentare.length})</span>}
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 14px 14px' }}>
+          {!projektId ? (
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3, #666)', padding: '4px 0 2px' }}>
+              Kein Projekt verknüpft — zum Kommentieren erst ein Projekt zuordnen.
+            </div>
+          ) : (
+            <>
+              <div style={{ position: 'relative', marginBottom: 12 }}>
+                <input
+                  className="cell-input" placeholder="Dein Name" value={autor}
+                  onChange={e => setAutor(e.target.value)}
+                  style={{ marginBottom: 6, fontSize: 12, width: '100%' }}
+                />
+                <textarea
+                  ref={textRef} className="cell-input" rows={3}
+                  placeholder="Neuer Kommentar — @Name für Erwähnung"
+                  value={text} onChange={onChange}
+                  style={{ width: '100%' }}
+                />
+                {mentionOpen && filteredTeam.length > 0 && (
+                  <div className="mention-dropdown">
+                    {filteredTeam.map(m => (
+                      <button key={m.name} type="button" onClick={() => insertMention(m.name)} className="mention-option">
+                        <strong>{m.name}</strong> <span className="muted">{m.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                  <button className="btn-primary btn-sm" onClick={submit} disabled={!text.trim() || posting}>
+                    {posting ? 'Speichere…' : 'Kommentar speichern'}
+                  </button>
+                </div>
+              </div>
+
+              {loading ? (
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Lade Kommentare…</div>
+              ) : kommentare.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Noch keine Kommentare.</div>
+              ) : (
+                <div className="kommentar-list">
+                  {kommentare.map(k => (
+                    <div key={k.id} className="kommentar-item">
+                      <div className="kommentar-meta">
+                        <strong>{k.autor || 'Unbekannt'}</strong>
+                        <span className="muted"> · {new Date(k.created_at).toLocaleString('de-DE')}</span>
+                      </div>
+                      <div className="kommentar-text">{highlightText(k.text)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -235,9 +512,11 @@ function ArbeitshinweiseInline({ job, onSaved }) {
 
 export default function JobView() {
   const { kundeId, jobId } = useParams();
+  const { me, user } = useAuth();
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);
   const [projekt, setProjekt] = useState(null);
+  const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabStatus, setTabStatus] = useState(null); // { auto, manual, effective }
@@ -342,19 +621,48 @@ export default function JobView() {
   useEffect(() => {
     setLoading(true);
     Promise.all([api(`/jobs/${jobId}`), api(`/kunden/${kundeId}`)])
-      .then(([j, k]) => { setJob(j.job); setKunde(k.kunde); })
+      .then(([j, k]) => {
+        setJob(j.job);
+        setKunde(k.kunde);
+        // Präzise Verknüpfung: das vom Backend mitgelieferte Projekt (projekt_id-FK).
+        // Ist es null, greift unten die kunde-basierte Fallback-Heuristik.
+        setProjekt(j.projekt || null);
+      })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, [jobId, kundeId]);
 
-  // Verknüpftes Projekt laden (für Status-Badge). Erstes/primäres Projekt des Kunden.
+  // Team (für @-Erwähnungen in Projekt-Kommentaren) — best-effort.
   useEffect(() => {
-    if (!kundeId) return;
+    api('/projekte/team').then(r => setTeam(r.team || [])).catch(() => setTeam([]));
+  }, []);
+
+  // Fallback: nur wenn KEIN Projekt präzise verknüpft ist (projekt_id null) —
+  // dann die bisherige kunde-basierte Heuristik (erstes/primäres Projekt des Kunden).
+  useEffect(() => {
+    if (!job) return;
+    if (job.projekt_id) return; // präzises Projekt kam bereits aus dem Job-Load
+    if (!kundeId) { setProjekt(null); return; }
     api(`/projekte?kunde_id=${kundeId}`).then(r => {
-      const primary = (r.projekte || [])[0] || null;
-      setProjekt(primary);
+      setProjekt((r.projekte || [])[0] || null);
     }).catch(() => setProjekt(null));
-  }, [kundeId, job?.id]);
+  }, [job?.id, job?.projekt_id, kundeId]);
+
+  // Autor-Vorbelegung für Kommentare — gleiche Quelle wie Auth-Kontext (useAuth).
+  // Wenn die E-Mail einem Team-Mitglied entspricht, dessen Name; sonst die E-Mail.
+  const defaultAutor = useMemo(() => {
+    const email = (me?.email || user?.email || '').toLowerCase();
+    const match = team.find(t => (t.email || '').toLowerCase() === email);
+    return match?.name || me?.email || user?.email || '';
+  }, [me, user, team]);
+
+  // Projekt manuell (um-)verknüpfen: PATCH /jobs/:id { projekt_id } → Job+Projekt neu laden.
+  async function relinkProjekt(projektId) {
+    await api(`/jobs/${jobId}`, { method: 'PATCH', body: { projekt_id: projektId || null } });
+    const res = await api(`/jobs/${jobId}`);
+    setJob(res.job);
+    setProjekt(res.projekt || null);
+  }
 
   // Jüngste Aktivität (tab-übergreifende "Zuletzt"-Zeile). Gleiche Quelle wie die
   // Timeline im Export-Tab — events[0] ist das neueste Event.
@@ -448,6 +756,21 @@ export default function JobView() {
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
         }
       </div>
+
+      {/* Projekt-Leiste: Werbekosten-Badge, „Zum Projekt", Zuordnungs-Dropdown */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <WerbekostenBadge projekt={projekt} onSaved={setProjekt} />
+        {projekt && (
+          <Link to={`/projekte?highlight=${projekt.id}`} className="btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
+            → Zum Projekt
+          </Link>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Projekt:</span>
+        <ProjektZuordnung job={job} projekt={projekt} onRelink={relinkProjekt} />
+      </div>
+
+      {/* Projekt-Kommentare (einklappbar) */}
+      <ProjektKommentare projekt={projekt} team={team} defaultAutor={defaultAutor} />
 
       {/* Zuletzt passiert — jüngste Aktivität am Projekt, sichtbar auf jedem Tab */}
       {letzteAktivitaet && (

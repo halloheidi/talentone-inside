@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
@@ -7,6 +7,90 @@ import NaechsterSchrittStapel from '../components/NaechsterSchrittBadge.jsx';
 import AvvAnfrageModal from '../components/AvvAnfrageModal.jsx';
 
 const VIEW_KEY = 'kundenList.view';
+
+function truncate(s, n = 80) {
+  if (!s) return '';
+  return s.length > n ? s.slice(0, n).trimEnd() + '…' : s;
+}
+
+/* ─── Kompaktes Werbekosten-Badge: K / N&W / — ─── */
+function WerbekostenChip({ value }) {
+  const v = value || null;
+  if (!v) return <span style={{ color: 'var(--ink-4, #999)' }}>—</span>;
+  const label = v === 'Kunde' ? 'K' : v === 'N&W' ? 'N&W' : v;
+  const isKunde = v === 'Kunde';
+  return (
+    <span
+      title={`Werbekosten: ${v}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        background: isKunde ? '#dbeafe' : '#ede9fe',
+        color: isKunde ? '#1e40af' : '#5b21b6',
+        border: `1px solid ${isKunde ? '#bfdbfe' : '#ddd6fe'}`,
+        padding: '1px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700,
+      }}
+    >{label}</span>
+  );
+}
+
+/* ─── Kommentar-Badge mit aufklappbarer Vorschau (letzte 2–3 Kommentare) ─── */
+function KommentarPopover({ info }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const count = info?.kommentar_count || 0;
+  const letzte = info?.letzte || [];
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  if (!count) return <span style={{ color: 'var(--ink-4, #999)' }}>—</span>;
+
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        title={`${count} Kommentar${count === 1 ? '' : 'e'} — klicken für Vorschau`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          background: '#f1f5f9', color: '#334155', border: '1px solid #e2e8f0',
+          padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+        }}
+      >💬 {count}</button>
+      {open && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30,
+            width: 280, background: '#fff', border: '1px solid var(--line, #e2e0dc)',
+            borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', padding: 12,
+            textAlign: 'left', cursor: 'default',
+          }}
+        >
+          {letzte.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--ink-3, #666)' }}>Keine Vorschau verfügbar.</div>
+          ) : letzte.slice(0, 3).map((k, i) => (
+            <div key={i} style={{ padding: '6px 0', borderTop: i > 0 ? '1px solid var(--bg-2, #f0f0ee)' : 'none' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-3, #666)' }}>
+                <strong>{k.autor || 'Unbekannt'}</strong>
+                {k.created_at ? ` · ${new Date(k.created_at).toLocaleDateString('de-DE')}` : ''}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--ink-1, #333)', marginTop: 2 }}>{truncate(k.text)}</div>
+            </div>
+          ))}
+          <Link to="/projekte" onClick={e => e.stopPropagation()}
+            style={{ fontSize: 11, display: 'inline-block', marginTop: 8, fontWeight: 600 }}>
+            Alle ansehen →
+          </Link>
+        </div>
+      )}
+    </span>
+  );
+}
 
 export default function KundenList() {
   const [kunden, setKunden] = useState([]);
@@ -18,6 +102,7 @@ export default function KundenList() {
   const [agenturFilter, setAgenturFilter] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [schritteMap, setSchritteMap] = useState({});
+  const [projektMap, setProjektMap] = useState({}); // { kunde_id: { kommentar_count, werbekosten, letzte } }
   const [view, setView] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'cards'; } catch (e) { return 'cards'; }
   });
@@ -40,8 +125,13 @@ export default function KundenList() {
           api(`/kunden/naechste-schritte?ids=${ids}`)
             .then(r => setSchritteMap(r.schritte || {}))
             .catch(() => setSchritteMap({}));
+          // Projekt-Übersicht (Werbekosten + Kommentar-Aggregat) pro Kunde
+          api(`/kunden/projekt-uebersicht?ids=${ids}`)
+            .then(r => setProjektMap(r || {}))
+            .catch(() => setProjektMap({}));
         } else {
           setSchritteMap({});
+          setProjektMap({});
         }
       })
       .catch(err => setError(err.message))
@@ -159,6 +249,12 @@ export default function KundenList() {
                     <NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={3} />
                   </div>
                 )}
+                {projektMap[k.id] && (projektMap[k.id].werbekosten || projektMap[k.id].kommentar_count) && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                    {projektMap[k.id].werbekosten && <WerbekostenChip value={projektMap[k.id].werbekosten} />}
+                    <KommentarPopover info={projektMap[k.id]} />
+                  </div>
+                )}
               </div>
             </Link>
           ))}
@@ -174,7 +270,9 @@ export default function KundenList() {
                 <th style={{ width: '24%' }}>Firma</th>
                 <th style={{ width: '16%' }}>Branche</th>
                 <th style={{ width: '12%' }}>Agentur</th>
+                <th style={{ width: 70 }}>Werbek.</th>
                 <th>Nächster Schritt</th>
+                <th style={{ width: 70 }}>Komm.</th>
               </tr>
             </thead>
             <tbody>
@@ -194,8 +292,12 @@ export default function KundenList() {
                   )}</td>
                   <td>{k.branche || '—'}</td>
                   <td>{k.agentur === 'nowagwirth' ? 'Nowag & Wirth' : k.agentur === 'talentone' ? 'TalentOne' : '—'}</td>
+                  <td><WerbekostenChip value={projektMap[k.id]?.werbekosten} /></td>
                   <td onClick={e => e.stopPropagation()}>
                     <NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={3} />
+                  </td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <KommentarPopover info={projektMap[k.id]} />
                   </td>
                 </tr>
               ))}

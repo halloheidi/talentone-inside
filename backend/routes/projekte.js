@@ -81,11 +81,23 @@ router.get('/', async (req, res) => {
     for (const o of offers || []) offerById.set(o.id, o);
   }
 
+  // Reverse-Link: verknüpfte Kampagnen-Jobs pro Projekt (Migration 066).
+  const projektIds = (data || []).map(p => p.id);
+  const jobsByProjekt = {};
+  if (projektIds.length > 0) {
+    const { data: verknJobs } = await supabase.from('talentone_jobs')
+      .select('id, stelle, kunde_id, projekt_id').in('projekt_id', projektIds);
+    for (const j of verknJobs || []) {
+      (jobsByProjekt[j.projekt_id] ||= []).push({ id: j.id, stelle: j.stelle, kunde_id: j.kunde_id });
+    }
+  }
+
   const enriched = (data || []).map(p => {
     const offer = p.offer_id ? offerById.get(p.offer_id) : null;
     return {
       ...p,
       kommentar_count: countMap[p.id] || 0,
+      verknuepfte_jobs: jobsByProjekt[p.id] || [],
       offer_snapshot: offer ? {
         brand:                offer.brand,
         campaign_started_at:  offer.campaign_started_at,

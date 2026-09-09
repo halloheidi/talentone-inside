@@ -43,6 +43,7 @@ import { startEntwurfsReminderScheduler } from './entwurfs-reminder.js';
 import { startDailyBewerbungsReportScheduler } from './daily-bewerbungs-report.js';
 import { startWeeklyBewerbungsReportScheduler } from './weekly-bewerbungs-report.js';
 import { startEigeneLeadsScheduler } from './eigene-leads-scheduler.js';
+import { startCampaignReminderScheduler } from './campaign-reminder.js';
 import { startWeeklyFeedbackScheduler } from './weekly-feedback.js';
 
 const app = express();
@@ -132,6 +133,7 @@ app.listen(PORT, () => {
   startDailyBewerbungsReportScheduler();
   startWeeklyBewerbungsReportScheduler();
   startEigeneLeadsScheduler();
+  startCampaignReminderScheduler();
   startWeeklyFeedbackScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });

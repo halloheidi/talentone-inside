@@ -296,6 +296,59 @@ router.get('/naechste-schritte', async (req, res) => {
   }
 });
 
+/* GET /api/kunden/projekt-uebersicht?ids=a,b,c — pro Kunde: Projekt-Kommentar-Anzahl,
+   Werbekosten-Träger und die letzten Kommentare (für die Kundenliste-Badges).
+   Kommentare hängen an talentone_kommentare.projekt_id; Projekte haben kunde_id. */
+router.get('/projekt-uebersicht', async (req, res) => {
+  try {
+    const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!ids.length) return res.json({});
+    const { data: projekte } = await supabase.from('talentone_projekte')
+      .select('id, kunde_id, werbekosten, status, pausiert_seit, created_at')
+      .in('kunde_id', ids);
+    const projektById = {};
+    const projekteByKunde = {};
+    for (const p of projekte || []) {
+      projektById[p.id] = p;
+      (projekteByKunde[p.kunde_id] ||= []).push(p);
+    }
+    const projektIds = (projekte || []).map(p => p.id);
+    let kommentare = [];
+    if (projektIds.length) {
+      const { data } = await supabase.from('talentone_kommentare')
+        .select('projekt_id, autor, text, created_at')
+        .in('projekt_id', projektIds)
+        .order('created_at', { ascending: false });
+      kommentare = data || [];
+    }
+    const out = {};
+    for (const id of ids) out[id] = { kommentar_count: 0, werbekosten: null, letzte: [] };
+    // Werbekosten je Kunde: bevorzugt ein nicht-pausiertes/live-Projekt, sonst neuestes mit Wert.
+    for (const [kundeId, ps] of Object.entries(projekteByKunde)) {
+      const sortiert = [...ps].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const mitWert = sortiert.find(p => p.werbekosten && p.status === 'live')
+        || sortiert.find(p => p.werbekosten);
+      out[kundeId].werbekosten = mitWert?.werbekosten || null;
+    }
+    for (const k of kommentare) {
+      const kundeId = projektById[k.projekt_id]?.kunde_id;
+      if (!kundeId || !out[kundeId]) continue;
+      out[kundeId].kommentar_count++;
+      if (out[kundeId].letzte.length < 3) {
+        out[kundeId].letzte.push({
+          autor: k.autor || null,
+          created_at: k.created_at,
+          text: String(k.text || '').slice(0, 200),
+        });
+      }
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('[projekt-uebersicht]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* GET /api/kunden/dubletten-check?q=Firmenname
    Liefert ähnliche Kunden + Projekte für die Dubletten-Warnung beim Anlegen.
    Trifft auf ilike-Match (case-insensitive, Teilstring) — bewusst großzügig. */

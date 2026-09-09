@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
@@ -111,6 +111,115 @@ function initials(name) {
   return name.split(/\s+/).filter(Boolean).map(s => s[0]).slice(0, 2).join('').toUpperCase();
 }
 
+// Pfad zum Job-Detail (Stelle-Tab) — wie in KundeDetail/JobView.
+function jobDetailPath(job) {
+  if (!job?.id || !job?.kunde_id) return null;
+  return `/kunden/${job.kunde_id}/jobs/${job.id}/stelle`;
+}
+
+/* ─── Kompaktes Werbekosten-Badge: K / N&W / — ─── */
+function WerbekostenChip({ value }) {
+  const v = value || null;
+  if (!v) return <span style={{ color: 'var(--ink-4, #999)' }}>—</span>;
+  const label = v === 'Kunde' ? 'K' : v === 'N&W' ? 'N&W' : v;
+  const isKunde = v === 'Kunde';
+  return (
+    <span
+      title={`Werbekosten: ${v}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        background: isKunde ? '#dbeafe' : '#ede9fe',
+        color: isKunde ? '#1e40af' : '#5b21b6',
+        border: `1px solid ${isKunde ? '#bfdbfe' : '#ddd6fe'}`,
+        padding: '1px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700,
+      }}
+    >{label}</span>
+  );
+}
+
+/* ─── „Zur Kampagne"-Link aus verknuepfte_jobs ─── */
+function ZurKampagne({ jobs, compact }) {
+  const list = jobs || [];
+  if (list.length === 0) return null;
+  if (list.length === 1) {
+    const path = jobDetailPath(list[0]);
+    if (!path) return null;
+    return (
+      <Link to={path} onClick={e => e.stopPropagation()} className="btn-ghost btn-sm"
+        style={{ textDecoration: 'none', fontSize: 11, whiteSpace: 'nowrap' }}
+        title={list[0].stelle || 'Zur Kampagne'}>
+        → Zur Kampagne
+      </Link>
+    );
+  }
+  // Mehrere: kleines Select zum Springen
+  return (
+    <select
+      onClick={e => e.stopPropagation()}
+      onChange={e => { const p = e.target.value; if (p) window.location.assign(p); }}
+      defaultValue=""
+      title={`${list.length} verknüpfte Kampagnen`}
+      style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--line)', maxWidth: compact ? 130 : 180 }}
+    >
+      <option value="">→ Kampagne ({list.length})</option>
+      {list.map(j => {
+        const path = jobDetailPath(j);
+        return path ? <option key={j.id} value={path}>{j.stelle || 'Kampagne'}</option> : null;
+      })}
+    </select>
+  );
+}
+
+/* ─── Job-Zuordnungs-Dropdown: Job des gleichen Kunden verknüpfen ───
+   Optionen lazy aus GET /jobs?kunde_id=<projekt.kunde_id>. Auswahl → PATCH /jobs/:id. */
+function JobZuordnungSelect({ projekt, onLinked }) {
+  const [options, setOptions] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const kundeId = projekt?.kunde_id || null;
+  const verknuepfteIds = new Set((projekt?.verknuepfte_jobs || []).map(j => j.id));
+
+  function ensureOptions() {
+    if (options !== null || !kundeId) return;
+    api(`/jobs?kunde_id=${kundeId}`)
+      .then(r => setOptions(r.jobs || []))
+      .catch(() => setOptions([]));
+  }
+
+  async function onChange(e) {
+    const jobId = e.target.value;
+    if (!jobId) return;
+    setBusy(true);
+    try {
+      await api(`/jobs/${jobId}`, { method: 'PATCH', body: { projekt_id: projekt.id } });
+      await onLinked?.();
+    } catch (err) { alert(`Verknüpfen fehlgeschlagen: ${err.message}`); }
+    finally { setBusy(false); }
+  }
+
+  if (!kundeId) {
+    return <span style={{ fontSize: 11, color: 'var(--ink-4, #999)' }} title="Kein TalentOne-Kunde am Projekt">—</span>;
+  }
+
+  return (
+    <select
+      value="" disabled={busy}
+      onClick={e => e.stopPropagation()}
+      onFocus={ensureOptions}
+      onMouseDown={ensureOptions}
+      onChange={onChange}
+      title="Job/Kampagne dieses Kunden verknüpfen"
+      style={{ fontSize: 11, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--line)', maxWidth: 180 }}
+    >
+      <option value="">+ Job verknüpfen…</option>
+      {(options || []).map(j => (
+        <option key={j.id} value={j.id}>
+          {verknuepfteIds.has(j.id) ? '✓ ' : ''}{j.stelle || 'Kampagne'}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function csvDownload(filename, rows) {
   if (!rows.length) return;
   const cols = Object.keys(rows[0]);
@@ -152,6 +261,14 @@ export default function ProjekteOverview() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [team, setTeam] = useState([]);
+  // Deep-Link: /projekte?highlight=<projekt_id> öffnet den Slide-Over direkt
+  // (z. B. aus dem Job-Detail „→ Zum Projekt").
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const h = searchParams.get('highlight');
+    if (h) setSelectedId(h);
+    // eslint-disable-next-line
+  }, []);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [paymentStatusById, setPaymentStatusById] = useState({}); // { kunde_id: 'ok'|'pending'|'blocked' }
   useEffect(() => {
@@ -409,9 +526,9 @@ export default function ProjekteOverview() {
       {loading ? <div className="motiv-sub">Lade Projekte…</div>
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
-          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} onDuplicate={duplicateProjekt} />
+          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} onDuplicate={duplicateProjekt} onReload={load} />
           : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
-                       selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} />
+                       selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onReload={load} />
       }
 
       {showCreate && <CreateProjektModal team={team} onClose={() => setShowCreate(false)} onCreated={p => { setProjekte(prev => [p, ...prev]); setShowCreate(false); }} />}
@@ -420,7 +537,14 @@ export default function ProjekteOverview() {
         <ProjektSlideOver
           projektId={selectedId}
           team={team}
-          onClose={() => setSelectedId(null)}
+          onClose={() => {
+            setSelectedId(null);
+            if (searchParams.get('highlight')) {
+              const next = new URLSearchParams(searchParams);
+              next.delete('highlight');
+              setSearchParams(next, { replace: true });
+            }
+          }}
           onUpdate={updated => {
             setProjekte(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
           }}
@@ -436,7 +560,7 @@ export default function ProjekteOverview() {
 
 /* ═════════════════════ KANBAN-BOARD ═════════════════════ */
 
-function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge, onDuplicate }) {
+function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge, onDuplicate, onReload }) {
   const [openMenu, setOpenMenu] = useState(null); // id der offenen Menü-Karte
   return (
     <div className="kanban">
@@ -533,7 +657,15 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                         <span className="kanban-badge" style={{ background: '#dcfce7', color: '#166534' }}
                           title={p.garantie_details || 'Garantie aktiv'}>🛡️ Garantie</span>
                       )}
+                      <span title="Werbekosten"><WerbekostenChip value={p.werbekosten} /></span>
                       {p.verantwortlich && <span className="kanban-avatar" title={p.verantwortlich}>{initials(p.verantwortlich)}</span>}
+                    </div>
+                    <div
+                      onClick={e => e.stopPropagation()}
+                      style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}
+                    >
+                      <ZurKampagne jobs={p.verknuepfte_jobs} compact />
+                      <JobZuordnungSelect projekt={p} onLinked={onReload} />
                     </div>
                     <div className="proj-progress" style={{ marginTop: 6 }}>
                       <div className="proj-progress-bar" style={{ width: `${total ? (done/total)*100 : 0}%` }} />
@@ -553,7 +685,7 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
 
 /* ═════════════════════ LISTEN-ANSICHT (kompakt) ═════════════════════ */
 
-function ListView({ filtered, onCardClick, updateField, checklistDone, selectedIds, toggleSelect, toggleSelectAll }) {
+function ListView({ filtered, onCardClick, updateField, checklistDone, selectedIds, toggleSelect, toggleSelectAll, onReload }) {
   const ids = filtered.map(p => p.id);
   const allSelected = ids.length > 0 && ids.every(id => selectedIds.has(id));
   const someSelected = ids.some(id => selectedIds.has(id));
@@ -571,8 +703,8 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
             />
           </th>
           <th>#</th><th>Projekt</th><th>Kunde</th><th>Status</th><th>Verantw.</th>
-          <th>Projektart</th><th>Positionen</th><th>Standorte</th><th>Checkliste</th>
-          <th>Komm.</th><th>Pixel</th><th>Letzter Kontakt</th>
+          <th>Projektart</th><th>Werbek.</th><th>Positionen</th><th>Standorte</th><th>Checkliste</th>
+          <th>Kampagne</th><th>Komm.</th><th>Pixel</th><th>Letzter Kontakt</th>
         </tr></thead>
         <tbody>
           {filtered.map(p => {
@@ -593,9 +725,16 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
                 </td>
                 <td>{p.verantwortlich || '—'}</td>
                 <td><span className="chip" style={{ fontSize: 11 }}>{p.projektart || '—'}</span></td>
+                <td><WerbekostenChip value={p.werbekosten} /></td>
                 <td style={{ maxWidth: 200 }}>{p.gesuchte_positionen || '—'}</td>
                 <td style={{ maxWidth: 200 }}>{p.standorte || '—'}</td>
                 <td><div className="proj-progress"><div className="proj-progress-bar" style={{ width: `${total ? (done/total)*100 : 0}%` }} /><span className="proj-progress-label">{done}/{total}</span></div></td>
+                <td onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                    <ZurKampagne jobs={p.verknuepfte_jobs} />
+                    <JobZuordnungSelect projekt={p} onLinked={onReload} />
+                  </div>
+                </td>
                 <td>{p.kommentar_count || 0}</td>
                 <td>{p.pixel ? <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.pixel.slice(0, 8)}…</span> : '—'}</td>
                 <td className="td-date">{p.letzter_kontakt ? new Date(p.letzter_kontakt).toLocaleDateString('de-DE') : '—'}</td>

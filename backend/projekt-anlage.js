@@ -45,7 +45,7 @@ export async function anlageKundeProjektJob({ kundeData, jobData, meta = {} }) {
   // Projekt in Kanban anlegen (Kanban/Liste-Übersicht)
   const status = PROJEKTE_STATI.includes(meta.status) ? meta.status : 'vorbereitung';
   const projektName = job.stelle || kunde.firmenname || 'Neues Projekt';
-  await supabase.from('talentone_projekte').insert({
+  const { data: projektRow } = await supabase.from('talentone_projekte').insert({
     projekt: projektName,
     kunde: kunde.firmenname,
     kunde_id: kunde.id,
@@ -64,7 +64,13 @@ export async function anlageKundeProjektJob({ kundeData, jobData, meta = {} }) {
     email: kunde.email || null,
     close_lead_id: kunde.close_lead_id || null,
     updated_at: new Date().toISOString(),
-  });
+  }).select('id').single();
+
+  // Job direkt mit dem frisch angelegten Projekt verknüpfen (Migration 066).
+  if (projektRow?.id) {
+    await supabase.from('talentone_jobs').update({ projekt_id: projektRow.id }).eq('id', job.id);
+    job.projekt_id = projektRow.id;
+  }
 
   return { kunde, job };
 }
