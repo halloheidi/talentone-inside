@@ -124,6 +124,98 @@ function WerbekostenBadge({ projekt, onSaved }) {
   );
 }
 
+// Meta-Formatierung (einheitliche Form über alle Seiten)
+const fmtEur = (n) => `${(Number(n) || 0).toFixed(2)} €`;
+const fmtCtr = (n) => (n == null ? '—' : `${(Number(n) || 0).toFixed(2)} %`);
+const fmtCpl = (n) => (n == null ? '—' : fmtEur(n));
+const budgetBarColor = (proz) => {
+  const p = Number(proz) || 0;
+  if (p >= 100) return '#dc2626';
+  if (p >= 80) return '#d97706';
+  return '#16a34a';
+};
+
+/* ─── Meta-Kennzahlen (kompakte Chips) am Job-Header ───
+   meta = null|{ hat_meta, spend_monat, cpl, ctr, aktive_lauftage, live, … } */
+function MetaChips({ meta }) {
+  if (!meta || !meta.hat_meta) {
+    return <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Meta: —</span>;
+  }
+  const chip = {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd',
+    padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <span style={chip}>Spend Monat {fmtEur(meta.spend_monat)}</span>
+      <span style={chip}>CPL {fmtCpl(meta.cpl)}</span>
+      <span style={chip}>CTR {fmtCtr(meta.ctr)}</span>
+      <span style={chip}>{meta.aktive_lauftage == null ? '—' : meta.aktive_lauftage} akt. Lauftage</span>
+      {meta.live && (
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          background: '#dcfce7', color: '#166534', border: '1px solid #86efac',
+          padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a' }} />live
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* ─── Monatsbudget (inline editierbar) + Fortschrittsbalken ───
+   Speichert PATCH /projekte/:id { monatsbudget_euro } (leer → null), lädt danach neu. */
+function MonatsbudgetInput({ projekt, meta, onSaved }) {
+  const [val, setVal] = useState(projekt?.monatsbudget_euro ?? '');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setVal(projekt?.monatsbudget_euro ?? ''); }, [projekt?.id, projekt?.monatsbudget_euro]);
+
+  async function save() {
+    if (!projekt) return;
+    const raw = String(val).trim();
+    const next = raw === '' ? null : (Number(raw) || 0);
+    if ((projekt.monatsbudget_euro ?? null) === next) return;
+    setBusy(true);
+    try {
+      await api(`/projekte/${projekt.id}`, { method: 'PATCH', body: { monatsbudget_euro: next } });
+      await onSaved?.();
+    } catch (err) { console.error('[monatsbudget-patch]', err.message); }
+    finally { setBusy(false); }
+  }
+
+  const hasBudget = meta && Number(meta.budget) > 0;
+  const proz = hasBudget ? (Number(meta.budget_prozent) || 0) : 0;
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)' }}
+        title={projekt ? 'Monatsbudget am Projekt' : 'Kein Projekt verknüpft'}>
+        Monatsbudget (€)
+        <input
+          type="number" min="0" step="1" value={val} disabled={!projekt || busy}
+          onChange={e => setVal(e.target.value)} onBlur={save}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          style={{ width: 90, fontSize: 12, padding: '4px 8px', borderRadius: 8, border: '1px solid var(--line)' }}
+        />
+      </label>
+      {hasBudget && (
+        <span title={`${fmtEur(meta.spend_monat)} / ${fmtEur(meta.budget)}`}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 140 }}>
+          <span style={{ position: 'relative', width: 90, height: 8, borderRadius: 100, background: '#e5e7eb', overflow: 'hidden' }}>
+            <span style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0,
+              width: `${Math.min(100, proz)}%`, background: budgetBarColor(proz),
+            }} />
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: budgetBarColor(proz) }}>{Math.round(proz)} %</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 /* ─── Projekt-Zuordnungs-Dropdown ───
    Optionen lazy aus GET /projekte?kunde_id=<job.kunde_id>. Auswahl → onRelink(id|null). */
 function ProjektZuordnung({ job, projekt, onRelink }) {
@@ -516,6 +608,7 @@ export default function JobView() {
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);
   const [projekt, setProjekt] = useState(null);
+  const [meta, setMeta] = useState(null); // Meta-Kennzahlen aus GET /jobs/:id
   const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -550,7 +643,7 @@ export default function JobView() {
   function reload() {
     loadTabStatus(); // Auto-Erkennung aktualisieren (Creatives/Funnel/Export können sich geändert haben)
     return Promise.all([
-      api(`/jobs/${jobId}`).then(r => setJob(r.job)),
+      api(`/jobs/${jobId}`).then(r => { setJob(r.job); setMeta(r.meta || null); if (r.projekt) setProjekt(r.projekt); }),
       api(`/kunden/${kundeId}`).then(r => setKunde(r.kunde)),
     ]);
   }
@@ -624,6 +717,7 @@ export default function JobView() {
       .then(([j, k]) => {
         setJob(j.job);
         setKunde(k.kunde);
+        setMeta(j.meta || null);
         // Präzise Verknüpfung: das vom Backend mitgelieferte Projekt (projekt_id-FK).
         // Ist es null, greift unten die kunde-basierte Fallback-Heuristik.
         setProjekt(j.projekt || null);
@@ -760,6 +854,7 @@ export default function JobView() {
       {/* Projekt-Leiste: Werbekosten-Badge, „Zum Projekt", Zuordnungs-Dropdown */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <WerbekostenBadge projekt={projekt} onSaved={setProjekt} />
+        {projekt && <MonatsbudgetInput projekt={projekt} meta={meta} onSaved={reload} />}
         {projekt && (
           <Link to={`/projekte?highlight=${projekt.id}`} className="btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
             → Zum Projekt
@@ -767,6 +862,11 @@ export default function JobView() {
         )}
         <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Projekt:</span>
         <ProjektZuordnung job={job} projekt={projekt} onRelink={relinkProjekt} />
+      </div>
+
+      {/* Meta-Kennzahlen kompakt */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <MetaChips meta={meta} />
       </div>
 
       {/* Projekt-Kommentare (einklappbar) */}

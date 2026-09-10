@@ -759,7 +759,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [kundeQuery, setKundeQuery] = useState('');
   const [showKundePicker, setShowKundePicker] = useState(false);
   const [metaKonten, setMetaKonten] = useState([]);  // Meta-Werbekonten für Pro-Projekt-Override
-  const [metaKampagnen, setMetaKampagnen] = useState({ aktuelle_id: null, kampagnen: [] });
+  const [metaKampagnen, setMetaKampagnen] = useState({ aktuelle_id: null, kampagnen: [], metrik: null });
 
   useEffect(() => {
     api('/kunden').then(r => setKundenList(r.kunden || [])).catch(() => {});
@@ -769,8 +769,8 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   useEffect(() => {
     if (!projektId) return;
     api(`/meta/projekt/${projektId}/kampagnen`)
-      .then(r => setMetaKampagnen({ aktuelle_id: r.aktuelle_id ?? null, kampagnen: r.kampagnen || [] }))
-      .catch(() => setMetaKampagnen({ aktuelle_id: null, kampagnen: [] }));
+      .then(r => setMetaKampagnen({ aktuelle_id: r.aktuelle_id ?? null, kampagnen: r.kampagnen || [], metrik: r.metrik || null }))
+      .catch(() => setMetaKampagnen({ aktuelle_id: null, kampagnen: [], metrik: null }));
   }, [projektId]);
 
   async function load() {
@@ -968,6 +968,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Enddatum Abo</span><input type="date" className="cell-input" value={projekt.enddatum_abo || ''} onChange={e => patch({ enddatum_abo: e.target.value || null })} /></label>
               <label><span>Pausiert seit</span><input type="date" className="cell-input" value={projekt.pausiert_seit || ''} onChange={e => patch({ pausiert_seit: e.target.value || null })} /></label>
               <label><span>Werbekosten</span><DebouncedInput value={projekt.werbekosten || ''} onSave={patchField('werbekosten')} /></label>
+              <label><span>Monatsbudget (€)</span><input type="number" min="0" step="1" className="cell-input" value={projekt.monatsbudget_euro ?? ''} onChange={e => patch({ monatsbudget_euro: e.target.value.trim() === '' ? null : (Number(e.target.value) || 0) })} /></label>
               <label className="slideover-full"><span>Meta-Werbekonto</span>
                 <SearchableSelect
                   value={projekt.meta_werbekonto_id || ''}
@@ -998,9 +999,30 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
           {metaKampagnen.kampagnen.length > 0 && (() => {
             const aktuelle = metaKampagnen.kampagnen.find(k => k.meta_campaign_id === metaKampagnen.aktuelle_id);
             const eur = n => `${(Number(n) || 0).toFixed(2)} €`;
+            const ctr = n => (n == null ? '—' : `${(Number(n) || 0).toFixed(2)} %`);
+            const cpl = n => (n == null ? '—' : eur(n));
+            const barColor = p => { const x = Number(p) || 0; return x >= 100 ? '#dc2626' : x >= 80 ? '#d97706' : '#16a34a'; };
+            const metrik = metaKampagnen.metrik;
+            const hatBudget = metrik && Number(metrik.budget) > 0;
             const hatPhasen = metaKampagnen.kampagnen.some(k => (k.phasen || []).length > 0);
             return (
               <section><h3>Meta-Kampagnen</h3>
+                {metrik && (
+                  <div style={{ fontSize: 13, marginBottom: 10 }}>
+                    Spend Monat {eur(metrik.spend_monat)} · CPL {cpl(metrik.cpl)} · CTR {ctr(metrik.ctr)}
+                  </div>
+                )}
+                {hatBudget && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
+                      <span>Budget {eur(metrik.spend_monat)} / {eur(metrik.budget)}</span>
+                      <span style={{ fontWeight: 600, color: barColor(metrik.budget_prozent) }}>{Math.round(Number(metrik.budget_prozent) || 0)} %</span>
+                    </div>
+                    <div style={{ height: 8, borderRadius: 100, background: '#e5e7eb', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, Number(metrik.budget_prozent) || 0)}%`, background: barColor(metrik.budget_prozent) }} />
+                    </div>
+                  </div>
+                )}
                 {aktuelle ? (
                   <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

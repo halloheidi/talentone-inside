@@ -39,6 +39,76 @@ function tageLabel(t) {
   return `vor ${t} Tagen`;
 }
 
+// Meta-Formatierung (einheitliche Form über alle Seiten)
+const fmtEur = (n) => `${(Number(n) || 0).toFixed(2)} €`;
+const fmtCtr = (n) => (n == null ? '—' : `${(Number(n) || 0).toFixed(2)} %`);
+const fmtCpl = (n) => (n == null ? '—' : fmtEur(n));
+
+// 📣 Meta-Ads (Spend & CPL) — Zeilen aus data.rows MIT meta.hat_meta, sortiert nach spend_monat desc.
+function MetaAdsSection({ rows }) {
+  const metaRows = rows
+    .filter(r => r.meta && r.meta.hat_meta)
+    .sort((a, b) => (Number(b.meta.spend_monat) || 0) - (Number(a.meta.spend_monat) || 0));
+  const ohneMeta = rows.filter(r => !(r.meta && r.meta.hat_meta)).length;
+
+  return (
+    <section style={{ marginBottom: 30 }}>
+      <h2 style={h2Style}>📣 Meta-Ads (Spend & CPL)</h2>
+      {metaRows.length === 0 ? (
+        <div style={emptyStyle}>Keine Meta-verknüpften Projekte im Zeitraum.</div>
+      ) : (
+        <>
+          <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={metaTh}>Kunde</th>
+                    <th style={metaTh}>Stelle / Projekt</th>
+                    <th style={{ ...metaTh, textAlign: 'right' }}>Spend (Monat)</th>
+                    <th style={{ ...metaTh, textAlign: 'right' }}>Spend (Phase)</th>
+                    <th style={{ ...metaTh, textAlign: 'right' }}>CTR</th>
+                    <th style={{ ...metaTh, textAlign: 'right' }}>CPL</th>
+                    <th style={{ ...metaTh, textAlign: 'right' }}>aktive Lauftage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {metaRows.map(r => {
+                    const m = r.meta;
+                    return (
+                      <tr key={r.projekt_id} style={{ borderTop: '1px solid #f0f0ee' }}>
+                        <td style={metaTd}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {m.live && (
+                              <span title="live" style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
+                            )}
+                            <strong>{r.kunde}</strong>
+                          </span>
+                        </td>
+                        <td style={{ ...metaTd, color: '#5a5955' }}>{r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}</td>
+                        <td style={{ ...metaTd, textAlign: 'right', fontWeight: 700 }}>{fmtEur(m.spend_monat)}</td>
+                        <td style={{ ...metaTd, textAlign: 'right' }}>{fmtEur(m.spend_phase)}</td>
+                        <td style={{ ...metaTd, textAlign: 'right' }}>{fmtCtr(m.ctr)}</td>
+                        <td style={{ ...metaTd, textAlign: 'right' }}>{fmtCpl(m.cpl)}</td>
+                        <td style={{ ...metaTd, textAlign: 'right' }}>{m.aktive_lauftage == null ? '—' : m.aktive_lauftage}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {ohneMeta > 0 && (
+            <div style={{ ...hintStyle, marginTop: 8 }}>
+              {ohneMeta} weitere Projekte ohne Meta-Verknüpfung (—)
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function ControllingDashboard() {
   const [days, setDays] = useState(14);        // 7 | 14 | 30 | 'custom'
   const [from, setFrom] = useState('');
@@ -222,6 +292,9 @@ export default function ControllingDashboard() {
             </div>
           </section>
 
+          {/* ── 📣 Meta-Ads (Spend & CPL) ── */}
+          <MetaAdsSection rows={data.rows} />
+
           {/* ── Diagramme ── */}
           <section style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -369,6 +442,8 @@ const emptyStyle = { padding: 30, background: '#fff', border: '1px solid #ececea
 const badge = { fontSize: 10, fontWeight: 600, color: '#5a5955', background: '#f1f1ee', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.03em' };
 const linkBtn = { fontSize: 13, fontWeight: 600, color: '#fff', background: '#0a0a0a', padding: '7px 14px', borderRadius: 8, textDecoration: 'none' };
 const linkBtnGhost = { fontSize: 13, fontWeight: 600, color: '#0a0a0a', background: '#f1f1ee', padding: '7px 14px', borderRadius: 8, textDecoration: 'none' };
+const metaTh = { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '10px 14px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
+const metaTd = { padding: '10px 14px', whiteSpace: 'nowrap', color: '#0a0a0a' };
 
 function segBtn(active) {
   return {
