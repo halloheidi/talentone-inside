@@ -75,15 +75,25 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function ymd(d) { return new Date(d).toISOString().slice(0, 10); }
 
 /** Distinct Werbekonten aus Projekt- und Job-Zuordnung (meta_werbekonto_id). */
+function normKonto(id) {
+  const s = String(id || '').trim();
+  if (!s) return null;
+  return s.startsWith('act_') ? s : `act_${s}`;
+}
+
+// Alle zu synchronisierenden Werbekonten: registrierte Konten (talentone_meta_konten,
+// exklusiv + pool) plus Zuordnungen an Kunde/Projekt/Job (Robustheit/Alt-Bestand).
 async function sammleWerbekonten() {
-  const [p, j] = await Promise.all([
+  const [konten, k, p, j] = await Promise.all([
+    supabase.from('talentone_meta_konten').select('konto_id'),
+    supabase.from('talentone_kunden').select('meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
     supabase.from('talentone_projekte').select('meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
     supabase.from('talentone_jobs').select('meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
   ]);
   const set = new Set();
-  for (const r of [...(p.data || []), ...(j.data || [])]) {
-    const id = String(r.meta_werbekonto_id || '').trim();
-    if (id) set.add(id.startsWith('act_') ? id : `act_${id}`);
+  for (const r of (konten.data || [])) { const id = normKonto(r.konto_id); if (id) set.add(id); }
+  for (const r of [...(k.data || []), ...(p.data || []), ...(j.data || [])]) {
+    const id = normKonto(r.meta_werbekonto_id); if (id) set.add(id);
   }
   return [...set];
 }
@@ -98,6 +108,102 @@ function leadsAusActions(actions) {
     if (leadTypes.has(a.action_type)) { n += Number(a.value) || 0; gefunden = true; }
   }
   return gefunden ? n : null;
+}
+
+/**
+ * Discovery: alle sichtbaren Werbekonten des Tokens laden (/me/adaccounts).
+ * Dient zugleich als Live-Token-Verifikation — wirft mit Klartext-Fehler.
+ */
+export async function ladeAdAccounts() {
+  const token = await getMetaToken();
+  if (!token) { const e = new Error('Kein Meta System User Token hinterlegt.'); e.code = 'kein_token'; throw e; }
+  const accounts = await graphAll('me/adaccounts', {
+    fields: 'account_id,id,name,account_status,currency', limit: '200',
+  }, token);
+  const statusLabel = { 1: 'aktiv', 2: 'deaktiviert', 3: 'ungenutzt', 7: 'ausstehende Prüfung', 8: 'in Prüfung', 9: 'Gnadenfrist', 101: 'geschlossen' };
+  return accounts.map(a => ({
+    konto_id: a.id,                                   // act_<id>
+    name: a.name || a.id,
+    account_status: a.account_status,
+    status_label: statusLabel[a.account_status] || String(a.account_status ?? '—'),
+    currency: a.currency || null,
+  }));
+}
+
+/* ── Kampagnen-Namens-Matching (Pool + Exklusiv) ─────────────────────────────
+   Attribution ist projekt_id-basiert. Regel: Kundenname-Substring priorisiert →
+   Kunde bestimmen (Exklusiv-Konto: fest vorgegeben), dann eindeutigen Projekt-
+   Treffer am Namen. Nur EINDEUTIGES wird automatisch gesetzt; Rest bleibt offen
+   (sichtbar in der „Nicht zugeordnet"-Liste). Manuell gesetzte (projekt_id ≠ null)
+   werden NIE überschrieben. */
+function normName(s) {
+  return String(s || '').toLowerCase()
+    .replace(/\(\s*[mwdx](?:\s*\/\s*[mwdx])*\s*\)/g, ' ')
+    .replace(/[^a-z0-9äöüß]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function nameTokens(s) { return new Set(normName(s).split(' ').filter(w => w.length >= 3)); }
+function nameScore(a, b) {
+  const ta = nameTokens(a), tb = nameTokens(b);
+  if (!ta.size || !tb.size) return 0;
+  let inter = 0; for (const t of ta) if (tb.has(t)) inter++;
+  const na = normName(a), nb = normName(b);
+  const sub = (na && nb && (na.includes(nb) || nb.includes(na))) ? 0.5 : 0;
+  return inter / Math.max(ta.size, tb.size) + sub;
+}
+const NAME_SCHWELLE = 0.34, NAME_VORSPRUNG = 0.15;
+
+function eindeutigBest(kandidaten, name, textOf) {
+  const scored = kandidaten.map(c => ({ c, s: nameScore(name, textOf(c)) })).sort((x, y) => y.s - x.s);
+  const best = scored[0], zweit = scored[1];
+  if (best && best.s >= NAME_SCHWELLE && (best.s - (zweit?.s || 0)) >= NAME_VORSPRUNG) return best.c;
+  return null;
+}
+
+export async function matchKampagnen() {
+  // Nur noch nicht zugeordnete Kampagnen (projekt_id null) automatisch matchen.
+  const { data: kampagnen } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id, name, werbekonto_id, projekt_id').is('projekt_id', null);
+  if (!kampagnen?.length) return { geprueft: 0, zugeordnet: 0, offen: 0 };
+
+  const [{ data: konten }, { data: kunden }, { data: kundenAcc }, { data: jobs }] = await Promise.all([
+    supabase.from('talentone_meta_konten').select('konto_id, typ, kunde_id'),
+    supabase.from('talentone_kunden').select('id, firmenname, meta_werbekonto_id'),
+    supabase.from('talentone_kunden').select('id, meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
+    supabase.from('talentone_jobs').select('id, stelle, kunde_id, projekt_id, projekttyp').not('projekt_id', 'is', null),
+  ]);
+  const kontoTyp = Object.fromEntries((konten || []).map(x => [normKonto(x.konto_id), x]));
+  const exklusivKundeByKonto = {};
+  for (const x of (konten || [])) if (x.typ === 'exklusiv' && x.kunde_id) exklusivKundeByKonto[normKonto(x.konto_id)] = x.kunde_id;
+  for (const x of (kundenAcc || [])) { const kn = normKonto(x.meta_werbekonto_id); if (kn && !exklusivKundeByKonto[kn]) exklusivKundeByKonto[kn] = x.id; }
+
+  const jobsByKunde = {};
+  for (const j of (jobs || [])) if (j.projekttyp !== 'sonstiges' && j.projekttyp !== 'video') (jobsByKunde[j.kunde_id] ||= []).push(j);
+
+  let zugeordnet = 0;
+  for (const c of kampagnen) {
+    const konto = normKonto(c.werbekonto_id);
+    // Kunde bestimmen: Exklusiv-Konto → fest; sonst Namens-Match über alle Kunden.
+    let kundeId = exklusivKundeByKonto[konto] || null;
+    if (!kundeId) {
+      const k = eindeutigBest(kunden || [], c.name, x => x.firmenname);
+      kundeId = k?.id || null;
+    }
+    if (!kundeId) continue; // kein Kunde erkennbar → offen
+    // Projekt (über einen verknüpften Job des Kunden) eindeutig am Namen finden.
+    const jobKand = jobsByKunde[kundeId] || [];
+    let projektId = null, jobId = null;
+    if (jobKand.length === 1) { projektId = jobKand[0].projekt_id; jobId = jobKand[0].id; }
+    else if (jobKand.length > 1) {
+      const jb = eindeutigBest(jobKand, c.name, x => x.stelle);
+      if (jb) { projektId = jb.projekt_id; jobId = jb.id; }
+    }
+    const patch = { kunde_id: kundeId, updated_at: new Date().toISOString() };
+    if (projektId) { patch.projekt_id = projektId; patch.job_id = jobId; zugeordnet++; }
+    await supabase.from('talentone_meta_kampagnen').update(patch).eq('meta_campaign_id', c.meta_campaign_id);
+  }
+  const offen = kampagnen.length - zugeordnet;
+  console.log(`[meta-match] ${kampagnen.length} geprüft, ${zugeordnet} zugeordnet, ${offen} offen.`);
+  return { geprueft: kampagnen.length, zugeordnet, offen };
 }
 
 /**
@@ -190,9 +296,14 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
       }
     }
 
+    // Kampagnen automatisch Projekten/Kunden zuordnen (Namens-Match). Rest bleibt offen
+    // und sichtbar in der „Nicht zugeordnet"-Liste.
+    let match = null;
+    try { match = await matchKampagnen(); } catch (e) { console.warn('[meta-sync] match:', e.message); }
+
     lastResult = {
       ok: true, konten: konten.length, kampagnen: kampagnenGesamt, insights: insightsGesamt,
-      backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, duration_ms: Date.now() - t0,
+      backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
     };
     lastRunAt = new Date().toISOString();
     console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage — ${kontoFehler.length} Kontofehler.`);

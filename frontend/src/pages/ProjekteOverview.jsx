@@ -757,9 +757,11 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [kundenList, setKundenList] = useState([]);  // alle TalentOne-Kunden für Verknüpfungs-Dropdown
   const [kundeQuery, setKundeQuery] = useState('');
   const [showKundePicker, setShowKundePicker] = useState(false);
+  const [metaKonten, setMetaKonten] = useState([]);  // Meta-Werbekonten für Pro-Projekt-Override
 
   useEffect(() => {
     api('/kunden').then(r => setKundenList(r.kunden || [])).catch(() => {});
+    api('/meta/konten').then(r => setMetaKonten(r.konten || [])).catch(() => {});
   }, []);
 
   async function load() {
@@ -957,6 +959,23 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Enddatum Abo</span><input type="date" className="cell-input" value={projekt.enddatum_abo || ''} onChange={e => patch({ enddatum_abo: e.target.value || null })} /></label>
               <label><span>Pausiert seit</span><input type="date" className="cell-input" value={projekt.pausiert_seit || ''} onChange={e => patch({ pausiert_seit: e.target.value || null })} /></label>
               <label><span>Werbekosten</span><DebouncedInput value={projekt.werbekosten || ''} onSave={patchField('werbekosten')} /></label>
+              <label className="slideover-full"><span>Meta-Werbekonto</span>
+                <select
+                  className="cell-input"
+                  value={projekt.meta_werbekonto_id || ''}
+                  onChange={e => patch({ meta_werbekonto_id: e.target.value || null })}
+                >
+                  <option value="">(vom Kunden erben)</option>
+                  {metaKonten.map(k => (
+                    <option key={k.konto_id} value={k.konto_id}>
+                      {k.name || '(ohne Name)'} · {k.konto_id}
+                    </option>
+                  ))}
+                  {projekt.meta_werbekonto_id && !metaKonten.some(k => k.konto_id === projekt.meta_werbekonto_id) && (
+                    <option value={projekt.meta_werbekonto_id}>{projekt.meta_werbekonto_id} (unbekannt)</option>
+                  )}
+                </select>
+              </label>
               <label><span>Zahlung aufgeteilt</span><input type="checkbox" checked={!!projekt.zahlung_aufgeteilt} onChange={e => patch({ zahlung_aufgeteilt: e.target.checked })} /></label>
               <label><span>Ziel erreicht</span><input type="checkbox" checked={!!projekt.ziel_erreicht} onChange={e => patch({ ziel_erreicht: e.target.checked })} /></label>
               <label><span>RE bezahlt</span><input type="checkbox" checked={!!projekt.re_bezahlt} onChange={e => patch({ re_bezahlt: e.target.checked })} /></label>

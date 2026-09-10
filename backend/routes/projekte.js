@@ -37,6 +37,8 @@ const ALLOWED_FIELDS = [
   'kickoff_termin',
   // Migration 049: Live-Sub-Status für Kampagnen-Update-Feedback
   'update_feedback_status', 'update_feedback_seit',
+  // Migration 067/069: Meta-Werbekonto-Override pro Projekt (erbt sonst vom Kunden)
+  'meta_werbekonto_id',
 ];
 
 function pickFields(body) {
