@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
+import SearchableSelect from '../../components/SearchableSelect.jsx';
 
 // Admin: Meta-Integration (Phase 1, nur lesend). Hier den System-User-Token
 // eintragen (ads_read, read_insights). Der Token wird NUR serverseitig gespeichert
@@ -273,16 +274,14 @@ export default function Meta() {
                         <option value="pool">Pool-Konto (mehrere Kunden)</option>
                       </select>
                       {d.typ === 'exklusiv' && (
-                        <select
-                          className="cell-input"
+                        <SearchableSelect
                           style={{ maxWidth: 260 }}
                           value={d.kunde_id || ''}
                           disabled={rowBusy}
-                          onChange={e => setD({ ...d, kunde_id: e.target.value || '' })}
-                        >
-                          <option value="">— Kunde wählen —</option>
-                          {kunden.map(k => <option key={k.id} value={k.id}>{k.firmenname || '(ohne Name)'}</option>)}
-                        </select>
+                          placeholder="— Kunde wählen —"
+                          options={kunden.map(k => ({ value: k.id, label: k.firmenname || '(ohne Name)' }))}
+                          onChange={v => setD({ ...d, kunde_id: v || '' })}
+                        />
                       )}
                       <button
                         className="btn-primary btn-sm"
@@ -338,23 +337,14 @@ export default function Meta() {
                       {kamp.kunde_name ? ` · Hinweis: ${kamp.kunde_name}` : ''}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <select
-                        className="cell-input"
+                      <SearchableSelect
                         style={{ maxWidth: 360, flex: 1 }}
                         value={sel}
                         disabled={rowBusy}
-                        onChange={e => setKampSel(p => ({ ...p, [kamp.meta_campaign_id]: e.target.value }))}
-                      >
-                        <option value="">— Projekt wählen —</option>
-                        {kundeProjekte.length > 0 && (
-                          <optgroup label={`Projekte von ${kamp.kunde_name || 'diesem Kunden'}`}>
-                            {kundeProjekte.map(p => <option key={p.id} value={p.id}>{projLabel(p)}</option>)}
-                          </optgroup>
-                        )}
-                        <optgroup label={kundeProjekte.length > 0 ? 'Weitere Projekte' : 'Alle Projekte'}>
-                          {andere.map(p => <option key={p.id} value={p.id}>{projLabel(p)}</option>)}
-                        </optgroup>
-                      </select>
+                        placeholder="— Projekt wählen —"
+                        options={[...kundeProjekte, ...andere].map(p => ({ value: p.id, label: projLabel(p) }))}
+                        onChange={v => setKampSel(p => ({ ...p, [kamp.meta_campaign_id]: v || '' }))}
+                      />
                       <button
                         className="btn-primary btn-sm"
                         onClick={() => zuordneKampagne(kamp, sel)}

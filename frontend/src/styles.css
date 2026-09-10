@@ -5389,3 +5389,22 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .review-k-warning {
   font-size: 11px; color: #b91c1c; margin-left: 4px;
 }
+
+/* ───────── SearchableSelect ───────── */
+.ss-wrap { position: relative; width: 100%; }
+.ss-pop {
+  position: absolute; z-index: 40; top: calc(100% + 2px); left: 0; right: 0;
+  margin: 0; padding: 4px; list-style: none;
+  max-height: 260px; overflow-y: auto;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+.ss-opt {
+  padding: 6px 8px; border-radius: 6px; font-size: 13px; color: var(--ink-1);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ss-opt.active { background: #f0efe9; }
+.ss-opt[aria-selected="true"] { font-weight: 600; }
+.ss-opt.ss-opt-empty { color: var(--ink-3); font-style: italic; }
+.ss-opt.ss-empty { color: var(--ink-3); cursor: default; }
+.ss-opt mark { background: var(--accent); color: var(--accent-ink); border-radius: 2px; padding: 0 1px; }

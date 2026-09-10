@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
 import PageContainer from '../components/PageContainer.jsx';
+import SearchableSelect from '../components/SearchableSelect.jsx';
 
 /* ─── Konstanten ─── */
 const STATUS_LABELS = {
@@ -960,21 +961,22 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Pausiert seit</span><input type="date" className="cell-input" value={projekt.pausiert_seit || ''} onChange={e => patch({ pausiert_seit: e.target.value || null })} /></label>
               <label><span>Werbekosten</span><DebouncedInput value={projekt.werbekosten || ''} onSave={patchField('werbekosten')} /></label>
               <label className="slideover-full"><span>Meta-Werbekonto</span>
-                <select
-                  className="cell-input"
+                <SearchableSelect
                   value={projekt.meta_werbekonto_id || ''}
-                  onChange={e => patch({ meta_werbekonto_id: e.target.value || null })}
-                >
-                  <option value="">(vom Kunden erben)</option>
-                  {metaKonten.map(k => (
-                    <option key={k.konto_id} value={k.konto_id}>
-                      {k.name || '(ohne Name)'} · {k.konto_id}
-                    </option>
-                  ))}
-                  {projekt.meta_werbekonto_id && !metaKonten.some(k => k.konto_id === projekt.meta_werbekonto_id) && (
-                    <option value={projekt.meta_werbekonto_id}>{projekt.meta_werbekonto_id} (unbekannt)</option>
-                  )}
-                </select>
+                  allowEmpty
+                  emptyLabel="(vom Kunden erben)"
+                  placeholder="(vom Kunden erben)"
+                  options={[
+                    ...metaKonten.map(k => ({
+                      value: k.konto_id,
+                      label: k.name ? `${k.name} · ${k.konto_id}` : k.konto_id,
+                    })),
+                    ...(projekt.meta_werbekonto_id && !metaKonten.some(k => k.konto_id === projekt.meta_werbekonto_id)
+                      ? [{ value: projekt.meta_werbekonto_id, label: `${projekt.meta_werbekonto_id} (unbekannt)` }]
+                      : []),
+                  ]}
+                  onChange={v => patch({ meta_werbekonto_id: v || null })}
+                />
               </label>
               <label><span>Zahlung aufgeteilt</span><input type="checkbox" checked={!!projekt.zahlung_aufgeteilt} onChange={e => patch({ zahlung_aufgeteilt: e.target.checked })} /></label>
               <label><span>Ziel erreicht</span><input type="checkbox" checked={!!projekt.ziel_erreicht} onChange={e => patch({ ziel_erreicht: e.target.checked })} /></label>

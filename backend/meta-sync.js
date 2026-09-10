@@ -53,11 +53,16 @@ async function graph(path, params, token) {
 }
 
 /** Graph-Call mit Cursor-Paginierung (folgt paging.next), rate-limit-schonend. */
-async function graphAll(path, params, token, maxPages = 25) {
+// Cursor-Paginierung: JEDER Graph-List-Endpoint (adaccounts, campaigns, insights …)
+// paginiert. Wir setzen ein explizites Seiten-Limit und folgen paging.next, bis keine
+// weitere Seite kommt. Hoher Seiten-Deckel + Warnung, damit große Listen (z. B. Insights
+// eines Pool-Kontos über 90 Tage) nie STILL abgeschnitten werden.
+async function graphAll(path, params, token, maxPages = 100) {
   const out = [];
-  let usp = new URLSearchParams({ ...params, access_token: token });
+  const usp = new URLSearchParams({ ...params, access_token: token });
   let url = `${GRAPH_BASE}/${path}?${usp.toString()}`;
-  for (let i = 0; i < maxPages && url; i++) {
+  let i = 0;
+  for (; i < maxPages && url; i++) {
     const res = await fetch(url);
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body?.error) {
@@ -68,8 +73,11 @@ async function graphAll(path, params, token, maxPages = 25) {
     url = body.paging?.next || null;
     if (url) await sleep(350); // schonend zwischen Seiten
   }
+  if (url) console.warn(`[meta-sync] Paginierung ${path}: Seiten-Deckel (${maxPages}) erreicht — evtl. unvollständig (${out.length} Zeilen).`);
   return out;
 }
+
+const PAGE_LIMIT = '100'; // explizites Seiten-Limit für alle Graph-List-Abrufe
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function ymd(d) { return new Date(d).toISOString().slice(0, 10); }
@@ -118,7 +126,7 @@ export async function ladeAdAccounts() {
   const token = await getMetaToken();
   if (!token) { const e = new Error('Kein Meta System User Token hinterlegt.'); e.code = 'kein_token'; throw e; }
   const accounts = await graphAll('me/adaccounts', {
-    fields: 'account_id,id,name,account_status,currency', limit: '200',
+    fields: 'account_id,id,name,account_status,currency', limit: PAGE_LIMIT,
   }, token);
   const statusLabel = { 1: 'aktiv', 2: 'deaktiviert', 3: 'ungenutzt', 7: 'ausstehende Prüfung', 8: 'in Prüfung', 9: 'Gnadenfrist', 101: 'geschlossen' };
   return accounts.map(a => ({
@@ -242,7 +250,7 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
         // 1) Kampagnen
         const kampagnen = await graphAll(`${konto}/campaigns`, {
           fields: 'id,name,start_time,effective_status,daily_budget,lifetime_budget',
-          limit: '200',
+          limit: PAGE_LIMIT,
         }, token);
         for (const c of kampagnen) {
           // vorheriger Status merken (für den späteren Status-Wächter).
@@ -270,7 +278,7 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
           time_increment: '1',
           time_range: JSON.stringify({ since, until }),
           fields: 'campaign_id,spend,impressions,clicks,ctr,cpm,actions',
-          limit: '500',
+          limit: PAGE_LIMIT,
         }, token);
         for (const row of insights) {
           const datum = row.date_start;
