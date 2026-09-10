@@ -326,26 +326,33 @@ export default function Meta() {
                 const rowBusy = savingKonto === row.konto_id;
                 const dirty = d.typ !== (row.typ || '') || (d.kunde_id || '') !== (row.kunde_id || '');
                 return (
-                  <div key={row.konto_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span>{row.name || '(ohne Name)'}</span>
+                  <div key={row.konto_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12, minWidth: 0, overflow: 'hidden' }}>
+                    {/* Kopfbereich */}
+                    <div style={{ fontWeight: 600, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span
+                        title={row.name || ''}
+                        style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {row.name || '(ohne Name)'}
+                      </span>
                       {row.zahlungsproblem && (
-                        <span style={{ background: '#fdecea', color: '#8a1c1c', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
+                        <span style={{ flex: '0 0 auto', background: '#fdecea', color: '#8a1c1c', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
                           ⚠️ {row.status_label} seit {row.zahlungsproblem_seit}
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8, overflowWrap: 'anywhere' }}>
                       {row.konto_id}
                       {row.status_label ? ` · ${row.status_label}` : ''}
                       {row.currency ? ` · ${row.currency}` : ''}
                       {gespeichert && row.typ === 'exklusiv' && ` · exklusiv → ${row.kunde_name || row.kunde_id || '?'}`}
                       {gespeichert && row.typ === 'pool' && ' · Pool-Konto'}
                     </div>
+                    {/* Bedienzeile */}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <select
                         className="cell-input"
-                        style={{ maxWidth: 220 }}
+                        style={{ flex: '1 1 160px', minWidth: 0, maxWidth: 220 }}
                         value={d.typ}
                         disabled={rowBusy}
                         onChange={e => {
@@ -359,7 +366,7 @@ export default function Meta() {
                       </select>
                       {d.typ === 'exklusiv' && (
                         <SearchableSelect
-                          style={{ maxWidth: 260 }}
+                          style={{ flex: '1 1 200px', minWidth: 0 }}
                           value={d.kunde_id || ''}
                           disabled={rowBusy}
                           placeholder="— Kunde wählen —"
@@ -369,13 +376,14 @@ export default function Meta() {
                       )}
                       <button
                         className="btn-primary btn-sm"
+                        style={{ flex: '0 0 auto' }}
                         onClick={() => speichereKonto(row, d)}
                         disabled={rowBusy || !dirty || !d.typ || (d.typ === 'exklusiv' && !d.kunde_id)}
                       >
                         {rowBusy ? 'Speichere…' : 'Speichern'}
                       </button>
                       {gespeichert && (
-                        <button className="btn-ghost btn-sm btn-danger" onClick={() => entferneKonto(row)} disabled={rowBusy}>
+                        <button className="btn-ghost btn-sm btn-danger" style={{ flex: '0 0 auto' }} onClick={() => entferneKonto(row)} disabled={rowBusy}>
                           Entfernen
                         </button>
                       )}
@@ -413,19 +421,26 @@ export default function Meta() {
                 const rowBusy = savingKamp === kamp.meta_campaign_id;
                 const projLabel = p => `${p.projekt || '(Unbenannt)'}${p.gesuchte_positionen ? ` — ${p.gesuchte_positionen}` : ''}`;
                 return (
-                  <div key={kamp.meta_campaign_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 2 }}>{kamp.name || '(ohne Name)'}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 2 }}>
+                  <div key={kamp.meta_campaign_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12, minWidth: 0, overflow: 'hidden' }}>
+                    {/* Kopfbereich */}
+                    <div
+                      title={kamp.name || ''}
+                      style={{ fontWeight: 600, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {kamp.name || '(ohne Name)'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 2, overflowWrap: 'anywhere' }}>
                       {kamp.konto_name ? `${kamp.konto_name} (${kamp.werbekonto_id})` : (kamp.werbekonto_id || '?')}
                       {kamp.effective_status ? ` · ${kamp.effective_status}` : ''}
                       {kamp.kunde_name ? ` · Hinweis: ${kamp.kunde_name}` : ''}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8, overflowWrap: 'anywhere' }}>
                       Start {kamp.start || '—'} · zuletzt aktiv {kamp.letzter_aktiv || '—'}
                     </div>
+                    {/* Bedienzeile */}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <SearchableSelect
-                        style={{ maxWidth: 360, flex: 1 }}
+                        style={{ flex: '1 1 200px', minWidth: 0 }}
                         value={sel}
                         disabled={rowBusy}
                         placeholder="— Projekt wählen —"
@@ -434,6 +449,7 @@ export default function Meta() {
                       />
                       <button
                         className="btn-primary btn-sm"
+                        style={{ flex: '0 0 auto' }}
                         onClick={() => zuordneKampagne(kamp, sel)}
                         disabled={rowBusy || !sel}
                       >

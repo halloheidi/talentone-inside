@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 /*
  * SearchableSelect — kleine, wiederverwendbare durchsuchbare Auswahl.
  * Ersetzt einfache <select>-Dropdowns, wenn die Optionsliste lang ist.
+ *
+ * Das Popover (ul.ss-pop) wird per Portal an document.body gerendert und mit
+ * position:fixed anhand der Input-BoundingBox positioniert — so wird es weder
+ * vom Karten-/Zeilen-Container beschnitten noch von transform-Kontexten (z. B.
+ * Slide-Over) verschoben, und es kann bei wenig Platz unten nach oben klappen.
  *
  * Props:
  *   value        aktueller Wert (oder null/'' für „nichts gewählt")
@@ -29,9 +35,10 @@ export default function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [popPos, setPopPos] = useState(null); // { left, width, top?, bottom?, maxHeight }
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
-  const listRef = useRef(null);
+  const listRef = useRef(null); // = Popover-Knoten (im Portal); auch für Outside-Click
   const baseId = useRef(`ss-${Math.random().toString(36).slice(2, 9)}`).current;
 
   const safeOptions = Array.isArray(options) ? options : [];
@@ -67,18 +74,58 @@ export default function SearchableSelect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Popover-Position aus der Input-BoundingBox berechnen (fixed, mit Flip nach oben).
+  const computePos = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const gap = 2;
+    const maxH = 260;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    // Nach oben klappen, wenn unten zu wenig Platz und oben mehr Platz ist.
+    const openUp = spaceBelow < Math.min(maxH + gap + 8, 220) && spaceAbove > spaceBelow;
+    const avail = (openUp ? spaceAbove : spaceBelow) - gap - 8;
+    setPopPos({
+      left: Math.max(4, Math.min(rect.left, window.innerWidth - rect.width - 4)),
+      width: rect.width,
+      ...(openUp
+        ? { bottom: window.innerHeight - rect.top + gap }
+        : { top: rect.bottom + gap }),
+      maxHeight: Math.max(120, Math.min(maxH, avail)),
+    });
+  };
+
+  // Position vor dem Paint berechnen (kein Flackern) + bei Scroll/Resize neu.
+  useLayoutEffect(() => {
+    if (!open) { setPopPos(null); return; }
+    computePos();
+    const onWin = () => computePos();
+    window.addEventListener('scroll', onWin, true); // capture: auch innere Scroll-Container
+    window.addEventListener('resize', onWin);
+    return () => {
+      window.removeEventListener('scroll', onWin, true);
+      window.removeEventListener('resize', onWin);
+    };
+    // nur an open koppeln — computePos liest Refs frisch
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   // Aktiven Index in Sicht scrollen.
   useEffect(() => {
     if (!open || !listRef.current) return;
     const el = listRef.current.querySelector(`#${baseId}-opt-${activeIndex}`);
     if (el) el.scrollIntoView({ block: 'nearest' });
-  }, [activeIndex, open, baseId]);
+  }, [activeIndex, open, baseId, popPos]);
 
-  // Outside-Click / Blur → schließen.
+  // Outside-Click → schließen. Der Portal-Knoten liegt außerhalb von wrapRef,
+  // deshalb zusätzlich das Popover selbst prüfen.
   useEffect(() => {
     if (!open) return;
     function onDocDown(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) close();
+      if (wrapRef.current && wrapRef.current.contains(e.target)) return;
+      if (listRef.current && listRef.current.contains(e.target)) return;
+      close();
     }
     document.addEventListener('mousedown', onDocDown);
     return () => document.removeEventListener('mousedown', onDocDown);
@@ -118,6 +165,42 @@ export default function SearchableSelect({
     }
   }
 
+  const popover = open && popPos ? createPortal(
+    <ul
+      ref={listRef}
+      id={`${baseId}-list`}
+      role="listbox"
+      className="ss-pop ss-pop-fixed"
+      style={{
+        position: 'fixed',
+        left: popPos.left,
+        width: popPos.width,
+        right: 'auto',
+        maxHeight: popPos.maxHeight,
+        ...(popPos.top != null ? { top: popPos.top } : { bottom: popPos.bottom }),
+      }}
+    >
+      {filtered.length === 0 && (
+        <li className="ss-opt ss-empty" aria-disabled="true">Keine Treffer</li>
+      )}
+      {filtered.map((it, i) => (
+        <li
+          key={(it.__empty ? '__empty__' : String(it.value)) + '-' + i}
+          id={`${baseId}-opt-${i}`}
+          role="option"
+          aria-selected={isEmptyValue ? !!it.__empty : it.value === value}
+          className={'ss-opt' + (i === activeIndex ? ' active' : '') + (it.__empty ? ' ss-opt-empty' : '')}
+          onMouseDown={e => e.preventDefault()}
+          onMouseEnter={() => setActiveIndex(i)}
+          onClick={() => choose(it)}
+        >
+          {highlight(it.label, q)}
+        </li>
+      ))}
+    </ul>,
+    document.body,
+  ) : null;
+
   return (
     <div ref={wrapRef} className="ss-wrap" style={style}>
       <input
@@ -137,27 +220,7 @@ export default function SearchableSelect({
         onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); setActiveIndex(0); }}
         onKeyDown={onKeyDown}
       />
-      {open && (
-        <ul ref={listRef} id={`${baseId}-list`} role="listbox" className="ss-pop">
-          {filtered.length === 0 && (
-            <li className="ss-opt ss-empty" aria-disabled="true">Keine Treffer</li>
-          )}
-          {filtered.map((it, i) => (
-            <li
-              key={(it.__empty ? '__empty__' : String(it.value)) + '-' + i}
-              id={`${baseId}-opt-${i}`}
-              role="option"
-              aria-selected={isEmptyValue ? !!it.__empty : it.value === value}
-              className={'ss-opt' + (i === activeIndex ? ' active' : '') + (it.__empty ? ' ss-opt-empty' : '')}
-              onMouseDown={e => e.preventDefault()}
-              onMouseEnter={() => setActiveIndex(i)}
-              onClick={() => choose(it)}
-            >
-              {highlight(it.label, q)}
-            </li>
-          ))}
-        </ul>
-      )}
+      {popover}
     </div>
   );
 }

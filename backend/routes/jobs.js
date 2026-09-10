@@ -9,6 +9,7 @@ import { getPublicBaseUrl } from '../branding.js';
 import { VORQUAL_STANDARD, effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { syncKriterienMitFeldern, normalizeKriterien } from '../kriterien.js';
 import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
+import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 
 const router = Router();
 
@@ -31,13 +32,15 @@ router.get('/:id', async (req, res) => {
   if (!data) return res.status(404).json({ error: 'Job nicht gefunden.' });
   // Verknüpftes Projekt (Migration 066) additiv mitliefern — für Werbekosten-Badge,
   // Projekt-Link und Kommentar-Bereich im Job-Detail.
-  let projekt = null;
+  let projekt = null, meta = null;
   if (data.projekt_id) {
     projekt = (await supabase.from('talentone_projekte')
-      .select('id, projekt, gesuchte_positionen, werbekosten, status, kunde_id, pausiert_seit, start_phase1, startdatum_abo, live_termin')
+      .select('id, projekt, gesuchte_positionen, werbekosten, status, kunde_id, pausiert_seit, start_phase1, startdatum_abo, live_termin, monatsbudget_euro, garantie, garantie_details')
       .eq('id', data.projekt_id).maybeSingle()).data || null;
+    // Kompakte Meta-Kennzahlen fürs Job-Kopf (null wenn keine Meta-Verknüpfung → „—").
+    try { meta = await metaMetrikenFuerProjekt(data.projekt_id); } catch (e) { console.warn('[jobs] meta-metriken:', e.message); }
   }
-  res.json({ job: data, projekt });
+  res.json({ job: data, projekt, meta });
 });
 
 /* POST /api/jobs/quick-create

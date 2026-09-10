@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase.js';
 import { aktuellePhaseInfo } from './meta-laufphasen.js';
+import { garantieStatus } from './meta-metriken.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
@@ -63,7 +64,7 @@ export async function ermittleFaelligeKampagnen(today = new Date(), nurProjektId
   if (!projektIds.length) return [];
 
   const { data: projekte } = await supabase.from('talentone_projekte')
-    .select('id, projekt, kunde, kunde_id, status, pausiert_seit, werbekosten, re_bezahlt, re2_bezahlt, live_termin, start_phase1, startdatum_abo, kampagnen_reminder_letzter')
+    .select('id, projekt, kunde, kunde_id, status, pausiert_seit, werbekosten, re_bezahlt, re2_bezahlt, live_termin, start_phase1, startdatum_abo, kampagnen_reminder_letzter, garantie, garantie_details, phase1_einstellungen, phase2_einstellungen')
     .in('id', projektIds)
     .eq('status', 'live')
     .is('pausiert_seit', null);
@@ -129,11 +130,21 @@ function renderMail(faellig, datumLabel) {
         : '';
       zeitraum = `${deDat(phase.kalender_von)}–${deDat(phase.kalender_bis)}${pausenTxt}`;
     }
+    // Garantie-Status mitliefern (auf Basis aktiver Lauftage, sofern Phase bekannt).
+    const gs = garantieStatus(p, phase?.aktive_lauftage ?? null);
+    let garantieZelle = '—';
+    if (gs.hat) {
+      const rest = gs.rest_tage != null
+        ? (gs.rest_tage > 0 ? ` · Rest ${gs.rest_tage} akt. Lauftage${gs.laeuft_aus ? ' ⚠️' : ''}` : ' · Fenster überschritten')
+        : '';
+      garantieZelle = `${escape(gs.text)}${rest}`;
+    }
     return `<tr>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${escape(p.kunde || '—')}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${escape(p.projekt || job.stelle || '—')}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;text-align:right;">${lauftageZelle}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">${escape(zeitraum)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">${garantieZelle}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${wk}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">RE ${re} · RE2 ${re2}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;"><a href="${escape(link)}">öffnen →</a></td>
@@ -149,6 +160,7 @@ function renderMail(faellig, datumLabel) {
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Projekt</th>
           <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Lauftage</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Zeitraum / Pause</th>
+          <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Garantie</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Werbekosten</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Rechnungen</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Link</th>

@@ -5399,6 +5399,9 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
   background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
 }
+/* An document.body geportetes Popover (position:fixed, per Inline-Style positioniert).
+   Muss über Slide-Over-Backdrops (z-index 50) liegen. */
+.ss-pop-fixed { z-index: 1000; }
 .ss-opt {
   padding: 6px 8px; border-radius: 6px; font-size: 13px; color: var(--ink-1);
   cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

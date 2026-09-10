@@ -39,6 +39,8 @@ const ALLOWED_FIELDS = [
   'update_feedback_status', 'update_feedback_seit',
   // Migration 067/069: Meta-Werbekonto-Override pro Projekt (erbt sonst vom Kunden)
   'meta_werbekonto_id',
+  // Migration 071: Monatsbudget (Budget-Wächter)
+  'monatsbudget_euro',
 ];
 
 function pickFields(body) {

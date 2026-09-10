@@ -6,6 +6,7 @@
 
 import { supabase } from './supabase.js';
 import { getNotificationRecipients } from './mail.js';
+import { metaMetrikenBatch, garantieStatus } from './meta-metriken.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
@@ -120,7 +121,81 @@ async function collectRows() {
   return { rows, neu24hTotal };
 }
 
-function renderMail({ rows, neu24hTotal, datumLabel }) {
+// Budget-Wächter (≥80%/100% des Monatsbudgets) + Garantie-Hinweise (Fenster endet in
+// ≤14 aktiven Lauftagen). Beides über LIVE-Projekte; Projekte ohne Budget/ohne Meta bleiben stumm.
+async function collectMetaWarnungen() {
+  const { data: live = [] } = await supabase.from('talentone_projekte')
+    .select('id, kunde, kunde_id, projekt, status, monatsbudget_euro, garantie, garantie_details, phase1_einstellungen, phase2_einstellungen')
+    .eq('status', 'live');
+  if (!live.length) return { budgetWarnungen: [], garantieHinweise: [] };
+
+  // Kundennamen (projekt.kunde ist teils leer).
+  const kundeIds = [...new Set(live.map(p => p.kunde_id).filter(Boolean))];
+  const { data: kunden = [] } = kundeIds.length
+    ? await supabase.from('talentone_kunden').select('id, firmenname').in('id', kundeIds) : { data: [] };
+  const kundeName = Object.fromEntries(kunden.map(k => [k.id, k.firmenname]));
+
+  const metaMap = await metaMetrikenBatch(live.map(p => p.id));
+  const budgetWarnungen = [], garantieHinweise = [];
+  for (const p of live) {
+    const m = metaMap.get(p.id) || null;
+    const kunde = kundeName[p.kunde_id] || p.kunde || 'Unbekannt';
+    // Budget: nur wenn Budget gesetzt UND Auslastung ≥ 80 %.
+    if (m && m.budget && m.budget_prozent != null && m.budget_prozent >= 80) {
+      budgetWarnungen.push({ kunde, projekt: p.projekt || '—', spend: m.spend_monat, budget: m.budget, prozent: m.budget_prozent });
+    }
+    // Garantie: Fenster endet in ≤14 aktiven Lauftagen (nur mit bekannter Phase).
+    const gs = garantieStatus(p, m?.aktive_lauftage ?? null);
+    if (gs.hat && gs.laeuft_aus) {
+      garantieHinweise.push({ kunde, projekt: p.projekt || '—', text: gs.text, rest: gs.rest_tage, phase1: gs.phase1, phase2: gs.phase2 });
+    }
+  }
+  budgetWarnungen.sort((a, b) => b.prozent - a.prozent);
+  garantieHinweise.sort((a, b) => (a.rest ?? 99) - (b.rest ?? 99));
+  return { budgetWarnungen, garantieHinweise };
+}
+
+function renderMetaSektionen({ budgetWarnungen, garantieHinweise }) {
+  let html = '';
+  if (budgetWarnungen.length) {
+    const rows = budgetWarnungen.map(b => {
+      const farbe = b.prozent >= 100 ? '#b91c1c' : '#b26b00';
+      return `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(b.kunde)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(b.projekt)}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:${farbe};font-weight:700;">${b.prozent}%</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;text-align:right;">${b.spend.toFixed(2)} € / ${Number(b.budget).toFixed(2)} €</td>
+      </tr>`;
+    }).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#0a0a0a;">💸 Budget-Warnungen (Monat)</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fafaf8;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Projekt</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Auslastung</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Spend / Budget</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  if (garantieHinweise.length) {
+    const rows = garantieHinweise.map(g => `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(g.kunde)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(g.projekt)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(g.text)}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b26b00;font-weight:700;">${g.rest} akt. Lauftage</td>
+        <td style="padding:8px 10px;font-size:11px;color:#5a5955;">P1: ${escape(g.phase1 || '—')} · P2: ${escape(g.phase2 || '—')}</td>
+      </tr>`).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#0a0a0a;">🛡️ Garantie läuft aus — Einstellungen erfasst?</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fafaf8;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Projekt</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Garantie</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Rest</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Einstellungen</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  return html;
+}
+
+function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [] } }) {
   const anyWarn = rows.some(r => r.warnung);
   const rowsHtml = rows.map(r => `
     <tr style="border-bottom:1px solid #ececea;${r.warnung ? 'background:#fef2f2;' : ''}">
@@ -162,6 +237,7 @@ function renderMail({ rows, neu24hTotal, datumLabel }) {
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table>
+      ${renderMetaSektionen(metaWarnungen)}
     </div>
   </body></html>`;
 }
@@ -189,15 +265,20 @@ export async function runDailyBewerbungsReport() {
   const t0 = Date.now();
   try {
     const { rows, neu24hTotal } = await collectRows();
-    if (!rows.length && neu24hTotal === 0) {
+    let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [] };
+    try { metaWarnungen = await collectMetaWarnungen(); } catch (e) { console.warn('[daily-bewerbungs-report] meta-warnungen:', e.message); }
+    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length;
+    if (!rows.length && neu24hTotal === 0 && !anyMeta) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
       console.log('[daily-bewerbungs-report] Nichts los — Mail übersprungen.');
       return lastResult;
     }
     const datumLabel = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const html = renderMail({ rows, neu24hTotal, datumLabel });
-    const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`;
+    const html = renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen });
+    const budgetN = metaWarnungen.budgetWarnungen.length, garantieN = metaWarnungen.garantieHinweise.length;
+    const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
+      + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };
     lastRunAt = new Date().toISOString();

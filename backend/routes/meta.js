@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { getMetaToken, setMetaToken, getMetaSyncStatus, syncMetaKampagnen, braucheBackfill, ladeAdAccounts, matchKampagnen } from '../meta-sync.js';
 import { aktuellePhaseInfo, laufphasenAktualisieren } from '../meta-laufphasen.js';
+import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 
 const router = Router();
 
@@ -235,7 +236,10 @@ router.get('/projekt/:projektId/kampagnen', async (req, res) => {
     const rang = a => (a.phase?.live ? 2 : (a.phase ? 1 : 0));
     const sortiert = [...angereichert].sort((a, b) => rang(b) - rang(a)
       || String(b.phase?.letzter_aktiv_tag || '').localeCompare(String(a.phase?.letzter_aktiv_tag || '')));
-    res.json({ kampagnen: angereichert, aktuelle_id: sortiert[0]?.meta_campaign_id || null });
+    // Kompakte Kennzahlen (Budget-Auslastung, CPL, Spend) fürs Projekt-Slide-Over.
+    let metrik = null;
+    try { metrik = await metaMetrikenFuerProjekt(req.params.projektId); } catch (e) { console.warn('[meta] metrik:', e.message); }
+    res.json({ kampagnen: angereichert, aktuelle_id: sortiert[0]?.meta_campaign_id || null, metrik });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

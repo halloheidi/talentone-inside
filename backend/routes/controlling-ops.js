@@ -13,6 +13,7 @@ import {
   AMPEL_CONFIG, AMPEL_RANG, STATUS_GRUPPEN, WOCHENTAGE,
   berlinParts, parseSollTage, tageSeit, computeAmpel,
 } from '../controlling-ops-service.js';
+import { metaMetrikenBatch } from '../meta-metriken.js';
 
 const router = Router();
 const DAY = 86400000;
@@ -245,6 +246,13 @@ router.get('/overview', async (req, res) => {
       if (at !== bt) return bt - at; // länger ohne Bewerbung zuerst
       return a.bewerbungen_range - b.bewerbungen_range;
     });
+
+    // 6b) Meta-Kennzahlen je Projekt (Spend Monat/Phase, CTR, echter CPL). Projekte ohne
+    // Meta-Verknüpfung erhalten kein meta-Objekt (Frontend zeigt „—", nicht 0).
+    try {
+      const metaMap = await metaMetrikenBatch(rows.map(r => r.projekt_id));
+      for (const r of rows) r.meta = metaMap.get(r.projekt_id) || null;
+    } catch (e) { console.warn('[controlling-ops] meta-metriken:', e.message); for (const r of rows) r.meta = null; }
 
     // 7) Aggregierte Charts über alle gefilterten Jobs im Zeitraum
     const rangeBews = alleBews.filter(b => jobKunde[b.job_id] && finalKundeIds.includes(jobKunde[b.job_id]) && within(b.created_at, start, end));
