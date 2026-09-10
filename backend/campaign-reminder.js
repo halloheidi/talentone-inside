@@ -10,6 +10,7 @@
 // ohne je doppelt zu senden.
 
 import { supabase } from './supabase.js';
+import { aktuellePhaseInfo } from './meta-laufphasen.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
@@ -26,8 +27,29 @@ function toDate(v) { if (!v) return null; const d = new Date(v); return isNaN(d)
 function ymd(d) { return d.toISOString().slice(0, 10); }
 function tageZwischen(a, b) { return Math.floor((b - a) / 86400000); }
 
+// Aktuelle Meta-Kampagne eines Projekts (live bevorzugt, sonst jüngster Aktiv-Tag) + Phase.
+async function metaPhaseFuerProjekt(kamps, zSeitByKonto) {
+  let best = null;
+  for (const k of kamps) {
+    const konto = String(k.werbekonto_id || '').trim();
+    const info = await aktuellePhaseInfo(k.meta_campaign_id, zSeitByKonto[konto] || null);
+    if (!info) continue;
+    const rang = info.live ? 2 : 1;
+    if (!best || rang > best.rang
+      || (rang === best.rang && String(info.letzter_aktiv_tag) > String(best.info.letzter_aktiv_tag))) {
+      best = { rang, info, kamp: k };
+    }
+  }
+  return best; // { info, kamp } | null
+}
+
 // Ermittelt fällige Kampagnen (reine Berechnung, testbar). today optional (Date).
 // nurProjektId: optionaler Filter — nur dieses eine Projekt prüfen (für kontrollierte Tests).
+//
+// KERN-REGEL: Bei Meta-verknüpften Projekten zählen AKTIVE LAUFTAGE (Tage mit Spend > 0)
+// der aktuellen Laufphase — nicht Kalendertage. Der Meilenstein-Kalendertag (für den
+// Doppelversand-Schutz) ist der N-te Aktiv-Tag. Projekte ohne Meta-Daten laufen weiter
+// über das Kalender-Startfeld (Abwärtskompatibilität).
 export async function ermittleFaelligeKampagnen(today = new Date(), nurProjektId = null) {
   today.setHours(12, 0, 0, 0); // Mittag → keine DST-/Zeitzonen-Grenzfälle bei Tagesdiff
 
@@ -46,34 +68,72 @@ export async function ermittleFaelligeKampagnen(today = new Date(), nurProjektId
     .eq('status', 'live')
     .is('pausiert_seit', null);
 
+  // Meta-Kampagnen je Projekt + Zahlungsproblem-Datum je Werbekonto (für Pausen-Aufschlüsselung).
+  const { data: metaKamps } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id, werbekonto_id, projekt_id').in('projekt_id', projektIds);
+  const kampsByProjekt = {};
+  for (const k of (metaKamps || [])) (kampsByProjekt[k.projekt_id] ||= []).push(k);
+  const { data: konten } = await supabase.from('talentone_meta_konten').select('konto_id, zahlungsproblem_seit');
+  const zSeitByKonto = {}; for (const k of (konten || [])) zSeitByKonto[String(k.konto_id || '').trim()] = k.zahlungsproblem_seit || null;
+
   const faellig = [];
   for (const p of projekte || []) {
-    const start = toDate(p.live_termin) || toDate(p.start_phase1) || toDate(p.startdatum_abo);
-    if (!start) continue;
-    start.setHours(12, 0, 0, 0);
-    const lauftage = tageZwischen(start, today);
-    if (lauftage < 30) continue;
-    const meilenstein = Math.floor(lauftage / 30) * 30; // 30/60/90…
-    // Datum, an dem dieser Meilenstein erreicht wurde (tagesgenau vergleichen):
-    const meilensteinDatum = new Date(start.getTime() + meilenstein * 86400000);
-    // Für diesen Meilenstein schon erinnert? (letzter >= Meilenstein-Tag) → skip.
-    // Tagesgenauer ymd-Vergleich (letzter ist ein DATE ohne Uhrzeit).
-    if (p.kampagnen_reminder_letzter && ymd(meilensteinDatum) <= String(p.kampagnen_reminder_letzter).slice(0, 10)) continue;
-    faellig.push({ projekt: p, job: jobByProjekt[p.id], lauftage, meilenstein });
+    let lauftage, meilensteinDatum, modus, phase = null;
+    const meta = kampsByProjekt[p.id]?.length ? await metaPhaseFuerProjekt(kampsByProjekt[p.id], zSeitByKonto) : null;
+
+    if (meta?.info) {
+      // Meta-Modus: aktive Lauftage der aktuellen Phase.
+      phase = meta.info;
+      lauftage = phase.aktive_lauftage;
+      if (lauftage < 30) continue;
+      const meilenstein = Math.floor(lauftage / 30) * 30;
+      const tag = phase.aktiv_tage[meilenstein - 1]; // N-ter Aktiv-Tag = Meilenstein-Kalendertag
+      if (!tag) continue;
+      meilensteinDatum = new Date(`${tag}T12:00:00`);
+      modus = 'meta';
+      if (p.kampagnen_reminder_letzter && ymd(meilensteinDatum) <= String(p.kampagnen_reminder_letzter).slice(0, 10)) continue;
+      faellig.push({ projekt: p, job: jobByProjekt[p.id], lauftage, meilenstein, modus, phase });
+    } else {
+      // Kalender-Modus (kein Meta): wie bisher ab dem gepflegten Startfeld.
+      const start = toDate(p.live_termin) || toDate(p.start_phase1) || toDate(p.startdatum_abo);
+      if (!start) continue;
+      start.setHours(12, 0, 0, 0);
+      lauftage = tageZwischen(start, today);
+      if (lauftage < 30) continue;
+      const meilenstein = Math.floor(lauftage / 30) * 30; // 30/60/90…
+      meilensteinDatum = new Date(start.getTime() + meilenstein * 86400000);
+      modus = 'kalender';
+      if (p.kampagnen_reminder_letzter && ymd(meilensteinDatum) <= String(p.kampagnen_reminder_letzter).slice(0, 10)) continue;
+      faellig.push({ projekt: p, job: jobByProjekt[p.id], lauftage, meilenstein, modus, phase });
+    }
   }
   return faellig;
 }
 
+function deDat(iso) { return iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '—'; }
+
 function renderMail(faellig, datumLabel) {
-  const rows = faellig.map(({ projekt: p, job, lauftage, meilenstein }) => {
+  const rows = faellig.map(({ projekt: p, job, lauftage, meilenstein, modus, phase }) => {
     const wk = p.werbekosten === 'N&W' ? 'N&W' : p.werbekosten === 'Kunde' ? 'Kunde' : '—';
     const re = p.re_bezahlt ? '✅' : '❌';
     const re2 = p.re2_bezahlt ? '✅' : '❌';
     const link = `${INSIDE_BASE}/kunden/${p.kunde_id}/jobs/${job.id}/stelle`;
+    // Lauftage-Zelle + Pausen-Transparenz (nur Meta-Modus kennt echte Pausen).
+    const lauftageZelle = modus === 'meta'
+      ? `<strong>${lauftage}</strong> aktive (Meilenstein ${meilenstein})`
+      : `<strong>${lauftage}</strong> Kalender (Meilenstein ${meilenstein})`;
+    let zeitraum = '—';
+    if (modus === 'meta' && phase) {
+      const pausenTxt = phase.pause_tage > 0
+        ? `, davon ${phase.pause_tage} Tage pausiert${phase.pause_wg_zahlung > 0 ? ` (davon ${phase.pause_wg_zahlung} wg. Zahlungsproblem)` : ''}`
+        : '';
+      zeitraum = `${deDat(phase.kalender_von)}–${deDat(phase.kalender_bis)}${pausenTxt}`;
+    }
     return `<tr>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${escape(p.kunde || '—')}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${escape(p.projekt || job.stelle || '—')}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;text-align:right;"><strong>${lauftage}</strong> (Meilenstein ${meilenstein})</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;text-align:right;">${lauftageZelle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:12px;color:#5a5955;">${escape(zeitraum)}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">${wk}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;">RE ${re} · RE2 ${re2}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #ececea;font-size:13px;"><a href="${escape(link)}">öffnen →</a></td>
@@ -88,6 +148,7 @@ function renderMail(faellig, datumLabel) {
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Kunde</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Projekt</th>
           <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Lauftage</th>
+          <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Zeitraum / Pause</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Werbekosten</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Rechnungen</th>
           <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Link</th>
@@ -112,8 +173,9 @@ export async function runCampaignReminder({ apply = true, nurProjektId = null } 
     const datumLabel = today.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     // Betreff im gewünschten Stil; bei mehreren Kampagnen den ersten Kunden + Zähler.
     const ersterKunde = faellig[0].projekt.kunde || faellig[0].job?.stelle || 'Kampagne';
+    const einheit = faellig[0].modus === 'meta' ? 'aktiven Lauftagen' : 'Tagen';
     const subject = faellig.length === 1
-      ? `Kampagne läuft seit ${faellig[0].lauftage} Tagen — Folgerechnung prüfen: ${ersterKunde}`
+      ? `Kampagne läuft seit ${faellig[0].lauftage} ${einheit} — Folgerechnung prüfen: ${ersterKunde}`
       : `${faellig.length} Kampagnen an einem 30-Tage-Meilenstein — Folgerechnungen prüfen`;
     const html = renderMail(faellig, datumLabel);
 

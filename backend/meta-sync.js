@@ -9,10 +9,33 @@
 // (Leerzeichen in .env-Werten crashen sonst / verfälschen den Header).
 
 import { supabase } from './supabase.js';
+import { getNotificationRecipients } from './mail.js';
+import { laufphasenAktualisieren } from './meta-laufphasen.js';
 
 const GRAPH_VERSION = 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 export const META_TOKEN_KEY = 'meta_system_user_token';
+const RESEND_API = 'https://api.resend.com/emails';
+const META_MAIL_FROM = 'TalentOne Inside <noreply@talent-one.de>';
+const ZAHLUNG_MAIL_ABSTAND_TAGE = 3; // Zahlungsproblem-Mail höchstens alle 3 Tage wiederholen
+
+/** Interne Benachrichtigung (Meta-Wächter) über Resend. Still, wenn kein API-Key. */
+async function sendeMetaMail({ subject, html }) {
+  if (!process.env.RESEND_API_KEY) { console.log('[meta-sync] RESEND_API_KEY fehlt — Mail übersprungen:', subject); return false; }
+  try {
+    const to = getNotificationRecipients();
+    const res = await fetch(RESEND_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+      body: JSON.stringify({ from: META_MAIL_FROM, to, subject, html }),
+    });
+    if (!res.ok) console.warn('[meta-sync] Resend', res.status, await res.text().catch(() => ''));
+    return res.ok;
+  } catch (e) { console.warn('[meta-sync] Mail-Fehler:', e.message); return false; }
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function tageBis(iso) { return iso ? Math.round((Date.now() - Date.parse(iso)) / 86400000) : Infinity; }
 
 let running = false;
 let lastRunAt = null;
@@ -174,12 +197,13 @@ export async function matchKampagnen() {
   if (!kampagnen?.length) return { geprueft: 0, zugeordnet: 0, offen: 0 };
 
   const [{ data: konten }, { data: kunden }, { data: kundenAcc }, { data: jobs }] = await Promise.all([
-    supabase.from('talentone_meta_konten').select('konto_id, typ, kunde_id'),
+    supabase.from('talentone_meta_konten').select('konto_id, name, typ, kunde_id'),
     supabase.from('talentone_kunden').select('id, firmenname, meta_werbekonto_id'),
     supabase.from('talentone_kunden').select('id, meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
     supabase.from('talentone_jobs').select('id, stelle, kunde_id, projekt_id, projekttyp').not('projekt_id', 'is', null),
   ]);
   const kontoTyp = Object.fromEntries((konten || []).map(x => [normKonto(x.konto_id), x]));
+  const kontoNameById = Object.fromEntries((konten || []).map(x => [normKonto(x.konto_id), x.name || '']));
   const exklusivKundeByKonto = {};
   for (const x of (konten || [])) if (x.typ === 'exklusiv' && x.kunde_id) exklusivKundeByKonto[normKonto(x.konto_id)] = x.kunde_id;
   for (const x of (kundenAcc || [])) { const kn = normKonto(x.meta_werbekonto_id); if (kn && !exklusivKundeByKonto[kn]) exklusivKundeByKonto[kn] = x.id; }
@@ -190,10 +214,13 @@ export async function matchKampagnen() {
   let zugeordnet = 0;
   for (const c of kampagnen) {
     const konto = normKonto(c.werbekonto_id);
-    // Kunde bestimmen: Exklusiv-Konto → fest; sonst Namens-Match über alle Kunden.
+    // Kunde bestimmen: Exklusiv-Konto → fest; sonst Namens-Match — zuerst am Kampagnen-
+    // namen, sonst am WERBEKONTO-Namen (Konto „N&W - Schüßler" → Kunde Schüßler, auch
+    // wenn die Kampagne nur „Monteur Q3" heißt).
     let kundeId = exklusivKundeByKonto[konto] || null;
     if (!kundeId) {
-      const k = eindeutigBest(kunden || [], c.name, x => x.firmenname);
+      const k = eindeutigBest(kunden || [], c.name, x => x.firmenname)
+        || eindeutigBest(kunden || [], kontoNameById[konto] || '', x => x.firmenname);
       kundeId = k?.id || null;
     }
     if (!kundeId) continue; // kein Kunde erkennbar → offen
@@ -212,6 +239,112 @@ export async function matchKampagnen() {
   const offen = kampagnen.length - zugeordnet;
   console.log(`[meta-match] ${kampagnen.length} geprüft, ${zugeordnet} zugeordnet, ${offen} offen.`);
   return { geprueft: kampagnen.length, zugeordnet, offen };
+}
+
+/* ── Zahlungsproblem-Wächter ─────────────────────────────────────────────────
+   account_status 2 = deaktiviert, 3 = Zahlung ausstehend/unsettled → dringliche
+   interne Mail + rotes Badge. Wiederholungs-Mail höchstens alle 3 Tage. Die Mail
+   unterscheidet den Werbekosten-Träger der betroffenen Projekte: „N&W" = eigenes
+   Zahlungsmittel (interner Alarm), „Kunde" = Kundenansprache. */
+const STATUS_PROBLEM = new Set([2, 3]);
+const STATUS_TEXT = { 2: 'deaktiviert', 3: 'Zahlung ausstehend' };
+
+async function verarbeiteKontoStatus(konto, info) {
+  const status = Number(info?.account_status);
+  const problem = STATUS_PROBLEM.has(status);
+  const { data: row } = await supabase.from('talentone_meta_konten').select('*').eq('konto_id', konto).maybeSingle();
+  if (!row && !problem) return; // gesundes, nicht registriertes Konto → nichts zu tun
+
+  const heute = ymd(Date.now());
+  const patch = {
+    konto_id: konto,
+    account_status: Number.isFinite(status) ? status : null,
+    disable_reason: info?.disable_reason != null ? String(info.disable_reason) : null,
+    status_gesynct: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (!row) { patch.name = info?.name || null; patch.typ = 'pool'; } // neu nur wg. Problem angelegt
+
+  let mailen = false;
+  if (problem) {
+    patch.zahlungsproblem = true;
+    patch.zahlungsproblem_seit = row?.zahlungsproblem_seit || heute; // Erstauftreten beibehalten
+    mailen = tageBis(row?.zahlungsproblem_mail_am) >= ZAHLUNG_MAIL_ABSTAND_TAGE;
+    if (mailen) patch.zahlungsproblem_mail_am = new Date().toISOString();
+  } else {
+    patch.zahlungsproblem = false;
+    patch.zahlungsproblem_seit = null;
+    patch.zahlungsproblem_mail_am = null; // Reset → ein erneutes Problem alarmiert wieder
+  }
+  await supabase.from('talentone_meta_konten').upsert(patch, { onConflict: 'konto_id' });
+  if (mailen) await sendeZahlungsproblemMail(konto, patch, info);
+}
+
+async function sendeZahlungsproblemMail(konto, patch, info) {
+  // Betroffene Projekte (über zugeordnete Kampagnen) + deren Werbekosten-Träger.
+  const { data: kamps } = await supabase.from('talentone_meta_kampagnen')
+    .select('projekt_id, talentone_projekte(projekt, werbekosten, talentone_kunden(firmenname))')
+    .eq('werbekonto_id', konto).not('projekt_id', 'is', null);
+  const projekte = [];
+  const traeger = new Set();
+  for (const k of (kamps || [])) {
+    const p = k.talentone_projekte; if (!p) continue;
+    projekte.push({ name: p.projekt || '(Projekt)', kunde: p.talentone_kunden?.firmenname || '?', werbekosten: p.werbekosten || '?' });
+    if (p.werbekosten) traeger.add(p.werbekosten);
+  }
+  const eigen = traeger.has('N&W');
+  const kunde = traeger.has('Kunde');
+  const kontoName = info?.name || patch.name || konto;
+  const statusTxt = STATUS_TEXT[patch.account_status] || `Status ${patch.account_status}`;
+  const ton = eigen
+    ? '🔴 <strong>Eigenes Zahlungsmittel (N&W)</strong> — bitte die Zahlungsweise im Business Manager prüfen.'
+    : kunde
+      ? '🟠 <strong>Kunde trägt die Werbekosten</strong> — bitte den Kunden kontaktieren, damit er das Konto wieder freischaltet.'
+      : 'Betroffene Projekte konnten (noch) nicht zugeordnet werden.';
+  const liste = projekte.length
+    ? '<ul>' + projekte.map(p => `<li>${esc(p.name)} · ${esc(p.kunde)} · Werbekosten: ${esc(p.werbekosten)}</li>`).join('') + '</ul>'
+    : '<p>Keine zugeordneten Projekte gefunden.</p>';
+  await sendeMetaMail({
+    subject: `⚠️ Werbekonto ${kontoName}: ${statusTxt} — Kampagnen ausgesetzt`,
+    html: `
+      <h2>⚠️ Zahlungsproblem am Werbekonto</h2>
+      <p><strong>${esc(kontoName)}</strong> (${esc(konto)}) — Status: <strong>${esc(statusTxt)}</strong>${patch.disable_reason ? ` (Grund-Code ${esc(patch.disable_reason)})` : ''}, seit ${esc(patch.zahlungsproblem_seit)}.</p>
+      <p>${ton}</p>
+      <h3>Betroffene Projekte</h3>
+      ${liste}
+      <p style="color:#888;font-size:12px">Wiederholung dieser Mail höchstens alle ${ZAHLUNG_MAIL_ABSTAND_TAGE} Tage, solange der Zustand anhält.</p>`,
+  });
+  console.log(`[meta-sync] Zahlungsproblem-Mail versandt: ${kontoName} (${statusTxt}).`);
+}
+
+/* ── Reaktivierungs-Nachfrage ────────────────────────────────────────────────
+   Neue Phase nach langer Pause → interne Mail + Badge zur Bestätigung. Keine
+   stille Automatik. Dedup: pro Reaktivierungs-Ereignis (phase_start) nur einmal. */
+async function verarbeiteReaktivierung(campaignId, reakt) {
+  const { data: c } = await supabase.from('talentone_meta_kampagnen')
+    .select('name, reaktivierung_am, reaktivierung_mail_am, talentone_kunden(firmenname)')
+    .eq('meta_campaign_id', campaignId).maybeSingle();
+  const schonGemeldet = c?.reaktivierung_am === reakt.phase_start && c?.reaktivierung_mail_am;
+  await supabase.from('talentone_meta_kampagnen').update({
+    reaktivierung_offen: true,
+    reaktivierung_am: reakt.phase_start,
+    reaktivierung_pause_tage: reakt.pause_tage,
+    reaktivierung_mail_am: schonGemeldet ? c.reaktivierung_mail_am : new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('meta_campaign_id', campaignId);
+  if (schonGemeldet) return;
+  const kunde = c?.talentone_kunden?.firmenname || 'unbekannter Kunde';
+  await sendeMetaMail({
+    subject: `🔄 Kampagne reaktiviert: ${c?.name || campaignId} (${kunde})`,
+    html: `
+      <h2>🔄 Kampagne reaktiviert</h2>
+      <p>Kampagne <strong>${esc(c?.name || campaignId)}</strong> bei <strong>${esc(kunde)}</strong> wurde nach
+      <strong>${reakt.pause_tage} Tagen Pause</strong> wieder aktiv.</p>
+      <p>Die <strong>Laufzeit zählt neu ab ${esc(reakt.phase_start)}</strong> (neue Laufphase).</p>
+      <p>👉 Neue Beauftragung? <strong>Rechnung prüfen.</strong> Bitte auf <em>/admin/meta</em> bestätigen:
+      „Neue Phase korrekt" oder — im Sonderfall — „Zusammenhängend zählen".</p>`,
+  });
+  console.log(`[meta-sync] Reaktivierungs-Mail versandt: ${c?.name || campaignId} (${reakt.pause_tage} Tage Pause).`);
 }
 
 /**
@@ -244,9 +377,16 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
     const since = ymd(Date.now() - tage * 86400000);
     let kampagnenGesamt = 0, insightsGesamt = 0;
     const kontoFehler = [];
+    const beruehrteKampagnen = new Set(); // für Laufphasen-Neuberechnung (nur was Insights bekam)
 
     for (const konto of konten) {
       try {
+        // 0) Konto-Status prüfen (Zahlungsproblem-Erkennung, account_status 2/3).
+        try {
+          const info = await graph(konto, { fields: 'account_status,disable_reason,name' }, token);
+          await verarbeiteKontoStatus(konto, info);
+        } catch (e) { console.warn(`[meta-sync] Konto-Status ${konto}: ${e.message}`); }
+
         // 1) Kampagnen
         const kampagnen = await graphAll(`${konto}/campaigns`, {
           fields: 'id,name,start_time,effective_status,daily_budget,lifetime_budget',
@@ -295,6 +435,7 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
             results: leadsAusActions(row.actions),
             updated_at: new Date().toISOString(),
           }, { onConflict: 'meta_campaign_id,datum' });
+          beruehrteKampagnen.add(row.campaign_id);
           insightsGesamt++;
         }
         await sleep(600); // Pause zwischen Konten — Rate-Limit-schonend
@@ -304,6 +445,15 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
       }
     }
 
+    // Laufphasen der berührten Kampagnen neu berechnen + Reaktivierungen erkennen/melden.
+    let reaktivierungen = 0;
+    for (const cid of beruehrteKampagnen) {
+      try {
+        const { reaktivierung } = await laufphasenAktualisieren(cid);
+        if (reaktivierung) { await verarbeiteReaktivierung(cid, reaktivierung); reaktivierungen++; }
+      } catch (e) { console.warn(`[meta-sync] Laufphasen ${cid}: ${e.message}`); }
+    }
+
     // Kampagnen automatisch Projekten/Kunden zuordnen (Namens-Match). Rest bleibt offen
     // und sichtbar in der „Nicht zugeordnet"-Liste.
     let match = null;
@@ -311,10 +461,10 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
 
     lastResult = {
       ok: true, konten: konten.length, kampagnen: kampagnenGesamt, insights: insightsGesamt,
-      backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
+      reaktivierungen, backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
     };
     lastRunAt = new Date().toISOString();
-    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage — ${kontoFehler.length} Kontofehler.`);
+    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage, ${reaktivierungen} Reaktivierungen — ${kontoFehler.length} Kontofehler.`);
     return lastResult;
   } finally { running = false; }
 }
