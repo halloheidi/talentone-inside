@@ -75,9 +75,10 @@ export default function SearchableSelect({
   }, [open]);
 
   // Popover-Position aus der Input-BoundingBox berechnen (fixed, mit Flip nach oben).
+  // Gibt die Position zurück UND setzt sie (Rückgabe für synchrones Seeding beim Öffnen).
   const computePos = () => {
     const el = inputRef.current;
-    if (!el) return;
+    if (!el) return null;
     const rect = el.getBoundingClientRect();
     const gap = 2;
     const maxH = 260;
@@ -86,15 +87,20 @@ export default function SearchableSelect({
     // Nach oben klappen, wenn unten zu wenig Platz und oben mehr Platz ist.
     const openUp = spaceBelow < Math.min(maxH + gap + 8, 220) && spaceAbove > spaceBelow;
     const avail = (openUp ? spaceAbove : spaceBelow) - gap - 8;
-    setPopPos({
+    const pos = {
       left: Math.max(4, Math.min(rect.left, window.innerWidth - rect.width - 4)),
       width: rect.width,
       ...(openUp
         ? { bottom: window.innerHeight - rect.top + gap }
         : { top: rect.bottom + gap }),
       maxHeight: Math.max(120, Math.min(maxH, avail)),
-    });
+    };
+    setPopPos(pos);
+    return pos;
   };
+
+  // Öffnen + Position sofort im selben Tick berechnen (kein null-gegateter Leer-Frame).
+  const openNow = () => { if (!disabled) { setOpen(true); computePos(); } };
 
   // Position vor dem Paint berechnen (kein Flackern) + bei Scroll/Resize neu.
   useLayoutEffect(() => {
@@ -146,7 +152,7 @@ export default function SearchableSelect({
   function onKeyDown(e) {
     if (disabled) return;
     if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) {
-      setOpen(true);
+      openNow();
       return;
     }
     if (!open) return;
@@ -177,6 +183,7 @@ export default function SearchableSelect({
         width: popPos.width,
         right: 'auto',
         maxHeight: popPos.maxHeight,
+        zIndex: 9999, // über allen Overlays/Headern (Inline schlägt jede Klassenregel)
         ...(popPos.top != null ? { top: popPos.top } : { bottom: popPos.bottom }),
       }}
     >
@@ -190,9 +197,10 @@ export default function SearchableSelect({
           role="option"
           aria-selected={isEmptyValue ? !!it.__empty : it.value === value}
           className={'ss-opt' + (i === activeIndex ? ' active' : '') + (it.__empty ? ' ss-opt-empty' : '')}
-          onMouseDown={e => e.preventDefault()}
+          // Auswahl auf mousedown: feuert VOR Blur/Outside-Handler → zuverlässig,
+          // unabhängig davon, ob im Portal ein späterer click ankommt.
+          onMouseDown={e => { e.preventDefault(); choose(it); }}
           onMouseEnter={() => setActiveIndex(i)}
-          onClick={() => choose(it)}
         >
           {highlight(it.label, q)}
         </li>
@@ -216,8 +224,8 @@ export default function SearchableSelect({
         disabled={disabled}
         value={open ? query : displayLabel}
         placeholder={open ? (displayLabel || placeholder) : placeholder}
-        onFocus={() => { if (!disabled) setOpen(true); }}
-        onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); setActiveIndex(0); }}
+        onFocus={openNow}
+        onChange={e => { setQuery(e.target.value); if (!open) openNow(); setActiveIndex(0); }}
         onKeyDown={onKeyDown}
       />
       {popover}
