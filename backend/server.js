@@ -56,14 +56,22 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://inside.talent-on
   .map(s => s.trim())
   .filter(Boolean);
 
-app.use(cors({
+const globalCors = cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
     cb(new Error(`Origin nicht erlaubt: ${origin}`));
   },
   credentials: true,
-}));
+});
+// Globales CORS NICHT auf die öffentlichen Webhook-Ingest-Routen anwenden — die
+// müssen Browser-Posts von beliebigen (selbst gehosteten) Landingpages annehmen und
+// setzen ihr eigenes permissives CORS im webhooksRouter. Sonst blockt die
+// Allow-List hier fremde Origins mit „Origin nicht erlaubt" (500).
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/webhooks')) return next();
+  return globalCors(req, res, next);
+});
 // easybill-Webhook MUSS vor express.json() gemountet werden — der Handler
 // braucht den Raw-Body für die HMAC-Signatur-Verifikation.
 app.use('/api/webhooks/easybill', easybillWebhookRouter);
