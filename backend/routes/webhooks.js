@@ -10,6 +10,19 @@ import { extractAnhaenge, spiegeleAnhaenge, anhaengeMitSignedUrls } from '../anh
 
 const router = Router();
 
+// CORS NUR für die Webhook-Ingest-Routen (/ingest + Aliasse /perspective, /leads).
+// Erlaubt Browser-Posts von selbst gehosteten Landingpages (fetch mit application/json
+// löst einen OPTIONS-Preflight aus). Der Endpoint ist ohnehin öffentlich und wird über
+// die job_id adressiert → Allow-Origin: * ist hier vertretbar. KEINE globale CORS-Öffnung
+// des Backends — dieses Middleware hängt ausschließlich an diesem Router.
+router.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204); // Preflight
+  next();
+});
+
 // Meta-Felder von Perspective, die wir komplett ignorieren
 const META_KEYS = new Set([
   'id', 'funnelid', 'funnelname', 'meta', 'values', 'titles',
@@ -589,8 +602,16 @@ async function createAnfrageUndBenachrichtige({ job, body }) {
         .eq('benachrichtige_leads', true);
       const emails = new Set(accounts.map(a => (a.email || '').trim().toLowerCase()).filter(Boolean));
 
-      // Kunden-Haupt-Mail nur als Fallback wenn keine Portal-Accounts benachrichtigt werden
-      // sollen — verhindert doppelte Zustellung.
+      // Am Job hinterlegte Benachrichtigungsadresse(n) — analog zur Bewerbungs-Mail
+      // (bewerbung_email, mit ; oder , trennbar). Gilt auch für Anfragen dieses Jobs.
+      for (const addr of String(job.bewerbung_email || '').split(/[;,]/)
+        .map(s => s.trim().toLowerCase())
+        .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s))) {
+        emails.add(addr);
+      }
+
+      // Kunden-Haupt-Mail nur als Fallback wenn sonst niemand benachrichtigt wird
+      // (keine Portal-Accounts, keine Job-Adresse) — verhindert doppelte Zustellung.
       if (emails.size === 0 && kunde.email) emails.add(kunde.email.trim().toLowerCase());
 
       const recipients = Array.from(emails);
