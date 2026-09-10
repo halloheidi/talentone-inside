@@ -249,11 +249,31 @@ export async function matchKampagnen() {
 const STATUS_PROBLEM = new Set([2, 3]);
 const STATUS_TEXT = { 2: 'deaktiviert', 3: 'Zahlung ausstehend' };
 
+// Ist das Konto tatsächlich in Benutzung? Nur dann ist ein Zahlungsproblem dringlich
+// („Kampagnen ausgesetzt"). Ungenutzte Konten-Hüllen (Status 3 ohne je gelaufene
+// Kampagnen) lösen KEINEN Alarm aus — sonst Spam. In Benutzung = mind. eine einem
+// Projekt zugeordnete Kampagne ODER Spend in den letzten 7 Tagen.
+async function kontoInBenutzung(konto) {
+  const { data: zug } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id').eq('werbekonto_id', konto).not('projekt_id', 'is', null).limit(1);
+  if (zug?.length) return true;
+  const { data: camps } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id').eq('werbekonto_id', konto);
+  const ids = (camps || []).map(c => c.meta_campaign_id);
+  if (!ids.length) return false;
+  const seit7 = ymd(Date.now() - 7 * 86400000);
+  const { data: recent } = await supabase.from('talentone_meta_insights')
+    .select('meta_campaign_id').in('meta_campaign_id', ids).gte('datum', seit7).gt('spend', 0).limit(1);
+  return !!recent?.length;
+}
+
 async function verarbeiteKontoStatus(konto, info) {
   const status = Number(info?.account_status);
   const problem = STATUS_PROBLEM.has(status);
+  // Alarm nur bei tatsächlich genutzten Konten — ungenutzte Status-3-Hüllen ignorieren.
+  const reportable = problem && await kontoInBenutzung(konto);
   const { data: row } = await supabase.from('talentone_meta_konten').select('*').eq('konto_id', konto).maybeSingle();
-  if (!row && !problem) return; // gesundes, nicht registriertes Konto → nichts zu tun
+  if (!row && !reportable) return; // ungenutztes/gesundes, nicht registriertes Konto → nichts zu tun
 
   const heute = ymd(Date.now());
   const patch = {
@@ -266,7 +286,7 @@ async function verarbeiteKontoStatus(konto, info) {
   if (!row) { patch.name = info?.name || null; patch.typ = 'pool'; } // neu nur wg. Problem angelegt
 
   let mailen = false;
-  if (problem) {
+  if (reportable) {
     patch.zahlungsproblem = true;
     patch.zahlungsproblem_seit = row?.zahlungsproblem_seit || heute; // Erstauftreten beibehalten
     mailen = tageBis(row?.zahlungsproblem_mail_am) >= ZAHLUNG_MAIL_ABSTAND_TAGE;

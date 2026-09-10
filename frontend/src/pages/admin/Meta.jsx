@@ -28,8 +28,21 @@ export default function Meta() {
   const [savingKamp, setSavingKamp] = useState(null);
   const [matchBusy, setMatchBusy] = useState(false);
 
+  // Reaktivierungen & Zahlungsprobleme
+  const [reaktivierungen, setReaktivierungen] = useState([]);
+  const [zahlungsprobleme, setZahlungsprobleme] = useState([]);
+  const [reakBusy, setReakBusy] = useState(null);   // meta_campaign_id während Request
+
   async function load() {
     try { setStatus(await api('/meta/status')); }
+    catch (e) { setErr(e.body?.error || e.message); }
+  }
+  async function loadReaktivierungen() {
+    try { const r = await api('/meta/kampagnen/reaktivierungen'); setReaktivierungen(r.kampagnen || []); }
+    catch (e) { setErr(e.body?.error || e.message); }
+  }
+  async function loadZahlungsprobleme() {
+    try { const r = await api('/meta/konten/zahlungsprobleme'); setZahlungsprobleme(r.konten || []); }
     catch (e) { setErr(e.body?.error || e.message); }
   }
   async function loadKonten() {
@@ -44,9 +57,23 @@ export default function Meta() {
     load();
     loadKonten();
     loadKampagnen();
+    loadReaktivierungen();
+    loadZahlungsprobleme();
     api('/kunden').then(r => setKunden(r.kunden || [])).catch(() => {});
     api('/projekte').then(r => setProjekte(r.projekte || [])).catch(() => {});
   }, []);
+
+  async function bestaetigeReaktivierung(kamp, modus) {
+    setReakBusy(kamp.meta_campaign_id); setErr(''); setMsg('');
+    try {
+      await api(`/meta/kampagnen/${encodeURIComponent(kamp.meta_campaign_id)}/reaktivierung/bestaetigen`, {
+        method: 'POST', body: { modus },
+      });
+      setMsg(modus === 'neue_phase' ? 'Reaktivierung als neue Phase bestätigt.' : 'Reaktivierung zusammenhängend gezählt.');
+      await loadReaktivierungen();
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setReakBusy(null); }
+  }
 
   async function speichern() {
     if (!token.trim()) { setErr('Bitte einen Token eingeben.'); return; }
@@ -159,6 +186,56 @@ export default function Meta() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 860 }}>
+      {zahlungsprobleme.length > 0 && (
+        <div className="alert" style={{ background: '#fdecea', color: '#8a1c1c' }}>
+          <strong>⚠️ Zahlungsproblem</strong>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+            {zahlungsprobleme.map(k => (
+              <div key={k.konto_id} style={{ fontSize: 13 }}>
+                {k.name || k.konto_id} — {k.status_label} seit {k.zahlungsproblem_seit}
+                {k.kunde_name ? ` · ${k.kunde_name}` : ''}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {reaktivierungen.length > 0 && (
+        <div className="card">
+          <h2 className="section-title" style={{ marginTop: 0 }}>🔄 Reaktivierungen</h2>
+          <p className="section-sub">
+            Diese Kampagnen liefen nach einer Pause wieder an. Bitte prüfen, ob es sich um eine neue Beauftragung
+            handelt (neue Phase, Laufzeit zählt neu) oder um eine Fortsetzung (zusammenhängend zählen).
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {reaktivierungen.map(kamp => {
+              const rowBusy = reakBusy === kamp.meta_campaign_id;
+              return (
+                <div key={kamp.meta_campaign_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>{kamp.name || '(ohne Name)'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
+                    Konto: {kamp.konto_name || kamp.werbekonto_id} · Kunde: {kamp.kunde_name || '?'}
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 10 }}>
+                    🔄 Reaktiviert nach {kamp.reaktivierung_pause_tage} Tagen Pause — Laufzeit zählt neu ab {kamp.reaktivierung_am}. Neue Beauftragung? Rechnung prüfen.
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn-primary btn-sm" disabled={rowBusy}
+                      onClick={() => bestaetigeReaktivierung(kamp, 'neue_phase')}>
+                      {rowBusy ? 'Speichere…' : 'Neue Phase korrekt'}
+                    </button>
+                    <button className="btn-ghost btn-sm" disabled={rowBusy}
+                      onClick={() => bestaetigeReaktivierung(kamp, 'zusammenhaengend')}>
+                      Zusammenhängend zählen
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <h1 className="section-title" style={{ marginTop: 0 }}>📊 Meta-Integration</h1>
         <p className="section-sub">
@@ -250,7 +327,14 @@ export default function Meta() {
                 const dirty = d.typ !== (row.typ || '') || (d.kunde_id || '') !== (row.kunde_id || '');
                 return (
                   <div key={row.konto_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 2 }}>{row.name || '(ohne Name)'}</div>
+                    <div style={{ fontWeight: 600, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span>{row.name || '(ohne Name)'}</span>
+                      {row.zahlungsproblem && (
+                        <span style={{ background: '#fdecea', color: '#8a1c1c', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
+                          ⚠️ {row.status_label} seit {row.zahlungsproblem_seit}
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
                       {row.konto_id}
                       {row.status_label ? ` · ${row.status_label}` : ''}
@@ -331,10 +415,13 @@ export default function Meta() {
                 return (
                   <div key={kamp.meta_campaign_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
                     <div style={{ fontWeight: 600, marginBottom: 2 }}>{kamp.name || '(ohne Name)'}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}>
-                      Werbekonto {kamp.werbekonto_id || '?'}
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 2 }}>
+                      {kamp.konto_name ? `${kamp.konto_name} (${kamp.werbekonto_id})` : (kamp.werbekonto_id || '?')}
                       {kamp.effective_status ? ` · ${kamp.effective_status}` : ''}
                       {kamp.kunde_name ? ` · Hinweis: ${kamp.kunde_name}` : ''}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8 }}>
+                      Start {kamp.start || '—'} · zuletzt aktiv {kamp.letzter_aktiv || '—'}
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <SearchableSelect

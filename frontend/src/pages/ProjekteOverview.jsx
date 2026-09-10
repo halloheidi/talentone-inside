@@ -759,11 +759,19 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [kundeQuery, setKundeQuery] = useState('');
   const [showKundePicker, setShowKundePicker] = useState(false);
   const [metaKonten, setMetaKonten] = useState([]);  // Meta-Werbekonten für Pro-Projekt-Override
+  const [metaKampagnen, setMetaKampagnen] = useState({ aktuelle_id: null, kampagnen: [] });
 
   useEffect(() => {
     api('/kunden').then(r => setKundenList(r.kunden || [])).catch(() => {});
     api('/meta/konten').then(r => setMetaKonten(r.konten || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!projektId) return;
+    api(`/meta/projekt/${projektId}/kampagnen`)
+      .then(r => setMetaKampagnen({ aktuelle_id: r.aktuelle_id ?? null, kampagnen: r.kampagnen || [] }))
+      .catch(() => setMetaKampagnen({ aktuelle_id: null, kampagnen: [] }));
+  }, [projektId]);
 
   async function load() {
     setLoading(true);
@@ -985,6 +993,66 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Bewertet</span><input type="checkbox" checked={!!projekt.bewertet} onChange={e => patch({ bewertet: e.target.checked })} /></label>
             </div>
           </section>
+
+          {/* Meta-Kampagnen */}
+          {metaKampagnen.kampagnen.length > 0 && (() => {
+            const aktuelle = metaKampagnen.kampagnen.find(k => k.meta_campaign_id === metaKampagnen.aktuelle_id);
+            const eur = n => `${(Number(n) || 0).toFixed(2)} €`;
+            const hatPhasen = metaKampagnen.kampagnen.some(k => (k.phasen || []).length > 0);
+            return (
+              <section><h3>Meta-Kampagnen</h3>
+                {aktuelle ? (
+                  <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700 }}>{aktuelle.name || '(ohne Name)'}</span>
+                      {aktuelle.phase?.live && (
+                        <span style={{ background: '#e7f6ec', color: '#0a5c2b', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>live</span>
+                      )}
+                    </div>
+                    {aktuelle.phase ? (
+                      <>
+                        <div style={{ fontSize: 13, marginTop: 4 }}>
+                          {aktuelle.phase.live
+                            ? `live seit ${Number(aktuelle.phase.aktive_lauftage) || 0} aktiven Lauftagen`
+                            : `${Number(aktuelle.phase.aktive_lauftage) || 0} aktive Lauftage`}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                          Zeitraum {aktuelle.phase.kalender_von || '—'}–{aktuelle.phase.kalender_bis || '—'}
+                          {Number(aktuelle.phase.pause_tage) > 0
+                            ? `, davon ${Number(aktuelle.phase.pause_tage)} Tage pausiert${Number(aktuelle.phase.pause_wg_zahlung) > 0 ? ` (${Number(aktuelle.phase.pause_wg_zahlung)} wg. Zahlungsproblem)` : ''}`
+                            : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>noch keine Aktivität</div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="pane-hint" style={{ marginTop: 0 }}>Keine aktuelle Meta-Kampagne markiert.</p>
+                )}
+
+                {hatPhasen && (
+                  <details style={{ marginTop: 10 }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 13 }}>Historie</summary>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+                      {metaKampagnen.kampagnen.map(k => (
+                        <div key={k.meta_campaign_id}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{k.name || '(ohne Name)'}</div>
+                          {(k.phasen || []).length === 0
+                            ? <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>keine Phasen</div>
+                            : (k.phasen || []).map((ph, i) => (
+                              <div key={i} style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                                {ph.phase_start || '—'}–{ph.phase_ende || 'laufend'} · {Number(ph.aktive_lauftage) || 0} aktive Lauftage · Spend {eur(ph.spend_summe)}
+                              </div>
+                            ))}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </section>
+            );
+          })()}
 
           {/* Projekt-Flags (Migration 025) */}
           <section><h3>Projekt-Eckdaten</h3>
