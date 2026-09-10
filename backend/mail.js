@@ -10,6 +10,26 @@ const RESEND_API = 'https://api.resend.com/emails';
 // Intern (Mitarbeiter-Benachrichtigungen) — immer TalentOne-Absender
 const INTERNAL_FROM = 'TalentOne Inside <noreply@talent-one.de>';
 
+// Brand der Neukunden-Anfrage-Mails (talentone_kunden.mail_brand). Zentrale Map,
+// damit Logo-URLs nicht im Template verstreut sind. Ein Eintrag mit logo=null
+// bedeutet "kein Override" → bisheriges (Agentur-)Verhalten. Absender = Anzeigename;
+// die Resend-AbsenderADRESSE bleibt unverändert (nur der Name wird ersetzt).
+const MAIL_BRAND_LOGOS = {
+  talentone: null, // TalentOne hat kein Bild-Logo → Shell zeigt den bestehenden Schriftzug (wie bisher)
+  nw_solar: 'https://halloheidi.b-cdn.net/A%20_%20Horizontal.png',
+};
+const MAIL_BRAND_ABSENDER = {
+  nw_solar: 'N&W Solar',
+};
+
+// Setzt/ersetzt den Anzeigenamen in einem Resend-"From" ("Name <addr>" oder "addr").
+function mitAbsendername(fromStr, name) {
+  const s = String(fromStr || '').trim();
+  const m = s.match(/<([^>]+)>/);
+  const addr = m ? m[1].trim() : s;
+  return `${name} <${addr}>`;
+}
+
 /**
  * Interne BCC-Liste — geht bei jeder Kunden-Mail mit, unsichtbar.
  * Konfiguriert via INTERNAL_BCC env var (Komma-getrennt). Fallback:
@@ -860,7 +880,16 @@ export async function sendZahlungsMail({ to, kunde, job, zahlung }) {
    Agentur, BCC ans interne Team. */
 export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
-  const brand = getBranding(kunde?.agentur);
+  const brandBasis = getBranding(kunde?.agentur);
+  // mail_brand-Override: NUR bekannte Brands mit Logo überschreiben Kopf-Logo +
+  // Absendername. Kein/unbekannter Wert ('talentone', null, …) → alles wie bisher
+  // (Agentur-Brand, Inhalt unverändert). Resend-AbsenderADRESSE bleibt gleich.
+  const mailBrand = String(kunde?.mail_brand || '').trim();
+  const brandLogoUrl = MAIL_BRAND_LOGOS[mailBrand] || null;
+  const absenderName = MAIL_BRAND_ABSENDER[mailBrand] || null;
+  const brand = brandLogoUrl
+    ? { ...brandBasis, logoHtml: `<img src="${brandLogoUrl}" alt="${escape(absenderName || brandBasis.name)}" style="max-height:48px;width:auto;display:block;background:#fff;border-radius:6px;padding:6px 10px;">` }
+    : brandBasis;
   const recipients = Array.isArray(to) ? to : [to];
   const produkt = job?.stelle || (job?.neukunden_daten?.produkt) || 'Produkt';
   const anfrageName = anfrage?.name || anfrage?.email || 'Interessent';
@@ -919,7 +948,9 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: getMailFrom(brand),
+      // Absender-ADRESSE unverändert (Agentur/verifiziert); nur der Anzeigename
+      // wird bei bekanntem mail_brand ersetzt (z. B. "N&W Solar").
+      from: absenderName ? mitAbsendername(getMailFrom(brandBasis), absenderName) : getMailFrom(brandBasis),
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
