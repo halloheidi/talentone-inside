@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { requireAuth } from './auth.js';
+import { requireAuth, requireAdmin } from './auth.js';
 import { isAdminEmail } from './team.js';
 import kundenRouter from './routes/kunden.js';
 import sucheRouter from './routes/suche.js';
@@ -24,6 +24,7 @@ import offersRouter from './routes/offers.js';
 import invoicesRouter from './routes/invoices.js';
 import hiresRouter from './routes/hires.js';
 import controllingRouter from './routes/controlling.js';
+import metaRouter from './routes/meta.js';
 import controllingOpsRouter from './routes/controlling-ops.js';
 import brandAssetsRouter from './routes/brand-assets.js';
 import anfragenRouter from './routes/anfragen.js';
@@ -44,6 +45,7 @@ import { startDailyBewerbungsReportScheduler } from './daily-bewerbungs-report.j
 import { startWeeklyBewerbungsReportScheduler } from './weekly-bewerbungs-report.js';
 import { startEigeneLeadsScheduler } from './eigene-leads-scheduler.js';
 import { startCampaignReminderScheduler } from './campaign-reminder.js';
+import { startMetaSyncScheduler } from './meta-sync.js';
 import { startWeeklyFeedbackScheduler } from './weekly-feedback.js';
 
 const app = express();
@@ -98,6 +100,7 @@ app.use('/api/offers', requireAuth, offersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
 app.use('/api/hires', requireAuth, hiresRouter);
 app.use('/api/controlling', requireAuth, controllingRouter);
+app.use('/api/meta', requireAuth, requireAdmin, metaRouter);
 app.use('/api/controlling-ops', requireAuth, controllingOpsRouter);
 app.use('/api/anfragen', requireAuth, anfragenRouter);
 app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
@@ -134,6 +137,7 @@ app.listen(PORT, () => {
   startWeeklyBewerbungsReportScheduler();
   startEigeneLeadsScheduler();
   startCampaignReminderScheduler();
+  startMetaSyncScheduler();
   startWeeklyFeedbackScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });
