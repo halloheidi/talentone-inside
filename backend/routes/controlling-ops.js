@@ -14,6 +14,7 @@ import {
   berlinParts, parseSollTage, tageSeit, computeAmpel,
 } from '../controlling-ops-service.js';
 import { metaMetrikenBatch, garantieStatus } from '../meta-metriken.js';
+import { gewerkVonStelle, berechneBenchmark, bewerteZeile, AMPEL_RANG as AMPEL_RANG_NEU } from '../controlling-ampel.js';
 
 const router = Router();
 const DAY = 86400000;
@@ -140,15 +141,17 @@ router.get('/overview', async (req, res) => {
 
     // 3) Jobs der betroffenen Kunden
     const finalKundeIds = [...new Set(projekte.map(p => p.kunde_id))];
-    const jobsByKunde = {}; const jobKunde = {}; const alleJobIds = [];
+    const jobsByKunde = {}; const jobsByProjekt = {}; const jobKunde = {}; const jobProjekt = {}; const alleJobIds = [];
     if (finalKundeIds.length) {
       const { data: jobs, error: jErr } = await supabase.from('talentone_jobs')
-        .select('id, kunde_id, stelle, bewerbungen_token, created_at')
+        .select('id, kunde_id, projekt_id, stelle, bewerbungen_token, created_at')
         .in('kunde_id', finalKundeIds).order('created_at', { ascending: true });
       if (jErr) throw jErr;
       for (const j of jobs || []) {
         (jobsByKunde[j.kunde_id] ||= []).push(j);
+        if (j.projekt_id) (jobsByProjekt[j.projekt_id] ||= []).push(j);
         jobKunde[j.id] = j.kunde_id;
+        jobProjekt[j.id] = j.projekt_id || null;
         alleJobIds.push(j.id);
       }
     }
@@ -166,10 +169,10 @@ router.get('/overview', async (req, res) => {
 
     // 5) Bewerbungen (all-time für "letzte Bewerbung"; Volumen klein)
     const alleBews = await loadBewerbungen(alleJobIds);
-    const bewsByKunde = {};
+    const bewsByProjekt = {};
     for (const b of alleBews) {
-      const kid = jobKunde[b.job_id];
-      if (kid) (bewsByKunde[kid] ||= []).push(b);
+      const projId = jobProjekt[b.job_id];
+      if (projId) (bewsByProjekt[projId] ||= []).push(b);
     }
 
     // 5b) Zufriedenheits-Feedback je Kunde — jüngste zuerst (Score + Trend)
@@ -190,8 +193,8 @@ router.get('/overview', async (req, res) => {
     // 6) Zeilen bauen
     const rows = projekte.map(p => {
       const k = kundeMap[p.kunde_id];
-      const jobs = jobsByKunde[p.kunde_id] || [];
-      const bews = bewsByKunde[p.kunde_id] || [];
+      const jobs = jobsByProjekt[p.id] || [];   // NUR Jobs DIESES Projekts (nicht des Kunden)
+      const bews = bewsByProjekt[p.id] || [];
       const liveStart = p.start_phase1 || p.live_termin || null;
       const liveStartIso = liveStart ? new Date(liveStart + (String(liveStart).length <= 10 ? 'T00:00:00Z' : '')).toISOString() : null;
       const liveTag = tageSeit(liveStartIso, now);
@@ -214,13 +217,9 @@ router.get('/overview', async (req, res) => {
       const spark = Object.fromEntries(sparkAxis.map(d => [d, 0]));
       for (const b of bews) { const dk = berlinParts(b.created_at).dateKey; if (dk in spark) spark[dk] += 1; }
 
-      const { ampel, grund } = computeAmpel({
-        status: p.status, liveTag, sollTage, letzteBewerbungTage,
-        bewerbungenSeitLive, letzte7, vorwoche,
-      });
-
       const jobFunnels = jobs.flatMap(j => funnelByJob[j.id] || []);
       const primaryJob = jobs[0] || null;
+      const stelle = primaryJob?.stelle || p.gesuchte_positionen || p.projekt || '—';
 
       const fbList = feedbackByKunde[p.kunde_id] || [];
       const zufriedenheit = fbList.length ? {
@@ -237,7 +236,8 @@ router.get('/overview', async (req, res) => {
         agentur: k?.agentur || p.agentur || null,
         status: p.status,
         verantwortlich: p.verantwortlich || null,
-        stelle: primaryJob?.stelle || p.gesuchte_positionen || p.projekt || '—',
+        stelle,
+        gewerk: gewerkVonStelle(stelle),
         anzahl_stellen: jobs.length,
         primary_job_id: primaryJob?.id || null,
         bewerbungen_token: primaryJob?.bewerbungen_token || null,
@@ -248,7 +248,7 @@ router.get('/overview', async (req, res) => {
         bewerbungen_gesamt: bews.length,
         letzte_bewerbung_tage: letzteBewerbungTage,
         sparkline: sparkAxis.map(d => ({ date: d, count: spark[d] })),
-        ampel, ampel_grund: grund,
+        // ampel wird nach Meta-Merge + Benchmark einheitlich berechnet (bewerteZeile)
         funnel_extern: funnelTyp(jobFunnels) === 'extern' ? true
           : funnelTyp(jobFunnels) === 'intern' ? false : null,
         zufriedenheit,
@@ -260,11 +260,6 @@ router.get('/overview', async (req, res) => {
         garantie: !!p.garantie,
         garantie_details: p.garantie_details || null,
       };
-    }).sort((a, b) => {
-      if (AMPEL_RANG[a.ampel] !== AMPEL_RANG[b.ampel]) return AMPEL_RANG[a.ampel] - AMPEL_RANG[b.ampel];
-      const at = a.letzte_bewerbung_tage ?? 9999, bt = b.letzte_bewerbung_tage ?? 9999;
-      if (at !== bt) return bt - at; // länger ohne Bewerbung zuerst
-      return a.bewerbungen_range - b.bewerbungen_range;
     });
 
     // 6b) Meta-Kennzahlen je Projekt (Spend Monat/Phase, CTR, echter CPL). Projekte ohne
@@ -302,6 +297,21 @@ router.get('/overview', async (req, res) => {
       };
     }
 
+    // 6d) Gewerk-CPL-Benchmark aus den eigenen Zeilen + EIN einheitliches Ampel-Regelwerk
+    // (ersetzt die alte Kritisch/Achtung-Heuristik). Jede Regel erzeugt einen benannten Grund.
+    const benchmark = berechneBenchmark(rows);
+    for (const r of rows) {
+      const { ampel, ampel_gruende } = bewerteZeile(r, benchmark);
+      r.ampel = ampel;
+      r.ampel_gruende = ampel_gruende;
+      r.gewerk_benchmark = benchmark.gewerk[r.gewerk]?.cpl ?? null;
+    }
+    // Sortierung: Rot zuerst; innerhalb gleicher Ampel höherer Spend zuerst.
+    rows.sort((a, b) => {
+      if (AMPEL_RANG_NEU[a.ampel] !== AMPEL_RANG_NEU[b.ampel]) return AMPEL_RANG_NEU[a.ampel] - AMPEL_RANG_NEU[b.ampel];
+      return (b.meta?.spend_monat || 0) - (a.meta?.spend_monat || 0);
+    });
+
     // 7) Aggregierte Charts über alle gefilterten Jobs im Zeitraum
     const rangeBews = alleBews.filter(b => jobKunde[b.job_id] && finalKundeIds.includes(jobKunde[b.job_id]) && within(b.created_at, start, end));
     const charts = verteilungen(rangeBews, rangeAxis);
@@ -331,6 +341,7 @@ router.get('/overview', async (req, res) => {
       ueberfaellig: rows.filter(r => r.cockpit?.status === 'ueberfaellig').length,
       pausiert: rows.filter(r => r.cockpit?.status === 'pausiert').length,
       zahlungsproblem: rows.filter(r => r.cockpit?.status === 'zahlungsproblem').length,
+      benchmark,   // { gewerk: {SHK:{cpl,n},…}, global, global_n } — Gewerk-CPL-Benchmark-Leiste
     };
 
     const kundenListe = finalKundeIds

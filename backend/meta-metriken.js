@@ -102,7 +102,7 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
   const heuteY = ymd(heute), monatY = monatsStart(heute);
 
   const { data: kamps } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, projekt_id, werbekonto_id, name').in('projekt_id', projektIds);
+    .select('meta_campaign_id, projekt_id, werbekonto_id, name, effective_status').in('projekt_id', projektIds);
   if (!kamps?.length) return map;
   const campIds = kamps.map(k => k.meta_campaign_id);
   const projektVonCamp = {}; const campsVonProjekt = {};
@@ -119,19 +119,12 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
       curPhase[p.meta_campaign_id] = p;
     }
   }
-  // Aktuelle Kampagne je Projekt (live bevorzugt, sonst jüngster Aktiv-Tag).
-  const projPhase = {}; // projekt → { phase_start, aktive_lauftage, live }
-  for (const [camp, ph] of Object.entries(curPhase)) {
-    const pid = projektVonCamp[camp];
-    const live = ph.letzter_aktiv_tag && tageDiff(ph.letzter_aktiv_tag, heuteY) <= AKTIV_LATENZ_TAGE;
-    const cand = { phase_start: ph.phase_start, aktive_lauftage: ph.aktive_lauftage, live, letzter: ph.letzter_aktiv_tag };
-    const cur = projPhase[pid];
-    if (!cur || (cand.live && !cur.live) || (cand.live === cur.live && String(cand.letzter) > String(cur.letzter))) projPhase[pid] = cand;
-  }
+  const campMeta = {}; for (const k of kamps) campMeta[k.meta_campaign_id] = k;
 
-  // Alle Insights der beteiligten Kampagnen (Datensatz ist klein) — in JS je Fenster aggregieren.
+  // Alle Insights der beteiligten Kampagnen (Datensatz ist klein) — je Kampagne indiziert.
   const { data: ins } = await supabase.from('talentone_meta_insights')
     .select('meta_campaign_id, datum, spend, impressions, clicks').in('meta_campaign_id', campIds);
+  const insByCamp = {}; for (const r of (ins || [])) (insByCamp[r.meta_campaign_id] ||= []).push(r);
 
   // Jobs je Projekt + Bewerbungen je Job (für CPL).
   const { data: jobs } = await supabase.from('talentone_jobs').select('id, projekt_id').in('projekt_id', projektIds);
@@ -139,7 +132,7 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
   for (const j of (jobs || [])) { (jobsVonProjekt[j.projekt_id] ||= []).push(j.id); alleJobIds.push(j.id); }
   let bew = [];
   if (alleJobIds.length) {
-    const { data } = await supabase.from('talentone_bewerbungen').select('job_id, created_at').in('job_id', alleJobIds);
+    const { data } = await supabase.from('talentone_bewerbungen').select('job_id, created_at, ko_kriterium').in('job_id', alleJobIds);
     bew = data || [];
   }
   const projektVonJob = {}; for (const j of (jobs || [])) projektVonJob[j.id] = j.projekt_id;
@@ -169,49 +162,75 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
     if (zahlungKonto[String(k.werbekonto_id || '').trim()]) zahlungVonProjekt[pid] = true;
   }
 
+  const RECENT_TAGE = 60; // Kampagnen dieses „Laufs" — letzter Aktiv-Tag höchstens so alt
+  const tagVor = n => ymd(Date.parse(heuteY) - n * 86400000);
+  const since7 = tagVor(6), since28 = tagVor(27); // inkl. heute → 7- bzw. 28-Tage-Fenster
+
   for (const pid of projektIds) {
     const camps = campsVonProjekt[pid]; if (!camps?.length) continue; // keine Meta-Verknüpfung → nicht im Ergebnis
-    const phase = projPhase[pid] || null;
-    const phaseStart = phase?.phase_start || null;
-    let spendMonat = 0, spendPhase = 0, impr = 0, clicks = 0;
-    const spendWochen = [0, 0, 0, 0, 0, 0, 0, 0]; // 8 Wochen, ältest → neuest (Index 7 = letzte 7 Tage)
-    for (const r of (ins || [])) {
-      if (!camps.includes(r.meta_campaign_id)) continue;
-      const sp = Number(r.spend) || 0;
-      if (r.datum >= monatY && r.datum <= heuteY) spendMonat += sp;
-      if (phaseStart && r.datum >= phaseStart && r.datum <= heuteY) {
-        spendPhase += sp; impr += Number(r.impressions) || 0; clicks += Number(r.clicks) || 0;
+    // Kampagnen des aktuellen Laufs: aktuelle Phase existiert UND letzter Aktiv-Tag ≤60 T.
+    const usable = camps.filter(c => curPhase[c] && curPhase[c].letzter_aktiv_tag && tageDiff(curPhase[c].letzter_aktiv_tag, heuteY) <= RECENT_TAGE);
+    const lauf = usable.length ? usable : camps.filter(c => curPhase[c]); // Fallback: irgendeine Phase
+    // Lauftage ab dem FRÜHESTEN aktiven Phasenstart (nicht der jüngsten Kampagne).
+    const aktuellePhaseStart = lauf.length ? lauf.map(c => curPhase[c].phase_start).sort()[0] : null;
+    const live = lauf.some(c => tageDiff(curPhase[c].letzter_aktiv_tag, heuteY) <= AKTIV_LATENZ_TAGE);
+
+    // Spend/Insights SUMMIEREN über alle Kampagnen des Projekts; Aktiv-Tage als Union.
+    const spendByTag = {};
+    let spendMonat = 0, spendPhase = 0, spend7 = 0, spend28 = 0, imprPhase = 0, clicksPhase = 0;
+    const spendWochen = [0, 0, 0, 0, 0, 0, 0, 0];
+    for (const c of camps) {
+      for (const r of (insByCamp[c] || [])) {
+        const sp = Number(r.spend) || 0;
+        spendByTag[r.datum] = (spendByTag[r.datum] || 0) + sp;
+        if (r.datum >= monatY && r.datum <= heuteY) spendMonat += sp;
+        if (aktuellePhaseStart && r.datum >= aktuellePhaseStart && r.datum <= heuteY) { spendPhase += sp; imprPhase += Number(r.impressions) || 0; clicksPhase += Number(r.clicks) || 0; }
+        if (r.datum >= since7 && r.datum <= heuteY) spend7 += sp;
+        if (r.datum >= since28 && r.datum <= heuteY) spend28 += sp;
+        const wz = Math.floor(tageDiff(r.datum, heuteY) / 7);
+        if (wz >= 0 && wz < 8) spendWochen[7 - wz] += sp;
       }
-      const wochenZurueck = Math.floor(tageDiff(r.datum, heuteY) / 7);
-      if (wochenZurueck >= 0 && wochenZurueck < 8) spendWochen[7 - wochenZurueck] += sp;
     }
-    // Bewerbungen seit Phasenstart (echte Leads).
-    const jobIds = jobsVonProjekt[pid] || [];
-    let bewPhase = 0;
-    if (phaseStart) {
-      for (const b of bew) {
-        if (projektVonJob[b.job_id] !== pid) continue;
-        if (String(b.created_at).slice(0, 10) >= phaseStart) bewPhase++;
-      }
-    }
+    const aktivTage = Object.keys(spendByTag).filter(d => spendByTag[d] > 0);
+    const aktiveLauftageGesamt = aktivTage.length;
+    const aktiveLauftage = aktuellePhaseStart ? aktivTage.filter(d => d >= aktuellePhaseStart && d <= heuteY).length : 0;
+
+    // Bewerbungen des Projekts (job-basiert) über die Fenster + KO + Wochen-Sparkline.
+    const projBews = bew.filter(b => projektVonJob[b.job_id] === pid);
+    const dOf = b => String(b.created_at).slice(0, 10);
+    const bewPhase = aktuellePhaseStart ? projBews.filter(b => dOf(b) >= aktuellePhaseStart).length : null;
+    const bew7 = projBews.filter(b => dOf(b) >= since7).length;
+    const bew28 = projBews.filter(b => dOf(b) >= since28).length;
+    const ohneKo = aktuellePhaseStart ? projBews.filter(b => dOf(b) >= aktuellePhaseStart && !b.ko_kriterium).length : null;
+    const bewWochen = [0, 0, 0, 0, 0, 0, 0, 0];
+    for (const b of projBews) { const wz = Math.floor(tageDiff(dOf(b), heuteY) / 7); if (wz >= 0 && wz < 8) bewWochen[7 - wz]++; }
+
     const budget = budgetVonProjekt[pid] ?? null;
+    // Kampagnen-Details (aufklappbar), aufsteigend nach Start.
+    const kampagnen = lauf.map(c => {
+      const ph = curPhase[c], cm = campMeta[c] || {};
+      let sp = 0; for (const r of (insByCamp[c] || [])) { if (ph.phase_start && r.datum >= ph.phase_start) sp += Number(r.spend) || 0; }
+      return { name: cm.name || c, phase_start: ph.phase_start, spend: sp, effective_status: cm.effective_status || null, aktive_lauftage: ph.aktive_lauftage, live: tageDiff(ph.letzter_aktiv_tag, heuteY) <= AKTIV_LATENZ_TAGE };
+    }).sort((a, b) => String(a.phase_start).localeCompare(String(b.phase_start)));
+
     map.set(pid, {
       hat_meta: true,
-      spend_monat: spendMonat,
-      spend_phase: spendPhase,
-      impressions: impr,
-      clicks,
-      ctr: impr > 0 ? (clicks / impr) * 100 : null,
-      bewerbungen: phaseStart ? bewPhase : null,
-      cpl: phaseStart && bewPhase > 0 ? spendPhase / bewPhase : null,
-      aktive_lauftage: phase?.aktive_lauftage ?? null,
-      live: !!phase?.live,
-      phase_start: phaseStart,
-      ist_livegang: istVonProjekt[pid] || null, // frühester Phasen-Start (erster Spend-Tag)
+      spend_monat: spendMonat, spend_phase: spendPhase,
+      impressions: imprPhase, clicks: clicksPhase,
+      ctr: imprPhase > 0 ? (clicksPhase / imprPhase) * 100 : null,
+      bewerbungen: bewPhase, ohne_ko: ohneKo,
+      cpl: (aktuellePhaseStart && bewPhase > 0) ? spendPhase / bewPhase : null,
+      cpl_7t: bew7 > 0 ? spend7 / bew7 : null,
+      cpl_28t: bew28 > 0 ? spend28 / bew28 : null,
+      bewerbungen_7t: bew7, bewerbungen_28t: bew28,
+      aktive_lauftage: aktiveLauftage, aktive_lauftage_gesamt: aktiveLauftageGesamt,
+      live, phase_start: aktuellePhaseStart, ist_livegang: istVonProjekt[pid] || null,
       zahlungsproblem: !!zahlungVonProjekt[pid],
-      spend_wochen: spendWochen,
-      budget,
-      budget_prozent: budget && budget > 0 ? Math.round((spendMonat / budget) * 100) : null,
+      spend_wochen: spendWochen, bewerbungen_wochen: bewWochen,
+      budget, budget_prozent: budget && budget > 0 ? Math.round((spendMonat / budget) * 100) : null,
+      anzahl_kampagnen: lauf.length,
+      anzahl_aktive: lauf.filter(c => tageDiff(curPhase[c].letzter_aktiv_tag, heuteY) <= AKTIV_LATENZ_TAGE).length,
+      kampagnen,
     });
   }
   return map;
