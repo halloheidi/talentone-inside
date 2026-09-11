@@ -13,6 +13,7 @@ import InvoicesSection, { SendInvoiceMailModal } from '../../components/Invoices
 import AnredeAbfrage from '../../components/AnredeAbfrage.jsx';
 import { anrede, t, anredeOffen } from '../../lib/anrede.js';
 import { getBrandBaseUrl } from '../../lib/branding.js';
+import { useAuth } from '../../lib/auth.jsx';
 
 const STYLE_LABEL = {
   emotional: 'Emotional / Story',
@@ -27,6 +28,10 @@ function badgeFor(c) {
 
 export default function JobExport() {
   const { job, kunde, projekt, reload } = useJob();
+  const { user } = useAuth();
+  // Testmail-Empfänger: vorbelegt mit der Adresse des eingeloggten Nutzers, frei änderbar.
+  const [testMailTo, setTestMailTo] = useState('');
+  useEffect(() => { setTestMailTo(prev => prev || user?.email || ''); }, [user?.email]);
   const [showPreflight, setShowPreflight] = useState(false);
   const [showGoLive, setShowGoLive] = useState(false);
   const [goLiveBusy, setGoLiveBusy] = useState(false);
@@ -361,9 +366,11 @@ export default function JobExport() {
     } finally { setMailBusy(false); }
   }
   async function testMail() {
+    const to = (testMailTo || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) { setMailErr(true); setMailMsg('Bitte eine gültige Empfänger-Adresse für die Testmail angeben.'); return; }
     setMailBusy(true); setMailMsg(''); setMailErr(false);
     try {
-      const res = await api(`/jobs/${job.id}/export/email/testmail`, { method: 'POST', body: mailVorschauBody() });
+      const res = await api(`/jobs/${job.id}/export/email/testmail`, { method: 'POST', body: { ...mailVorschauBody(), to } });
       setMailErr(false); setMailMsg(`Testmail an ${res.to} verschickt — Entwurfs-Status unverändert.`);
     } catch (err) {
       setMailErr(true); setMailMsg(`Testmail fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
@@ -904,8 +911,6 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
             <button className="btn-ghost" onClick={vorschauMail} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
               title="Fertig gerenderte Mail in neuem Tab ansehen (kein Versand)">👁 Vorschau</button>
-            <button className="btn-ghost" onClick={testMail} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
-              title="Diese Mail an deine eigene Adresse schicken — Status bleibt unverändert">✉️ Testmail an mich</button>
             {mailForm.mailKontext === 'update' ? (
               <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : '📬 Update senden'}
@@ -956,6 +961,18 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
                 <span>Funnel-Link „Vorschau ansehen" mit einbinden</span>
               </label>
             )}
+            {/* Testmail: Empfänger vorbelegt mit eigener Adresse, frei änderbar. Betreff [TEST], kein Status-Wechsel. */}
+            <div className="field field-full" style={{ borderTop: '1px solid var(--line)', paddingTop: 12, marginTop: 4 }}>
+              <span>Testmail an (Betreff-Präfix „[TEST]", ändert den Entwurfs-Status nicht)</span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input type="email" style={{ flex: '1 1 220px', minWidth: 0 }} value={testMailTo}
+                  onChange={e => setTestMailTo(e.target.value)} placeholder="dein.name@nowagwirth.de" />
+                <button type="button" className="btn-ghost btn-sm" style={{ flex: '0 0 auto' }}
+                  onClick={testMail} disabled={mailBusy || !testMailTo.trim()}>
+                  ✉️ Testmail senden
+                </button>
+              </div>
+            </div>
           </div>
         )}
         {mailMsg && (

@@ -390,8 +390,10 @@ router.post('/jobs/:id/export/email/vorschau', async (req, res) => {
    Nutzer (req.user.email), ohne Review-Status/Versandhistorie/Projekt-Status zu ändern.
    Kein interner BCC (kein Team-Spam bei Tests). */
 router.post('/jobs/:id/export/email/testmail', async (req, res) => {
-  const to = (req.user?.email || '').trim();
-  if (!to) return res.status(400).json({ error: 'Keine E-Mail-Adresse für den eingeloggten Nutzer gefunden.' });
+  // Empfänger frei wählbar (Frontend füllt mit der Adresse des eingeloggten Nutzers vor);
+  // Fallback auf req.user.email.
+  const to = (req.body?.to || req.user?.email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: 'Bitte eine gültige Empfänger-Adresse angeben.' });
   try {
     const p = await bereiteEntwurfInputs(req.params.id, req.body);
     await sendEntwurfsMail({
