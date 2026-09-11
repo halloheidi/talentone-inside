@@ -890,6 +890,10 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
   const brand = brandLogoUrl
     ? { ...brandBasis, logoHtml: `<img src="${brandLogoUrl}" alt="${escape(absenderName || brandBasis.name)}" style="max-height:48px;width:auto;display:block;background:#fff;border-radius:6px;padding:6px 10px;">` }
     : brandBasis;
+  // Dashboard-Button: bei mail_brand 'nw_solar' in dessen Primärfarbe (#105080), sonst
+  // TalentOne-/Agentur-Standard (brand.accent). Konsistent zum restlichen Template.
+  const btnBg = mailBrand === 'nw_solar' ? '#105080' : brand.accent;
+  const btnInk = mailBrand === 'nw_solar' ? '#ffffff' : brand.accentInk;
   const recipients = Array.isArray(to) ? to : [to];
   const produkt = job?.stelle || (job?.neukunden_daten?.produkt) || 'Produkt';
   const anfrageName = anfrage?.name || anfrage?.email || 'Interessent';
@@ -927,7 +931,7 @@ export async function sendAnfrageMail({ to, kunde, job, anfrage, anfragenUrl }) 
       </table>
     </td></tr>
     ${anfragenUrl ? `<tr><td align="center" style="padding:0 32px 28px;">
-      <a href="${escape(anfragenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;">→ Alle Anfragen ansehen</a>
+      <a href="${escape(anfragenUrl)}" style="display:inline-block;background:${btnBg};color:${btnInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;">Anfrage im Dashboard öffnen →</a>
     </td></tr>` : ''}
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">${t(kunde, 'Melde dich zeitnah', 'Melden Sie sich zeitnah')} — je schneller die Kontaktaufnahme, desto höher die Abschluss-Wahrscheinlichkeit.</p>

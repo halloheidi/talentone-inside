@@ -622,8 +622,19 @@ async function createAnfrageUndBenachrichtige({ job, body }) {
 
       const { sendAnfrageMail } = await import('../mail.js');
       const { getPublicBaseUrl } = await import('../branding.js');
-      const anfragenUrl = job.anfragen_token
-        ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${job.anfragen_token}`
+      // Portal-Anfragenliste des Jobs — für ALLE Empfänger (Kunden wie interne),
+      // konsistent zur Bewerbungs-Mail. Token bei Bedarf anlegen, damit der Dashboard-
+      // Button immer funktioniert (bisher fehlte er, wenn kein Token existierte).
+      let anfragenToken = job.anfragen_token;
+      if (!anfragenToken) {
+        const { randomUUID } = await import('node:crypto');
+        anfragenToken = randomUUID();
+        const { error: tokErr } = await supabase.from('talentone_jobs')
+          .update({ anfragen_token: anfragenToken }).eq('id', job.id);
+        if (tokErr) { console.warn('[anfrage-mail] Token-Anlage:', tokErr.message); anfragenToken = null; }
+      }
+      const anfragenUrl = anfragenToken
+        ? `${getPublicBaseUrl(kunde.agentur)}/anfragen/${anfragenToken}`
         : null;
       await sendAnfrageMail({ to: recipients, kunde, job, anfrage, anfragenUrl });
       console.log(`[anfrage-mail] ${recipients.length} Empfaenger benachrichtigt (${recipients.join(', ')}) + INTERNAL_BCC`);
