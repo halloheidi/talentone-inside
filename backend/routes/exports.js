@@ -345,8 +345,10 @@ async function bereiteEntwurfInputs(jobId, body) {
     : (funnel.extern && funnel.extern_url) ? funnel.extern_url
     : `${baseUrl}/f/${funnel.id}`;
   const sheetUrl = include_funnel && funnel?.extern_sheet_url ? funnel.extern_sheet_url : null;
-  // Bestehenden Review-Token nutzen, sonst Platzhalter — NIE neu erzeugen (keine Mutation).
-  const reviewUrl = `${baseUrl}/review/${job.review_token || 'vorschau'}`;
+  // Bestehenden Review-Token nutzen (read-only Ansicht, keine Rotation), sonst — wenn noch
+  // NIE echt versandt wurde — auf eine token-freie Hinweis-Seite verlinken statt ins Leere.
+  // NIE einen Token erzeugen (keine Mutation, keine Kunden-Sichtbarkeit).
+  const reviewUrl = job.review_token ? `${baseUrl}/review/${job.review_token}` : `${baseUrl}/review-test`;
   const istUpdate = mailKontext === 'update';
   const tplRound = await renderEmail(istUpdate ? 'kampagne_update' : 'entwurf_runde', kunde, { stelle: job?.stelle || '' });
   const finalBetreff = (betreff || '').trim() || tplRound?.subject

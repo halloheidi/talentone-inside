@@ -6,6 +6,7 @@ import PublicUpload from './pages/PublicUpload.jsx';
 import PublicFormular from './pages/PublicFormular.jsx';
 import PublicFunnel from './pages/PublicFunnel.jsx';
 import PublicReview from './pages/PublicReview.jsx';
+import ReviewTest from './pages/ReviewTest.jsx';
 import PublicBewerbungen from './pages/PublicBewerbungen.jsx';
 import PublicAnfragen from './pages/PublicAnfragen.jsx';
 import PublicPortal from './pages/PublicPortal.jsx';
@@ -60,6 +61,7 @@ export default function App() {
       <Route path="/feedback/:token" element={<PublicFeedback />} />
       <Route path="/f/:funnelId" element={<PublicFunnel />} />
       <Route path="/review/:token" element={<PublicReview />} />
+      <Route path="/review-test" element={<ReviewTest />} />
       <Route path="/bewerbungen/:token" element={<PublicBewerbungen />} />
       <Route path="/anfragen/:token" element={<PublicAnfragen />} />
       <Route path="/portal/:token" element={<PublicPortal />} />
