@@ -41,6 +41,8 @@ const ALLOWED_FIELDS = [
   'meta_werbekonto_id',
   // Migration 071: Monatsbudget (Budget-Wächter)
   'monatsbudget_euro',
+  // Migration 072: geplanter Livegang (Soll-Datum fürs Controlling-Cockpit)
+  'geplanter_livegang',
 ];
 
 function pickFields(body) {

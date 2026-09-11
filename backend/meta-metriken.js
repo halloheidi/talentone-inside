@@ -148,11 +148,33 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
   const { data: pj } = await supabase.from('talentone_projekte').select('id, monatsbudget_euro').in('id', projektIds);
   const budgetVonProjekt = {}; for (const p of (pj || [])) budgetVonProjekt[p.id] = p.monatsbudget_euro != null ? Number(p.monatsbudget_euro) : null;
 
+  // IST-Livegang je Projekt = frühester Phasen-Start über alle Kampagnen (erster Spend-Tag
+  // der ersten Laufphase).
+  const istVonProjekt = {};
+  for (const p of (phasen || [])) {
+    const pid = projektVonCamp[p.meta_campaign_id]; if (!pid) continue;
+    if (!istVonProjekt[pid] || p.phase_start < istVonProjekt[pid]) istVonProjekt[pid] = p.phase_start;
+  }
+
+  // Zahlungsproblem je Projekt = irgendein zugeordnetes Werbekonto betroffen.
+  const kontoIds = [...new Set(kamps.map(k => String(k.werbekonto_id || '').trim()).filter(Boolean))];
+  const zahlungKonto = {};
+  if (kontoIds.length) {
+    const { data: kt } = await supabase.from('talentone_meta_konten').select('konto_id, zahlungsproblem').in('konto_id', kontoIds);
+    for (const k of (kt || [])) zahlungKonto[String(k.konto_id).trim()] = !!k.zahlungsproblem;
+  }
+  const zahlungVonProjekt = {};
+  for (const k of kamps) {
+    const pid = k.projekt_id;
+    if (zahlungKonto[String(k.werbekonto_id || '').trim()]) zahlungVonProjekt[pid] = true;
+  }
+
   for (const pid of projektIds) {
     const camps = campsVonProjekt[pid]; if (!camps?.length) continue; // keine Meta-Verknüpfung → nicht im Ergebnis
     const phase = projPhase[pid] || null;
     const phaseStart = phase?.phase_start || null;
     let spendMonat = 0, spendPhase = 0, impr = 0, clicks = 0;
+    const spendWochen = [0, 0, 0, 0, 0, 0, 0, 0]; // 8 Wochen, ältest → neuest (Index 7 = letzte 7 Tage)
     for (const r of (ins || [])) {
       if (!camps.includes(r.meta_campaign_id)) continue;
       const sp = Number(r.spend) || 0;
@@ -160,6 +182,8 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
       if (phaseStart && r.datum >= phaseStart && r.datum <= heuteY) {
         spendPhase += sp; impr += Number(r.impressions) || 0; clicks += Number(r.clicks) || 0;
       }
+      const wochenZurueck = Math.floor(tageDiff(r.datum, heuteY) / 7);
+      if (wochenZurueck >= 0 && wochenZurueck < 8) spendWochen[7 - wochenZurueck] += sp;
     }
     // Bewerbungen seit Phasenstart (echte Leads).
     const jobIds = jobsVonProjekt[pid] || [];
@@ -183,6 +207,9 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
       aktive_lauftage: phase?.aktive_lauftage ?? null,
       live: !!phase?.live,
       phase_start: phaseStart,
+      ist_livegang: istVonProjekt[pid] || null, // frühester Phasen-Start (erster Spend-Tag)
+      zahlungsproblem: !!zahlungVonProjekt[pid],
+      spend_wochen: spendWochen,
       budget,
       budget_prozent: budget && budget > 0 ? Math.round((spendMonat / budget) * 100) : null,
     });

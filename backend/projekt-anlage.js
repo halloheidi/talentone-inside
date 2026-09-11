@@ -58,6 +58,7 @@ export async function anlageKundeProjektJob({ kundeData, jobData, meta = {} }) {
     garantie: !!meta.garantie,
     garantie_details: meta.garantie && meta.garantie_details ? String(meta.garantie_details).trim() : null,
     kickoff_termin: meta.kickoff_termin || null,
+    geplanter_livegang: meta.geplanter_livegang || null,
     gesuchte_positionen: job.stelle || null,
     standorte: job.region || null,
     verantwortlich: meta.verantwortlich || null,

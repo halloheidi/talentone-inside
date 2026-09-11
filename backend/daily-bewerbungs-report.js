@@ -152,11 +152,67 @@ async function collectMetaWarnungen() {
   }
   budgetWarnungen.sort((a, b) => b.prozent - a.prozent);
   garantieHinweise.sort((a, b) => (a.rest ?? 99) - (b.rest ?? 99));
-  return { budgetWarnungen, garantieHinweise };
+
+  const ueberfaelligMeldungen = await collectUeberfaellig();
+  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen };
 }
 
-function renderMetaSektionen({ budgetWarnungen, garantieHinweise }) {
+// Überfällige Projekte: geplanter Livegang liegt in der Vergangenheit, aber es gibt keinen
+// echten Start (weder Meta-Spend noch start_phase1). Meldung EINMAL bei Eintritt, danach
+// WÖCHENTLICH (Dedup über ueberfaellig_gemeldet_am). Geht ein Projekt live, wird die Marke
+// zurückgesetzt (späteres erneutes Überfälligwerden alarmiert wieder).
+async function collectUeberfaellig() {
+  const heute = new Date().toISOString().slice(0, 10);
+  const vor7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const { data: kand = [] } = await supabase.from('talentone_projekte')
+    .select('id, kunde, kunde_id, projekt, status, geplanter_livegang, start_phase1, ueberfaellig_gemeldet_am')
+    .not('geplanter_livegang', 'is', null)
+    .lt('geplanter_livegang', heute);
+  const aktiv = kand.filter(p => !/beend|abgeschloss|storn|verloren|abgesagt/i.test(p.status || ''));
+  if (!aktiv.length) return [];
+
+  const metaMap = await metaMetrikenBatch(aktiv.map(p => p.id));
+  const kundeIds = [...new Set(aktiv.map(p => p.kunde_id).filter(Boolean))];
+  const { data: kunden = [] } = kundeIds.length
+    ? await supabase.from('talentone_kunden').select('id, firmenname').in('id', kundeIds) : { data: [] };
+  const kundeName = Object.fromEntries(kunden.map(k => [k.id, k.firmenname]));
+
+  const meldungen = [];
+  for (const p of aktiv) {
+    const ist = metaMap.get(p.id)?.ist_livegang || p.start_phase1 || null;
+    if (ist) {
+      // Doch gestartet → Marke zurücksetzen, falls gesetzt.
+      if (p.ueberfaellig_gemeldet_am) await supabase.from('talentone_projekte').update({ ueberfaellig_gemeldet_am: null }).eq('id', p.id);
+      continue;
+    }
+    const tage = Math.round((Date.parse(heute) - Date.parse(p.geplanter_livegang)) / 86400000);
+    const faellig = !p.ueberfaellig_gemeldet_am || String(p.ueberfaellig_gemeldet_am).slice(0, 10) <= vor7;
+    if (faellig) {
+      await supabase.from('talentone_projekte').update({ ueberfaellig_gemeldet_am: heute }).eq('id', p.id);
+      meldungen.push({ kunde: kundeName[p.kunde_id] || p.kunde || 'Unbekannt', projekt: p.projekt || '—', geplant: p.geplanter_livegang, tage });
+    }
+  }
+  meldungen.sort((a, b) => b.tage - a.tage);
+  return meldungen;
+}
+
+function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [] }) {
   let html = '';
+  if (ueberfaelligMeldungen.length) {
+    const rows = ueberfaelligMeldungen.map(u => `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(u.kunde)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(u.projekt)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">geplant ${escape(String(u.geplant))}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b91c1c;font-weight:700;">⏰ überfällig seit ${u.tage} Tagen</td>
+      </tr>`).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b91c1c;">⏰ Überfällige Livegänge (kein Start trotz Plan-Datum)</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fdecea;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Projekt</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Geplant</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Status</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
   if (budgetWarnungen.length) {
     const rows = budgetWarnungen.map(b => {
       const farbe = b.prozent >= 100 ? '#b91c1c' : '#b26b00';
@@ -195,7 +251,7 @@ function renderMetaSektionen({ budgetWarnungen, garantieHinweise }) {
   return html;
 }
 
-function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [] } }) {
+function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] } }) {
   const anyWarn = rows.some(r => r.warnung);
   const rowsHtml = rows.map(r => `
     <tr style="border-bottom:1px solid #ececea;${r.warnung ? 'background:#fef2f2;' : ''}">
@@ -265,9 +321,9 @@ export async function runDailyBewerbungsReport() {
   const t0 = Date.now();
   try {
     const { rows, neu24hTotal } = await collectRows();
-    let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [] };
+    let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] };
     try { metaWarnungen = await collectMetaWarnungen(); } catch (e) { console.warn('[daily-bewerbungs-report] meta-warnungen:', e.message); }
-    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length;
+    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length;
     if (!rows.length && neu24hTotal === 0 && !anyMeta) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
@@ -276,9 +332,9 @@ export async function runDailyBewerbungsReport() {
     }
     const datumLabel = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const html = renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen });
-    const budgetN = metaWarnungen.budgetWarnungen.length, garantieN = metaWarnungen.garantieHinweise.length;
+    const budgetN = metaWarnungen.budgetWarnungen.length, garantieN = metaWarnungen.garantieHinweise.length, ueberN = metaWarnungen.ueberfaelligMeldungen.length;
     const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
-      + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '');
+      + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };
     lastRunAt = new Date().toISOString();

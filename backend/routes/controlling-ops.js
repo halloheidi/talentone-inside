@@ -13,7 +13,7 @@ import {
   AMPEL_CONFIG, AMPEL_RANG, STATUS_GRUPPEN, WOCHENTAGE,
   berlinParts, parseSollTage, tageSeit, computeAmpel,
 } from '../controlling-ops-service.js';
-import { metaMetrikenBatch } from '../meta-metriken.js';
+import { metaMetrikenBatch, garantieStatus } from '../meta-metriken.js';
 
 const router = Router();
 const DAY = 86400000;
@@ -101,7 +101,7 @@ router.get('/overview', async (req, res) => {
 
     // 1) Projekte nach Status
     let pq = supabase.from('talentone_projekte')
-      .select('id, kunde_id, kunde, status, projektdauer, start_phase1, ende_phase1, live_termin, agentur, verantwortlich, projekt, gesuchte_positionen, standorte');
+      .select('id, kunde_id, kunde, status, projektdauer, start_phase1, ende_phase1, live_termin, startdatum_abo, geplanter_livegang, agentur, verantwortlich, projekt, gesuchte_positionen, standorte, pausiert_seit, werbekosten, garantie, garantie_details, monatsbudget_euro');
     const statusListe = STATUS_GRUPPEN[statusKey];
     if (statusListe) pq = pq.in('status', statusListe);
     const { data: projekteRaw, error: pErr } = await pq;
@@ -239,6 +239,13 @@ router.get('/overview', async (req, res) => {
         funnel_extern: funnelTyp(jobFunnels) === 'extern' ? true
           : funnelTyp(jobFunnels) === 'intern' ? false : null,
         zufriedenheit,
+        // Cockpit-Rohfelder (Derivate werden nach dem Meta-Merge berechnet).
+        geplanter_livegang: p.geplanter_livegang || null,
+        start_phase1: p.start_phase1 || null,
+        werbekosten: p.werbekosten || null,
+        pausiert_seit: p.pausiert_seit || null,
+        garantie: !!p.garantie,
+        garantie_details: p.garantie_details || null,
       };
     }).sort((a, b) => {
       if (AMPEL_RANG[a.ampel] !== AMPEL_RANG[b.ampel]) return AMPEL_RANG[a.ampel] - AMPEL_RANG[b.ampel];
@@ -253,6 +260,34 @@ router.get('/overview', async (req, res) => {
       const metaMap = await metaMetrikenBatch(rows.map(r => r.projekt_id));
       for (const r of rows) r.meta = metaMap.get(r.projekt_id) || null;
     } catch (e) { console.warn('[controlling-ops] meta-metriken:', e.message); for (const r of rows) r.meta = null; }
+
+    // 6c) Cockpit-Derivate: Soll/Ist-Livegang, Überfälligkeit, Garantie-Rest, Status-Ampel.
+    const heuteStr = now.toISOString().slice(0, 10);
+    const tageDiffStr = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / DAY);
+    const beendetRe = /beend|abgeschloss|storn|verloren|abgesagt/i;
+    const wkKuerzel = w => (w === 'N&W' ? 'N&W' : w === 'Kunde' ? 'K' : null);
+    for (const r of rows) {
+      const m = r.meta;
+      const ist = m?.ist_livegang || r.start_phase1 || null;   // tatsächlicher Livegang (erster Spend-Tag bzw. Kalender)
+      const soll = r.geplanter_livegang || null;
+      const diffTage = (ist && soll) ? tageDiffStr(soll, ist) : null; // + = später als geplant
+      const ueberfaellig = !!(soll && soll < heuteStr && !ist);
+      const gs = garantieStatus({ garantie: r.garantie, garantie_details: r.garantie_details }, m?.aktive_lauftage ?? null);
+      let status;
+      if (beendetRe.test(r.status || '')) status = 'beendet';
+      else if (r.pausiert_seit || /pausier/i.test(r.status || '')) status = 'pausiert';
+      else if (m?.zahlungsproblem) status = 'zahlungsproblem';
+      else if (ueberfaellig) status = 'ueberfaellig';
+      else status = 'live';
+      r.cockpit = {
+        soll, ist, diff_tage: diffTage,
+        ueberfaellig, ueberfaellig_tage: ueberfaellig ? tageDiffStr(soll, heuteStr) : null,
+        garantie_rest: gs.hat ? gs.rest_tage : null,
+        garantie_laeuft_aus: gs.hat ? gs.laeuft_aus : false,
+        werbekosten: wkKuerzel(r.werbekosten),
+        status,
+      };
+    }
 
     // 7) Aggregierte Charts über alle gefilterten Jobs im Zeitraum
     const rangeBews = alleBews.filter(b => jobKunde[b.job_id] && finalKundeIds.includes(jobKunde[b.job_id]) && within(b.created_at, start, end));
@@ -270,6 +305,19 @@ router.get('/overview', async (req, res) => {
         ? Math.round((mitFeedback.reduce((s, r) => s + r.zufriedenheit.score, 0) / mitFeedback.length) * 10) / 10
         : null,
       zufriedenheit_anzahl: mitFeedback.length,
+    };
+
+    // Meta-Aggregate für die Cockpit-Kopfzeile.
+    const metaRows = rows.filter(r => r.meta);
+    const cplWerte = metaRows.map(r => r.meta.cpl).filter(v => v != null);
+    totals.meta = {
+      spend_monat_gesamt: metaRows.reduce((s, r) => s + (Number(r.meta.spend_monat) || 0), 0),
+      cpl_schnitt: cplWerte.length ? cplWerte.reduce((s, v) => s + v, 0) / cplWerte.length : null,
+      anzahl_meta: metaRows.length,
+      live: rows.filter(r => r.cockpit?.status === 'live').length,
+      ueberfaellig: rows.filter(r => r.cockpit?.status === 'ueberfaellig').length,
+      pausiert: rows.filter(r => r.cockpit?.status === 'pausiert').length,
+      zahlungsproblem: rows.filter(r => r.cockpit?.status === 'zahlungsproblem').length,
     };
 
     const kundenListe = finalKundeIds
