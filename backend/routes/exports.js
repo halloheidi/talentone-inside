@@ -593,7 +593,7 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
     if (set_status_live && kunde?.id) {
       try {
         const { data: projekt } = await supabase
-          .from('talentone_projekte').select('id,status,start_phase1,ende_phase1').eq('kunde_id', kunde.id)
+          .from('talentone_projekte').select('id,status,start_phase1,ende_phase1,geplanter_livegang').eq('kunde_id', kunde.id)
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
         if (projekt) {
           const today   = new Date();
@@ -603,6 +603,9 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
           if (projekt.status !== 'live') patch.status = 'live';
           if (!projekt.start_phase1)     patch.start_phase1 = iso(today);
           if (!projekt.ende_phase1)      patch.ende_phase1  = iso(in30);
+          // Plan=Ist beim Livegang: nur befüllen, wenn noch kein Plan-Datum gesetzt wurde
+          // (manuell gesetzte geplanter_livegang werden NIE überschrieben).
+          if (!projekt.geplanter_livegang) patch.geplanter_livegang = iso(today);
           if (Object.keys(patch).length > 1) {
             await supabase.from('talentone_projekte').update(patch).eq('id', projekt.id);
             console.log(`[kampagne-live] Projekt ${projekt.id.slice(0,8)} → status=live, phase1=${patch.start_phase1 || 'unverändert'}–${patch.ende_phase1 || 'unverändert'}`);

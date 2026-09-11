@@ -367,6 +367,47 @@ async function verarbeiteReaktivierung(campaignId, reakt) {
   console.log(`[meta-sync] Reaktivierungs-Mail versandt: ${c?.name || campaignId} (${reakt.pause_tage} Tage Pause).`);
 }
 
+/* ── Plan=Ist-Automatik ──────────────────────────────────────────────────────
+   Sobald der erste echte Spend-Tag (Start der ersten Laufphase) eines Projekts bekannt
+   ist und geplanter_livegang noch LEER ist, das Feld mit diesem Ist-Datum befüllen. So
+   dokumentieren sich gestartete Projekte selbst, während der Überfällig-Wächter für rein
+   geplante (noch nicht gestartete) Projekte scharf bleibt. Manuell gesetzte Plan-Daten
+   werden NIE überschrieben (Update-Filter .is('geplanter_livegang', null) → race-sicher). */
+export async function befuelleGeplanterLivegang(campaignIds) {
+  const cidArr = [...campaignIds];
+  if (!cidArr.length) return 0;
+  const { data: kamps } = await supabase.from('talentone_meta_kampagnen')
+    .select('projekt_id').in('meta_campaign_id', cidArr).not('projekt_id', 'is', null);
+  const projektIds = [...new Set((kamps || []).map(k => k.projekt_id))];
+  if (!projektIds.length) return 0;
+  // nur Projekte mit noch leerem Plan-Datum weiterverfolgen
+  const { data: leer } = await supabase.from('talentone_projekte')
+    .select('id').in('id', projektIds).is('geplanter_livegang', null);
+  const leereIds = (leer || []).map(p => p.id);
+  if (!leereIds.length) return 0;
+  // frühester Phasen-Start je Projekt über ALLE seine Kampagnen
+  const { data: alleKamps } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id, projekt_id').in('projekt_id', leereIds);
+  const projektVonCamp = {}; const cids = [];
+  for (const k of (alleKamps || [])) { projektVonCamp[k.meta_campaign_id] = k.projekt_id; cids.push(k.meta_campaign_id); }
+  if (!cids.length) return 0;
+  const { data: phasen } = await supabase.from('talentone_meta_laufphasen')
+    .select('meta_campaign_id, phase_start').in('meta_campaign_id', cids);
+  const earliest = {};
+  for (const ph of (phasen || [])) {
+    const pid = projektVonCamp[ph.meta_campaign_id]; if (!pid || !ph.phase_start) continue;
+    if (!earliest[pid] || ph.phase_start < earliest[pid]) earliest[pid] = ph.phase_start;
+  }
+  let gesetzt = 0;
+  for (const [pid, ist] of Object.entries(earliest)) {
+    const { error } = await supabase.from('talentone_projekte')
+      .update({ geplanter_livegang: ist, updated_at: new Date().toISOString() })
+      .eq('id', pid).is('geplanter_livegang', null); // nur wenn (noch) leer
+    if (!error) { gesetzt++; console.log(`[meta-sync] Plan=Ist: Projekt ${String(pid).slice(0, 8)} geplanter_livegang → ${ist}`); }
+  }
+  return gesetzt;
+}
+
 /**
  * Sync: alle hinterlegten Werbekonten → Kampagnen + Tages-Insights upserten.
  * backfill=true → 90 Tage (Erstlauf), sonst letzte 7 Tage. Konto für Konto (Rate-Limit).
@@ -474,6 +515,10 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
       } catch (e) { console.warn(`[meta-sync] Laufphasen ${cid}: ${e.message}`); }
     }
 
+    // Plan=Ist: leeres geplanter_livegang aus dem ersten echten Spend-Tag befüllen.
+    let planIst = 0;
+    try { planIst = await befuelleGeplanterLivegang(beruehrteKampagnen); } catch (e) { console.warn('[meta-sync] Plan=Ist:', e.message); }
+
     // Kampagnen automatisch Projekten/Kunden zuordnen (Namens-Match). Rest bleibt offen
     // und sichtbar in der „Nicht zugeordnet"-Liste.
     let match = null;
@@ -481,10 +526,10 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
 
     lastResult = {
       ok: true, konten: konten.length, kampagnen: kampagnenGesamt, insights: insightsGesamt,
-      reaktivierungen, backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
+      reaktivierungen, plan_ist: planIst, backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
     };
     lastRunAt = new Date().toISOString();
-    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage, ${reaktivierungen} Reaktivierungen — ${kontoFehler.length} Kontofehler.`);
+    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage, ${reaktivierungen} Reaktivierungen, ${planIst} Plan=Ist — ${kontoFehler.length} Kontofehler.`);
     return lastResult;
   } finally { running = false; }
 }
