@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import PageContainer from '../components/PageContainer.jsx';
 import {
@@ -43,6 +43,7 @@ function tageLabel(t) {
 const fmtEur = (n) => `${(Number(n) || 0).toFixed(2)} €`;
 const fmtCtr = (n) => (n == null ? '—' : `${(Number(n) || 0).toFixed(2)} %`);
 const fmtCpl = (n) => (n == null ? '—' : fmtEur(n));
+const fmtPct = (n) => (n == null ? '—' : `${Math.round(Number(n) || 0)} %`);
 
 // 📣 Meta-Ads (Spend & CPL) — Zeilen aus data.rows MIT meta.hat_meta, sortiert nach spend_monat desc.
 function MetaAdsSection({ rows }) {
@@ -104,6 +105,226 @@ function MetaAdsSection({ rows }) {
             </div>
           )}
         </>
+      )}
+    </section>
+  );
+}
+
+// Status-Metadaten fürs Cockpit (Ampel-Punkt + Farbe je cockpit.status)
+const COCKPIT_STATUS = {
+  live:            { emoji: '🟢', color: '#166534', label: 'Live' },
+  ueberfaellig:    { emoji: '⏰', color: '#dc2626', label: 'Überfällig' },
+  pausiert:        { emoji: '⏸️', color: '#6b7280', label: 'Pausiert' },
+  zahlungsproblem: { emoji: '🔴', color: '#dc2626', label: 'Zahlungsproblem' },
+  beendet:         { emoji: '⚪', color: '#9a9994', label: 'Beendet' },
+};
+
+// Sortier-Wert je Key (null bleibt null → immer ans Ende)
+function cockpitSortVal(r, key) {
+  switch (key) {
+    case 'cpl':              return r.meta?.cpl ?? null;
+    case 'spend_monat':      return r.meta?.spend_monat ?? null;
+    case 'budget_prozent':   return r.meta?.budget_prozent ?? null;
+    case 'ueberfaellig_tage':return r.cockpit?.ueberfaellig_tage ?? null;
+    case 'aktive_lauftage':  return r.meta?.aktive_lauftage ?? null;
+    case 'kunde':            return r.kunde ?? null;
+    default:                 return null;
+  }
+}
+
+// 8-Wochen-Spend als Mini-Balken (Sparkline akzeptiert kein Zahlen-Array → inline)
+function SpendSparkline({ wochen }) {
+  if (!Array.isArray(wochen) || wochen.length === 0) return <span style={{ color: '#9a9994' }}>—</span>;
+  const max = Math.max(1, ...wochen.map(w => Number(w) || 0));
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 28 }} title="Spend letzte 8 Wochen (ältest→neuest)">
+      {wochen.map((w, i) => {
+        const v = Number(w) || 0;
+        return (
+          <div key={i} title={`Woche ${i + 1}: ${fmtEur(v)}`}
+            style={{ width: 5, height: `${Math.max(2, (v / max) * 28)}px`, background: v > 0 ? '#0a0a0a' : '#e5e7eb', borderRadius: 1 }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function BudgetBar({ prozent }) {
+  if (prozent == null) return <span style={{ color: '#9a9994' }}>—</span>;
+  const v = Number(prozent) || 0;
+  const color = v >= 100 ? '#dc2626' : v >= 80 ? '#d97706' : '#16a34a';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ width: 44, height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ width: `${Math.min(100, v)}%`, height: '100%', background: color }} />
+      </div>
+      <span style={{ fontSize: 12, color, fontWeight: 600 }}>{fmtPct(prozent)}</span>
+    </div>
+  );
+}
+
+// Sortierbarer Spaltenkopf
+function CockpitTh({ label, sortKey, sort, onSort, align }) {
+  const active = sortKey && sort.key === sortKey;
+  return (
+    <th
+      style={{ ...cockpitTh, textAlign: align || 'left', cursor: sortKey ? 'pointer' : 'default', userSelect: 'none' }}
+      onClick={sortKey ? () => onSort(sortKey) : undefined}
+      title={sortKey ? 'Klick zum Sortieren' : undefined}
+    >
+      {label}{active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+    </th>
+  );
+}
+
+// 🎛️ Kunden-Cockpit — Aggregat-Kopf + sortier-/filterbare Haupttabelle aller Projekte
+function KundenCockpit({ meta, rows }) {
+  const navigate = useNavigate();
+  const [sort, setSort] = useState({ key: 'spend_monat', dir: 'desc' });
+  const [filter, setFilter] = useState({ ueberfaellig: false, zahlung: false, nw: false });
+
+  const onSort = useCallback((key) => {
+    setSort(prev => prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: key === 'kunde' ? 'asc' : 'desc' });
+  }, []);
+
+  const visible = useMemo(() => {
+    let list = (rows || []);
+    if (filter.ueberfaellig) list = list.filter(r => r.cockpit?.ueberfaellig);
+    if (filter.zahlung)      list = list.filter(r => r.cockpit?.status === 'zahlungsproblem');
+    if (filter.nw)           list = list.filter(r => r.cockpit?.werbekosten === 'N&W');
+    const { key, dir } = sort;
+    return [...list].sort((a, b) => {
+      const va = cockpitSortVal(a, key);
+      const vb = cockpitSortVal(b, key);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;   // null immer ans Ende
+      if (vb == null) return -1;
+      let cmp;
+      if (typeof va === 'string') cmp = va.localeCompare(String(vb), 'de');
+      else cmp = (Number(va) || 0) - (Number(vb) || 0);
+      return dir === 'asc' ? cmp : -cmp;
+    });
+  }, [rows, filter, sort]);
+
+  function go(r) {
+    if (r.primary_job_id && r.kunde_id) navigate(`/kunden/${r.kunde_id}/jobs/${r.primary_job_id}/stelle`);
+    else navigate(`/projekte?highlight=${r.projekt_id}`);
+  }
+
+  const ueberfaelligN = Number(meta.ueberfaellig) || 0;
+  const zahlungN = Number(meta.zahlungsproblem) || 0;
+
+  return (
+    <section style={{ marginBottom: 30 }}>
+      <h2 style={h2Style}>🎛️ Kunden-Cockpit</h2>
+
+      {/* (a) Aggregat-Kopfzeile */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <Stat label="Spend lfd. Monat" value={fmtEur(meta.spend_monat_gesamt)} />
+        <Stat label="Ø CPL" value={fmtCpl(meta.cpl_schnitt)} />
+        <Stat label="Meta-Projekte" value={Number(meta.anzahl_meta) || 0} />
+        <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, padding: '12px 16px', display: 'flex', alignItems: 'center', minWidth: 120 }}>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            <strong style={{ color: '#166534' }}>{Number(meta.live) || 0}</strong> live{' · '}
+            <strong style={{ color: ueberfaelligN > 0 ? '#dc2626' : '#0a0a0a' }}>{ueberfaelligN} überfällig</strong>{' · '}
+            <strong>{Number(meta.pausiert) || 0}</strong> pausiert{' · '}
+            <strong style={{ color: zahlungN > 0 ? '#dc2626' : '#0a0a0a' }}>{zahlungN} Zahlungsproblem</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter + Schnell-Sort */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <button type="button" style={segBtn(filter.ueberfaellig)} onClick={() => setFilter(f => ({ ...f, ueberfaellig: !f.ueberfaellig }))}>⏰ nur überfällig</button>
+        <button type="button" style={segBtn(filter.zahlung)} onClick={() => setFilter(f => ({ ...f, zahlung: !f.zahlung }))}>🔴 nur Zahlungsprobleme</button>
+        <button type="button" style={segBtn(filter.nw)} onClick={() => setFilter(f => ({ ...f, nw: !f.nw }))}>nur N&amp;W-Werbekosten</button>
+        <button type="button" style={segBtn(sort.key === 'cpl')} onClick={() => setSort({ key: 'cpl', dir: 'desc' })}>↕ nach CPL</button>
+      </div>
+
+      {visible.length === 0 ? (
+        <div style={emptyStyle}>Keine Projekte im aktuellen Filter.</div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <CockpitTh label="Status" />
+                  <CockpitTh label="Kunde / Stelle" sortKey="kunde" sort={sort} onSort={onSort} />
+                  <CockpitTh label="Geplant → Live" sortKey="ueberfaellig_tage" sort={sort} onSort={onSort} />
+                  <CockpitTh label="aktive Lauftage" sortKey="aktive_lauftage" sort={sort} onSort={onSort} align="right" />
+                  <CockpitTh label="Spend M / Phase" sortKey="spend_monat" sort={sort} onSort={onSort} align="right" />
+                  <CockpitTh label="Budget %" sortKey="budget_prozent" sort={sort} onSort={onSort} />
+                  <CockpitTh label="Bewerbungen" sort={sort} onSort={onSort} align="right" />
+                  <CockpitTh label="CPL" sortKey="cpl" sort={sort} onSort={onSort} align="right" />
+                  <CockpitTh label="Garantie-Rest" align="right" />
+                  <CockpitTh label="Werbekosten" />
+                  <CockpitTh label="Verlauf" />
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(r => {
+                  const c = r.cockpit || {};
+                  const m = r.meta || null;
+                  const st = COCKPIT_STATUS[c.status] || COCKPIT_STATUS.beendet;
+                  return (
+                    <tr key={r.projekt_id} style={{ borderTop: '1px solid #f0f0ee', cursor: 'pointer' }}
+                      onClick={() => go(r)} title="Zur Stelle / zum Projekt">
+                      {/* Status */}
+                      <td style={{ ...cockpitTd, textAlign: 'center' }}>
+                        <span title={st.label} style={{ fontSize: 16 }}>{st.emoji}</span>
+                      </td>
+                      {/* Kunde / Stelle */}
+                      <td style={cockpitTd}>
+                        <div style={{ fontWeight: 700 }}>{r.kunde}</div>
+                        <div style={{ fontSize: 12, color: '#5a5955' }}>
+                          {r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}
+                        </div>
+                      </td>
+                      {/* Geplant → Live */}
+                      <td style={cockpitTd}>
+                        {c.ueberfaellig ? (
+                          <span style={{ color: '#dc2626', fontWeight: 600 }}>
+                            ⏰ überfällig seit {c.ueberfaellig_tage} T (geplant {c.soll || '—'})
+                          </span>
+                        ) : c.ist ? (
+                          <span>
+                            Geplant {c.soll || '—'} · Live {c.ist}
+                            {c.diff_tage == null ? '' : ` (${c.diff_tage >= 0 ? '+' : ''}${c.diff_tage} T)`}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      {/* aktive Lauftage */}
+                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m?.aktive_lauftage ?? '—'}</td>
+                      {/* Spend M / Phase */}
+                      <td style={{ ...cockpitTd, textAlign: 'right' }}>
+                        {m ? <>{fmtEur(m.spend_monat)}<span style={{ color: '#9a9994' }}> / {fmtEur(m.spend_phase)}</span></> : '—'}
+                      </td>
+                      {/* Budget % */}
+                      <td style={cockpitTd}><BudgetBar prozent={m ? m.budget_prozent : null} /></td>
+                      {/* Bewerbungen */}
+                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m?.bewerbungen ?? '—'}</td>
+                      {/* CPL */}
+                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m ? fmtCpl(m.cpl) : '—'}</td>
+                      {/* Garantie-Rest */}
+                      <td style={{ ...cockpitTd, textAlign: 'right' }}>
+                        {c.garantie_rest == null
+                          ? '—'
+                          : <span style={c.garantie_laeuft_aus ? { color: '#dc2626', fontWeight: 700 } : undefined}>{c.garantie_rest} T</span>}
+                      </td>
+                      {/* Werbekosten */}
+                      <td style={cockpitTd}>{c.werbekosten || '—'}</td>
+                      {/* Verlauf */}
+                      <td style={cockpitTd}><SpendSparkline wochen={m ? m.spend_wochen : null} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </section>
   );
@@ -230,6 +451,9 @@ export default function ControllingDashboard() {
                 color={data.totals.zufriedenheit_schnitt <= 2 ? AMPEL.rot.color : data.totals.zufriedenheit_schnitt < 4 ? AMPEL.gelb.color : AMPEL.gruen.color} />
             )}
           </div>
+
+          {/* ── 🎛️ Kunden-Cockpit (prominent ganz oben) ── */}
+          <KundenCockpit meta={data.totals.meta || {}} rows={data.rows} />
 
           {/* ── Ampel-Liste ── */}
           <section style={{ marginBottom: 30 }}>
@@ -444,6 +668,8 @@ const linkBtn = { fontSize: 13, fontWeight: 600, color: '#fff', background: '#0a
 const linkBtnGhost = { fontSize: 13, fontWeight: 600, color: '#0a0a0a', background: '#f1f1ee', padding: '7px 14px', borderRadius: 8, textDecoration: 'none' };
 const metaTh = { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '10px 14px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
 const metaTd = { padding: '10px 14px', whiteSpace: 'nowrap', color: '#0a0a0a' };
+const cockpitTh = { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '9px 12px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
+const cockpitTd = { padding: '9px 12px', whiteSpace: 'nowrap', color: '#0a0a0a', verticalAlign: 'middle' };
 
 function segBtn(active) {
   return {

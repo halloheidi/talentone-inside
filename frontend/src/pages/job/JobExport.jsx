@@ -26,10 +26,13 @@ function badgeFor(c) {
 }
 
 export default function JobExport() {
-  const { job, kunde, reload } = useJob();
+  const { job, kunde, projekt, reload } = useJob();
   const [showPreflight, setShowPreflight] = useState(false);
   const [showGoLive, setShowGoLive] = useState(false);
   const [goLiveBusy, setGoLiveBusy] = useState(false);
+  // Editierbares Soll-Datum „Geplanter Livegang" am verknüpften Projekt
+  const [livegangVal, setLivegangVal] = useState('');
+  useEffect(() => { setLivegangVal(projekt?.geplanter_livegang || ''); }, [projekt?.id, projekt?.geplanter_livegang]);
   // Entwurfs-Reminder + Manuell-Antwort
   const [showReminder, setShowReminder] = useState(false);
   const [reminderText, setReminderText] = useState('');
@@ -383,6 +386,19 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
       setReakMsg(err.message);
     } finally {
       setReakBusy(false);
+    }
+  }
+
+  // Speichert das Soll-Datum am Projekt (onBlur/Enter), danach Projekt/Job neu laden.
+  async function saveLivegang() {
+    if (!projekt?.id) return;
+    const next = livegangVal || null;
+    if ((projekt.geplanter_livegang || null) === next) return; // nichts geändert
+    try {
+      await api('/projekte/' + projekt.id, { method: 'PATCH', body: { geplanter_livegang: next } });
+      reload?.();
+    } catch (err) {
+      alert(`Speichern fehlgeschlagen: ${err.message}`);
     }
   }
 
@@ -744,6 +760,18 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
       {/* ─────── Kampagne ist Live melden ─────── */}
       <fieldset className="formular-section" style={{ marginTop: 22 }}>
         <legend>Kampagne live melden</legend>
+        {projekt && (
+          <label className="field" style={{ display: 'block', maxWidth: 220, marginBottom: 12 }}>
+            <span>Geplanter Livegang</span>
+            <input
+              type="date"
+              value={livegangVal}
+              onChange={e => setLivegangVal(e.target.value)}
+              onBlur={saveLivegang}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            />
+          </label>
+        )}
         {letzteKampagneLive ? (
           <div className="versand-status" style={{ marginBottom: 10 }}>
             <span>🚀 „Kampagne ist live"-Mail gesendet am <strong>{new Date(letzteKampagneLive.created_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</strong> an <strong>{letzteKampagneLive.empfaenger}</strong> · <em>Bereits gemeldet — erneut senden überschreibt diesen Hinweis</em></span>

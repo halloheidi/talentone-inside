@@ -793,7 +793,7 @@ export default function JobView() {
   const hasPending = pendingCreatives > 0 || pendingReels.length > 0;
 
   return (
-    <JobContext.Provider value={{ job, kunde, reload, startCreatives, startReel, pendingCreatives, pendingReels }}>
+    <JobContext.Provider value={{ job, kunde, projekt, reload, startCreatives, startReel, pendingCreatives, pendingReels }}>
       <div className="breadcrumb">
         <Link to="/kunden">Kunden</Link>
         <span aria-hidden>›</span>

@@ -951,7 +951,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
           <section><h3>Phasen</h3>
             <div className="slideover-form">
               <label><span>Kick-Off-Termin</span><input type="date" className="cell-input" value={projekt.kickoff_termin || ''} onChange={e => patch({ kickoff_termin: e.target.value || null })} /></label>
-              <label className="slideover-full"><span>Geplanter Go-Live-Termin</span><input type="date" className="cell-input" value={projekt.live_termin || ''} onChange={e => patch({ live_termin: e.target.value || null })} /></label>
+              <label className="slideover-full"><span>Geplanter Livegang</span><input type="date" className="cell-input" value={projekt.geplanter_livegang || ''} onChange={e => patch({ geplanter_livegang: e.target.value || null })} /></label>
               <label><span>Start Phase 1</span><input type="date" className="cell-input" value={projekt.start_phase1 || ''} onChange={e => patch({ start_phase1: e.target.value || null })} /></label>
               <label><span>Ende Phase 1</span><input type="date" className="cell-input" value={projekt.ende_phase1 || ''} onChange={e => patch({ ende_phase1: e.target.value || null })} /></label>
               <label className="slideover-full"><span>Phase 1 Einstellungen</span><DebouncedInput value={projekt.phase1_einstellungen || ''} onSave={patchField('phase1_einstellungen')} /></label>

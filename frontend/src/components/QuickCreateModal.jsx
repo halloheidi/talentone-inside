@@ -81,6 +81,7 @@ export default function QuickCreateModal({ open, onClose }) {
   const [agentur, setAgentur] = useState('talentone');
   const [projektStatus, setProjektStatus] = useState('vorbereitung');
   const [kickoffTermin, setKickoffTermin] = useState('');
+  const [geplanterLivegang, setGeplanterLivegang] = useState('');
   const [projektart, setProjektart] = useState('');
   const [projektFlags, setProjektFlags] = useState({
     projektdauer: '', fotograf_noetig: false, zahlung_aufgeteilt: false,
@@ -129,6 +130,8 @@ export default function QuickCreateModal({ open, onClose }) {
     setBusy(false);
     setAgentur('talentone');
     setProjektStatus('kickoff_vereinbart');
+    setKickoffTermin('');
+    setGeplanterLivegang('');
     setProjektart('');
     setVerantwortlich('');
     setUrl('');
@@ -170,6 +173,7 @@ export default function QuickCreateModal({ open, onClose }) {
     body.projekttyp = agentur === 'nowagwirth' ? createProjekttyp : 'mitarbeitergewinnung';
     body.projekt_status = projektStatus;
     body.kickoff_termin = projektStatus === 'kickoff_vereinbart' ? (kickoffTermin || null) : null;
+    body.geplanter_livegang = geplanterLivegang || null;
     body.projektart = projektart || null;
     body.projektdauer = projektFlags.projektdauer || null;
     body.fotograf_noetig = !!projektFlags.fotograf_noetig;
@@ -372,6 +376,10 @@ export default function QuickCreateModal({ open, onClose }) {
                 <input type="date" value={kickoffTermin} onChange={e => setKickoffTermin(e.target.value)} disabled={busy} />
               </label>
             )}
+            <label>
+              <span>Geplanter Livegang</span>
+              <input type="date" value={geplanterLivegang} onChange={e => setGeplanterLivegang(e.target.value)} disabled={busy} />
+            </label>
             <label>
               <span>Projektart</span>
               <select value={projektart} onChange={e => setProjektart(e.target.value)} disabled={busy}>

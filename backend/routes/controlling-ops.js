@@ -100,12 +100,25 @@ router.get('/overview', async (req, res) => {
     const now = new Date();
 
     // 1) Projekte nach Status
-    let pq = supabase.from('talentone_projekte')
-      .select('id, kunde_id, kunde, status, projektdauer, start_phase1, ende_phase1, live_termin, startdatum_abo, geplanter_livegang, agentur, verantwortlich, projekt, gesuchte_positionen, standorte, pausiert_seit, werbekosten, garantie, garantie_details, monatsbudget_euro');
+    const PROJEKT_COLS = 'id, kunde_id, kunde, status, projektdauer, start_phase1, ende_phase1, live_termin, startdatum_abo, geplanter_livegang, agentur, verantwortlich, projekt, gesuchte_positionen, standorte, pausiert_seit, werbekosten, garantie, garantie_details, monatsbudget_euro';
+    let pq = supabase.from('talentone_projekte').select(PROJEKT_COLS);
     const statusListe = STATUS_GRUPPEN[statusKey];
     if (statusListe) pq = pq.in('status', statusListe);
     const { data: projekteRaw, error: pErr } = await pq;
     if (pErr) throw pErr;
+
+    // 1b) Überfällige Livegänge IMMER einbeziehen (auch außerhalb des Status-Filters): Plan-
+    // Datum in der Vergangenheit + noch kein echter Start (start_phase1 leer). So tauchen
+    // überfällige Projekte im Cockpit garantiert prominent auf.
+    const heuteFilter = new Date().toISOString().slice(0, 10);
+    const vorhanden = new Set((projekteRaw || []).map(p => p.id));
+    const { data: ueberfaellig } = await supabase.from('talentone_projekte').select(PROJEKT_COLS)
+      .not('geplanter_livegang', 'is', null).lt('geplanter_livegang', heuteFilter).is('start_phase1', null);
+    for (const p of (ueberfaellig || [])) {
+      if (vorhanden.has(p.id)) continue;
+      if (/beend|abgeschloss|storn|verloren|abgesagt|archiv/i.test(p.status || '')) continue;
+      projekteRaw.push(p); vorhanden.add(p.id);
+    }
 
     // 2) Kunden (Agentur autoritativ, archivierte raus)
     const kundeIds = [...new Set((projekteRaw || []).map(p => p.kunde_id).filter(Boolean))];
