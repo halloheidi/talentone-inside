@@ -560,7 +560,7 @@ router.get('/review/:token', async (req, res) => {
   };
 
   res.json({
-    job: { id: job.id, stelle: job.stelle, region: job.region, projekttyp: job.projekttyp || 'mitarbeitergewinnung' },
+    job: { id: job.id, stelle: job.stelle, region: job.region, projekttyp: job.projekttyp || 'mitarbeitergewinnung', url: job.url || null },
     kunde,
     creatives,
     adcopies,

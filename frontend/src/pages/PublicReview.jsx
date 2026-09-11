@@ -187,6 +187,20 @@ export default function PublicReview() {
 
         {istNeukunden ? (
           <>
+            {/* Landingpage-Link zuerst: Zielseite ansehen, dann Anzeigen freigeben */}
+            {job?.url && (
+              <section className="review-section">
+                <h2 className="review-h2">🌐 Landingpage</h2>
+                <p style={{ fontSize: 13, color: 'var(--rv-ink-3, #5a5955)', margin: '0 0 12px' }}>
+                  {t(kunde, 'Das ist die Seite, auf der eure Anzeigen landen — schau sie dir zuerst an', 'Das ist die Seite, auf der Ihre Anzeigen landen — sehen Sie sie sich zuerst an')}:
+                </p>
+                <a href={job.url} target="_blank" rel="noreferrer"
+                  style={{ display: 'inline-block', background: '#0a0a0a', color: '#fff', textDecoration: 'none', fontWeight: 700, fontSize: 14, padding: '11px 22px', borderRadius: 100 }}>
+                  → Zur Landingpage
+                </a>
+                <div style={{ fontSize: 12, color: 'var(--rv-ink-3, #9a9994)', marginTop: 8, wordBreak: 'break-all' }}>{job.url}</div>
+              </section>
+            )}
             {/* Neukundengewinnung: Creative + zugeordnete Copy als Paar (wie bei Meta) */}
             {creatives.length > 0 && (
               <section className="review-section">

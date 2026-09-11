@@ -14,16 +14,18 @@ const INTERNAL_FROM = 'TalentOne Inside <noreply@talent-one.de>';
 // damit Logo-URLs nicht im Template verstreut sind. Ein Eintrag mit logo=null
 // bedeutet "kein Override" → bisheriges (Agentur-)Verhalten. Absender = Anzeigename;
 // die Resend-AbsenderADRESSE bleibt unverändert (nur der Name wird ersetzt).
-const MAIL_BRAND_LOGOS = {
+// Exportiert, damit auch andere Mail-Sender (z. B. sendEntwurfsMail in exports.js) dieselbe
+// Brand-Infrastruktur nutzen können — EINE Quelle für Logos/Absendernamen, kein Duplikat.
+export const MAIL_BRAND_LOGOS = {
   talentone: null, // TalentOne hat kein Bild-Logo → Shell zeigt den bestehenden Schriftzug (wie bisher)
   nw_solar: 'https://halloheidi.b-cdn.net/A%20_%20Horizontal.png',
 };
-const MAIL_BRAND_ABSENDER = {
+export const MAIL_BRAND_ABSENDER = {
   nw_solar: 'N&W Solar',
 };
 
 // Setzt/ersetzt den Anzeigenamen in einem Resend-"From" ("Name <addr>" oder "addr").
-function mitAbsendername(fromStr, name) {
+export function mitAbsendername(fromStr, name) {
   const s = String(fromStr || '').trim();
   const m = s.match(/<([^>]+)>/);
   const addr = m ? m[1].trim() : s;

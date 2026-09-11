@@ -12,7 +12,7 @@ import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './br
 // Signed-URL-Lebensdauer für Mail-Links (Kunde öffnet evtl. später) — deutlich
 // länger als die UI-Auslieferung. Der durable Zugang bleibt das Bewerber-Portal.
 const MAIL_ANHANG_TTL = 60 * 60 * 24 * 30; // 30 Tage
-import { getInternalBcc } from './mail.js';
+import { getInternalBcc, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER, mitAbsendername } from './mail.js';
 import { anrede, t, anredePromptHinweis } from './anrede.js';
 import { renderEmail } from './email-templates.js';
 
@@ -476,7 +476,15 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
     ? t(kunde, 'Neue Werbeanzeigen für deine Kampagne 📬', 'Neue Werbeanzeigen für Ihre Kampagne 📬')
     : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'));
 
-  const brand = getBranding(kunde?.agentur);
+  // Brand-Override wie in sendAnfrageMail: bei bekanntem mail_brand (z. B. 'nw_solar')
+  // Bild-Logo im Kopf (max-height 48px) + Absender-Anzeigename. Ohne/unbekannt → wie bisher.
+  const brandBasis = getBranding(kunde?.agentur);
+  const mailBrand = String(kunde?.mail_brand || '').trim();
+  const brandLogoUrl = MAIL_BRAND_LOGOS[mailBrand] || null;
+  const absenderName = MAIL_BRAND_ABSENDER[mailBrand] || null;
+  const brand = brandLogoUrl
+    ? { ...brandBasis, logoHtml: `<img src="${brandLogoUrl}" alt="${escape(absenderName || brandBasis.name)}" style="max-height:48px;width:auto;display:block;background:#fff;border-radius:6px;padding:6px 10px;">` }
+    : brandBasis;
   const safeAnschreiben = escape(anschreiben || '').replace(/\n/g, '<br>');
   const firma = escape(kunde?.firmenname || '');
   const stelle = escape(job?.stelle || '');
@@ -585,6 +593,17 @@ ${sortedAdcopies.map(a => `
   <a href="${escape(reviewUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:100px;">${reviewCta}</a>
 </div>` : '';
 
+  // Landingpage-Link (nur Neukundengewinnung + job.url gesetzt): OBERHALB der Anzeigen-Paare,
+  // damit der Kunde zuerst die Zielseite ansieht und dann die Anzeigen freigibt.
+  const landingUrl = (istNeukunden && job?.url) ? String(job.url).trim() : '';
+  const landingpageHtml = landingUrl ? `
+<div style="margin:28px 0 4px;padding:16px 18px;background:#fafaf8;border:1px solid #ececea;border-radius:10px;">
+  <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#5a5955;margin-bottom:8px;">Landingpage</div>
+  <p style="font-size:13px;color:#5a5955;margin:0 0 12px;line-height:1.5;">${t(kunde, 'Das ist die Seite, auf der eure Anzeigen landen — schau sie dir zuerst an', 'Das ist die Seite, auf der Ihre Anzeigen landen — sehen Sie sie sich zuerst an')}:</p>
+  <a href="${escape(landingUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:100px;">→ Zur Landingpage</a>
+  <div style="font-size:11px;color:#9a9994;margin-top:8px;word-break:break-all;">${escape(landingUrl)}</div>
+</div>` : '';
+
   const html = `<!doctype html>
 <html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0a0a0a;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
@@ -600,6 +619,7 @@ ${sortedAdcopies.map(a => `
   </td></tr>
   <tr><td style="padding:0 32px 24px;">
     ${reviewHtml}
+    ${landingpageHtml}
     ${creativesHtml}
     ${adcopiesHtml}
     ${funnelHtml}
@@ -617,6 +637,7 @@ ${sortedAdcopies.map(a => `
 
   const textParts = [anschreiben || ''];
   if (reviewUrl) textParts.push(`\n→ ${istUpdate ? 'Neue Anzeigen ansehen & freigeben' : 'Entwürfe kommentieren & freigeben'}: ${reviewUrl}`);
+  if (landingUrl) textParts.push(`\nZur Landingpage: ${landingUrl}`);
   if (sortedCreatives.length) textParts.push(`\n${sortedCreatives.length} Creative(s) im Anhang/eingebettet.`);
   const textStyleLabels = { emotional: 'Emotional / Story', benefit: 'Benefit-fokussiert', kompakt: 'Knackig / Hook' };
   const textAdcopies = istNeukunden
@@ -640,7 +661,9 @@ ${sortedAdcopies.map(a => `
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: getMailFrom(brand),
+      // Absender-ADRESSE unverändert (Agentur/verifiziert); nur der Anzeigename wird bei
+      // bekanntem mail_brand ersetzt — identisch zu sendAnfrageMail.
+      from: absenderName ? mitAbsendername(getMailFrom(brandBasis), absenderName) : getMailFrom(brand),
       to,
       bcc: getInternalBcc([], Array.isArray(to) ? to : [to]),
       reply_to: getMailReplyTo(brand),
