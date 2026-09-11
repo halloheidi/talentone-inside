@@ -461,8 +461,9 @@ function escape(s = '') {
     .replace(/"/g, '&quot;');
 }
 
-export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl, avvUrl, variant = 'entwurf' }) {
-  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, creatives, adcopies, funnelUrl, sheetUrl, reviewUrl, avvUrl, variant = 'entwurf', renderOnly = false, internBcc = true }) {
+  // renderOnly = true → nur rendern (Vorschau), kein Versand, kein RESEND-Key nötig.
+  if (!renderOnly && !process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const istUpdate = variant === 'update';
   // Wortlaut je nach Variante — Entwurfs-Erstversand vs. Kampagnen-Update während der Live-Phase.
   const eyebrow = istUpdate ? 'Kampagnen-Update zur Freigabe' : 'Entwürfe zur Freigabe';
@@ -657,15 +658,21 @@ ${sortedAdcopies.map(a => `
   if (sheetUrl) textParts.push(`Google Sheet: ${sheetUrl}`);
   if (avvUrl) textParts.push(`\n📄 Bitte noch bestätigen — AVV ansehen & akzeptieren: ${avvUrl}`);
 
+  const fromFinal = absenderName ? mitAbsendername(getMailFrom(brandBasis), absenderName) : getMailFrom(brand);
+  if (renderOnly) {
+    // Vorschau: exakt derselbe gerenderte Stand wie beim echten Versand — nur ohne Fetch.
+    return { subject: betreff || betreffFallback, html, text: textParts.join('\n'), from: fromFinal };
+  }
+
   const response = await fetch(RESEND_API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
       // Absender-ADRESSE unverändert (Agentur/verifiziert); nur der Anzeigename wird bei
       // bekanntem mail_brand ersetzt — identisch zu sendAnfrageMail.
-      from: absenderName ? mitAbsendername(getMailFrom(brandBasis), absenderName) : getMailFrom(brand),
+      from: fromFinal,
       to,
-      bcc: getInternalBcc([], Array.isArray(to) ? to : [to]),
+      bcc: internBcc ? getInternalBcc([], Array.isArray(to) ? to : [to]) : [],
       reply_to: getMailReplyTo(brand),
       subject: betreff || betreffFallback,
       html,

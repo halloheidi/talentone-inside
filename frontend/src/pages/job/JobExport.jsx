@@ -51,6 +51,17 @@ export default function JobExport() {
   const [busy, setBusy] = useState(null); // 'zip' | 'pdf' | 'alles' | null
   const [copiedId, setCopiedId] = useState(null);
 
+  // Neukundengewinnung: Kundenlink zeigt die Anfragenliste (/anfragen/:token) statt der
+  // Bewerberliste. Token bei Bedarf anlegen — dieselbe Erzeugung wie beim Mail-Versand.
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
+  const [anfragenToken, setAnfragenToken] = useState(job?.anfragen_token || null);
+  useEffect(() => {
+    if (!istNeukunden || !job?.id) return;
+    if (job.anfragen_token) { setAnfragenToken(job.anfragen_token); return; }
+    api(`/anfragen/token/ensure/${job.id}`, { method: 'POST' })
+      .then(r => setAnfragenToken(r.token || null)).catch(() => {});
+  }, [istNeukunden, job?.id, job?.anfragen_token]);
+
   // Mail-Modal
   const [showMail, setShowMail] = useState(false);
   const [mailForm, setMailForm] = useState({
@@ -324,6 +335,41 @@ export default function JobExport() {
     }
   }
 
+  // Gemeinsame Payload für Vorschau/Testmail — exakt der aktuelle Mail-Stand (Betreff,
+  // Anschreiben, Auswahl, Funnel, Kontext). Kein `to`/resend_mode nötig.
+  function mailVorschauBody() {
+    return {
+      betreff: mailForm.betreff,
+      anschreiben: mailForm.anschreiben,
+      creative_ids: Array.from(selectedCreatives),
+      adcopy_ids: Array.from(selectedAdcopies),
+      include_funnel: mailForm.include_funnel,
+      mailKontext: mailForm.mailKontext,
+    };
+  }
+  async function vorschauMail() {
+    setMailBusy(true); setMailMsg(''); setMailErr(false);
+    try {
+      const res = await api(`/jobs/${job.id}/export/email/vorschau`, { method: 'POST', body: mailVorschauBody() });
+      const blob = new Blob([res.html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const w = window.open(url, '_blank');
+      if (!w) { setMailErr(true); setMailMsg('Popup blockiert — bitte Popups für diese Seite erlauben.'); }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      setMailErr(true); setMailMsg(`Vorschau fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
+    } finally { setMailBusy(false); }
+  }
+  async function testMail() {
+    setMailBusy(true); setMailMsg(''); setMailErr(false);
+    try {
+      const res = await api(`/jobs/${job.id}/export/email/testmail`, { method: 'POST', body: mailVorschauBody() });
+      setMailErr(false); setMailMsg(`Testmail an ${res.to} verschickt — Entwurfs-Status unverändert.`);
+    } catch (err) {
+      setMailErr(true); setMailMsg(`Testmail fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
+    } finally { setMailBusy(false); }
+  }
+
   /* ───── Reaktivierungs-Modal ───── */
   // Vorbelegter Mail-Text — folgt der am Kunden gesetzten Anrede (Du/Sie).
   function buildReakText(k) {
@@ -427,28 +473,50 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
   const bewerbungenUrl = job?.bewerbungen_token
     ? `${getBrandBaseUrl(kunde?.agentur)}/bewerbungen/${job.bewerbungen_token}`
     : null;
+  const anfragenUrl = anfragenToken
+    ? `${getBrandBaseUrl(kunde?.agentur)}/anfragen/${anfragenToken}`
+    : null;
 
   return (
     <div className="export-tab">
       {/* ─────── Chronologische Aktivitäts-Historie (neueste zuerst) ─────── */}
       <AktivitaetsTimeline events={aktivitaet} loading={loading} />
 
-      {/* ─────── Bewerberliste-Link für den Kunden ─────── */}
-      {bewerbungenUrl && (
-        <div className="bewerbungen-link-box">
-          <div className="bewerbungen-link-title">📋 Bewerberliste für den Kunden</div>
-          <div className="bewerbungen-link-row">
-            <code className="bewerbungen-link-url">{bewerbungenUrl}</code>
-            <button type="button" className="btn-ghost btn-sm" onClick={async () => {
-              try { await navigator.clipboard.writeText(bewerbungenUrl); } catch { /* noop */ }
-            }}>Kopieren</button>
-            <a className="btn-ghost btn-sm" href={bewerbungenUrl} target="_blank" rel="noreferrer">Öffnen</a>
+      {/* ─────── Kundenlink: Neukundengewinnung → Anfragenliste, sonst Bewerberliste ─────── */}
+      {istNeukunden ? (
+        anfragenUrl && (
+          <div className="bewerbungen-link-box">
+            <div className="bewerbungen-link-title">📋 Anfragenliste für den Kunden</div>
+            <div className="bewerbungen-link-row">
+              <code className="bewerbungen-link-url">{anfragenUrl}</code>
+              <button type="button" className="btn-ghost btn-sm" onClick={async () => {
+                try { await navigator.clipboard.writeText(anfragenUrl); } catch { /* noop */ }
+              }}>Kopieren</button>
+              <a className="btn-ghost btn-sm" href={anfragenUrl} target="_blank" rel="noreferrer">Öffnen</a>
+            </div>
+            <p className="bewerbungen-link-hint">
+              Diesen Link an den Kunden weitergeben — er zeigt alle Anfragen in Echtzeit
+              (Branding nach Agentur-Einstellung, Status/Notizen können vom Kunden eingetragen werden).
+            </p>
           </div>
-          <p className="bewerbungen-link-hint">
-            Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit
-            (Branding nach Agentur-Einstellung, Status/Termin/Notizen können vom Kunden eingetragen werden).
-          </p>
-        </div>
+        )
+      ) : (
+        bewerbungenUrl && (
+          <div className="bewerbungen-link-box">
+            <div className="bewerbungen-link-title">📋 Bewerberliste für den Kunden</div>
+            <div className="bewerbungen-link-row">
+              <code className="bewerbungen-link-url">{bewerbungenUrl}</code>
+              <button type="button" className="btn-ghost btn-sm" onClick={async () => {
+                try { await navigator.clipboard.writeText(bewerbungenUrl); } catch { /* noop */ }
+              }}>Kopieren</button>
+              <a className="btn-ghost btn-sm" href={bewerbungenUrl} target="_blank" rel="noreferrer">Öffnen</a>
+            </div>
+            <p className="bewerbungen-link-hint">
+              Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit
+              (Branding nach Agentur-Einstellung, Status/Termin/Notizen können vom Kunden eingetragen werden).
+            </p>
+          </div>
+        )
       )}
 
       {/* ─────── Zahlungen (PayPal) ─────── */}
@@ -834,6 +902,10 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
+            <button className="btn-ghost" onClick={vorschauMail} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
+              title="Fertig gerenderte Mail in neuem Tab ansehen (kein Versand)">👁 Vorschau</button>
+            <button className="btn-ghost" onClick={testMail} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
+              title="Diese Mail an deine eigene Adresse schicken — Status bleibt unverändert">✉️ Testmail an mich</button>
             {mailForm.mailKontext === 'update' ? (
               <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : '📬 Update senden'}

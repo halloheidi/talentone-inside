@@ -333,6 +333,77 @@ router.post('/jobs/:id/export/email', async (req, res) => {
   }
 });
 
+/* Gemeinsame, MUTATIONSFREIE Aufbereitung der Entwurfs-Mail-Eingaben für Vorschau +
+   Testmail: kein Review-Token wird erzeugt, keine Review-Row, kein Versand, keine
+   Status-Änderung. Rendert später über EXAKT dieselbe sendEntwurfsMail wie der echte
+   Versand (keine zweite Render-Logik). */
+async function bereiteEntwurfInputs(jobId, body) {
+  const { betreff, anschreiben, creative_ids, adcopy_ids, include_funnel, mailKontext } = body || {};
+  const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(jobId);
+  const baseUrl = getPublicBaseUrl(kunde?.agentur);
+  const funnelUrl = !include_funnel || !funnel?.id ? null
+    : (funnel.extern && funnel.extern_url) ? funnel.extern_url
+    : `${baseUrl}/f/${funnel.id}`;
+  const sheetUrl = include_funnel && funnel?.extern_sheet_url ? funnel.extern_sheet_url : null;
+  // Bestehenden Review-Token nutzen, sonst Platzhalter — NIE neu erzeugen (keine Mutation).
+  const reviewUrl = `${baseUrl}/review/${job.review_token || 'vorschau'}`;
+  const istUpdate = mailKontext === 'update';
+  const tplRound = await renderEmail(istUpdate ? 'kampagne_update' : 'entwurf_runde', kunde, { stelle: job?.stelle || '' });
+  const finalBetreff = (betreff || '').trim() || tplRound?.subject
+    || (istUpdate
+      ? t(kunde, 'Neue Werbeanzeigen für deine Kampagne 📬', 'Neue Werbeanzeigen für Ihre Kampagne 📬')
+      : t(kunde, 'Deine Entwürfe sind fertig 🎨', 'Ihre Entwürfe sind fertig 🎨'));
+  let avvUrl = null;
+  try {
+    const { getAnnahme } = await import('../avv.js');
+    if (!(await getAnnahme(kunde.id))) {
+      const { data: k } = await supabase.from('talentone_kunden').select('portal_token').eq('id', kunde.id).maybeSingle();
+      if (k?.portal_token) avvUrl = `${baseUrl}/avv/${k.portal_token}`;
+    }
+  } catch (e) { console.warn('[entwurf-vorschau avv]', e.message); }
+  return {
+    job, kunde,
+    selCreatives: filterByIds(creatives, creative_ids),
+    selAdcopies: filterByIds(adcopies, adcopy_ids),
+    funnelUrl, sheetUrl, reviewUrl, avvUrl,
+    finalBetreff, anschreiben: anschreiben || null,
+    variant: istUpdate ? 'update' : 'entwurf',
+  };
+}
+
+/* POST /api/jobs/:id/export/email/vorschau — rendert die Entwurfs-Mail (exakt der Stand,
+   der verschickt würde) OHNE Versand/Mutation. Antwort: { html, subject, from }. */
+router.post('/jobs/:id/export/email/vorschau', async (req, res) => {
+  try {
+    const p = await bereiteEntwurfInputs(req.params.id, req.body);
+    const out = await sendEntwurfsMail({
+      to: 'vorschau@example.com', betreff: p.finalBetreff, anschreiben: p.anschreiben,
+      job: p.job, kunde: p.kunde, creatives: p.selCreatives, adcopies: p.selAdcopies,
+      funnelUrl: p.funnelUrl, sheetUrl: p.sheetUrl, reviewUrl: p.reviewUrl, avvUrl: p.avvUrl,
+      variant: p.variant, renderOnly: true,
+    });
+    res.json({ html: out.html, subject: out.subject, from: out.from });
+  } catch (err) { console.error('[export/email/vorschau]', err.message); res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/jobs/:id/export/email/testmail — schickt die fertige Mail an den EINGELOGGTEN
+   Nutzer (req.user.email), ohne Review-Status/Versandhistorie/Projekt-Status zu ändern.
+   Kein interner BCC (kein Team-Spam bei Tests). */
+router.post('/jobs/:id/export/email/testmail', async (req, res) => {
+  const to = (req.user?.email || '').trim();
+  if (!to) return res.status(400).json({ error: 'Keine E-Mail-Adresse für den eingeloggten Nutzer gefunden.' });
+  try {
+    const p = await bereiteEntwurfInputs(req.params.id, req.body);
+    await sendEntwurfsMail({
+      to, betreff: `[TEST] ${p.finalBetreff}`, anschreiben: p.anschreiben,
+      job: p.job, kunde: p.kunde, creatives: p.selCreatives, adcopies: p.selAdcopies,
+      funnelUrl: p.funnelUrl, sheetUrl: p.sheetUrl, reviewUrl: p.reviewUrl, avvUrl: p.avvUrl,
+      variant: p.variant, internBcc: false,
+    });
+    res.json({ ok: true, to });
+  } catch (err) { console.error('[export/email/testmail]', err.message); res.status(503).json({ error: err.message }); }
+});
+
 /* POST /api/jobs/:id/export/kampagne-update
    Kampagnen-Update während der Live-Phase: neue/optimierte Creatives, die der Kunde
    freigeben muss, bevor sie live gehen. Eigener Review-Strom (kontext='update') mit
