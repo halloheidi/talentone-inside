@@ -10,7 +10,14 @@ import { attachSignedAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
+
+// mail_brand → { logo_url, name } für die Public-Seiten (Review/Anfragen). EINE Quelle
+// (die Maps aus mail.js), kein Duplikat. Ohne/unbekannten mail_brand → null (Agentur-Branding).
+function brandForKunde(kunde) {
+  const mb = String(kunde?.mail_brand || '').trim();
+  return { brand_logo_url: MAIL_BRAND_LOGOS[mb] || null, brand_name: MAIL_BRAND_ABSENDER[mb] || null };
+}
 import { notifyKunde, findLead, addTask, getUserIdByName } from '../close.js';
 import { findMemberByName } from '../team.js';
 import { protokolliereAnnahme, getAktuelleVersion, getAnnahme } from '../avv.js';
@@ -515,7 +522,7 @@ router.get('/review/:token', async (req, res) => {
 
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, branche, logo_url, farben, agentur, ansprechpartner, anrede_form, anrede_titel, nachname')
+    .select('id, firmenname, branche, logo_url, farben, agentur, mail_brand, ansprechpartner, anrede_form, anrede_titel, nachname')
     .eq('id', job.kunde_id).maybeSingle();
   const { data: creatives = [] } = await supabase
     .from('talentone_creatives').select('*').eq('job_id', job.id)
@@ -562,6 +569,7 @@ router.get('/review/:token', async (req, res) => {
   res.json({
     job: { id: job.id, stelle: job.stelle, region: job.region, projekttyp: job.projekttyp || 'mitarbeitergewinnung', url: job.url || null },
     kunde,
+    ...brandForKunde(kunde),
     creatives,
     adcopies,
     funnel_url: funnelUrl,
@@ -1288,7 +1296,7 @@ router.get('/anfragen/:token', async (req, res) => {
   const job = await loadJobByAnfragenToken(req.params.token);
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
   const { data: kunde } = await supabase.from('talentone_kunden')
-    .select('firmenname, agentur, logo_url, farben, ansprechpartner, anrede_form, anrede_titel, nachname').eq('id', job.kunde_id).maybeSingle();
+    .select('firmenname, agentur, mail_brand, logo_url, farben, ansprechpartner, anrede_form, anrede_titel, nachname').eq('id', job.kunde_id).maybeSingle();
   const { data: anfragen = [] } = await supabase.from('talentone_anfragen')
     .select('*').eq('job_id', job.id).order('created_at', { ascending: false });
   res.json({
@@ -1299,6 +1307,7 @@ router.get('/anfragen/:token', async (req, res) => {
       pipeline_stufen: job.pipeline_stufen || null,
     },
     kunde,
+    ...brandForKunde(kunde),
     anfragen,
   });
 });

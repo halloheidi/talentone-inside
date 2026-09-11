@@ -85,7 +85,9 @@ export default function PublicAnfragen() {
   return (
     <div style={{ minHeight: '100vh', background: '#f4f3f0', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
       <header style={{ background: brand.primary, color: '#fff', padding: '20px 32px', display: 'flex', alignItems: 'center', gap: 20 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>{brand.name}</div>
+        {data.brand_logo_url
+          ? <img src={data.brand_logo_url} alt={data.brand_name || ''} height={40} style={{ background: '#fff', borderRadius: 8, padding: '4px 8px' }} />
+          : <div style={{ fontSize: 18, fontWeight: 700 }}>{data.brand_name || brand.name}</div>}
         {data.kunde?.logo_url && <img src={data.kunde.logo_url} alt="" height={40} style={{ background: '#fff', borderRadius: 8, padding: '4px 8px' }} />}
         <div style={{ marginLeft: 'auto' }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>Anfragen</div>

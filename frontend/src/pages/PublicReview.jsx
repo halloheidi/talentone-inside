@@ -151,7 +151,11 @@ export default function PublicReview() {
   return (
     <div className="review-page" style={themeStyle}>
       <header className="review-header">
-        <div className="review-brand">{brand.logo}</div>
+        <div className="review-brand">
+          {data.brand_logo_url
+            ? <img src={data.brand_logo_url} alt={data.brand_name || ''} style={{ height: 32, background: '#fff', borderRadius: 6, padding: '4px 8px', display: 'inline-block' }} />
+            : brand.logo}
+        </div>
         {kunde?.logo_url && <img className="review-kunde-logo" src={kunde.logo_url} alt={kunde.firmenname || ''} />}
       </header>
 
@@ -427,7 +431,7 @@ export default function PublicReview() {
       </main>
 
       <footer className="review-footer">
-        Made with ❤️ by <a href={brand.website} target="_blank" rel="noreferrer">{brand.name}</a> · {brand.footer}
+        Made with ❤️ by <a href={brand.website} target="_blank" rel="noreferrer">{data.brand_name || brand.name}</a> · {brand.footer}
       </footer>
 
       {lightboxIndex !== null && (
