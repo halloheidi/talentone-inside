@@ -10,6 +10,13 @@ const STYLES = [
 ];
 
 export default function JobAdCopies() {
+  const { job } = useJob();
+  // Neukundengewinnung: manuelle Copy-Verwaltung statt der KI-Oberfläche.
+  if (job.projekttyp === 'neukundengewinnung') return <ManualAdCopies />;
+  return <RecruitingAdCopies />;
+}
+
+function RecruitingAdCopies() {
   const { job, kunde } = useJob();
   const [items, setItems] = useState([]);                  // alle adcopies aus DB
   const [drafts, setDrafts] = useState({});                // { stil: text } — User-Edit
@@ -440,6 +447,212 @@ export default function JobAdCopies() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ══════════════════════ Manuelle Ad-Copies (Neukundengewinnung) ══════════════════════
+   Meta-Positionslogik: ueberschriften[0] = Headline, ueberschriften[1] = Beschreibung. */
+const LEER_FORM = { stil: '', text: '', headline: '', beschreibung: '' };
+
+function ManualAdCopies() {
+  const { job } = useJob();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [form, setForm] = useState(LEER_FORM);
+  const [creating, setCreating] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState(LEER_FORM);
+  const [saving, setSaving] = useState(false);
+
+  function load() {
+    setLoading(true);
+    api(`/adcopies?job_id=${job.id}`)
+      .then(res => setItems(res.adcopies || []))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [job.id]);
+
+  async function create(e) {
+    e?.preventDefault();
+    if (!form.stil.trim() && !form.text.trim()) {
+      setError('Bitte mindestens eine Bezeichnung oder einen Primary Text angeben.');
+      return;
+    }
+    setCreating(true);
+    setError('');
+    try {
+      await api('/adcopies/manuell', {
+        method: 'POST',
+        body: {
+          job_id: job.id,
+          stil: form.stil.trim(),
+          text: form.text,
+          headline: form.headline,
+          beschreibung: form.beschreibung,
+        },
+      });
+      setForm(LEER_FORM);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function startEdit(a) {
+    const u = a.ueberschriften || [];
+    setEditId(a.id);
+    setEditForm({ stil: a.stil || '', text: a.text || '', headline: u[0] || '', beschreibung: u[1] || '' });
+  }
+  function cancelEdit() { setEditId(null); setEditForm(LEER_FORM); }
+
+  async function saveEdit(id) {
+    setSaving(true);
+    setError('');
+    try {
+      await api(`/adcopies/${id}`, {
+        method: 'PATCH',
+        body: {
+          text: editForm.text,
+          stil: editForm.stil.trim(),
+          headline: editForm.headline,
+          beschreibung: editForm.beschreibung,
+        },
+      });
+      cancelEdit();
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(id) {
+    if (!confirm('Diese Ad-Copy wirklich löschen?')) return;
+    try {
+      await api(`/adcopies/${id}`, { method: 'DELETE' });
+      setItems(prev => prev.filter(a => a.id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div>
+      <div className="adcopy-head">
+        <div>
+          <h2 className="section-title">Werbetexte</h2>
+          <p className="section-sub">Ad-Copies manuell erfassen. Werden im Kundenportal als Paar zum zugeordneten Creative angezeigt.</p>
+        </div>
+      </div>
+
+      {error && <div className="alert alert-error" style={{ marginBottom: 14 }}>{error}</div>}
+
+      {/* ─────── Liste ─────── */}
+      {loading ? (
+        <div className="card empty">Lade…</div>
+      ) : items.length === 0 ? (
+        <div className="card empty">
+          <h2>Noch keine Ad-Copies</h2>
+          <p>Lege unten die erste Ad-Copy an.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12, marginBottom: 22 }}>
+          {items.map(a => {
+            const u = a.ueberschriften || [];
+            const inEdit = editId === a.id;
+            return (
+              <div key={a.id} className="card-form">
+                {inEdit ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <label className="field field-full">
+                      <span>Bezeichnung</span>
+                      <input type="text" value={editForm.stil} onChange={e => setEditForm(f => ({ ...f, stil: e.target.value }))} />
+                    </label>
+                    <label className="field field-full">
+                      <span>Primary Text</span>
+                      <textarea rows={6} value={editForm.text} onChange={e => setEditForm(f => ({ ...f, text: e.target.value }))} />
+                    </label>
+                    <label className="field field-full">
+                      <span>Headline</span>
+                      <input type="text" value={editForm.headline} onChange={e => setEditForm(f => ({ ...f, headline: e.target.value }))} />
+                    </label>
+                    <label className="field field-full">
+                      <span>Beschreibung</span>
+                      <textarea rows={2} value={editForm.beschreibung} onChange={e => setEditForm(f => ({ ...f, beschreibung: e.target.value }))} />
+                    </label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn-primary btn-sm" onClick={() => saveEdit(a.id)} disabled={saving}>
+                        {saving ? 'Speichert…' : 'Speichern'}
+                      </button>
+                      <button className="btn-ghost btn-sm" onClick={cancelEdit} disabled={saving}>Abbrechen</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                      <div style={{ flex: 1, fontWeight: 700, fontSize: 15 }}>{a.stil || <em style={{ color: 'var(--ink-4)' }}>ohne Bezeichnung</em>}</div>
+                      <button className="btn-ghost btn-sm" onClick={() => startEdit(a)}>Bearbeiten</button>
+                      <button className="btn-ghost btn-sm btn-danger" onClick={() => remove(a.id)}>Löschen</button>
+                    </div>
+                    {a.text && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: 'var(--ink-3)', marginBottom: 3 }}>Primary Text</div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{a.text}</div>
+                      </div>
+                    )}
+                    {u[0] && (
+                      <div style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: 'var(--ink-3)', marginBottom: 3 }}>Headline</div>
+                        <div style={{ fontSize: 14 }}>{u[0]}</div>
+                      </div>
+                    )}
+                    {u[1] && (
+                      <div>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: 'var(--ink-3)', marginBottom: 3 }}>Beschreibung</div>
+                        <div style={{ fontSize: 14 }}>{u[1]}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─────── Formular „Neue Ad-Copy" ─────── */}
+      <form className="card-form" onSubmit={create}>
+        <div className="form-section-title" style={{ marginBottom: 12 }}>Neue Ad-Copy</div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label className="field field-full">
+            <span>Bezeichnung</span>
+            <input type="text" placeholder="z.B. A1 · Stromrechnung" value={form.stil} onChange={e => setForm(f => ({ ...f, stil: e.target.value }))} />
+          </label>
+          <label className="field field-full">
+            <span>Primary Text</span>
+            <textarea rows={6} placeholder="Haupttext der Anzeige…" value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))} />
+          </label>
+          <label className="field field-full">
+            <span>Headline</span>
+            <input type="text" placeholder="Kurze Überschrift" value={form.headline} onChange={e => setForm(f => ({ ...f, headline: e.target.value }))} />
+          </label>
+          <label className="field field-full">
+            <span>Beschreibung</span>
+            <textarea rows={2} placeholder="Kurze Beschreibung unter der Headline" value={form.beschreibung} onChange={e => setForm(f => ({ ...f, beschreibung: e.target.value }))} />
+          </label>
+          <div>
+            <button type="submit" className="btn-primary" disabled={creating}>
+              {creating ? 'Speichert…' : 'Ad-Copy anlegen'}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

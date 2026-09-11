@@ -560,7 +560,7 @@ router.get('/review/:token', async (req, res) => {
   };
 
   res.json({
-    job: { id: job.id, stelle: job.stelle, region: job.region },
+    job: { id: job.id, stelle: job.stelle, region: job.region, projekttyp: job.projekttyp || 'mitarbeitergewinnung' },
     kunde,
     creatives,
     adcopies,
@@ -1664,7 +1664,7 @@ router.get('/portal/:token', async (req, res) => {
         : { data: [] },
       jobIds.length
         ? supabase.from('talentone_creatives')
-            .select('id, job_id, format, typ, bild_url, bild_ohne_logo_url, created_at, archiviert')
+            .select('id, job_id, format, typ, bild_url, bild_ohne_logo_url, adcopy_id, created_at, archiviert')
             .in('job_id', jobIds)
             .neq('archiviert', true)
             .order('created_at', { ascending: false })

@@ -75,6 +75,9 @@ export default function JobCreatives() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
   const [creatives, setCreatives] = useState([]);
+  // Neukundengewinnung: Ad-Copies zum Zuordnen an einzelne Creatives.
+  const istNeukunden = job.projekttyp === 'neukundengewinnung';
+  const [adcopies, setAdcopies] = useState([]);
   const [logoPosTarget, setLogoPosTarget] = useState(null);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
@@ -251,6 +254,29 @@ export default function JobCreatives() {
       .finally(() => setLoadingGalerie(false));
   }
   useEffect(() => { loadGalerie(); /* eslint-disable-next-line */ }, [job.id, showArchived]);
+
+  // Ad-Copies einmalig laden (nur Neukundengewinnung) — für die Zuordnung pro Creative.
+  useEffect(() => {
+    if (!istNeukunden) return;
+    api(`/adcopies?job_id=${job.id}`)
+      .then(res => setAdcopies(res.adcopies || []))
+      .catch(() => {});
+    // eslint-disable-next-line
+  }, [job.id, istNeukunden]);
+
+  async function setCreativeAdcopy(creative, val) {
+    const adcopy_id = val || null;
+    try {
+      await api(`/creatives/${creative.id}/adcopy`, { method: 'PATCH', body: { adcopy_id } });
+      setCreatives(prev => prev.map(c => c.id === creative.id ? { ...c, adcopy_id } : c));
+    } catch (err) {
+      alert(`Zuordnung fehlgeschlagen: ${err.message}`);
+    }
+  }
+  function adcopyLabel(a) {
+    const u = a.ueberschriften || [];
+    return `${a.stil || 'Copy'}${u[0] ? ' · ' + u[0] : ''}`;
+  }
 
   // Banner-Info: wie viele aktive Creatives tragen noch die alte Logo-Fassung?
   function loadLogoStatus() {
@@ -1180,6 +1206,21 @@ export default function JobCreatives() {
                 {c.parent_id && c.parent_created_at && (
                   <div style={{ fontSize: 11, color: 'var(--ink-4)', padding: '2px 4px' }} title="Aus einer gezielten Änderung entstanden">
                     ↩ ersetzt Version vom {new Date(c.parent_created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                  </div>
+                )}
+                {istNeukunden && (
+                  <div style={{ padding: '6px 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>Zugehörige Ad-Copy</label>
+                    <select
+                      value={c.adcopy_id || ''}
+                      onChange={e => setCreativeAdcopy(c, e.target.value)}
+                      style={{ flex: 1, minWidth: 0, fontSize: 12, padding: '4px 6px', border: '1px solid var(--line, #ececea)', borderRadius: 6, background: '#fff' }}
+                    >
+                      <option value="">Allgemein (keine)</option>
+                      {adcopies.map(a => (
+                        <option key={a.id} value={a.id}>{adcopyLabel(a)}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 <div className="creative-foot">

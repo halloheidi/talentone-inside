@@ -142,6 +142,12 @@ export default function PublicReview() {
   // Sortierte AdCopies
   const sortedAdcopies = ['emotional', 'benefit', 'kompakt'].map(s => adcopies.find(a => a.stil === s)).filter(Boolean);
 
+  // Neukundengewinnung: Creatives + zugeordnete Ad-Copy als Paar (Meta-Vorschau).
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
+  const adcopyById = id => adcopies.find(a => a.id === id) || null;
+  const zugeordneteIds = new Set(creatives.map(c => c.adcopy_id).filter(Boolean));
+  const freieCopies = adcopies.filter(a => !zugeordneteIds.has(a.id));
+
   return (
     <div className="review-page" style={themeStyle}>
       <header className="review-header">
@@ -179,56 +185,130 @@ export default function PublicReview() {
           </div>
         )}
 
-        {/* Creatives */}
-        {creatives.length > 0 && (
-          <section className="review-section">
-            <h2 className="review-h2">🎨 Creatives ({creatives.length})</h2>
-            <div className="review-creative-grid">
-              {creatives.map((c, i) => (
-                <div key={c.id} className="review-creative">
-                  <button type="button" className="review-creative-thumb" onClick={() => setLightboxIndex(i)}>
-                    {c.typ === 'video'
-                      ? <><video src={c.bild_url} preload="metadata" muted playsInline /><span className="creative-play-icon" aria-hidden>▶</span></>
-                      : <img src={c.bild_url} alt="" loading="lazy" />}
-                    <span className={`format-badge format-${c.format}`}>
-                      {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
-                    </span>
-                  </button>
-                  <textarea
-                    className="review-kommentar"
-                    placeholder="Anmerkung zu diesem Creative (optional)…"
-                    rows={2}
-                    value={kommentare[`creative_${c.id}`] || ''}
-                    onChange={e => setKommentar(`creative_${c.id}`, e.target.value)}
-                    disabled={!!done}
-                  />
+        {istNeukunden ? (
+          <>
+            {/* Neukundengewinnung: Creative + zugeordnete Copy als Paar (wie bei Meta) */}
+            {creatives.length > 0 && (
+              <section className="review-section">
+                <h2 className="review-h2">🎨 Anzeigen ({creatives.length})</h2>
+                <div className="review-creative-grid">
+                  {creatives.map((c, i) => {
+                    const a = adcopyById(c.adcopy_id);
+                    const u = a?.ueberschriften || [];
+                    return (
+                      <div key={c.id} className="review-creative">
+                        <button type="button" className="review-creative-thumb" onClick={() => setLightboxIndex(i)}>
+                          {c.typ === 'video'
+                            ? <><video src={c.bild_url} preload="metadata" muted playsInline /><span className="creative-play-icon" aria-hidden>▶</span></>
+                            : <img src={c.bild_url} alt="" loading="lazy" />}
+                          <span className={`format-badge format-${c.format}`}>
+                            {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
+                          </span>
+                        </button>
+                        {a && (
+                          <div style={{ border: '1px solid var(--rv-line, #ececea)', borderTop: 'none', borderRadius: '0 0 10px 10px', padding: '10px 12px', background: '#fff' }}>
+                            {a.text && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginBottom: (u[0] || u[1]) ? 8 : 0 }}>{a.text}</div>}
+                            {u[0] && <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{u[0]}</div>}
+                            {u[1] && <div style={{ fontSize: 12.5, color: 'var(--rv-ink-3, #5a5955)', marginTop: 2 }}>{u[1]}</div>}
+                          </div>
+                        )}
+                        <textarea
+                          className="review-kommentar"
+                          placeholder="Anmerkung zu dieser Anzeige (optional)…"
+                          rows={2}
+                          value={kommentare[`creative_${c.id}`] || ''}
+                          onChange={e => setKommentar(`creative_${c.id}`, e.target.value)}
+                          disabled={!!done}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              </section>
+            )}
 
-        {/* Ad Copies */}
-        {sortedAdcopies.length > 0 && (
-          <section className="review-section">
-            <h2 className="review-h2">✍️ Werbetexte</h2>
-            <div className="review-adcopies">
-              {sortedAdcopies.map(a => (
-                <div key={a.id} className="review-adcopy">
-                  <div className="review-adcopy-label">{STYLE_LABEL[a.stil] || a.stil}</div>
-                  <pre className="review-adcopy-text">{a.text}</pre>
-                  <textarea
-                    className="review-kommentar"
-                    placeholder="Anmerkung zu diesem Text (optional)…"
-                    rows={2}
-                    value={kommentare[`adcopy_${a.id}`] || ''}
-                    onChange={e => setKommentar(`adcopy_${a.id}`, e.target.value)}
-                    disabled={!!done}
-                  />
+            {/* Nicht zugeordnete Copies */}
+            {freieCopies.length > 0 && (
+              <section className="review-section">
+                <h2 className="review-h2">✍️ Allgemeine Textvarianten</h2>
+                <div className="review-adcopies">
+                  {freieCopies.map(a => {
+                    const u = a.ueberschriften || [];
+                    return (
+                      <div key={a.id} className="review-adcopy">
+                        <div className="review-adcopy-label">{a.stil || 'Textvariante'}</div>
+                        {a.text && <pre className="review-adcopy-text">{a.text}</pre>}
+                        {u[0] && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{u[0]}</div>}
+                        {u[1] && <div style={{ fontSize: 12.5, color: 'var(--rv-ink-3, #5a5955)', marginTop: 2 }}>{u[1]}</div>}
+                        <textarea
+                          className="review-kommentar"
+                          placeholder="Anmerkung zu diesem Text (optional)…"
+                          rows={2}
+                          value={kommentare[`adcopy_${a.id}`] || ''}
+                          onChange={e => setKommentar(`adcopy_${a.id}`, e.target.value)}
+                          disabled={!!done}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Creatives */}
+            {creatives.length > 0 && (
+              <section className="review-section">
+                <h2 className="review-h2">🎨 Creatives ({creatives.length})</h2>
+                <div className="review-creative-grid">
+                  {creatives.map((c, i) => (
+                    <div key={c.id} className="review-creative">
+                      <button type="button" className="review-creative-thumb" onClick={() => setLightboxIndex(i)}>
+                        {c.typ === 'video'
+                          ? <><video src={c.bild_url} preload="metadata" muted playsInline /><span className="creative-play-icon" aria-hidden>▶</span></>
+                          : <img src={c.bild_url} alt="" loading="lazy" />}
+                        <span className={`format-badge format-${c.format}`}>
+                          {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
+                        </span>
+                      </button>
+                      <textarea
+                        className="review-kommentar"
+                        placeholder="Anmerkung zu diesem Creative (optional)…"
+                        rows={2}
+                        value={kommentare[`creative_${c.id}`] || ''}
+                        onChange={e => setKommentar(`creative_${c.id}`, e.target.value)}
+                        disabled={!!done}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Ad Copies */}
+            {sortedAdcopies.length > 0 && (
+              <section className="review-section">
+                <h2 className="review-h2">✍️ Werbetexte</h2>
+                <div className="review-adcopies">
+                  {sortedAdcopies.map(a => (
+                    <div key={a.id} className="review-adcopy">
+                      <div className="review-adcopy-label">{STYLE_LABEL[a.stil] || a.stil}</div>
+                      <pre className="review-adcopy-text">{a.text}</pre>
+                      <textarea
+                        className="review-kommentar"
+                        placeholder="Anmerkung zu diesem Text (optional)…"
+                        rows={2}
+                        value={kommentare[`adcopy_${a.id}`] || ''}
+                        onChange={e => setKommentar(`adcopy_${a.id}`, e.target.value)}
+                        disabled={!!done}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
         )}
 
         {/* Funnel & Sheet */}

@@ -316,13 +316,83 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
         </>
       )}
 
-      {creatives.length > 0 && (
-        <CreativesSection
-          creatives={creatives} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk}
-          onSaved={onReload}
-        />
-      )}
+      {istNeukunden
+        ? (creatives.length > 0 || adcopies.length > 0) && (
+            <CreativePaareSection creatives={creatives} adcopies={adcopies} kunde={kunde} />
+          )
+        : creatives.length > 0 && (
+            <CreativesSection
+              creatives={creatives} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk}
+              onSaved={onReload}
+            />
+          )}
     </section>
+  );
+}
+
+/* ══════════════════════ Creative + Copy als Paar (Neukundengewinnung) ══════════════════════ */
+
+function CreativePaareSection({ creatives, adcopies, kunde }) {
+  const [lightbox, setLightbox] = useState(null);
+  const adcopyById = id => adcopies.find(a => a.id === id) || null;
+  const zugeordneteIds = new Set(creatives.map(c => c.adcopy_id).filter(Boolean));
+  const freieCopies = adcopies.filter(a => !zugeordneteIds.has(a.id));
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>🎨 {t(kunde, 'Deine', 'Ihre')} Anzeigen</h2>
+
+      {creatives.length > 0 && (
+        <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+          {creatives.map((c, i) => {
+            const a = adcopyById(c.adcopy_id);
+            const u = a?.ueberschriften || [];
+            return (
+              <div key={c.id} style={{ border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                <button onClick={() => setLightbox(i)} title="Groß-Ansicht"
+                  style={{ background: '#000', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1' }}>
+                  {c.typ === 'video'
+                    ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                </button>
+                {a && (
+                  <div style={{ padding: '10px 12px' }}>
+                    {a.text && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginBottom: (u[0] || u[1]) ? 8 : 0 }}>{a.text}</div>}
+                    {u[0] && <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{u[0]}</div>}
+                    {u[1] && <div style={{ fontSize: 12.5, color: '#5a5955', marginTop: 2 }}>{u[1]}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {freieCopies.length > 0 && (
+        <div style={{ marginTop: creatives.length > 0 ? 20 : 0 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px' }}>Allgemeine Textvarianten</h3>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {freieCopies.map(a => {
+              const u = a.ueberschriften || [];
+              return (
+                <div key={a.id} style={{ border: '1px solid #ececea', borderRadius: 10, padding: '10px 12px', background: '#fafaf8' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: '#5a5955', marginBottom: 4 }}>{a.stil || 'Textvariante'}</div>
+                  {a.text && <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginBottom: (u[0] || u[1]) ? 8 : 0 }}>{a.text}</div>}
+                  {u[0] && <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{u[0]}</div>}
+                  {u[1] && <div style={{ fontSize: 12.5, color: '#5a5955', marginTop: 2 }}>{u[1]}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {lightbox !== null && creatives.length > 0 && (
+        <Lightbox items={creatives} index={Math.max(0, Math.min(lightbox, creatives.length - 1))}
+          onClose={() => setLightbox(null)} onNavigate={setLightbox}
+          filenameFor={c => `creative-${c.format}-${c.id.slice(0, 8)}.${c.typ === 'video' ? 'mp4' : 'png'}`} />
+      )}
+    </div>
   );
 }
 

@@ -157,13 +157,47 @@ router.post('/:id/regenerate', async (req, res) => {
   }
 });
 
-/* PATCH /api/adcopies/:id  body: { text } — manuelle Edits, setzt bearbeitet=true */
+/* POST /api/adcopies/manuell  body: { job_id, stil, text, headline, beschreibung }
+   Manuell erfasste Ad-Copy (extern getextet) — NUR für Neukundengewinnungs-Jobs.
+   Headline + Beschreibung werden im bestehenden string[]-Format in `ueberschriften`
+   abgelegt: [0] = Headline, [1] = Beschreibung. So bleibt das Format identisch zur
+   Recruiting-Strecke (dort mehrere Headline-Strings), Leser müssen nichts umbauen. */
+router.post('/manuell', async (req, res) => {
+  const { job_id, stil, text, headline, beschreibung } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  try {
+    const { job } = await loadJobAndKunde(job_id);
+    if (job.projekttyp !== 'neukundengewinnung') {
+      return res.status(400).json({ error: 'Manuelle Ad-Copies nur für Neukundengewinnungs-Jobs.' });
+    }
+    const ueberschriften = [String(headline || '').trim(), String(beschreibung || '').trim()];
+    const { data, error } = await supabase.from('talentone_adcopies').insert({
+      job_id,
+      stil: String(stil || '').trim() || null,
+      text: String(text || '').trim(),
+      ueberschriften,
+      bearbeitet: true,
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json({ adcopy: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* PATCH /api/adcopies/:id  body: { text, stil?, headline?, beschreibung? }
+   Recruiting sendet nur { text } → Verhalten unverändert. Manuelle Neukunden-Copies
+   senden zusätzlich stil/headline/beschreibung; ueberschriften wird dann als
+   [Headline, Beschreibung] gesetzt. bearbeitet=true. */
 router.patch('/:id', async (req, res) => {
-  const { text } = req.body || {};
+  const { text, stil, headline, beschreibung } = req.body || {};
   if (typeof text !== 'string') return res.status(400).json({ error: 'text ist Pflicht.' });
+  const patch = { text, bearbeitet: true };
+  if (typeof stil === 'string') patch.stil = stil.trim() || null;
+  if (headline !== undefined || beschreibung !== undefined) {
+    patch.ueberschriften = [String(headline || '').trim(), String(beschreibung || '').trim()];
+  }
   const { data, error } = await supabase
     .from('talentone_adcopies')
-    .update({ text, bearbeitet: true })
+    .update(patch)
     .eq('id', req.params.id)
     .select().single();
   if (error) return res.status(500).json({ error: error.message });

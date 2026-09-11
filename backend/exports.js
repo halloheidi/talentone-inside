@@ -488,7 +488,50 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
     return 0;
   });
 
-  const creativesHtml = sortedCreatives.length === 0 ? '' : `
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
+  // Manuelle Neukunden-Copies: ueberschriften[0] = Headline, [1] = Beschreibung.
+  const hl = a => (Array.isArray(a?.ueberschriften) ? a.ueberschriften[0] : '') || '';
+  const bs = a => (Array.isArray(a?.ueberschriften) ? a.ueberschriften[1] : '') || '';
+  // Medien-Kachel (Bild/Video) für ein Creative.
+  const mediaHtml = c => {
+    const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : '1:1 Feed');
+    if (c.typ === 'video') {
+      return `<a href="${c.bild_url}" target="_blank" style="display:block;text-decoration:none;color:#0a0a0a;background:#fafaf8;border-bottom:1px solid #ececea;padding:16px;text-align:center;"><strong>▶ ${badge}</strong><br><span style="font-size:11px;color:#5a5955;">Video ansehen</span></a>`;
+    }
+    return `<img src="${c.bild_url}" alt="" width="500" style="max-width:100%;display:block;"/>`;
+  };
+  // Copy-Block wie bei Meta: Primary Text, darunter Headline + Beschreibung.
+  const copyHtml = a => `
+    ${a.text ? `<div style="font-size:13px;line-height:1.55;color:#2a2a2a;white-space:pre-wrap;margin:0 0 10px;">${escape(a.text)}</div>` : ''}
+    ${hl(a) ? `<div style="font-size:15px;font-weight:700;color:#0a0a0a;margin:0 0 3px;">${escape(hl(a))}</div>` : ''}
+    ${bs(a) ? `<div style="font-size:12px;color:#5a5955;">${escape(bs(a))}</div>` : ''}`;
+
+  let creativesHtml, adcopiesHtml;
+  if (istNeukunden) {
+    // Neukundengewinnung: Creative + zugeordnete Copy als PAAR (wie die Anzeige bei Meta),
+    // darunter nicht zugeordnete Copies als „Allgemeine Textvarianten".
+    const copyById = Object.fromEntries((adcopies || []).map(a => [a.id, a]));
+    const zugeordnet = new Set(sortedCreatives.map(c => c.adcopy_id).filter(Boolean));
+    creativesHtml = sortedCreatives.length === 0 ? '' : `
+<h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Anzeigen</h2>
+${sortedCreatives.map(c => {
+  const copy = c.adcopy_id ? copyById[c.adcopy_id] : null;
+  return `<div style="margin:0 0 22px;border:1px solid #ececea;border-radius:10px;overflow:hidden;">
+    ${mediaHtml(c)}
+    ${copy ? `<div style="padding:14px 16px;">${copyHtml(copy)}</div>` : ''}
+  </div>`;
+}).join('')}`;
+    const allgemein = (adcopies || []).filter(a => !zugeordnet.has(a.id));
+    adcopiesHtml = allgemein.length === 0 ? '' : `
+<h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Allgemeine Textvarianten</h2>
+${allgemein.map(a => `
+<div style="margin:0 0 18px;padding:16px;background:#fafaf8;border:1px solid #ececea;border-radius:8px;">
+  ${a.stil ? `<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#5a5955;margin-bottom:8px;">${escape(a.stil)}</div>` : ''}
+  ${copyHtml(a)}
+</div>`).join('')}`;
+  } else {
+    // Recruiting: unverändert — Creatives-Liste + Werbetexte nach festen Stilen.
+    creativesHtml = sortedCreatives.length === 0 ? '' : `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Creatives</h2>
 <table width="100%" cellpadding="0" cellspacing="0">
   ${sortedCreatives.map(c => {
@@ -500,16 +543,16 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
   }).join('')}
 </table>`;
 
-  const styleLabels = {
-    emotional: 'Emotional / Story',
-    benefit:   'Benefit-fokussiert',
-    kompakt:   'Knackig / Hook',
-  };
-  const sortedAdcopies = ['emotional', 'benefit', 'kompakt']
-    .map(s => adcopies.find(a => a.stil === s))
-    .filter(Boolean);
+    const styleLabels = {
+      emotional: 'Emotional / Story',
+      benefit:   'Benefit-fokussiert',
+      kompakt:   'Knackig / Hook',
+    };
+    const sortedAdcopies = ['emotional', 'benefit', 'kompakt']
+      .map(s => adcopies.find(a => a.stil === s))
+      .filter(Boolean);
 
-  const adcopiesHtml = sortedAdcopies.length === 0 ? '' : `
+    adcopiesHtml = sortedAdcopies.length === 0 ? '' : `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Werbetexte</h2>
 ${sortedAdcopies.map(a => `
 <div style="margin:0 0 18px;padding:16px;background:#fafaf8;border:1px solid #ececea;border-radius:8px;">
@@ -517,6 +560,7 @@ ${sortedAdcopies.map(a => `
   <div style="font-size:13px;line-height:1.55;color:#2a2a2a;white-space:pre-wrap;">${escape(a.text || '')}</div>
 </div>
 `).join('')}`;
+  }
 
   const funnelHtml = funnelUrl ? `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Bewerbungs-Funnel</h2>
@@ -574,10 +618,18 @@ ${sortedAdcopies.map(a => `
   const textParts = [anschreiben || ''];
   if (reviewUrl) textParts.push(`\n→ ${istUpdate ? 'Neue Anzeigen ansehen & freigeben' : 'Entwürfe kommentieren & freigeben'}: ${reviewUrl}`);
   if (sortedCreatives.length) textParts.push(`\n${sortedCreatives.length} Creative(s) im Anhang/eingebettet.`);
-  if (sortedAdcopies.length) {
-    textParts.push('\nWerbetexte:');
-    for (const a of sortedAdcopies) {
-      textParts.push(`\n— ${styleLabels[a.stil]} —\n${a.text}\n`);
+  const textStyleLabels = { emotional: 'Emotional / Story', benefit: 'Benefit-fokussiert', kompakt: 'Knackig / Hook' };
+  const textAdcopies = istNeukunden
+    ? (adcopies || [])
+    : ['emotional', 'benefit', 'kompakt'].map(s => (adcopies || []).find(a => a.stil === s)).filter(Boolean);
+  if (textAdcopies.length) {
+    textParts.push(istNeukunden ? '\nTexte:' : '\nWerbetexte:');
+    for (const a of textAdcopies) {
+      const label = istNeukunden ? (a.stil || 'Copy') : (textStyleLabels[a.stil] || a.stil);
+      const zusatz = istNeukunden
+        ? [hl(a) && `Headline: ${hl(a)}`, bs(a) && `Beschreibung: ${bs(a)}`].filter(Boolean).join('\n')
+        : '';
+      textParts.push(`\n— ${label} —\n${a.text || ''}${zusatz ? '\n' + zusatz : ''}\n`);
     }
   }
   if (funnelUrl) textParts.push(`\nFunnel-Vorschau: ${funnelUrl}`);

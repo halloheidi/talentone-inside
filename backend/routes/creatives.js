@@ -723,6 +723,27 @@ router.post('/story-ableiten-alle', async (req, res) => {
     .catch(err => console.error('[story-derive-alle] uncaught:', err));
 });
 
+/* PATCH /api/creatives/:id/adcopy  body: { adcopy_id: uuid|null }
+   Ordnet dem Creative höchstens EINE Ad-Copy zu (null = allgemein/keine). Die Copy muss
+   zum selben Job gehören. Rein relationale Zuordnung — kein Bild-Rerender, keine Meta-
+   Wirkung (Meta ist read-only). */
+router.patch('/:id/adcopy', async (req, res) => {
+  const { adcopy_id } = req.body || {};
+  const { data: creative, error: cErr } = await supabase
+    .from('talentone_creatives').select('id, job_id').eq('id', req.params.id).single();
+  if (cErr || !creative) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (adcopy_id) {
+    const { data: copy } = await supabase
+      .from('talentone_adcopies').select('id, job_id').eq('id', adcopy_id).maybeSingle();
+    if (!copy) return res.status(404).json({ error: 'Ad-Copy nicht gefunden.' });
+    if (copy.job_id !== creative.job_id) return res.status(400).json({ error: 'Ad-Copy gehört zu einem anderen Job.' });
+  }
+  const { data, error } = await supabase.from('talentone_creatives')
+    .update({ adcopy_id: adcopy_id || null }).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ creative: data });
+});
+
 /* PATCH /api/creatives/:id/logo-position
    body: { x?, y?, width_pct? }  — Werte 0..1, x/y = Zentrum des Logos.
    Rendert das Creative aus bild_ohne_logo_url + kunden.logo_transparent_url
