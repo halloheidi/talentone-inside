@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
+import AnfragenKanban from '../components/AnfragenKanban.jsx';
 import { supabase } from '../lib/supabase.js';
 import { t } from '../lib/anrede.js';
 
@@ -493,6 +494,13 @@ function LeadsSection({ job, token, kunde, primary, primaryInk, anfragen, onRelo
   const [showPipelineEdit, setShowPipelineEdit] = useState(false);
   const stufen = job.pipeline_stufen || [];
 
+  async function moveLead(anfrageId, stufeId) {
+    try {
+      await api(`/public/portal/${token}/anfrage/${anfrageId}`, { method: 'PATCH', body: JSON.stringify({ status: stufeId }) });
+      onReload();
+    } catch (err) { alert(err.message); }
+  }
+
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
@@ -517,7 +525,7 @@ function LeadsSection({ job, token, kunde, primary, primaryInk, anfragen, onRelo
       {anfragen.length === 0 ? (
         <div style={{ padding: 30, textAlign: 'center', color: '#9a9994' }}>Noch keine Anfragen eingegangen.</div>
       ) : view === 'pipeline' ? (
-        <PipelineKanban stufen={stufen} anfragen={anfragen} token={token} onOpen={setSelected} onReload={onReload} />
+        <AnfragenKanban stufen={stufen} anfragen={anfragen} onOpen={setSelected} onMove={moveLead} />
       ) : (
         <LeadsTabelle stufen={stufen} anfragen={anfragen} token={token} onOpen={setSelected} onReload={onReload} />
       )}
@@ -549,78 +557,6 @@ function pillStyle(aktiv, primary, primaryInk) {
     padding: '5px 12px', borderRadius: 100, cursor: 'pointer',
     fontSize: 12, fontWeight: 600,
   };
-}
-
-function PipelineKanban({ stufen, anfragen, token, onOpen, onReload }) {
-  const [dragId, setDragId] = useState(null);
-  const grouped = {};
-  for (const s of stufen) grouped[s.id] = [];
-  const catchAllKey = stufen[0]?.id || 'neu';
-  for (const a of anfragen) {
-    const bucket = stufen.find(s => s.id === a.status) ? a.status : catchAllKey;
-    (grouped[bucket] ||= []).push(a);
-  }
-
-  async function move(anfrageId, stufeId) {
-    try {
-      await api(`/public/portal/${token}/anfrage/${anfrageId}`, {
-        method: 'PATCH', body: JSON.stringify({ status: stufeId }),
-      });
-      onReload();
-    } catch (err) { alert(err.message); }
-  }
-
-  return (
-    <div style={{ display: 'grid', gap: 8, gridTemplateColumns: `repeat(${stufen.length}, minmax(180px, 1fr))`, overflowX: 'auto' }}>
-      {stufen.map(s => (
-        <div key={s.id}
-          onDragOver={e => e.preventDefault()}
-          onDrop={() => dragId && move(dragId, s.id)}
-          style={{ background: '#fafaf8', borderRadius: 8, padding: 8, minHeight: 200 }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 100, background: s.farbe }} />
-            <strong style={{ fontSize: 12, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955' }}>{s.name}</strong>
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9a9994' }}>{(grouped[s.id] || []).length}</span>
-          </div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {(grouped[s.id] || []).map(a => {
-              const d = a.daten || {};
-              const pick = (...keys) => { for (const k of keys) { const v = d[k]; if (v != null && String(v).trim() !== '') return String(v); } return null; };
-              const projektname = pick('Projektname', 'projektname');
-              const standort    = pick('Standort Freiflaeche', 'Standort Freifläche', 'Adresse', 'standort');
-              const groesse     = pick('Groesse der Flaeche', 'Größe der Fläche', 'größe', 'groesse');
-              const anmerkung   = pick('Anmerkung', 'bemerkung');
-              const gemeinde    = pick('Gemeinde', 'gemeinde');
-              const plz         = pick('Postleitzahl', 'plz');
-              const title = projektname || a.name || '—';
-              return (
-                <div key={a.id}
-                  draggable
-                  onDragStart={() => setDragId(a.id)}
-                  onDragEnd={() => setDragId(null)}
-                  onClick={() => onOpen(a)}
-                  style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 8, padding: 10, fontSize: 12, cursor: 'grab' }}
-                >
-                  <div style={{ fontWeight: 600, marginBottom: 2 }}>{title}</div>
-                  {projektname && a.name && <div style={{ fontSize: 11, color: '#5a5955' }}>👤 {a.name}</div>}
-                  {a.telefon && <div style={{ color: '#5a5955' }}>📞 {a.telefon}</div>}
-                  {standort && <div style={{ color: '#5a5955', marginTop: 2 }}>📍 {[plz, gemeinde].filter(Boolean).join(' ') || standort}</div>}
-                  {groesse && <div style={{ color: '#0a0a0a', marginTop: 2, fontWeight: 500 }}>📐 {groesse}</div>}
-                  {anmerkung && (
-                    <div style={{ color: '#5a5955', marginTop: 4, fontSize: 11, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      „{anmerkung}"
-                    </div>
-                  )}
-                  <div style={{ color: '#9a9994', fontSize: 10, marginTop: 6 }}>{new Date(a.created_at).toLocaleDateString('de-DE')}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function LeadsTabelle({ stufen, anfragen, token, onOpen, onReload }) {

@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { t } from '../lib/anrede.js';
+import AnfragenKanban from '../components/AnfragenKanban.jsx';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const VIEW_KEY = 'anfragen_view'; // 'board' | 'tabelle' — pro Browser gemerkt
+
+function togglePill(aktiv, brand) {
+  return {
+    background: aktiv ? brand.primary : 'transparent',
+    color: aktiv ? '#fff' : '#0a0a0a',
+    border: '1px solid ' + (aktiv ? brand.primary : '#d8d8d4'),
+    padding: '6px 14px', borderRadius: 100, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+  };
+}
 
 const STATUS_OPTIONS = [
   { value: 'neu',          label: '🆕 Neu' },
@@ -22,6 +33,16 @@ export default function PublicAnfragen() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
+  const [view, setView] = useState(() => { try { return localStorage.getItem(VIEW_KEY) || 'board'; } catch { return 'board'; } });
+  const setViewPersist = v => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* noop */ } };
+  // Mobil (< ~700px): Drag&Drop-Board ist unpraktisch → auf die Tabelle zurückfallen.
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 700px)');
+    const h = e => setIsNarrow(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE}/public/anfragen/${token}`)
@@ -57,6 +78,9 @@ export default function PublicAnfragen() {
   }
 
   const anfragen = data.anfragen || [];
+  const stufen = [...(data.job?.pipeline_stufen || [])].sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
+  const hatPipeline = stufen.length > 0;
+  const boardActive = hatPipeline && !isNarrow && view === 'board';
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f3f0', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
@@ -70,14 +94,26 @@ export default function PublicAnfragen() {
       </header>
 
       <main style={{ maxWidth: 1400, margin: '0 auto', padding: '32px 24px' }}>
-        <h1 style={{ fontSize: 24, marginBottom: 8 }}>{t(data.kunde, 'Deine', 'Ihre')} Anfragen ({anfragen.length})</h1>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+          <h1 style={{ fontSize: 24, margin: 0 }}>{t(data.kunde, 'Deine', 'Ihre')} Anfragen ({anfragen.length})</h1>
+          {hatPipeline && !isNarrow && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <button onClick={() => setViewPersist('board')} style={togglePill(view === 'board', brand)}>Board</button>
+              <button onClick={() => setViewPersist('tabelle')} style={togglePill(view === 'tabelle', brand)}>Liste</button>
+            </div>
+          )}
+        </div>
         <p style={{ color: '#5a5955', marginBottom: 20 }}>
           {t(data.kunde,
-            'Alle Anfragen aus deiner Neukunden-Kampagne. Klick auf eine Zeile für Details.',
-            'Alle Anfragen aus Ihrer Neukunden-Kampagne. Klicken Sie auf eine Zeile für Details.')}
+            boardActive ? 'Alle Anfragen aus deiner Neukunden-Kampagne. Karte ziehen oder Status wählen, um sie durch die Pipeline zu bewegen.' : 'Alle Anfragen aus deiner Neukunden-Kampagne. Klick auf eine Zeile für Details.',
+            boardActive ? 'Alle Anfragen aus Ihrer Neukunden-Kampagne. Karte ziehen oder Status wählen, um sie durch die Pipeline zu bewegen.' : 'Alle Anfragen aus Ihrer Neukunden-Kampagne. Klicken Sie auf eine Zeile für Details.')}
         </p>
 
-        {anfragen.length === 0 ? (
+        {boardActive ? (
+          anfragen.length === 0
+            ? <div style={{ padding: 40, background: '#fff', borderRadius: 12, textAlign: 'center', color: '#9a9994' }}>Noch keine Anfragen eingegangen.</div>
+            : <AnfragenKanban stufen={stufen} anfragen={anfragen} onOpen={setSelected} onMove={(id, stufeId) => saveAnfrage(id, { status: stufeId })} />
+        ) : anfragen.length === 0 ? (
           <div style={{ padding: 40, background: '#fff', borderRadius: 12, textAlign: 'center', color: '#9a9994' }}>
             Noch keine Anfragen eingegangen.
           </div>

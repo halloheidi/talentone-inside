@@ -1278,7 +1278,7 @@ async function logKundenBewerberAenderung({ jobId, kundeId, bewId, changes }) {
 
 async function loadJobByAnfragenToken(token) {
   const { data } = await supabase.from('talentone_jobs')
-    .select('id, stelle, region, kunde_id, projekttyp, neukunden_daten, anfragen_token')
+    .select('id, stelle, region, kunde_id, projekttyp, neukunden_daten, anfragen_token, pipeline_stufen')
     .eq('anfragen_token', token).maybeSingle();
   return data;
 }
@@ -1296,6 +1296,7 @@ router.get('/anfragen/:token', async (req, res) => {
       id: job.id, stelle: job.stelle, region: job.region,
       produkt: job.neukunden_daten?.produkt || job.stelle,
       projekttyp: job.projekttyp,
+      pipeline_stufen: job.pipeline_stufen || null,
     },
     kunde,
     anfragen,
