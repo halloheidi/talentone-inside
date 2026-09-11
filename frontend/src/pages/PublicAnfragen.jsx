@@ -30,6 +30,15 @@ export default function PublicAnfragen() {
       .catch(e => setError(e.message));
   }, [token]);
 
+  // Detail-Slide-Over per Escape schließen (Klick außerhalb + Button gibt es bereits).
+  // Die Listen-/Board-Ansicht bleibt im Hintergrund montiert → Scroll-Position bleibt erhalten.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = e => { if (e.key === 'Escape') setSelected(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
+
   if (error) return <div style={{ padding: 32, textAlign: 'center' }}>{error}</div>;
   if (!data) return <div style={{ padding: 32, textAlign: 'center' }}>Lade Anfragen…</div>;
 
@@ -119,7 +128,14 @@ export default function PublicAnfragen() {
       {selected && (
         <div onClick={() => setSelected(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', justifyContent: 'flex-end' }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', width: 420, maxWidth: '100%', height: '100%', overflowY: 'auto', padding: 24 }}>
-            <button onClick={() => setSelected(null)} style={{ background: 'transparent', border: 'none', fontSize: 20, cursor: 'pointer', float: 'right' }}>×</button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <button onClick={() => setSelected(null)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: brand.primary, padding: 0 }}>
+                ← Zurück zur Übersicht
+              </button>
+              <button onClick={() => setSelected(null)} aria-label="Schließen"
+                style={{ background: 'transparent', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9a9994', lineHeight: 1 }}>×</button>
+            </div>
             <h2 style={{ marginTop: 0 }}>{selected.name || 'Anfrage'}</h2>
             <div style={{ fontSize: 12, color: '#9a9994', marginBottom: 16 }}>
               Eingegangen {new Date(selected.created_at).toLocaleString('de-DE')}

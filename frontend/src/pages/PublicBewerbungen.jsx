@@ -251,12 +251,24 @@ function VorqualEditSection({ vorqualSpalten = [], recruiterWerte = {}, kundeWer
 
 /* ─── Slide-Over für Bewerber-Detail ─── */
 function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, recruiterSync, brandName, vorqualSpalten = [], kunde, onPatchFeedback, onSetWert, onPatchVorqualKunde, onClose }) {
+  // Escape schließt (Klick außerhalb + ×-Button gibt es bereits). Listener nur aktiv,
+  // wenn ein Bewerber geöffnet ist. Die Liste bleibt im Hintergrund → Scroll bleibt.
+  useEffect(() => {
+    if (!bewerbung) return;
+    const onKey = e => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [bewerbung, onClose]);
   if (!bewerbung) return null;
   const norm = normalized || {};
   const fb = feedback || {};
   return (
     <div className="pub-slideover-backdrop" onClick={onClose}>
       <aside className="pub-slideover" onClick={e => e.stopPropagation()}>
+        <button onClick={onClose}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: 'inherit', padding: '14px 16px 0' }}>
+          ← Zurück zur Übersicht
+        </button>
         <header className="pub-slideover-head">
           <div>
             <h2>{norm.name || '(ohne Namen)'}</h2>

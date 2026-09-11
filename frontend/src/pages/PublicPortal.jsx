@@ -497,7 +497,12 @@ function LeadsSection({ job, token, kunde, primary, primaryInk, anfragen, onRelo
     <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🎯 {t(kunde, 'Deine', 'Ihre')} Anfragen ({anfragen.length})</h2>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {job.anfragen_token && (
+            <a href={`/anfragen/${job.anfragen_token}`} target="_blank" rel="noreferrer"
+              style={{ ...pillStyle(false, primary, primaryInk), textDecoration: 'none' }}
+              title="Fokussierte Anfragenliste in neuem Tab öffnen">↗ {t(kunde, 'Zu deinen Anfragen', 'Zu Ihren Anfragen')}</a>
+          )}
           <button onClick={() => setView('pipeline')}
             style={pillStyle(view === 'pipeline', primary, primaryInk)}>Pipeline</button>
           <button onClick={() => setView('tabelle')}
