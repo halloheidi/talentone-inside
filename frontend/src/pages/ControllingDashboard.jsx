@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import PageContainer from '../components/PageContainer.jsx';
 import {
@@ -12,33 +12,6 @@ const AMPEL = {
   gruen: { emoji: '🟢', label: 'Läuft',      color: '#166534', bg: '#f0fdf4', border: '#bbf7d0' },
   grau:  { emoji: '⚪', label: 'Nicht live', color: '#6b7280', bg: '#f9fafb', border: '#e5e7eb' },
 };
-const AGENTUR_LABEL = { talentone: 'TalentOne', nowagwirth: 'Nowag & Wirth' };
-
-function Sparkline({ data }) {
-  const max = Math.max(1, ...data.map(d => d.count));
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 34 }} title="Bewerbungen letzte 14 Tage">
-      {data.map((d, i) => (
-        <div key={i}
-          title={`${d.date}: ${d.count}`}
-          style={{
-            width: 5,
-            height: `${Math.max(2, (d.count / max) * 34)}px`,
-            background: d.count > 0 ? '#0a0a0a' : '#e5e7eb',
-            borderRadius: 1,
-          }} />
-      ))}
-    </div>
-  );
-}
-
-function tageLabel(t) {
-  if (t == null) return 'noch nie';
-  if (t === 0) return 'heute';
-  if (t === 1) return 'gestern';
-  return `vor ${t} Tagen`;
-}
-
 // Meta-Formatierung (einheitliche Form über alle Seiten)
 const fmtEur = (n) => `${(Number(n) || 0).toFixed(2)} €`;
 const fmtCtr = (n) => (n == null ? '—' : `${(Number(n) || 0).toFixed(2)} %`);
@@ -110,16 +83,10 @@ function MetaAdsSection({ rows }) {
   );
 }
 
-// Status-Metadaten fürs Cockpit (Ampel-Punkt + Farbe je cockpit.status)
-const COCKPIT_STATUS = {
-  live:            { emoji: '🟢', color: '#166534', label: 'Live' },
-  ueberfaellig:    { emoji: '⏰', color: '#dc2626', label: 'Überfällig' },
-  pausiert:        { emoji: '⏸️', color: '#6b7280', label: 'Pausiert' },
-  zahlungsproblem: { emoji: '🔴', color: '#dc2626', label: 'Zahlungsproblem' },
-  beendet:         { emoji: '⚪', color: '#9a9994', label: 'Beendet' },
-};
+// Ampel-Punkt je Zeilen-Ampel (rot/gelb/gruen/grau) — Emoji + Tooltip-Label aus AMPEL
+const AMPEL_DOT = { rot: '🔴', gelb: '🟡', gruen: '🟢', grau: '⚪' };
 
-// Sortier-Wert je Key (null bleibt null → immer ans Ende)
+// Sortier-Wert je Key (null bleibt null → immer ans Ende). Default = Server-Reihenfolge (kein key).
 function cockpitSortVal(r, key) {
   switch (key) {
     case 'cpl':              return r.meta?.cpl ?? null;
@@ -132,20 +99,56 @@ function cockpitSortVal(r, key) {
   }
 }
 
-// 8-Wochen-Spend als Mini-Balken (Sparkline akzeptiert kein Zahlen-Array → inline)
-function SpendSparkline({ wochen }) {
-  if (!Array.isArray(wochen) || wochen.length === 0) return <span style={{ color: '#9a9994' }}>—</span>;
-  const max = Math.max(1, ...wochen.map(w => Number(w) || 0));
+// Mini-Balken für ein Zahlen-Array (Spend- ODER Bewerbungen-Wochen). Leer → null.
+function MiniSpark({ values, color = '#0a0a0a', label }) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const max = Math.max(1, ...values.map(v => Number(v) || 0));
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 28 }} title="Spend letzte 8 Wochen (ältest→neuest)">
-      {wochen.map((w, i) => {
-        const v = Number(w) || 0;
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 20 }} title={label}>
+      {values.map((v, i) => {
+        const n = Number(v) || 0;
         return (
-          <div key={i} title={`Woche ${i + 1}: ${fmtEur(v)}`}
-            style={{ width: 5, height: `${Math.max(2, (v / max) * 28)}px`, background: v > 0 ? '#0a0a0a' : '#e5e7eb', borderRadius: 1 }} />
+          <div key={i} title={`Woche ${i + 1}: ${n}`}
+            style={{ width: 4, height: `${Math.max(2, (n / max) * 20)}px`, background: n > 0 ? color : '#e5e7eb', borderRadius: 1 }} />
         );
       })}
     </div>
+  );
+}
+
+// Automatische Funnel-Mini-Diagnose (robuste Null-Guards)
+function funnelDiagnose(m, benchmark) {
+  if (!m) return null;
+  const ctr = m.ctr;
+  const clicks = Number(m.clicks) || 0;
+  const bew = m.bewerbungen;
+  const cpl = m.cpl;
+  if (ctr != null && ctr < 1) return '→ Creative prüfen';
+  if (clicks > 50 && bew != null && (bew / clicks) < 0.02) return '→ Funnel prüfen';
+  if (cpl != null && benchmark && cpl > 1.3 * benchmark) return '→ Kosten/Zielgruppe';
+  return null;
+}
+
+// CPL-Trend 7T vs. 28T → Richtungspfeil (fallend = besser = grün)
+function cplTrend(m) {
+  if (!m || m.cpl_7t == null || m.cpl_28t == null) return null;
+  const a = Number(m.cpl_7t) || 0;
+  const b = Number(m.cpl_28t) || 0;
+  const rel = b ? Math.abs(a - b) / b : 0;
+  if (rel < 0.05) return { arrow: '→', color: '#5a5955' };
+  if (a < b) return { arrow: '↓', color: '#16a34a' };
+  return { arrow: '↑', color: '#dc2626' };
+}
+
+// Gründe-Chip (rot rot-hinterlegt, gelb amber)
+function GrundChip({ g }) {
+  const rot = g?.stufe === 'rot';
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+      background: rot ? '#fef2f2' : '#fffbeb', color: rot ? '#b91c1c' : '#b45309',
+      border: `1px solid ${rot ? '#fecaca' : '#fde68a'}`,
+    }}>{g?.label}</span>
   );
 }
 
@@ -177,11 +180,15 @@ function CockpitTh({ label, sortKey, sort, onSort, align }) {
   );
 }
 
-// 🎛️ Kunden-Cockpit — Aggregat-Kopf + sortier-/filterbare Haupttabelle aller Projekte
-function KundenCockpit({ meta, rows }) {
+// 🎛️ Kunden-Cockpit — Aggregat-Kopf + einheitliches Regelwerk (rot-zuerst vom Server)
+function KundenCockpit({ meta, rows, onReload }) {
   const navigate = useNavigate();
-  const [sort, setSort] = useState({ key: 'spend_monat', dir: 'desc' });
+  const [sort, setSort] = useState({ key: null, dir: 'desc' }); // key null = Server-Reihenfolge
   const [filter, setFilter] = useState({ ueberfaellig: false, zahlung: false, nw: false });
+  const [expandedId, setExpandedId] = useState(null);           // Kampagnen-Aufklapp
+  const [edit, setEdit] = useState(null);                       // { id, field:'budget'|'wk' }
+  const [editVal, setEditVal] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const onSort = useCallback((key) => {
     setSort(prev => prev.key === key
@@ -195,6 +202,7 @@ function KundenCockpit({ meta, rows }) {
     if (filter.zahlung)      list = list.filter(r => r.cockpit?.status === 'zahlungsproblem');
     if (filter.nw)           list = list.filter(r => r.cockpit?.werbekosten === 'N&W');
     const { key, dir } = sort;
+    if (!key) return list;   // Default: Server-Reihenfolge (rot zuerst) — NICHT umsortieren
     return [...list].sort((a, b) => {
       const va = cockpitSortVal(a, key);
       const vb = cockpitSortVal(b, key);
@@ -213,17 +221,49 @@ function KundenCockpit({ meta, rows }) {
     else navigate(`/projekte?highlight=${r.projekt_id}`);
   }
 
+  const stop = (e) => e.stopPropagation();
+
+  async function saveBudget(r) {
+    setSaving(true);
+    try {
+      const num = editVal === '' ? null : Number(editVal);
+      const val = (num != null && Number.isFinite(num)) ? num : null;
+      await api('/projekte/' + r.projekt_id, { method: 'PATCH', body: { monatsbudget_euro: val } });
+      setEdit(null); setEditVal('');
+      onReload && onReload();
+    } catch (e) { alert(e.message || 'Budget speichern fehlgeschlagen'); }
+    finally { setSaving(false); }
+  }
+
+  async function saveWk(r, wert) {   // wert: 'Kunde' | 'N&W'
+    if (!wert) return;
+    setSaving(true);
+    try {
+      await api('/projekte/' + r.projekt_id, { method: 'PATCH', body: { werbekosten: wert } });
+      setEdit(null);
+      onReload && onReload();
+    } catch (e) { alert(e.message || 'Werbekosten speichern fehlgeschlagen'); }
+    finally { setSaving(false); }
+  }
+
   const ueberfaelligN = Number(meta.ueberfaellig) || 0;
   const zahlungN = Number(meta.zahlungsproblem) || 0;
+
+  // Gewerk-Benchmark-Leiste (nur Gewerke mit cpl != null)
+  const gewerkBench = Object.entries(meta.benchmark?.gewerk || {})
+    .filter(([, v]) => v && v.cpl != null)
+    .map(([g, v]) => ({ gewerk: g, cpl: v.cpl, n: v.n }));
+
+  const COLS = 9;
 
   return (
     <section style={{ marginBottom: 30 }}>
       <h2 style={h2Style}>🎛️ Kunden-Cockpit</h2>
 
       {/* (a) Aggregat-Kopfzeile */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <Stat label="Spend lfd. Monat" value={fmtEur(meta.spend_monat_gesamt)} />
-        <Stat label="Ø CPL" value={fmtCpl(meta.cpl_schnitt)} />
+        <Stat label="Ø CPL (global)" value={fmtCpl(meta.cpl_schnitt)} />
         <Stat label="Meta-Projekte" value={Number(meta.anzahl_meta) || 0} />
         <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, padding: '12px 16px', display: 'flex', alignItems: 'center', minWidth: 120 }}>
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
@@ -235,12 +275,29 @@ function KundenCockpit({ meta, rows }) {
         </div>
       </div>
 
+      {/* (a2) Gewerk-Benchmark-Leiste */}
+      {gewerkBench.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '8px 12px', background: '#fafafa', border: '1px solid #ececea', borderRadius: 8, fontSize: 12 }}>
+          <span style={{ fontWeight: 700, color: '#5a5955' }}>Gewerk-Ø CPL:</span>
+          {gewerkBench.map((b, i) => (
+            <span key={b.gewerk} style={{ color: '#0a0a0a' }}>
+              {i > 0 && <span style={{ color: '#c7c7c2' }}>· </span>}
+              <strong>{b.gewerk}</strong> {fmtEur(b.cpl)}{b.n ? <span style={{ color: '#9a9994' }}> ({b.n})</span> : ''}
+            </span>
+          ))}
+          {meta.cpl_schnitt != null && (
+            <span style={{ color: '#9a9994', marginLeft: 'auto' }}>global Ø {fmtEur(meta.cpl_schnitt)}{meta.benchmark?.global_n ? ` (${meta.benchmark.global_n})` : ''}</span>
+          )}
+        </div>
+      )}
+
       {/* Filter + Schnell-Sort */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <button type="button" style={segBtn(filter.ueberfaellig)} onClick={() => setFilter(f => ({ ...f, ueberfaellig: !f.ueberfaellig }))}>⏰ nur überfällig</button>
         <button type="button" style={segBtn(filter.zahlung)} onClick={() => setFilter(f => ({ ...f, zahlung: !f.zahlung }))}>🔴 nur Zahlungsprobleme</button>
         <button type="button" style={segBtn(filter.nw)} onClick={() => setFilter(f => ({ ...f, nw: !f.nw }))}>nur N&amp;W-Werbekosten</button>
-        <button type="button" style={segBtn(sort.key === 'cpl')} onClick={() => setSort({ key: 'cpl', dir: 'desc' })}>↕ nach CPL</button>
+        <button type="button" style={segBtn(sort.key === 'cpl')} onClick={() => onSort('cpl')}>↕ nach CPL</button>
+        {sort.key && <button type="button" style={segBtn(false)} onClick={() => setSort({ key: null, dir: 'desc' })}>↺ Server-Reihenfolge</button>}
       </div>
 
       {visible.length === 0 ? (
@@ -251,74 +308,176 @@ function KundenCockpit({ meta, rows }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
-                  <CockpitTh label="Status" />
+                  <CockpitTh label="" />
                   <CockpitTh label="Kunde / Stelle" sortKey="kunde" sort={sort} onSort={onSort} />
-                  <CockpitTh label="Geplant → Live" sortKey="ueberfaellig_tage" sort={sort} onSort={onSort} />
-                  <CockpitTh label="aktive Lauftage" sortKey="aktive_lauftage" sort={sort} onSort={onSort} align="right" />
-                  <CockpitTh label="Spend M / Phase" sortKey="spend_monat" sort={sort} onSort={onSort} align="right" />
+                  <CockpitTh label="Zeit / Phase" sortKey="ueberfaellig_tage" sort={sort} onSort={onSort} />
+                  <CockpitTh label="Funnel-Kette" />
+                  <CockpitTh label="CPL & Trend" sortKey="cpl" sort={sort} onSort={onSort} align="right" />
                   <CockpitTh label="Budget %" sortKey="budget_prozent" sort={sort} onSort={onSort} />
-                  <CockpitTh label="Bewerbungen" sort={sort} onSort={onSort} align="right" />
-                  <CockpitTh label="CPL" sortKey="cpl" sort={sort} onSort={onSort} align="right" />
                   <CockpitTh label="Garantie-Rest" align="right" />
                   <CockpitTh label="Werbekosten" />
-                  <CockpitTh label="Verlauf" />
+                  <CockpitTh label="Verlauf (8W)" />
                 </tr>
               </thead>
               <tbody>
                 {visible.map(r => {
                   const c = r.cockpit || {};
                   const m = r.meta || null;
-                  const st = COCKPIT_STATUS[c.status] || COCKPIT_STATUS.beendet;
+                  const ampel = r.ampel || 'grau';
+                  const gruende = Array.isArray(r.ampel_gruende) ? r.ampel_gruende : [];
+                  const nKamp = Number(m?.anzahl_kampagnen) || 0;
+                  const kampagnen = Array.isArray(m?.kampagnen) ? m.kampagnen : [];
+                  const isOpen = expandedId === r.projekt_id;
+                  const clicks = Number(m?.clicks) || 0;
+                  const conv = (m && m.bewerbungen != null && clicks > 0) ? fmtPct((m.bewerbungen / clicks) * 100) : '—';
+                  const diag = funnelDiagnose(m, r.gewerk_benchmark);
+                  const trend = cplTrend(m);
+                  const budgetGepflegt = !!(m && m.budget != null);
+                  const editingBudget = edit?.id === r.projekt_id && edit.field === 'budget';
+                  const editingWk = edit?.id === r.projekt_id && edit.field === 'wk';
                   return (
-                    <tr key={r.projekt_id} style={{ borderTop: '1px solid #f0f0ee', cursor: 'pointer' }}
-                      onClick={() => go(r)} title="Zur Stelle / zum Projekt">
-                      {/* Status */}
-                      <td style={{ ...cockpitTd, textAlign: 'center' }}>
-                        <span title={st.label} style={{ fontSize: 16 }}>{st.emoji}</span>
-                      </td>
-                      {/* Kunde / Stelle */}
-                      <td style={cockpitTd}>
-                        <div style={{ fontWeight: 700 }}>{r.kunde}</div>
-                        <div style={{ fontSize: 12, color: '#5a5955' }}>
-                          {r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}
-                        </div>
-                      </td>
-                      {/* Geplant → Live */}
-                      <td style={cockpitTd}>
-                        {c.ueberfaellig ? (
-                          <span style={{ color: '#dc2626', fontWeight: 600 }}>
-                            ⏰ überfällig seit {c.ueberfaellig_tage} T (geplant {c.soll || '—'})
-                          </span>
-                        ) : c.ist ? (
-                          <span>
-                            Geplant {c.soll || '—'} · Live {c.ist}
-                            {c.diff_tage == null ? '' : ` (${c.diff_tage >= 0 ? '+' : ''}${c.diff_tage} T)`}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      {/* aktive Lauftage */}
-                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m?.aktive_lauftage ?? '—'}</td>
-                      {/* Spend M / Phase */}
-                      <td style={{ ...cockpitTd, textAlign: 'right' }}>
-                        {m ? <>{fmtEur(m.spend_monat)}<span style={{ color: '#9a9994' }}> / {fmtEur(m.spend_phase)}</span></> : '—'}
-                      </td>
-                      {/* Budget % */}
-                      <td style={cockpitTd}><BudgetBar prozent={m ? m.budget_prozent : null} /></td>
-                      {/* Bewerbungen */}
-                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m?.bewerbungen ?? '—'}</td>
-                      {/* CPL */}
-                      <td style={{ ...cockpitTd, textAlign: 'right' }}>{m ? fmtCpl(m.cpl) : '—'}</td>
-                      {/* Garantie-Rest */}
-                      <td style={{ ...cockpitTd, textAlign: 'right' }}>
-                        {c.garantie_rest == null
-                          ? '—'
-                          : <span style={c.garantie_laeuft_aus ? { color: '#dc2626', fontWeight: 700 } : undefined}>{c.garantie_rest} T</span>}
-                      </td>
-                      {/* Werbekosten */}
-                      <td style={cockpitTd}>{c.werbekosten || '—'}</td>
-                      {/* Verlauf */}
-                      <td style={cockpitTd}><SpendSparkline wochen={m ? m.spend_wochen : null} /></td>
-                    </tr>
+                    <Fragment key={r.projekt_id}>
+                      <tr style={{ borderTop: '1px solid #f0f0ee', cursor: 'pointer' }}
+                        onClick={() => go(r)} title="Zur Stelle / zum Projekt">
+                        {/* Toggle + Ampel-Punkt */}
+                        <td style={{ ...cockpitTd, textAlign: 'center', paddingRight: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {nKamp >= 2 ? (
+                              <button type="button" title="Kampagnen anzeigen"
+                                onClick={(e) => { stop(e); setExpandedId(isOpen ? null : r.projekt_id); }}
+                                style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#5a5955', padding: 0, width: 14, lineHeight: 1 }}>
+                                {isOpen ? '▾' : '▸'}
+                              </button>
+                            ) : <span style={{ width: 14, display: 'inline-block' }} />}
+                            <span title={(AMPEL[ampel] || AMPEL.grau).label} style={{ fontSize: 15 }}>{AMPEL_DOT[ampel] || AMPEL_DOT.grau}</span>
+                          </div>
+                        </td>
+                        {/* Kunde / Stelle + Kampagnen-Chip + Gründe-Chips */}
+                        <td style={cockpitTd}>
+                          <div style={{ fontWeight: 700 }}>{r.kunde}</div>
+                          <div style={{ fontSize: 12, color: '#5a5955', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span>{r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}</span>
+                            {nKamp >= 2 && (
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', whiteSpace: 'nowrap' }}>⚡ {nKamp} Kampagnen</span>
+                            )}
+                          </div>
+                          {gruende.length > 0 && (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                              {gruende.map((g, i) => <GrundChip key={g.code || i} g={g} />)}
+                            </div>
+                          )}
+                        </td>
+                        {/* Zeit / Phase */}
+                        <td style={cockpitTd}>
+                          {c.ueberfaellig ? (
+                            <span style={{ color: '#dc2626', fontWeight: 600 }}>
+                              ⏰ überfällig seit {c.ueberfaellig_tage} T{c.soll ? ` (geplant ${c.soll})` : ''}
+                            </span>
+                          ) : (
+                            <div style={{ lineHeight: 1.4 }}>
+                              <div>aktuelle Phase seit <strong>{m?.aktive_lauftage ?? '—'}</strong> aktiven T</div>
+                              <div style={{ fontSize: 11, color: '#9a9994' }}>Projekt gesamt {m?.aktive_lauftage_gesamt ?? '—'} aktive T</div>
+                            </div>
+                          )}
+                        </td>
+                        {/* Funnel-Kette */}
+                        <td style={cockpitTd}>
+                          {m ? (
+                            <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                              <div><strong>{fmtEur(m.spend_monat)}</strong> <span style={{ color: '#9a9994' }}>Spend</span></div>
+                              <div>{m.clicks ?? '—'} Klicks <span style={{ color: '#9a9994' }}>· CTR {fmtCtr(m.ctr)}</span></div>
+                              <div>{m.bewerbungen ?? '—'} Bew. <span style={{ color: '#9a9994' }}>· Konv. {conv}</span></div>
+                              <div><span style={{ color: '#9a9994' }}>o. KO</span> {m.ohne_ko ?? '—'}</div>
+                              {diag && <div style={{ color: '#b45309', fontWeight: 600 }}>{diag}</div>}
+                            </div>
+                          ) : '—'}
+                        </td>
+                        {/* CPL & Trend + Gewerk-Benchmark */}
+                        <td style={{ ...cockpitTd, textAlign: 'right' }}>
+                          <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                            <div style={{ fontWeight: 700 }}>
+                              {m ? fmtCpl(m.cpl) : '—'}
+                              {r.gewerk_benchmark != null && <span style={{ color: '#9a9994', fontWeight: 400 }}> · Ø {fmtEur(r.gewerk_benchmark)}</span>}
+                            </div>
+                            {trend && (
+                              <div style={{ fontSize: 11, color: '#5a5955' }}>
+                                <span style={{ color: trend.color, fontWeight: 700 }}>{trend.arrow}</span> 7T {fmtCpl(m.cpl_7t)} · 28T {fmtCpl(m.cpl_28t)}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        {/* Budget % (inline pflegbar) */}
+                        <td style={cockpitTd} onClick={editingBudget ? stop : undefined}>
+                          {budgetGepflegt ? (
+                            <BudgetBar prozent={m.budget_prozent} />
+                          ) : editingBudget ? (
+                            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }} onClick={stop}>
+                              <input type="number" autoFocus value={editVal} placeholder="€/Monat" style={inlineInput}
+                                onClick={stop}
+                                onChange={(e) => setEditVal(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') saveBudget(r); if (e.key === 'Escape') { setEdit(null); setEditVal(''); } }} />
+                              <button type="button" style={inlineBtn} disabled={saving} onClick={(e) => { stop(e); saveBudget(r); }}>✓</button>
+                              <button type="button" style={inlineBtnGhost} onClick={(e) => { stop(e); setEdit(null); setEditVal(''); }}>✕</button>
+                            </span>
+                          ) : (
+                            <a role="button" style={setzLink} onClick={(e) => { stop(e); setEdit({ id: r.projekt_id, field: 'budget' }); setEditVal(''); }}>+ Budget</a>
+                          )}
+                        </td>
+                        {/* Garantie-Rest */}
+                        <td style={{ ...cockpitTd, textAlign: 'right' }}>
+                          {c.garantie_rest == null
+                            ? '—'
+                            : <span style={c.garantie_laeuft_aus ? { color: '#dc2626', fontWeight: 700 } : undefined}>{c.garantie_rest} T</span>}
+                        </td>
+                        {/* Werbekosten (inline pflegbar) */}
+                        <td style={cockpitTd} onClick={editingWk ? stop : undefined}>
+                          {c.werbekosten ? (
+                            c.werbekosten
+                          ) : editingWk ? (
+                            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }} onClick={stop}>
+                              <select autoFocus defaultValue="" style={inlineInput} disabled={saving}
+                                onClick={stop}
+                                onChange={(e) => saveWk(r, e.target.value)}>
+                                <option value="" disabled>wählen…</option>
+                                <option value="Kunde">K (Kunde)</option>
+                                <option value="N&W">N&W</option>
+                              </select>
+                              <button type="button" style={inlineBtnGhost} onClick={(e) => { stop(e); setEdit(null); }}>✕</button>
+                            </span>
+                          ) : (
+                            <a role="button" style={setzLink} onClick={(e) => { stop(e); setEdit({ id: r.projekt_id, field: 'wk' }); }}>+ Werbekosten</a>
+                          )}
+                        </td>
+                        {/* Verlauf: Spend (grau) + Bewerbungen (dunkel) */}
+                        <td style={cockpitTd}>
+                          {m && (Array.isArray(m.spend_wochen) || Array.isArray(m.bewerbungen_wochen)) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <MiniSpark values={m.spend_wochen} color="#c7c7c2" label="Spend / Woche (8W)" />
+                              <MiniSpark values={m.bewerbungen_wochen} color="#0a0a0a" label="Bewerbungen / Woche (8W)" />
+                            </div>
+                          ) : <span style={{ color: '#9a9994' }}>—</span>}
+                        </td>
+                      </tr>
+                      {isOpen && kampagnen.length > 0 && (
+                        <tr style={{ background: '#fcfcfb' }}>
+                          <td />
+                          <td style={{ ...cockpitTd, whiteSpace: 'normal' }} colSpan={COLS - 1}>
+                            <div style={{ display: 'grid', gap: 6 }}>
+                              {kampagnen.map((k, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
+                                  <span title={k.live ? 'live' : 'nicht live'} style={{ width: 8, height: 8, borderRadius: '50%', background: k.live ? '#16a34a' : '#d8d8d4', flexShrink: 0 }} />
+                                  <strong style={{ minWidth: 160 }}>{k.name || 'Kampagne'}</strong>
+                                  <span style={{ color: '#5a5955' }}>Start {k.phase_start || '—'}</span>
+                                  <span>{fmtEur(k.spend)}</span>
+                                  <span style={{ color: '#5a5955' }}>{k.effective_status || '—'}</span>
+                                  <span style={{ color: '#5a5955' }}>{k.aktive_lauftage ?? '—'} aktive T</span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -340,7 +499,6 @@ export default function ControllingDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [expanded, setExpanded] = useState(null);   // kunde_id
   const [drill, setDrill] = useState({});           // kunde_id -> drilldown
   const [chartKunde, setChartKunde] = useState(''); // '' = gesamt
 
@@ -358,10 +516,18 @@ export default function ControllingDashboard() {
     if (days === 'custom' && !from) return; // erst laden, wenn Startdatum gesetzt
     setLoading(true); setError('');
     api(`/controlling-ops/overview?${query}`)
-      .then(res => { if (!cancelled) { setData(res); setExpanded(null); } })
+      .then(res => { if (!cancelled) setData(res); })
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  }, [query, days, from]);
+
+  // Overview leise neu laden (nach Inline-Pflege im Cockpit)
+  const reloadOverview = useCallback(() => {
+    if (days === 'custom' && !from) return;
+    api(`/controlling-ops/overview?${query}`)
+      .then(res => setData(res))
+      .catch(err => setError(err.message));
   }, [query, days, from]);
 
   const loadDrill = useCallback(async (kundeId) => {
@@ -376,8 +542,7 @@ export default function ControllingDashboard() {
     } catch { return null; }
   }, [drill, days, from, to]);
 
-  // Drilldown bei Bedarf laden (Zeile aufklappen ODER Chart-Kunde gewählt)
-  useEffect(() => { if (expanded) loadDrill(expanded); }, [expanded, loadDrill]);
+  // Drilldown bei Bedarf laden (Chart-Kunde gewählt)
   useEffect(() => { if (chartKunde) loadDrill(chartKunde); }, [chartKunde, loadDrill]);
 
   // Reset Drill-Cache bei Filterwechsel (Zeitraum ändert die Zahlen)
@@ -452,69 +617,8 @@ export default function ControllingDashboard() {
             )}
           </div>
 
-          {/* ── 🎛️ Kunden-Cockpit (prominent ganz oben) ── */}
-          <KundenCockpit meta={data.totals.meta || {}} rows={data.rows} />
-
-          {/* ── Ampel-Liste ── */}
-          <section style={{ marginBottom: 30 }}>
-            <h2 style={h2Style}>Ampel-Übersicht</h2>
-            {data.rows.length === 0 && <div style={emptyStyle}>Keine Projekte im aktuellen Filter.</div>}
-            <div style={{ display: 'grid', gap: 8 }}>
-              {data.rows.map(r => {
-                const meta = AMPEL[r.ampel] || AMPEL.grau;
-                const isOpen = expanded === r.kunde_id;
-                return (
-                  <div key={r.projekt_id} style={{
-                    border: `1px solid ${meta.border}`, borderLeft: `4px solid ${meta.color}`,
-                    borderRadius: 10, background: '#fff', overflow: 'hidden',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px', cursor: 'pointer' }}
-                      onClick={() => setExpanded(isOpen ? null : r.kunde_id)}>
-                      <span style={{ fontSize: 18 }} title={meta.label}>{meta.emoji}</span>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                          <strong style={{ fontSize: 15 }}>{r.kunde}</strong>
-                          <span style={{ color: '#5a5955', fontSize: 13 }}>· {r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}</span>
-                          {r.agentur && <span style={badge}>{AGENTUR_LABEL[r.agentur] || r.agentur}</span>}
-                          {r.funnel_extern === true && <span style={badge}>extern</span>}
-                          {r.zufriedenheit && (
-                            <span style={{
-                              ...badge,
-                              background: r.zufriedenheit.score <= 2 ? '#fde8e8' : r.zufriedenheit.score < 4 ? '#fff3cd' : '#e0f5df',
-                              color: r.zufriedenheit.score <= 2 ? '#9b1c1c' : r.zufriedenheit.score < 4 ? '#8a6d00' : '#0a7a3d',
-                            }} title={`Zufriedenheit ${r.zufriedenheit.score}/5${r.zufriedenheit.anzahl > 1 ? ` · ${r.zufriedenheit.anzahl} Antworten` : ''}`}>
-                              ⭐ {r.zufriedenheit.score}/5{r.zufriedenheit.trend > 0 ? ' ↑' : r.zufriedenheit.trend < 0 ? ' ↓' : ''}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 12, color: meta.color, marginTop: 2 }}>{r.ampel_grund}</div>
-                      </div>
-                      <div style={{ textAlign: 'right', fontSize: 12, color: '#5a5955', whiteSpace: 'nowrap' }}>
-                        <div><strong style={{ color: '#0a0a0a', fontSize: 15 }}>{r.bewerbungen_range}</strong> Bew.</div>
-                        <div>{r.live_tag != null
-                          ? `Tag ${r.live_tag}${r.soll_tage ? `/${r.soll_tage}` : ''}`
-                          : 'kein Live-Start'}</div>
-                        <div>letzte: {tageLabel(r.letzte_bewerbung_tage)}</div>
-                      </div>
-                      <Sparkline data={r.sparkline} />
-                    </div>
-
-                    {isOpen && (
-                      <div style={{ borderTop: `1px solid ${meta.border}`, padding: '14px', background: '#fcfcfb' }}>
-                        <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-                          {r.primary_job_id
-                            ? <Link to={`/kunden/${r.kunde_id}/jobs/${r.primary_job_id}/funnel`} style={linkBtn}>→ Bewerberliste</Link>
-                            : <Link to={`/kunden/${r.kunde_id}`} style={linkBtn}>→ Kunde</Link>}
-                          <Link to={`/kunden/${r.kunde_id}`} style={linkBtnGhost}>Kundenseite</Link>
-                        </div>
-                        <Drilldown d={drill[r.kunde_id]} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          {/* ── 🎛️ Kunden-Cockpit (prominent ganz oben, einheitliches Regelwerk) ── */}
+          <KundenCockpit meta={data.totals.meta || {}} rows={data.rows} onReload={reloadOverview} />
 
           {/* ── 📣 Meta-Ads (Spend & CPL) ── */}
           <MetaAdsSection rows={data.rows} />
@@ -586,62 +690,6 @@ export default function ControllingDashboard() {
   );
 }
 
-function Drilldown({ d }) {
-  if (!d) return <div style={{ color: '#9a9994', fontSize: 13 }}>Lade Details…</div>;
-  const c = d.conversion;
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-      <div>
-        <div style={miniTitle}>Bewerbungen pro Tag</div>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={d.charts.per_tag} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
-            <XAxis dataKey="label" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-            <YAxis allowDecimals={false} tick={{ fontSize: 9 }} width={24} />
-            <Tooltip />
-            <Bar dataKey="count" fill="#0a0a0a" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div>
-        <div style={miniTitle}>Wochentag</div>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={d.charts.wochentag} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
-            <XAxis dataKey="tag" tick={{ fontSize: 9 }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 9 }} width={24} />
-            <Tooltip />
-            <Bar dataKey="count" fill="#0068a3" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div>
-        <div style={miniTitle}>Conversion & Quellen</div>
-        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <Pill>{c.bewerbungen} Bewerbungen</Pill>
-            <span style={{ color: '#9a9994' }}>→</span>
-            <Pill>{c.qualifiziert} qualifiziert{c.quote != null ? ` (${c.quote}%)` : ''}</Pill>
-          </div>
-          <div style={{ fontSize: 11, color: '#9a9994', margin: '6px 0 10px' }}>{c.hinweis}</div>
-          <div style={{ fontSize: 12, color: '#5a5955' }}>
-            Quellen: {d.quellen.funnel} intern (TalentOne) · {d.quellen.perspective} Perspective
-            {d.quellen.andere ? ` · ${d.quellen.andere} andere` : ''}
-          </div>
-          {d.stellen.length > 1 && (
-            <div style={{ fontSize: 12, color: '#5a5955', marginTop: 8 }}>
-              {d.stellen.map(s => (
-                <div key={s.job_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.stelle}</span>
-                  <strong>{s.bewerbungen}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Stat({ label, value, color }) {
   return (
     <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, padding: '12px 16px', minWidth: 120 }}>
@@ -653,23 +701,21 @@ function Stat({ label, value, color }) {
 function ChartCard({ children }) {
   return <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 10, padding: '14px 10px 6px' }}>{children}</div>;
 }
-function Pill({ children }) {
-  return <span style={{ background: '#f1f1ee', borderRadius: 100, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>{children}</span>;
-}
 
 const labelStyle = { display: 'block', fontSize: 11, fontWeight: 600, color: '#5a5955', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.04em' };
 const inputStyle = { padding: '7px 10px', border: '1px solid #d8d8d4', borderRadius: 8, fontSize: 13, background: '#fff' };
 const h2Style = { fontSize: 15, fontWeight: 700, margin: '0 0 10px' };
 const hintStyle = { fontSize: 12, color: '#9a9994', margin: '0 0 10px' };
-const miniTitle = { fontSize: 11, fontWeight: 700, color: '#5a5955', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' };
 const emptyStyle = { padding: 30, background: '#fff', border: '1px solid #ececea', borderRadius: 10, textAlign: 'center', color: '#9a9994' };
-const badge = { fontSize: 10, fontWeight: 600, color: '#5a5955', background: '#f1f1ee', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '0.03em' };
-const linkBtn = { fontSize: 13, fontWeight: 600, color: '#fff', background: '#0a0a0a', padding: '7px 14px', borderRadius: 8, textDecoration: 'none' };
-const linkBtnGhost = { fontSize: 13, fontWeight: 600, color: '#0a0a0a', background: '#f1f1ee', padding: '7px 14px', borderRadius: 8, textDecoration: 'none' };
-const metaTh = { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '10px 14px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
+const metaTh ={ textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '10px 14px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
 const metaTd = { padding: '10px 14px', whiteSpace: 'nowrap', color: '#0a0a0a' };
 const cockpitTh = { textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#5a5955', padding: '9px 12px', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', background: '#fafafa' };
-const cockpitTd = { padding: '9px 12px', whiteSpace: 'nowrap', color: '#0a0a0a', verticalAlign: 'middle' };
+const cockpitTd = { padding: '9px 12px', whiteSpace: 'nowrap', color: '#0a0a0a', verticalAlign: 'top' };
+// Inline-Datenpflege (Setz-Link + Mini-Eingaben)
+const setzLink = { fontSize: 12, fontWeight: 600, color: '#0068a3', cursor: 'pointer', textDecoration: 'none', whiteSpace: 'nowrap' };
+const inlineInput = { padding: '3px 6px', border: '1px solid #d8d8d4', borderRadius: 6, fontSize: 12, width: 78, background: '#fff' };
+const inlineBtn = { padding: '3px 7px', border: '1px solid #0a0a0a', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: '#0a0a0a', color: '#fff', fontWeight: 700 };
+const inlineBtnGhost = { padding: '3px 7px', border: '1px solid #d8d8d4', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: '#fff', color: '#5a5955' };
 
 function segBtn(active) {
   return {
