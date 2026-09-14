@@ -13,7 +13,7 @@ import { sendAngebotMail, sendAuftragMail } from '../mail.js';
 import { addNote as closeAddNote } from '../close.js';
 import { buildEckdatenBlock } from '../mail-eckdaten.js';
 import { ensureProjektForOffer } from '../auftrag-automation.js';
-import { resolveKundeIdForOffer, linkOfferToKunde } from '../offer-linking.js';
+import { resolveKundeIdForOffer, linkOfferToKunde, createKundeFromSnapshot } from '../offer-linking.js';
 
 const router = Router();
 
@@ -665,11 +665,25 @@ router.post('/', async (req, res) => {
     // Auto-Verknüpfung mit internem Kunden (gehärtet): expliziter customer_id →
     // easybill-Cache-Email → Snapshot-Email → Snapshot-Firmenname (case-insensitiv).
     // So bleiben Angebote seltener "verwaist".
-    const resolvedCustomerId = await resolveKundeIdForOffer({
+    let resolvedCustomerId = await resolveKundeIdForOffer({
       customer_id: b.customer_id,
       easybill_customer_id: b.easybill_customer_id,
       customer_snapshot: b.customer_snapshot,
     });
+
+    // "Kunde auch im Tool anlegen": nur wenn noch kein interner Kunde existiert.
+    // Fehler werden NIE stillschweigend geschluckt — der Grund geht als
+    // kunde_warnung zurück, das Angebot wird trotzdem gespeichert.
+    let kundeWarnung = null;
+    if (!resolvedCustomerId && b.also_in_tool === true) {
+      try {
+        const neu = await createKundeFromSnapshot({ snapshot: b.customer_snapshot, brand: b.brand });
+        resolvedCustomerId = neu.id;
+      } catch (kErr) {
+        kundeWarnung = `Kunde konnte nicht angelegt werden: ${kErr.message}`;
+        console.warn('[offers/create kunde-anlegen]', kErr.message);
+      }
+    }
 
     const row = {
       brand:                       b.brand,
@@ -703,7 +717,7 @@ router.post('/', async (req, res) => {
       .insert(row)
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
-    res.status(201).json({ offer: data, totals });
+    res.status(201).json({ offer: data, totals, kunde_warnung: kundeWarnung });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

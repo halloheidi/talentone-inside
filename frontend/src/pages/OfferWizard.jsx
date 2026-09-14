@@ -369,6 +369,9 @@ export default function OfferWizard() {
         country: customer.country, number: customer.number, phone_1: customer.phone_1,
       },
       customer_id: customer.tool_kunde_id || null,
+      // "Kunde auch im Tool anlegen": nur relevant, wenn noch kein interner Kunde
+      // verknüpft ist. Backend legt dann einen talentone_kunden an (constraint-sicher).
+      also_in_tool: alsoInTool && !customer.tool_kunde_id,
       selected_product_ids: [...selectedIds].map(id => ({ product_id: id })),
       positionen_snapshot: cleanSnapshot,
       additional_positions_count: additionalPositionsCount,
@@ -389,6 +392,7 @@ export default function OfferWizard() {
     setSavingDraft(true); setError('');
     try {
       const res = await api('/offers', { method: 'POST', body: buildPayload() });
+      if (res.kunde_warnung) window.alert(`⚠️ ${res.kunde_warnung}\n\nDas Angebot wurde gespeichert.`);
       navigate(`/angebote?draft=${res.offer.id}`);
     } catch (err) { setError(err.message); }
     finally { setSavingDraft(false); }
@@ -403,6 +407,7 @@ export default function OfferWizard() {
     try {
       const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
       draftId = draftRes.offer.id;
+      if (draftRes.kunde_warnung) window.alert(`⚠️ ${draftRes.kunde_warnung}\n\nDas Angebot wird trotzdem erzeugt.`);
       let easyRes;
       try {
         easyRes = await api(`/offers/${draftId}/create-easybill`, { method: 'POST' });
@@ -444,6 +449,7 @@ export default function OfferWizard() {
     try {
       const draftRes = await api('/offers', { method: 'POST', body: buildPayload() });
       draftId = draftRes.offer.id;
+      if (draftRes.kunde_warnung) window.alert(`⚠️ ${draftRes.kunde_warnung}\n\nDie Auftragsbestätigung wird trotzdem erzeugt.`);
       let easyRes;
       try {
         easyRes = await api(`/offers/${draftId}/create-easybill-order`, { method: 'POST' });

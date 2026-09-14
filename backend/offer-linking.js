@@ -39,6 +39,46 @@ export async function resolveKundeIdForOffer({ customer_id, easybill_customer_id
 }
 
 /**
+ * Legt einen internen Kunden aus dem Angebots-Snapshot an ("Kunde auch im Tool
+ * anlegen"). Bewusst constraint-sicher: status NUR 'wartend'|'aktiv', anrede_form
+ * NUR 'du'|'sie' (kleingeschrieben), agentur NUR 'talentone'|'nowagwirth' —
+ * sonst wirft die DB 23514. Wirft bei Fehler (Aufrufer surfacen den Grund,
+ * schlucken ihn NIE stillschweigend).
+ *
+ * @param {object} p
+ * @param {object} p.snapshot  offer.customer_snapshot
+ * @param {string} p.brand     'talentone' | 'nowag_wirth'
+ * @returns {Promise<object>} die angelegte Kunden-Row
+ */
+export async function createKundeFromSnapshot({ snapshot, brand }) {
+  const snap = snapshot || {};
+  const firmenname = String(snap.company_name || snap.firmenname || '').trim();
+  if (!firmenname) throw new Error('Firmenname fehlt im Angebot.');
+
+  const ansprechpartner = [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim();
+  const agentur = brand === 'nowag_wirth' ? 'nowagwirth' : 'talentone';
+
+  const kundeData = {
+    firmenname,
+    ansprechpartner: ansprechpartner || null,
+    nachname: snap.last_name || null,
+    email: snap.email || null,
+    telefon: snap.phone_1 || null,
+    strasse: snap.street || null,
+    plz: snap.zip_code || null,
+    ort: snap.city || null,
+    agentur,                 // Constraint: talentone|nowagwirth
+    status: 'wartend',       // Constraint: wartend|aktiv (NICHT 'vorbereitung'/'interessent')
+    anrede_form: 'sie',      // Constraint: du|sie (klein) — B2B-Default
+  };
+
+  const { data: kunde, error } = await supabase
+    .from('talentone_kunden').insert(kundeData).select().single();
+  if (error) throw new Error(error.message);
+  return kunde;
+}
+
+/**
  * Verwaiste Angebote (customer_id IS NULL), die zu einem Kunden passen
  * (per E-Mail — Snapshot oder easybill-Cache — oder exaktem Firmennamen).
  * @returns {Promise<Array>}
