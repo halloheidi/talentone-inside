@@ -12,3 +12,6 @@ dist/
 *.xlsx
 *.xls
 *.tsv
+
+# Bestandskunden-Import: diese CSVs sind gewollte Datendateien
+!backend/scripts/import/*.csv
