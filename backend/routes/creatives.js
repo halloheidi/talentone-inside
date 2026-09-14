@@ -16,6 +16,8 @@ import { uploadBuffer, extFromMime, safeFilenameStem, fetchAsBuffer } from '../s
 import { generateOverlays } from '../overlay-renderer.js';
 import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
+import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWarnung, renderLayoutVorlage } from '../layout-vorlagen.js';
+import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -469,6 +471,116 @@ router.post('/generate', async (req, res) => {
     console.error('[generate-bg] uncaught:', err);
     recordGenError(job_id, err);
   });
+});
+
+/* ═══════════════ Deterministische Layout-Vorlagen (A/B) ═══════════════
+   Baut feste Kompositionen exakt nach (Puppeteer-Render, keine KI-Freiheit).
+   Inhalte ausschließlich aus gewählten Daten. Freisteller via remove.bg mit
+   sauberem Fallback aufs abgedunkelte Vollbild-Layout. */
+
+function bufferToDataUri(buffer, hintMime) {
+  const b = buffer;
+  let mime = hintMime || 'image/png';
+  if (!hintMime && b && b.length > 12) {
+    if (b[0] === 0xff && b[1] === 0xd8) mime = 'image/jpeg';
+    else if (b[0] === 0x89 && b[1] === 0x50) mime = 'image/png';
+    else if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57) mime = 'image/webp';
+  }
+  return `data:${mime};base64,${Buffer.from(b).toString('base64')}`;
+}
+
+// Gemeinsame Vorbereitung für Vorschau + Render.
+async function prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller }) {
+  if (!istLayoutVorlage(vorlage)) { const e = new Error('Unbekannte Vorlage.'); e.status = 400; throw e; }
+  if (!job_id) { const e = new Error('job_id ist Pflicht.'); e.status = 400; throw e; }
+  if (!foto_id) { const e = new Error('Bitte ein Foto auswählen.'); e.status = 400; throw e; }
+
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
+  if (!job) { const e = new Error('Job nicht gefunden.'); e.status = 404; throw e; }
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+  const { data: ref } = await supabase.from('talentone_referenzbilder')
+    .select('id, kunde_id, bild_url, beschreibung').eq('id', foto_id).maybeSingle();
+  if (!ref?.bild_url) { const e = new Error('Foto nicht gefunden.'); e.status = 404; throw e; }
+
+  // Foto → data-URI
+  const fotoBuf = (await fetchAsBuffer(ref.bild_url)).buffer;
+  const fotoUri = bufferToDataUri(fotoBuf);
+
+  // Freisteller (nur wenn gewünscht)
+  let cutoutUri = null, freisteller_ok = false, freisteller_reason = null;
+  if (freisteller !== false) {
+    const fr = await getOrCreateFreisteller(ref);
+    if (fr.ok && fr.buffer) { cutoutUri = bufferToDataUri(fr.buffer, 'image/png'); freisteller_ok = true; }
+    else { freisteller_reason = fr.reason || 'Freisteller nicht verfügbar'; }
+  }
+
+  // Transparentes Logo → data-URI (best effort)
+  let logoUri = null;
+  if (kunde?.logo_url) {
+    try { logoUri = bufferToDataUri(await resolveTransparentLogo(kunde), 'image/png'); }
+    catch (err) { console.warn('[layout] Logo nicht ladbar:', err.message); }
+  }
+
+  const defaults = buildSlotDefaults({ vorlage, job, kunde, spruch: slots?.spruch });
+  const effSlots = { ...defaults, ...(slots || {}) };
+  delete effSlots.spruch;
+
+  return { job, kunde, ref, fotoUri, cutoutUri, logoUri, freisteller_ok, freisteller_reason, slots: effSlots };
+}
+
+// GET /api/creatives/layout-vorlagen → Vorlagen-Metadaten + Verfügbarkeit
+router.get('/layout-vorlagen', (req, res) => {
+  res.json({ vorlagen: LAYOUT_VORLAGEN, freisteller_verfuegbar: freistellerVerfuegbar() });
+});
+
+// POST /api/creatives/layout-preview
+// body: { job_id, vorlage:'A'|'B', foto_id, slots?, freisteller?:bool }
+router.post('/layout-preview', async (req, res) => {
+  const { job_id, vorlage, foto_id, slots, freisteller } = req.body || {};
+  try {
+    const ctx = await prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller });
+    const [rendered, warnungen] = await Promise.all([
+      renderLayoutVorlage({
+        vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri,
+        logoUri: ctx.logoUri, slots: ctx.slots, formats: ['quadrat'], jobId: job_id,
+      }),
+      pruefeSlotTexteWarnung(ctx.slots, { stelle: ctx.job.stelle, region: ctx.job.region }),
+    ]);
+    res.json({
+      preview_url: rendered[0]?.bild_url || null,
+      freisteller_ok: ctx.freisteller_ok,
+      freisteller_reason: ctx.freisteller_reason,
+      lektorat_warnungen: warnungen,
+      slots: ctx.slots,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// POST /api/creatives/layout-render → rendert 1:1 + 9:16, legt 2 Creatives an.
+// body: { job_id, vorlage, foto_id, slots, freisteller?:bool }
+router.post('/layout-render', async (req, res) => {
+  const { job_id, vorlage, foto_id, slots, freisteller } = req.body || {};
+  try {
+    const ctx = await prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller });
+    const rendered = await renderLayoutVorlage({
+      vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri,
+      logoUri: ctx.logoUri, slots: ctx.slots, formats: ['quadrat', 'story'], jobId: job_id,
+    });
+    const hookText = ctx.slots.hook || ctx.slots.textblock || '';
+    const rows = rendered.map(r => ({
+      job_id, format: r.format, typ: 'bild', bild_url: r.bild_url,
+      bild_ohne_logo_url: null, status: 'fertig',
+      prompt: `Layout-Vorlage ${vorlage} · Hook: "${(hookText || '').replace(/\n/g, ' ').slice(0, 120)}"`,
+    }));
+    const { data: created, error: insErr } = await supabase
+      .from('talentone_creatives').insert(rows).select();
+    if (insErr) return res.status(500).json({ error: `DB-Insert fehlgeschlagen: ${insErr.message}` });
+    res.status(201).json({ creatives: created || [] });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 /* POST /api/creatives/:id/regenerate

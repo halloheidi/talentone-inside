@@ -10,6 +10,13 @@ import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
 import LogoPositionModal from '../../components/LogoPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 import CreativeEditModal from '../../components/CreativeEditModal.jsx';
+import LayoutVorlageModal from '../../components/LayoutVorlageModal.jsx';
+
+// Mini-Schema-Thumbnails der deterministischen Layout-Vorlagen (rein CSS, kein Asset).
+const LAYOUT_VORLAGEN_META = [
+  { id: 'A', name: 'Frage + Glow-Headline + Team', hint: 'Dunkles Foto, Hook-Balken oben, riesiger Glow-Titel, Person unten, Logo unten mittig.' },
+  { id: 'B', name: 'Person links + Textblock rechts', hint: 'Logo oben, Person links freigestellt, rechts Versal-Textblock, Titel unten mit Glow.' },
+];
 
 // Spruch-Vorschläge kommen als { text, kategorie } (KI-verbesserte Varianten als
 // String) — beides defensiv behandeln.
@@ -67,6 +74,10 @@ export default function JobCreatives() {
   const [stilvorlagen, setStilvorlagen] = useState([]);
   const [stilvorlageId, setStilvorlageId] = useState(null);
   const [stilLightboxIndex, setStilLightboxIndex] = useState(null);
+
+  // Layout-Vorlagen (deterministisch, mode==='layout')
+  const [layoutVorlage, setLayoutVorlage] = useState('A'); // 'A' | 'B'
+  const [showLayoutModal, setShowLayoutModal] = useState(false);
 
   // Generation
   const [varianten, setVarianten] = useState(1);
@@ -671,6 +682,17 @@ export default function JobCreatives() {
             Transparentes PNG mit Hook, Job-Block, Benefits und Logo. In Canva über ein eigenes Foto legen — kein Bild geht durch die KI.
           </div>
         </button>
+        <button
+          type="button"
+          className={`mode-card ${mode === 'layout' ? 'is-active' : ''}`}
+          onClick={() => setMode('layout')}
+          title="Feste Kompositionen exakt nachgebaut — nur gewählte Daten, keine KI-Freiheiten."
+        >
+          <div className="mode-card-title">🎯 Layout-Vorlage (fix)</div>
+          <div className="mode-card-desc">
+            Deterministisches Rendering von Vorlage A/B. Nur dein Foto, Spruch, Stellentitel &amp; Logo — nichts wird ergänzt. Freisteller optional.
+          </div>
+        </button>
       </div>
 
       {/* ───────── Motiv-Sektion (nur Modus KI) ───────── */}
@@ -862,6 +884,7 @@ export default function JobCreatives() {
         <div className="form-section-title" style={{ marginBottom: 4 }}>
           {mode === 'ki' ? 'Personen-Referenz (optional)'
             : mode === 'foto' ? 'Hintergrund-Foto auswählen'
+            : mode === 'layout' ? 'Foto für die Vorlage auswählen'
             : 'Referenzfotos des Kunden'}
         </div>
         <p className="pane-hint" style={{ margin: '0 0 12px' }}>
@@ -869,6 +892,8 @@ export default function JobCreatives() {
             ? 'Foto eines echten Mitarbeiters / der Geschäftsführung. Die KI baut diese Person in die generierte Szene ein.'
             : mode === 'foto'
             ? 'Foto auswählen, das als unveränderter Hintergrund verwendet wird.'
+            : mode === 'layout'
+            ? 'Foto auswählen: dient als abgedunkelter Hintergrund und (mit Freisteller) als freigestellte Person in der Vorlage.'
             : 'Die vom Kunden hochgeladenen Fotos. Im Overlay-Modus legst du das transparente Overlay in Canva über eines dieser Fotos.'}
         </p>
 
@@ -941,8 +966,51 @@ export default function JobCreatives() {
         </div>
       </section>
 
+      {/* ───────── Layout-Vorlage wählen (nur mode='layout') ───────── */}
+      {mode === 'layout' && (
+        <section className="card-form" style={{ marginTop: 18 }}>
+          <div className="form-section-title" style={{ marginBottom: 8 }}>Vorlage wählen</div>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            {LAYOUT_VORLAGEN_META.map(v => {
+              const aktiv = layoutVorlage === v.id;
+              return (
+                <button key={v.id} type="button" onClick={() => setLayoutVorlage(v.id)}
+                  style={{ flex: '0 0 220px', textAlign: 'left', cursor: 'pointer', padding: 10, borderRadius: 10,
+                    border: aktiv ? '2px solid #16a34a' : '1px solid var(--line, #ddd)', background: aktiv ? '#f0fdf4' : '#fff' }}>
+                  {/* Mini-Schema-Thumbnail */}
+                  <div style={{ position: 'relative', aspectRatio: '1/1', width: '100%', borderRadius: 6, overflow: 'hidden',
+                    background: 'linear-gradient(160deg,#1b1b1f,#0a0a0c)', marginBottom: 8 }}>
+                    {v.id === 'A' ? (
+                      <>
+                        <div style={{ position: 'absolute', top: '10%', left: '8%', width: '60%', height: 12, background: '#e2001a', borderRadius: 3 }} />
+                        <div style={{ position: 'absolute', top: '17%', left: '14%', width: '46%', height: 12, background: '#e2001a', borderRadius: 3 }} />
+                        <div style={{ position: 'absolute', top: '30%', left: '8%', width: '80%', height: 26, background: 'rgba(226,0,26,0.85)', borderRadius: 4, boxShadow: '0 0 10px #e2001a' }} />
+                        <div style={{ position: 'absolute', bottom: '4%', left: '50%', transform: 'translateX(-50%)', width: '46%', height: '42%', background: 'rgba(255,255,255,0.22)', borderRadius: '40% 40% 0 0' }} />
+                        <div style={{ position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)', width: '26%', height: 8, background: '#fff', borderRadius: 2 }} />
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ position: 'absolute', top: '7%', left: '50%', transform: 'translateX(-50%)', width: '30%', height: 8, background: '#fff', borderRadius: 2 }} />
+                        <div style={{ position: 'absolute', bottom: '18%', left: '4%', width: '40%', height: '58%', background: 'rgba(255,255,255,0.22)', borderRadius: '40% 40% 0 0' }} />
+                        <div style={{ position: 'absolute', top: '28%', right: '6%', width: '44%', height: 10, background: '#fff', borderRadius: 2 }} />
+                        <div style={{ position: 'absolute', top: '36%', right: '6%', width: '34%', height: 10, background: '#e2001a', borderRadius: 2 }} />
+                        <div style={{ position: 'absolute', top: '44%', right: '6%', width: '40%', height: 10, background: '#fff', borderRadius: 2 }} />
+                        <div style={{ position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)', width: '70%', height: 20, background: 'rgba(255,255,255,0.9)', borderRadius: 3, boxShadow: '0 0 10px rgba(255,255,255,0.5)' }} />
+                      </>
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Vorlage {v.id}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3, #666)', marginTop: 2 }}>{v.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4, #999)', marginTop: 4, lineHeight: 1.35 }}>{v.hint}</div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ───────── Stil-Auswahl (Vorlagen) ───────── */}
-      {stilvorlagen.length > 0 && (
+      {mode !== 'overlay' && mode !== 'layout' && stilvorlagen.length > 0 && (
         <section className="card-form" style={{ marginTop: 18 }}>
           <div className="form-section-title" style={{ marginBottom: 8 }}>Stil-Vorlage</div>
           <div style={{ display: 'flex', gap: 10, overflowX: 'auto', padding: '4px 2px 8px' }}>
@@ -1005,15 +1073,17 @@ export default function JobCreatives() {
       {/* ───────── Generate-Bar ───────── */}
       <section className="card-form" style={{ marginTop: 18 }}>
         <div className="generate-row" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
-          <label className="field" style={{ flex: '0 0 140px' }}>
-            <span>Varianten</span>
-            <select value={varianten} onChange={e => setVarianten(Number(e.target.value))}>
-              <option value={1}>1 (= 2 Bilder)</option>
-              <option value={2}>2 (= 4 Bilder)</option>
-              <option value={3}>3 (= 6 Bilder)</option>
-            </select>
-          </label>
-          {mode !== 'overlay' && kunde?.logo_url && (
+          {mode !== 'layout' && (
+            <label className="field" style={{ flex: '0 0 140px' }}>
+              <span>Varianten</span>
+              <select value={varianten} onChange={e => setVarianten(Number(e.target.value))}>
+                <option value={1}>1 (= 2 Bilder)</option>
+                <option value={2}>2 (= 4 Bilder)</option>
+                <option value={3}>3 (= 6 Bilder)</option>
+              </select>
+            </label>
+          )}
+          {mode !== 'overlay' && mode !== 'layout' && kunde?.logo_url && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 0 auto' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}
                 title="Das echte Logo wird der KI mitgegeben und aufs Shirt/die Arbeitskleidung eingearbeitet. Das Eck-Logo oben bleibt unberührt.">
@@ -1039,17 +1109,30 @@ export default function JobCreatives() {
           )}
           <div className="generate-actions">
             <div className="generate-hint">
-              Läuft im Hintergrund — Bilder erscheinen automatisch in der Galerie. Pro Bild ~30-90 Sekunden.
+              {mode === 'layout'
+                ? 'Deterministisch — Vorschau öffnen, Slots prüfen, dann 1:1 + 9:16 rendern.'
+                : 'Läuft im Hintergrund — Bilder erscheinen automatisch in der Galerie. Pro Bild ~30-90 Sekunden.'}
             </div>
-            <button
-              className="btn-primary"
-              onClick={onGenerate}
-              disabled={generating || (mode === 'ki' ? !motiv : mode === 'foto' ? !fotoId : !spruch.trim())}
-            >
-              {generating
-                ? (mode === 'overlay' ? `Rendere ${expected} Overlays…` : `Generiere ${expected} Bilder…`)
-                : (mode === 'overlay' ? 'Overlays rendern' : 'Creatives generieren')}
-            </button>
+            {mode === 'layout' ? (
+              <button
+                className="btn-primary"
+                onClick={() => { setGenerateError(''); setShowLayoutModal(true); }}
+                disabled={!fotoId || !spruch.trim()}
+                title={!fotoId ? 'Bitte ein Foto auswählen' : !spruch.trim() ? 'Bitte einen Spruch/Hook wählen' : ''}
+              >
+                Vorlage {layoutVorlage} konfigurieren &amp; rendern
+              </button>
+            ) : (
+              <button
+                className="btn-primary"
+                onClick={onGenerate}
+                disabled={generating || (mode === 'ki' ? !motiv : mode === 'foto' ? !fotoId : !spruch.trim())}
+              >
+                {generating
+                  ? (mode === 'overlay' ? `Rendere ${expected} Overlays…` : `Generiere ${expected} Bilder…`)
+                  : (mode === 'overlay' ? 'Overlays rendern' : 'Creatives generieren')}
+              </button>
+            )}
           </div>
         </div>
         {generateError && <div className="alert alert-error" style={{ marginTop: 12 }}>{generateError}</div>}
@@ -1384,6 +1467,19 @@ export default function JobCreatives() {
               } catch (err) { alert('Archivieren fehlgeschlagen: ' + err.message); }
             }
           }, 0);
+        }}
+      />
+
+      <LayoutVorlageModal
+        open={showLayoutModal}
+        job={job}
+        vorlage={layoutVorlage}
+        fotoId={fotoId}
+        spruch={spruch}
+        onClose={() => setShowLayoutModal(false)}
+        onCreated={(neue) => {
+          if (Array.isArray(neue) && neue.length) setCreatives(prev => [...neue, ...prev]);
+          setShowLayoutModal(false);
         }}
       />
 
