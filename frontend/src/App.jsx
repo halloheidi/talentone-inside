@@ -32,6 +32,7 @@ import EigeneLeads from './pages/admin/EigeneLeads.jsx';
 import Controlling from './pages/admin/Controlling.jsx';
 import EmailVorlagen from './pages/admin/EmailVorlagen.jsx';
 import MetaIntegration from './pages/admin/Meta.jsx';
+import Bestandskunden from './pages/Bestandskunden.jsx';
 import ControllingDashboard from './pages/ControllingDashboard.jsx';
 import OfferWizard from './pages/OfferWizard.jsx';
 import OffersList from './pages/OffersList.jsx';
@@ -90,6 +91,7 @@ export default function App() {
         <Route path="admin/controlling" element={<AdminOnly><Controlling /></AdminOnly>} />
         <Route path="admin/email-vorlagen" element={<AdminOnly><EmailVorlagen /></AdminOnly>} />
         <Route path="admin/meta" element={<AdminOnly><MetaIntegration /></AdminOnly>} />
+        <Route path="bestandskunden" element={<AdminOnly><Bestandskunden /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />

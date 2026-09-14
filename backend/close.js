@@ -147,6 +147,28 @@ export async function addTask({ leadId, text, assignedTo, dueIso }) {
   });
 }
 
+/** Holt einen Task (u.a. is_complete, assigned_to). */
+export async function getTask(taskId) {
+  return closeFetch(`/task/${taskId}/`);
+}
+
+/** Aktualisiert einen Task (Text, assigned_to, date) — nicht löschen+neu. */
+export async function updateTask(taskId, patch) {
+  return closeFetch(`/task/${taskId}/`, { method: 'PUT', body: JSON.stringify(patch) });
+}
+
+/** Löscht einen Task. */
+export async function deleteTask(taskId) {
+  return closeFetch(`/task/${taskId}/`, { method: 'DELETE' });
+}
+
+/** Freitextsuche nach Leads (Fuzzy-Matching macht der Aufrufer). @returns Array */
+export async function searchLeads(query, limit = 8) {
+  if (!query || !String(query).trim()) return [];
+  const res = await closeFetch(`/lead/?query=${encodeURIComponent(String(query).trim())}&_limit=${limit}`);
+  return res.data || [];
+}
+
 /**
  * Best-effort-Note für allgemeine Tool-Aktivitäten (Formular-Versand, Feedback,
  * Zahlungen, Go-Live etc.). Liest close_lead_id vom Kunden (primär), fällt

@@ -62,6 +62,24 @@ export async function listCustomers({ page = 1, limit = 1000 } = {}) {
   };
 }
 
+/**
+ * Listet Dokumente paginiert (für den Bestandskunden-Sync). Optionaler
+ * type-Filter (INVOICE/CREDIT/STORNO). Rückgabe wie listCustomers.
+ */
+export async function listDocuments({ page = 1, limit = 100, types = [], extra = {} } = {}) {
+  const params = { page: String(page), limit: String(limit), ...extra };
+  if (types.length) params.type = types.join(',');
+  const qs = new URLSearchParams(params).toString();
+  const data = await easybill(`/documents?${qs}`);
+  return {
+    page:  Number(data?.page || page),
+    pages: Number(data?.pages || 1),
+    limit: Number(data?.limit || limit),
+    total: Number(data?.total || 0),
+    items: Array.isArray(data?.items) ? data.items : [],
+  };
+}
+
 /** Holt einen einzelnen Kunden per ID. */
 export async function getCustomer(id) {
   if (!id) throw new Error('customer id fehlt.');
