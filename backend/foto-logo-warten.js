@@ -12,6 +12,8 @@ import { supabase } from './supabase.js';
 export function computeFotoLogoWarten({ anfrageVersand, uploadToken, hatLogo, hatFotos }) {
   const angefragt = !!anfrageVersand || !!uploadToken;
   if (!angefragt) return null;
+  // Explizit als beantwortet markiert (Upload hat den Umfang erfüllt) → nicht mehr mahnen.
+  if (anfrageVersand?.inhalte?.beantwortet_am) return null;
   const umfang = anfrageVersand?.inhalte?.umfang || 'beides';
   const wantLogo = umfang !== 'fotos';
   const wantFotos = umfang !== 'logo';

@@ -873,7 +873,7 @@ export default function KundeDetail() {
         )}
       </div>
 
-      <div className="ref-strip">
+      <div className="ref-strip" id="referenzbilder">
         <div className="ref-strip-title">
           {referenzbilder.length > 0
             ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)</>

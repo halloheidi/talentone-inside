@@ -11,6 +11,7 @@ import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
+import { vermerkeUpload, markAnfrageBeantwortetWennErfuellt } from '../upload-benachrichtigung.js';
 
 // mail_brand → { logo_url, name } für die Public-Seiten (Review/Anfragen). EINE Quelle
 // (die Maps aus mail.js), kein Duplikat. Ohne/unbekannten mail_brand → null (Agentur-Branding).
@@ -103,6 +104,9 @@ router.post('/upload/:token', async (req, res) => {
       await supabase.from('talentone_referenzbilder').insert({
         kunde_id: kunde.id, bild_url: publicUrl, typ: 'logo', uploaded_via: 'kunde',
       });
+      // Debounce-Sammlung + offene Anfrage ggf. als beantwortet markieren (best-effort).
+      await vermerkeUpload(kunde.id, { typ: 'logo', dateiname: fileName });
+      markAnfrageBeantwortetWennErfuellt(kunde.id).catch(() => {});
       return res.status(201).json({ ok: true, typ: 'logo', bild_url: publicUrl });
     }
 
@@ -119,6 +123,9 @@ router.post('/upload/:token', async (req, res) => {
       })
       .select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
+    // Debounce-Sammlung + offene Anfrage ggf. als beantwortet markieren (best-effort).
+    await vermerkeUpload(kunde.id, { typ: 'foto', dateiname: fileName });
+    markAnfrageBeantwortetWennErfuellt(kunde.id).catch(() => {});
     res.status(201).json({ ok: true, typ: 'foto', referenzbild: row });
   } catch (err) {
     console.error('[public-upload]', err.message);

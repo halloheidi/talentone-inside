@@ -47,6 +47,7 @@ import { startEigeneLeadsScheduler } from './eigene-leads-scheduler.js';
 import { startCampaignReminderScheduler } from './campaign-reminder.js';
 import { startMetaSyncScheduler } from './meta-sync.js';
 import { startWeeklyFeedbackScheduler } from './weekly-feedback.js';
+import { startUploadBenachrichtigungScheduler } from './upload-benachrichtigung.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -147,5 +148,6 @@ app.listen(PORT, () => {
   startCampaignReminderScheduler();
   startMetaSyncScheduler();
   startWeeklyFeedbackScheduler();
+  startUploadBenachrichtigungScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });
