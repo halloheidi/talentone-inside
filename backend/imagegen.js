@@ -903,6 +903,8 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   let finalBuffer = rawBuffer;
   let bildOhneLogoUrl = null;
   let logoPosition = null;
+  // Neue Creatives erben den Kunden-Default „Logo ohne weiße Fläche bevorzugen".
+  const weisseFlaeche = kunde?.logo_ohne_flaeche_default !== true;
 
   // Rohbild (ohne Overlay) separat speichern — Basis für spätere Logo-Neupositionierung.
   // Wenn kein Logo verwendet wird, ist bild_url == bild_ohne_logo_url; wir speichern
@@ -920,7 +922,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
       // 9:16 (Story/Reel): Logo unterhalb der oberen ~250px-Zone platzieren (Meta legt
       // dort Profilname/Overlays drüber). Feed (1:1): Default oben rechts.
       logoPosition = format === 'story' ? STORY_LOGO_POSITION : null;
-      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, logoPosition || undefined);
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, logoPosition || undefined, { weisseFlaeche });
     } catch (err) {
       console.warn(`[logo-overlay] fehlgeschlagen — fahre ohne Overlay fort: ${err.message}`);
     }
@@ -928,7 +930,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
-  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition };
+  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche: weisseFlaeche };
 }
 
 /**
@@ -1083,7 +1085,7 @@ export async function generateGezielteAenderung({ job, kunde, creative, wunsch, 
     try {
       const logoBuf = kunde?.logo_url ? (await fetchAsBuffer(kunde.logo_url)).buffer : null;
       const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
-      finalBuffer = await composeLogoOverlay(editedBase, transparentLogo, creative.logo_position || {});
+      finalBuffer = await composeLogoOverlay(editedBase, transparentLogo, creative.logo_position || {}, { weisseFlaeche: creative?.logo_weisse_flaeche !== false });
     } catch (err) { console.warn(`[gezielt] logo-overlay skip: ${err.message}`); }
   }
 
@@ -1168,12 +1170,13 @@ export async function deriveStoryFromFeed({ job, kunde, creative, stilPrompt = '
     try {
       const logoBuf = (await fetchAsBuffer(kunde.logo_url)).buffer;
       const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
-      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, STORY_LOGO_POSITION);
+      // Story übernimmt die Fläche-Wahl des Feed-Originals (inkl. 250px-Positionsregel).
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, STORY_LOGO_POSITION, { weisseFlaeche: creative?.logo_weisse_flaeche !== false });
       logoPosition = STORY_LOGO_POSITION;
     } catch (err) { console.warn(`[story-derive] logo-overlay skip: ${err.message}`); }
   }
 
   const filename = `${job.id}/story-derived-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
-  return { bildUrl, bildOhneLogoUrl, prompt, logoPosition };
+  return { bildUrl, bildOhneLogoUrl, prompt, logoPosition, logoWeisseFlaeche: creative?.logo_weisse_flaeche !== false };
 }

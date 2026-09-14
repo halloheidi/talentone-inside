@@ -6,10 +6,12 @@ import { api } from '../lib/api.js';
 // Zeigt bild_ohne_logo_url als Base + Logo-Overlay (Preview via CSS).
 // Beim Speichern: PATCH /creatives/:id/logo-position, das Backend rendert
 // per Sharp neu und liefert das aktualisierte Creative zurück.
-export default function LogoPositionModal({ open, creative, logoUrl, onClose, onSaved }) {
+export default function LogoPositionModal({ open, creative, logoUrl, logoTransparentUrl, onClose, onSaved }) {
   const [pos, setPos] = useState({ x: 0.87, y: 0.10, width_pct: 0.20 });
+  const [weisseFlaeche, setWeisseFlaeche] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const hatTransparent = !!logoTransparentUrl;
   const dragRef = useRef(null);
   const stageRef = useRef(null);
   const logoDimsRef = useRef({ w: 1, h: 1 });
@@ -24,7 +26,9 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
       y: Number.isFinite(p.y) ? p.y : 0.10,
       width_pct: wp,
     });
-  }, [open, creative]);
+    // Ohne transparentes Logo ist „ohne Fläche" nicht möglich → immer an.
+    setWeisseFlaeche(logoTransparentUrl ? creative?.logo_weisse_flaeche !== false : true);
+  }, [open, creative, logoTransparentUrl]);
 
   function startDrag(e) {
     if (!stageRef.current) return;
@@ -57,7 +61,7 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
     try {
       const res = await api(`/creatives/${creative.id}/logo-position`, {
         method: 'PATCH',
-        body: { x: pos.x, y: pos.y, width_pct: pos.width_pct },
+        body: { x: pos.x, y: pos.y, width_pct: pos.width_pct, weisse_flaeche: weisseFlaeche },
       });
       if (onSaved) onSaved(res.creative);
       onClose();
@@ -130,9 +134,9 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '6%',
-                background: 'rgba(255,255,255,0.75)',
-                borderRadius: '14%',
+                padding: weisseFlaeche ? '6%' : '0',
+                background: weisseFlaeche ? 'rgba(255,255,255,0.75)' : 'transparent',
+                borderRadius: weisseFlaeche ? '14%' : '0',
                 boxShadow: '0 0 0 2px rgba(0,120,255,0.8)',
               }}
               onLoad={(e) => {
@@ -141,10 +145,11 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
               }}
             >
               <img
-                src={logoUrl}
+                src={(!weisseFlaeche && logoTransparentUrl) ? logoTransparentUrl : logoUrl}
                 alt="Logo"
                 draggable={false}
-                style={{ width: '100%', height: 'auto', pointerEvents: 'none', display: 'block' }}
+                style={{ width: '100%', height: 'auto', pointerEvents: 'none', display: 'block',
+                  filter: weisseFlaeche ? 'none' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}
               />
             </div>
           </div>
@@ -165,9 +170,22 @@ export default function LogoPositionModal({ open, creative, logoUrl, onClose, on
                 {Math.round(pos.width_pct * 100)}%
               </span>
             </label>
+
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginTop: 14 }}
+              title={hatTransparent ? '' : 'Transparentes Logo fehlt in der Kundenakte'}>
+              <input type="checkbox" checked={weisseFlaeche} disabled={!hatTransparent}
+                onChange={e => setWeisseFlaeche(e.target.checked)} />
+              <span style={{ color: hatTransparent ? undefined : '#9a9994' }}>Weißer Hintergrund (Plakette)</span>
+            </label>
+            {!hatTransparent && (
+              <p style={{ fontSize: 12, color: '#9a5a00', margin: '4px 0 0 26px' }}>
+                Transparentes Logo fehlt in der Kundenakte — ohne weiße Fläche nicht möglich.
+              </p>
+            )}
             <p style={{ fontSize: 12, color: '#5a5955', marginTop: 10 }}>
-              Ziehe das Logo im Bild, um es zu verschieben. Die tatsächliche Darstellung erhält
-              beim Speichern automatisch einen dezenten halbtransparenten Hintergrund für die Lesbarkeit.
+              Ziehe das Logo im Bild, um es zu verschieben. {weisseFlaeche
+                ? 'Mit Plakette: dezenter halbtransparenter Hintergrund hinter dem Logo.'
+                : 'Ohne Plakette: das transparente Logo liegt direkt auf dem Motiv, mit feinem Schatten für die Lesbarkeit.'}
             </p>
             {error && <p style={{ color: '#c1272d', fontSize: 13, marginTop: 8 }}>{error}</p>}
           </div>

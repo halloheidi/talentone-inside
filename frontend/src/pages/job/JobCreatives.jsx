@@ -1349,6 +1349,7 @@ export default function JobCreatives() {
         open={!!logoPosTarget}
         creative={logoPosTarget}
         logoUrl={kunde?.logo_url}
+        logoTransparentUrl={kunde?.logo_transparent_url}
         onClose={() => setLogoPosTarget(null)}
         onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
       />

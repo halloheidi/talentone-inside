@@ -46,7 +46,7 @@ async function resolveTransparentLogo(kunde) {
 // logo_position oder null (=> Default oben rechts). Gibt die neue Row zurueck.
 async function relogoBildCreative(existing, transparentLogo) {
   const base = await fetchAsBuffer(existing.bild_ohne_logo_url);
-  const composed = await composeLogoOverlay(base.buffer, transparentLogo, existing.logo_position || {});
+  const composed = await composeLogoOverlay(base.buffer, transparentLogo, existing.logo_position || {}, { weisseFlaeche: existing.logo_weisse_flaeche !== false });
   const path = `${existing.job_id}/${existing.format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const newUrl = await uploadBuffer({ bucket: CREATIVES_BUCKET, path, buffer: composed, contentType: 'image/png' });
 
@@ -442,11 +442,12 @@ router.post('/generate', async (req, res) => {
       if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
       if (allOk.length > 0) {
-        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition }) => ({
+        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche }) => ({
           job_id, format, typ: 'bild', bild_url: bildUrl,
           bild_ohne_logo_url: bildOhneLogoUrl || null,
           prompt, status: 'fertig',
           logo_position: logoPosition || null,
+          logo_weisse_flaeche: logoWeisseFlaeche !== false,
           stilvorlage_id: stilvorlage?.id || null,
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
@@ -645,7 +646,7 @@ async function deriveStoryInBackground(existing, job, kunde) {
         .select('layout_prompt').eq('id', existing.stilvorlage_id).maybeSingle();
       stilPrompt = sv?.layout_prompt || '';
     }
-    const { bildUrl, bildOhneLogoUrl, prompt, logoPosition } =
+    const { bildUrl, bildOhneLogoUrl, prompt, logoPosition, logoWeisseFlaeche } =
       await deriveStoryFromFeed({ job, kunde, creative: existing, stilPrompt });
 
     const { error: insErr } = await supabase.from('talentone_creatives').insert({
@@ -655,6 +656,7 @@ async function deriveStoryInBackground(existing, job, kunde) {
       bild_url: bildUrl,
       bild_ohne_logo_url: bildOhneLogoUrl || null,
       logo_position: logoPosition || null,
+      logo_weisse_flaeche: logoWeisseFlaeche !== false, // Story erbt die Wahl des Feed-Originals
       prompt,
       status: 'fertig',
       parent_id: existing.id,
@@ -749,7 +751,7 @@ router.patch('/:id/adcopy', async (req, res) => {
    Rendert das Creative aus bild_ohne_logo_url + kunden.logo_transparent_url
    neu; ersetzt bild_url + speichert logo_position. */
 router.patch('/:id/logo-position', async (req, res) => {
-  const { x, y, width_pct } = req.body || {};
+  const { x, y, width_pct, weisse_flaeche } = req.body || {};
   const position = {};
   if (x != null) position.x = Number(x);
   if (y != null) position.y = Number(y);
@@ -772,10 +774,17 @@ router.patch('/:id/logo-position', async (req, res) => {
     .select('id, logo_url, logo_transparent_url').eq('id', job.kunde_id).single();
   if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
 
+  // Effektive Flächen-Wahl: expliziter Toggle > bisheriger Creative-Wert. „Ohne Fläche"
+  // verlangt ein hinterlegtes transparentes Logo — NICHT on-the-fly herausrechnen.
+  const flaeche = weisse_flaeche !== undefined ? !!weisse_flaeche : (existing.logo_weisse_flaeche !== false);
+  if (!flaeche && !kunde.logo_transparent_url) {
+    return res.status(400).json({ error: 'Transparentes Logo fehlt in der Kundenakte — „ohne weiße Fläche" nicht möglich.' });
+  }
+
   try {
     const transparentLogo = await resolveTransparentLogo(kunde);
     const base = await fetchAsBuffer(existing.bild_ohne_logo_url);
-    const composed = await composeLogoOverlay(base.buffer, transparentLogo, position);
+    const composed = await composeLogoOverlay(base.buffer, transparentLogo, position, { weisseFlaeche: flaeche });
 
     // Neues Bild uploaden, altes ersetzen
     const path = `${existing.job_id}/${existing.format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
@@ -785,7 +794,7 @@ router.patch('/:id/logo-position', async (req, res) => {
     const oldUrl = existing.bild_url;
 
     const { data: updated, error: uErr } = await supabase.from('talentone_creatives')
-      .update({ bild_url: newUrl, logo_position: position })
+      .update({ bild_url: newUrl, logo_position: position, logo_weisse_flaeche: flaeche })
       .eq('id', existing.id).select().single();
     if (uErr) return res.status(500).json({ error: uErr.message });
 
@@ -967,6 +976,7 @@ router.post('/:id/edit-apply', async (req, res) => {
       bild_url,
       bild_ohne_logo_url: bild_ohne_logo_url || null,
       logo_position: original.logo_position || null,
+      logo_weisse_flaeche: original.logo_weisse_flaeche !== false,
       stilvorlage_id: original.stilvorlage_id || null,
       parent_id: original.id,
       status: 'fertig',

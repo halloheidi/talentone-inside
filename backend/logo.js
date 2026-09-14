@@ -62,7 +62,8 @@ export async function logoBrightness(transparentPngBuffer) {
  *                                         width_pct = Logo-Breite / Bildbreite, Default 0.20
  * @returns {Promise<Buffer>} komponiertes PNG
  */
-export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, position) {
+export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, position, opts = {}) {
+  const { weisseFlaeche = true } = opts; // false → Plakette weglassen, Logo direkt aufs Motiv
   const base = sharp(baseBuffer);
   const meta = await base.metadata();
   const W = meta.width, H = meta.height;
@@ -87,6 +88,18 @@ export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, posi
   const left = Math.round(W * cx - lw / 2);
   const top  = Math.round(H * cy - lh / 2);
 
+  if (!weisseFlaeche) {
+    // Ohne Plakette: transparentes Logo direkt aufs Motiv, darunter ein dezenter
+    // weicher Schlagschatten (Lesbarkeits-Netz gegen unruhige Bildbereiche — subtil,
+    // kein harter Sticker-Rand).
+    const schatten = await weicherSchatten(resized.data, lw, lh);
+    const off = Math.max(2, Math.round(Math.min(lw, lh) * 0.03));
+    return base.composite([
+      { input: schatten.buffer, left: clampInt(left - schatten.pad + off, -schatten.pad, W), top: clampInt(top - schatten.pad + off, -schatten.pad, H) },
+      { input: resized.data, left, top },
+    ]).png().toBuffer();
+  }
+
   // Backdrop: abgerundetes Rechteck hinter dem Logo. Farbe je nach Logo-Helligkeit.
   const pad = Math.round(Math.min(lw, lh) * 0.18);
   const backdropW = lw + pad * 2;
@@ -110,6 +123,31 @@ export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, posi
     { input: backdropSvg, left: backdropLeft, top: backdropTop },
     { input: resized.data, left, top },
   ]).png().toBuffer();
+}
+
+/**
+ * Erzeugt aus einem RGBA-Logo einen weichen, halbtransparenten Schlagschatten:
+ * die Logo-Silhouette (Alpha) in Schwarz, mit Rand versehen und weichgezeichnet.
+ * @returns {{ buffer: Buffer, pad: number }} pad = zusätzlicher Rand rund ums Logo
+ */
+async function weicherSchatten(logoRgbaBuffer, lw, lh) {
+  const pad = Math.max(6, Math.round(Math.min(lw, lh) * 0.12));
+  const sigma = Math.max(2, Math.round(Math.min(lw, lh) * 0.06));
+  const { data, info } = await sharp(logoRgbaBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  // Schwarze Silhouette mit gedämpftem Alpha (max. ~50 %).
+  const sil = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    sil[i] = 0; sil[i + 1] = 0; sil[i + 2] = 0;
+    sil[i + 3] = Math.round((data[i + 3] / 255) * 0.5 * 255);
+  }
+  // Auf gepolstertes, transparentes Canvas legen, dann weichzeichnen.
+  const silPng = await sharp(sil, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
+  const buffer = await sharp({ create: { width: lw + pad * 2, height: lh + pad * 2, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: silPng, left: pad, top: pad }])
+    .blur(sigma)
+    .png()
+    .toBuffer();
+  return { buffer, pad };
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }

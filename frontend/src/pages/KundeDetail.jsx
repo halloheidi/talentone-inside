@@ -515,6 +515,18 @@ export default function KundeDetail() {
           style={{ display: 'none' }}
           onChange={onLogoChange}
         />
+        {/* Kunden-Default für das Logo-Overlay; neue Creatives erben ihn (pro Creative überschreibbar). */}
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--ink-3)', marginTop: 6,
+            cursor: kunde.logo_transparent_url ? 'pointer' : 'not-allowed' }}
+          title={kunde.logo_transparent_url ? 'Neue Creatives ohne weiße Logo-Fläche rendern' : 'Transparentes Logo fehlt in der Kundenakte'}>
+          <input type="checkbox" disabled={!kunde.logo_transparent_url} checked={!!kunde.logo_ohne_flaeche_default}
+            onChange={async e => {
+              const v = e.target.checked;
+              try { const res = await api(`/kunden/${kundeId}`, { method: 'PATCH', body: { logo_ohne_flaeche_default: v } }); setKunde(res.kunde); }
+              catch (err) { alert(err.message || String(err)); }
+            }} />
+          Logo ohne weiße Fläche bevorzugen
+        </label>
         <div className="kunde-head-body">
           {!editMode ? (
             <>
