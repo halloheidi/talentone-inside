@@ -81,6 +81,10 @@ export default function JobCreatives() {
 
   // Generation
   const [varianten, setVarianten] = useState(1);
+  // Ausgabeformate (Mehrfachauswahl): 1:1 / 4:5 / 9:16. Default = 1:1 + 9:16.
+  const [genFormats, setGenFormats] = useState(['quadrat', 'story']);
+  const toggleGenFormat = (f) => setGenFormats(prev =>
+    prev.includes(f) ? (prev.length > 1 ? prev.filter(x => x !== f) : prev) : [...prev, f]);
   const [logoAufKleidungGen, setLogoAufKleidungGen] = useState(false); // Logo aufs Motiv (Kleidung/Fahrzeug)
   const [logoKleidungModusGen, setLogoKleidungModusGen] = useState('voll'); // 'voll' = komplett inkl. Schriftzug | 'icon'
   const [generating, setGenerating] = useState(false);
@@ -182,6 +186,20 @@ export default function JobCreatives() {
       startCreatives?.(1);
     } catch (err) {
       alert(`Story-Ableitung fehlgeschlagen: ${err.message}`);
+    }
+  }
+
+  // ── Feed 4:5 aus 1:1-Creative ableiten (reuse storyBusy-Set für den Spinner) ──
+  async function onDeriveFeed(creative) {
+    if (storyBusy.has(creative.id)) return;
+    if (!confirm('4:5-Feed-Version aus diesem 1:1-Creative ableiten?\n\nDas Motiv wird per KI dezent nach oben/unten erweitert und mittig auf 4:5 beschnitten (dauert ~30-60 Sek). Erscheint automatisch in der Galerie.')) return;
+    try {
+      await api(`/creatives/${creative.id}/feed-ableiten`, { method: 'POST' });
+      setStoryBusy(prev => { const n = new Set(prev); n.add(creative.id); return n; });
+      startStoryPolling(creative.id);
+      startCreatives?.(1);
+    } catch (err) {
+      alert(`4:5-Ableitung fehlgeschlagen: ${err.message}`);
     }
   }
 
@@ -516,12 +534,12 @@ export default function JobCreatives() {
     try {
       const trimmedSpruch = spruch.trim() || undefined;
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
+        ? { job_id: job.id, mode, motiv, varianten, formats: genFormats, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
         : mode === 'foto'
-        ? { job_id: job.id, mode, varianten, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
-        : { job_id: job.id, mode: 'overlay', varianten, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
+        ? { job_id: job.id, mode, varianten, formats: genFormats, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
+        : { job_id: job.id, mode: 'overlay', varianten, formats: genFormats, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
       const res = await api('/creatives/generate', { method: 'POST', body });
-      const exp = res.expected || varianten * 2;
+      const exp = res.expected || varianten * (genFormats.length || 2);
       setExpected(exp);
       startPolling(baseline, exp);
       // Persistenter Banner über JobView-Context (übersteht Tab-Wechsel)
@@ -1074,12 +1092,25 @@ export default function JobCreatives() {
       <section className="card-form" style={{ marginTop: 18 }}>
         <div className="generate-row" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
           {mode !== 'layout' && (
+            <div className="field" style={{ flex: '0 0 auto' }}>
+              <span>Formate</span>
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                {[['quadrat', '1:1'], ['feed', '4:5'], ['story', '9:16']].map(([key, label]) => (
+                  <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', padding: '5px 10px', borderRadius: 8, border: genFormats.includes(key) ? '1.5px solid #16a34a' : '1px solid var(--line, #ddd)', background: genFormats.includes(key) ? '#f0fdf4' : '#fff' }}>
+                    <input type="checkbox" checked={genFormats.includes(key)} onChange={() => toggleGenFormat(key)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {mode !== 'layout' && (
             <label className="field" style={{ flex: '0 0 140px' }}>
               <span>Varianten</span>
               <select value={varianten} onChange={e => setVarianten(Number(e.target.value))}>
-                <option value={1}>1 (= 2 Bilder)</option>
-                <option value={2}>2 (= 4 Bilder)</option>
-                <option value={3}>3 (= 6 Bilder)</option>
+                <option value={1}>1 (= {genFormats.length} Bilder)</option>
+                <option value={2}>2 (= {genFormats.length * 2} Bilder)</option>
+                <option value={3}>3 (= {genFormats.length * 3} Bilder)</option>
               </select>
             </label>
           )}
@@ -1241,7 +1272,7 @@ export default function JobCreatives() {
                     <img src={c.bild_url} alt="" loading="lazy" />
                   )}
                   <span className={`format-badge format-${c.format}`}>
-                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'sonstiges' ? '?' : '1:1')}
+                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : c.format === 'sonstiges' ? '?' : '1:1')}
                   </span>
                   {c.typ === 'overlay' && (
                     <span style={{ position: 'absolute', top: 8, left: 8, background: '#0a0a0a', color: '#d4ff00', padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}>
@@ -1327,9 +1358,19 @@ export default function JobCreatives() {
                         className="btn-ghost btn-sm"
                         onClick={() => onDeriveStory(c)}
                         disabled={storyBusy.has(c.id)}
-                        title="Aus diesem Feed-Creative eine 9:16-Story ableiten (Motiv wird nach oben/unten erweitert)"
+                        title="Aus diesem 1:1-Creative eine 9:16-Story ableiten (Motiv wird nach oben/unten erweitert)"
                       >
                         {storyBusy.has(c.id) ? '📱 Story läuft…' : '📱 Story (9:16) ableiten'}
+                      </button>
+                    )}
+                    {!showArchived && c.format === 'quadrat' && c.typ !== 'video' && (
+                      <button
+                        className="btn-ghost btn-sm"
+                        onClick={() => onDeriveFeed(c)}
+                        disabled={storyBusy.has(c.id)}
+                        title="Aus diesem 1:1-Creative eine 4:5-Feed-Version ableiten (Metas empfohlenes Mobile-Feed-Format)"
+                      >
+                        {storyBusy.has(c.id) ? '📱 4:5 läuft…' : '📱 Feed (4:5) ableiten'}
                       </button>
                     )}
                     {c.format === 'story' && c.typ !== 'video' && (
@@ -1411,7 +1452,7 @@ export default function JobCreatives() {
         }
       >
         <p className="pane-hint">
-          Format bleibt <strong>{reworkTarget?.format === 'story' ? '9:16 (Story)' : '1:1 (Feed)'}</strong>. Modus „KI-Bild" — das alte Creative wird ersetzt.
+          Format bleibt <strong>{reworkTarget?.format === 'story' ? '9:16 (Story)' : reworkTarget?.format === 'feed' ? '4:5 (Feed)' : '1:1 (Feed)'}</strong>. Modus „KI-Bild" — das alte Creative wird ersetzt.
         </p>
         <label className="field field-full">
           <span>Neues Motiv</span>

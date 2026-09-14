@@ -106,7 +106,7 @@ export default function LogoPositionModal({ open, creative, logoUrl, logoTranspa
               width: '100%',
               maxWidth: 480,
               margin: '0 auto',
-              aspectRatio: creative.format === 'story' ? '9 / 16' : '1 / 1',
+              aspectRatio: creative.format === 'story' ? '9 / 16' : creative.format === 'feed' ? '4 / 5' : '1 / 1',
               background: '#000',
               borderRadius: 8,
               overflow: 'hidden',

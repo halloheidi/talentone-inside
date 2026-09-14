@@ -7,7 +7,7 @@ import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
-import { extendTo9x16, normalizeImageForOpenAI } from './imageops.js';
+import { extendTo9x16, cropTo4x5, normalizeImageForOpenAI } from './imageops.js';
 import sharp from 'sharp';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
@@ -19,6 +19,7 @@ const CLAUDE_MODEL = 'claude-sonnet-4-6';
 // Format → OpenAI image size (gpt-image-2 unterstützt 1024x1024, 1024x1536, 1536x1024)
 const FORMAT_SIZE = {
   quadrat: '1024x1024',  // 1:1 — Feed
+  feed: '1024x1536',     // 2:3 hochkant → per Sharp mittig auf 4:5 (1080×1350) beschnitten
   story: '1024x1536',    // 2:3 — nahe an 9:16, von gpt-image-2 supported
 };
 
@@ -511,7 +512,7 @@ function buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, sti
   const firmenname = kunde?.firmenname || '';
   const benefits = pickBenefits(job);
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
-  const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : format === 'feed' ? 'hochkant im Seitenverhältnis 4:5 (Mobile-Feed). WICHTIG: Motiv mittig/zentriert komponieren und oben sowie unten je ~10% des Bildes frei von wichtigen Elementen (Köpfe, Text, Logo) halten — dieser Randbereich wird beschnitten.' : 'quadratisch (1:1, geeignet für Feed-Posts)';
   const farben = buildFarbenHinweis(kunde);
   // Mit Stilvorlage: Farben aus der Kunden-CI erzwingen (nicht aus dem Referenzbild),
   // außer farben_fix ist gesetzt. Ohne Stilvorlage: bisheriger Markenfarben-Hinweis.
@@ -591,7 +592,7 @@ function buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hat
   const firmenname = kunde?.firmenname || '';
   const benefits = pickBenefits(job);
   const benefitListe = [...benefits.map(b => `"${b}"`), '"u.v.m."'].join(', ');
-  const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const orientation = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : format === 'feed' ? 'hochkant im Seitenverhältnis 4:5 (Mobile-Feed). WICHTIG: Motiv mittig/zentriert komponieren und oben sowie unten je ~10% des Bildes frei von wichtigen Elementen (Köpfe, Text, Logo) halten — dieser Randbereich wird beschnitten.' : 'quadratisch (1:1, geeignet für Feed-Posts)';
   const farben = buildFarbenHinweis(kunde);
   const farbenFix = !!stilvorlage?.farben_fix;
   const farbBlock = stilvorlage
@@ -670,7 +671,7 @@ function buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person
   const vorteile     = Array.isArray(nk.vorteile) ? nk.vorteile.filter(Boolean).slice(0, 4) : [];
   const unterschied  = (nk.unterschied || '').toString().trim();
   const firmenname   = kunde?.firmenname || '';
-  const orientation  = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : 'quadratisch (1:1, geeignet für Feed-Posts)';
+  const orientation  = format === 'story' ? 'hochkant (2:3, geeignet für Stories/Reels)' : format === 'feed' ? 'hochkant im Seitenverhältnis 4:5 (Mobile-Feed). WICHTIG: Motiv mittig/zentriert komponieren und oben sowie unten je ~10% des Bildes frei von wichtigen Elementen (Köpfe, Text, Logo) halten — dieser Randbereich wird beschnitten.' : 'quadratisch (1:1, geeignet für Feed-Posts)';
   const farben = buildFarbenHinweis(kunde);
 
   const refHinweis = [];
@@ -898,6 +899,14 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     } catch (err) {
       console.warn(`[extend-9x16] fehlgeschlagen — behalte 2:3-Original: ${err.message}`);
     }
+  } else if (format === 'feed') {
+    // 4:5 Mobile-Feed: gpt-image-2 liefert 1024×1536 (2:3), mittig auf 1080×1350
+    // beschneiden (kein Stretch; oben/unten ~10% werden weggeschnitten).
+    try {
+      rawBuffer = await cropTo4x5(rawBuffer);
+    } catch (err) {
+      console.warn(`[crop-4x5] fehlgeschlagen — behalte 2:3-Original: ${err.message}`);
+    }
   }
 
   let finalBuffer = rawBuffer;
@@ -920,8 +929,10 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     try {
       const transparentLogo = await ensureTransparentLogo(kunde, logoRef.buffer);
       // 9:16 (Story/Reel): Logo unterhalb der oberen ~250px-Zone platzieren (Meta legt
-      // dort Profilname/Overlays drüber). Feed (1:1): Default oben rechts.
-      logoPosition = format === 'story' ? STORY_LOGO_POSITION : null;
+      // dort Profilname/Overlays drüber). 4:5 (Feed): eigene Position oben rechts,
+      // etwas höher/kleiner als 1:1. 1:1: Default oben rechts (null).
+      logoPosition = format === 'story' ? STORY_LOGO_POSITION
+        : format === 'feed' ? FEED_LOGO_POSITION : null;
       finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, logoPosition || undefined, { weisseFlaeche });
     } catch (err) {
       console.warn(`[logo-overlay] fehlgeschlagen — fahre ohne Overlay fort: ${err.message}`);
@@ -964,9 +975,8 @@ async function ensureTransparentLogo(kunde, originalLogoBuffer) {
   return transparent;
 }
 
-// Generiert eine Variante in beiden Formaten (quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
-  const formats = ['quadrat', 'story'];
+// Generiert eine Variante in den angeforderten Formaten (Default quadrat + story) parallel.
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll', formats = ['quadrat', 'story'] }) {
   const results = await Promise.allSettled(
     formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus })),
   );
@@ -995,7 +1005,7 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 
 // Kanonische Zielgroesse je Format — damit editierte Bilder uniform zu den
 // uebrigen Creatives sind (Logo-Position in % mappt dann identisch).
-const FORMAT_PIXELS = { quadrat: [1024, 1024], story: [1080, 1920] };
+const FORMAT_PIXELS = { quadrat: [1024, 1024], feed: [1080, 1350], story: [1080, 1920] };
 
 // Baut den Edit-Prompt: NUR der Wunsch aendert sich, alles andere bleibt.
 // Bei logoAufKleidung geht ein zweites Bild (das Firmenlogo) mit — dann wird die
@@ -1099,11 +1109,14 @@ export async function generateGezielteAenderung({ job, kunde, creative, wunsch, 
    reserviert. Das Logo wird in die sichere Zone gesetzt (unter dem oberen Rand).
    Relative Position {x,y,width_pct}, x/y = Zentrum. */
 const STORY_LOGO_POSITION = { x: 0.83, y: 0.22, width_pct: 0.16 };
+// 4:5 Feed (1080×1350): oben rechts, etwas höher/kleiner als beim 1:1-Default.
+const FEED_LOGO_POSITION = { x: 0.84, y: 0.07, width_pct: 0.18 };
 
-function buildStoryOutpaintPrompt(originalPrompt, stilPrompt) {
+function buildStoryOutpaintPrompt(originalPrompt, stilPrompt, targetFormat = 'story') {
   const stilKontext = stilPrompt?.trim() ? `\n\nSTIL-KONTEXT (für konsistenten Look, nicht wörtlich einblenden): ${String(stilPrompt).slice(0, 700)}` : '';
   const promptKontext = originalPrompt?.trim() ? `\n\nURSPRÜNGLICHER BILD-KONTEXT: ${String(originalPrompt).slice(0, 700)}` : '';
-  return `Erweitere dieses quadratische Motiv (BILD 1) zu einem HOCHFORMATIGEN Bild (9:16, Instagram/Reels Story).
+  const zielLabel = targetFormat === 'feed' ? '4:5 (Mobile-Feed, hochkant)' : '9:16 (Instagram/Reels Story)';
+  return `Erweitere dieses quadratische Motiv (BILD 1) zu einem HOCHFORMATIGEN Bild (${zielLabel}).
 
 HARTE REGELN (nicht verletzen):
 1. Das gesamte vorhandene Motiv bleibt vollständig erhalten, unverändert und mittig — nichts wegschneiden, nichts stauchen, nicht einfach hochskalieren.
@@ -1121,15 +1134,16 @@ HARTE REGELN (nicht verletzen):
  *
  * @returns {Promise<{bildUrl:string, bildOhneLogoUrl:(string|null), prompt:string, logoPosition:(object|null)}>}
  */
-export async function deriveStoryFromFeed({ job, kunde, creative, stilPrompt = '' }) {
+export async function deriveStoryFromFeed({ job, kunde, creative, stilPrompt = '', targetFormat = 'story' }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
+  const istFeed = targetFormat === 'feed';
   const inputUrl = creative.bild_ohne_logo_url || creative.bild_url;
   if (!inputUrl) throw new Error('Feed-Creative hat kein Bild.');
 
   const { buffer: rawInput } = await fetchAsBuffer(inputUrl);
   const norm = await normalizeImageForOpenAI(rawInput, { label: 'Feed-Creative' });
 
-  const prompt = buildStoryOutpaintPrompt(creative.prompt, stilPrompt);
+  const prompt = buildStoryOutpaintPrompt(creative.prompt, stilPrompt, targetFormat);
 
   const form = new FormData();
   form.append('model', 'gpt-image-2');
@@ -1154,29 +1168,31 @@ export async function deriveStoryFromFeed({ job, kunde, creative, stilPrompt = '
   const b64 = data.data?.[0]?.b64_json;
   if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
 
-  // 2:3 → exakt 1080×1920 (dezente Ambient-Erweiterung landet in den Overlay-Zonen).
+  // 2:3 → Story: exakt 1080×1920 (Ambient-Erweiterung in den Overlay-Zonen);
+  //       Feed:  mittig auf 1080×1350 (4:5) beschnitten.
   let rawBuffer = Buffer.from(b64, 'base64');
-  rawBuffer = await extendTo9x16(rawBuffer);
+  rawBuffer = istFeed ? await cropTo4x5(rawBuffer) : await extendTo9x16(rawBuffer);
 
-  // Logo neu für die Story-Safe-Zone platzieren (Position 0..1 skaliert auf 1080×1920).
+  // Logo neu für das Ziel-Format platzieren (Position 0..1 skaliert auf Zielgröße).
+  const ZIEL_LOGO_POSITION = istFeed ? FEED_LOGO_POSITION : STORY_LOGO_POSITION;
   let finalBuffer = rawBuffer;
   let bildOhneLogoUrl = null;
   let logoPosition = null;
   if (kunde?.logo_url) {
     const rand = Math.random().toString(36).slice(2, 8);
-    const rawFilename = `${job.id}/raw-story-derived-${Date.now()}-${rand}.png`;
+    const rawFilename = `${job.id}/raw-${targetFormat}-derived-${Date.now()}-${rand}.png`;
     try { bildOhneLogoUrl = await uploadToStorage(rawBuffer, rawFilename); }
     catch (err) { console.warn(`[story-derive] raw-upload skip: ${err.message}`); }
     try {
       const logoBuf = (await fetchAsBuffer(kunde.logo_url)).buffer;
       const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
-      // Story übernimmt die Fläche-Wahl des Feed-Originals (inkl. 250px-Positionsregel).
-      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, STORY_LOGO_POSITION, { weisseFlaeche: creative?.logo_weisse_flaeche !== false });
-      logoPosition = STORY_LOGO_POSITION;
-    } catch (err) { console.warn(`[story-derive] logo-overlay skip: ${err.message}`); }
+      // Abgeleitetes Format übernimmt die Fläche-Wahl des Feed-Originals.
+      finalBuffer = await composeLogoOverlay(rawBuffer, transparentLogo, ZIEL_LOGO_POSITION, { weisseFlaeche: creative?.logo_weisse_flaeche !== false });
+      logoPosition = ZIEL_LOGO_POSITION;
+    } catch (err) { console.warn(`[${targetFormat}-derive] logo-overlay skip: ${err.message}`); }
   }
 
-  const filename = `${job.id}/story-derived-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+  const filename = `${job.id}/${targetFormat}-derived-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
   return { bildUrl, bildOhneLogoUrl, prompt, logoPosition, logoWeisseFlaeche: creative?.logo_weisse_flaeche !== false };
 }

@@ -12,6 +12,7 @@ function detectFormat(file) {
   // Versuche aus Dateiname zu erraten (z.B. "...-9x16.mp4" oder "1x1.png")
   const n = (file.name || '').toLowerCase();
   if (/9[x:]?16|story|reel|vertikal|portrait/.test(n)) return 'story';
+  if (/4[x:]?5|1080.?1350|feed/.test(n)) return 'feed';
   if (/1[x:]?1|quadrat|square/.test(n)) return 'quadrat';
   return 'quadrat'; // sinnvoller Default für Feed
 }
@@ -179,6 +180,7 @@ export default function UploadCreativesModal({ open, onClose, jobId, onUploaded 
                   style={{ marginTop: 2 }}
                 >
                   <option value="quadrat">1:1 (Feed)</option>
+                  <option value="feed">4:5 (Mobile-Feed)</option>
                   <option value="story">9:16 (Story/Reel)</option>
                   <option value="sonstiges">Sonstiges</option>
                 </select>

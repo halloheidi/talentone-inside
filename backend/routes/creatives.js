@@ -69,7 +69,7 @@ async function relogoBildCreative(existing, transparentLogo) {
 // ("Overlay · Hook: \"…\""); Benefits werden nicht persistiert -> best effort.
 async function relogoOverlayCreative(existing, job, kunde) {
   const hook = (existing.prompt || '').match(/Hook:\s*"([^"]*)"/)?.[1] || '';
-  const fmt = existing.format === 'story' ? '9:16' : '1:1';
+  const fmt = existing.format === 'story' ? '9:16' : existing.format === 'feed' ? '4:5' : '1:1';
   const overlays = await generateOverlays({ job, kunde, spruch: hook, benefits: null, formats: [fmt] });
   const match = overlays.find(o => o.format === fmt) || overlays[0];
   if (!match?.bild_url) throw new Error('Overlay-Render lieferte kein Bild.');
@@ -85,7 +85,7 @@ async function relogoOverlayCreative(existing, job, kunde) {
 
 const router = Router();
 
-const VALID_FORMATS = new Set(['quadrat', 'story', 'sonstiges']);
+const VALID_FORMATS = new Set(['quadrat', 'feed', 'story', 'sonstiges']);
 const VALID_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 const VALID_VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime']);
 
@@ -328,7 +328,11 @@ router.post('/spruch-verbessern', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung, logo_kleidung_modus } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung, logo_kleidung_modus, formats } = req.body || {};
+  // Ausgabeformate (Mehrfachauswahl): 1:1 / 4:5 / 9:16. Default = quadrat + story.
+  const FORMAT_KEYS = ['quadrat', 'feed', 'story'];
+  const selFormats = (Array.isArray(formats) ? formats.filter(f => FORMAT_KEYS.includes(f)) : []);
+  const zielFormate = selFormats.length ? [...new Set(selFormats)] : ['quadrat', 'story'];
   // Logo aufs Motiv (Kleidung/Fahrzeug): expliziter Toggle ODER aus dem Motiv erkannt.
   const logoAufKleidung = logo_auf_kleidung === true || willLogoImMotiv(motiv || '');
   // Modus: 'icon' = nur Bildzeichen; sonst 'voll' (komplettes Logo inkl. Schriftzug).
@@ -385,7 +389,7 @@ router.post('/generate', async (req, res) => {
     referenceImages.push({ url: stilvorlage.vorschau_url, name: 'stilbeispiel', isLogo: false, isStyle: true });
   }
 
-  const expected = n * 2; // jede Variante × 2 Formate
+  const expected = n * zielFormate.length; // jede Variante × gewählte Formate
   // Alte Fehlermeldung clearen damit das Frontend nicht den Fehler vom letzten Run sieht
   clearGenError(job_id);
   res.status(202).json({ accepted: true, expected, message: 'Generierung gestartet — Bilder erscheinen automatisch in der Galerie.' });
@@ -400,12 +404,12 @@ router.post('/generate', async (req, res) => {
           const overlays = await generateOverlays({
             job, kunde, spruch,
             benefits: Array.isArray(benefits) && benefits.length ? benefits : null,
-            formats: ['1:1', '9:16'],
+            formats: zielFormate.map(f => f === 'quadrat' ? '1:1' : f === 'feed' ? '4:5' : '9:16'),
           });
           for (const o of overlays) {
             allRows.push({
               job_id,
-              format: o.format === '1:1' ? 'quadrat' : 'story',
+              format: o.format === '1:1' ? 'quadrat' : o.format === '4:5' ? 'feed' : 'story',
               typ: 'overlay',
               bild_url: o.bild_url,
               status: 'fertig',
@@ -437,7 +441,7 @@ router.post('/generate', async (req, res) => {
     console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus, formats: zielFormate })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
@@ -558,15 +562,18 @@ router.post('/layout-preview', async (req, res) => {
   }
 });
 
-// POST /api/creatives/layout-render → rendert 1:1 + 9:16, legt 2 Creatives an.
-// body: { job_id, vorlage, foto_id, slots, freisteller?:bool }
+// POST /api/creatives/layout-render → rendert die gewählten Formate (1:1 / 4:5 / 9:16),
+// legt je ein Creative an. body: { job_id, vorlage, foto_id, slots, freisteller?, formats? }
 router.post('/layout-render', async (req, res) => {
-  const { job_id, vorlage, foto_id, slots, freisteller } = req.body || {};
+  const { job_id, vorlage, foto_id, slots, freisteller, formats } = req.body || {};
+  const LK = ['quadrat', 'feed', 'story'];
+  const zielFormate = (Array.isArray(formats) ? [...new Set(formats.filter(f => LK.includes(f)))] : []);
+  const layoutFormate = zielFormate.length ? zielFormate : ['quadrat', 'feed', 'story'];
   try {
     const ctx = await prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller });
     const rendered = await renderLayoutVorlage({
       vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri,
-      logoUri: ctx.logoUri, slots: ctx.slots, formats: ['quadrat', 'story'], jobId: job_id,
+      logoUri: ctx.logoUri, slots: ctx.slots, formats: layoutFormate, jobId: job_id,
     });
     const hookText = ctx.slots.hook || ctx.slots.textblock || '';
     const rows = rendered.map(r => ({
@@ -750,7 +757,7 @@ router.post('/:id/reel', async (req, res) => {
    Hintergrund-Job (wie /reel): Outpainting via gpt-image-2, dann neue Zeile mit
    format='story', parent_id=Ursprungs-Creative. Fehler → in-memory Fehlerstatus
    (getGenError) fürs Frontend; es entsteht NIE eine Zeile ohne Bild-URL. */
-async function deriveStoryInBackground(existing, job, kunde) {
+async function deriveStoryInBackground(existing, job, kunde, targetFormat = 'story') {
   try {
     let stilPrompt = '';
     if (existing.stilvorlage_id) {
@@ -759,25 +766,25 @@ async function deriveStoryInBackground(existing, job, kunde) {
       stilPrompt = sv?.layout_prompt || '';
     }
     const { bildUrl, bildOhneLogoUrl, prompt, logoPosition, logoWeisseFlaeche } =
-      await deriveStoryFromFeed({ job, kunde, creative: existing, stilPrompt });
+      await deriveStoryFromFeed({ job, kunde, creative: existing, stilPrompt, targetFormat });
 
     const { error: insErr } = await supabase.from('talentone_creatives').insert({
       job_id: existing.job_id,
-      format: 'story',
+      format: targetFormat,
       typ: existing.typ === 'overlay' ? 'overlay' : 'bild', // typ analog zum Parent
       bild_url: bildUrl,
       bild_ohne_logo_url: bildOhneLogoUrl || null,
       logo_position: logoPosition || null,
-      logo_weisse_flaeche: logoWeisseFlaeche !== false, // Story erbt die Wahl des Feed-Originals
+      logo_weisse_flaeche: logoWeisseFlaeche !== false, // Ableitung erbt die Wahl des Feed-Originals
       prompt,
       status: 'fertig',
       parent_id: existing.id,
       stilvorlage_id: existing.stilvorlage_id || null,
     });
-    if (insErr) { console.error('[story-derive-bg] DB-Insert:', insErr.message); recordGenError(existing.job_id, new Error(insErr.message)); }
-    else console.log(`[story-derive-bg] Story fertig für creative ${existing.id.slice(0, 8)}`);
+    if (insErr) { console.error(`[${targetFormat}-derive-bg] DB-Insert:`, insErr.message); recordGenError(existing.job_id, new Error(insErr.message)); }
+    else console.log(`[${targetFormat}-derive-bg] ${targetFormat} fertig für creative ${existing.id.slice(0, 8)}`);
   } catch (err) {
-    console.error('[story-derive-bg]', err.message);
+    console.error('[derive-bg]', err.message);
     recordGenError(existing.job_id, err);
   }
 }
@@ -835,6 +842,28 @@ router.post('/story-ableiten-alle', async (req, res) => {
   // Sequentiell — schont OpenAI-Rate-Limits (jede Ableitung ist ein gpt-image-Call).
   (async () => { for (const c of todo) await deriveStoryInBackground(c, job, kunde); })()
     .catch(err => console.error('[story-derive-alle] uncaught:', err));
+});
+
+/* POST /api/creatives/:id/feed-ableiten — eine 1:1-Zeile → 4:5-Feed (Mobile-Feed). */
+router.post('/:id/feed-ableiten', async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
+
+  const { data: existing, error } = await supabase
+    .from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (error || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.format !== 'quadrat') return res.status(400).json({ error: '4:5-Ableitung nur aus 1:1-Creatives möglich.' });
+  if (existing.typ === 'video') return res.status(400).json({ error: 'Quelle muss ein Bild sein, kein Video.' });
+  if (!existing.bild_url && !existing.bild_ohne_logo_url) return res.status(400).json({ error: 'Keine Bild-URL am Creative.' });
+
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  clearGenError(existing.job_id);
+  res.status(202).json({ accepted: true, parent_id: existing.id, message: '4:5-Ableitung gestartet — die Feed-Version erscheint automatisch in der Galerie.' });
+
+  deriveStoryInBackground(existing, job, kunde, 'feed')
+    .catch(err => console.error('[feed-derive] uncaught:', err));
 });
 
 /* PATCH /api/creatives/:id/adcopy  body: { adcopy_id: uuid|null }
@@ -1043,7 +1072,7 @@ router.post('/:id/edit-preview', async (req, res) => {
     if (existing.typ === 'overlay') {
       const aktHook = (existing.prompt || '').match(/Hook:\s*"([^"]*)"/)?.[1] || '';
       const neuHook = await neuerHookAusWunsch({ hook: aktHook, wunsch });
-      const fmt = existing.format === 'story' ? '9:16' : '1:1';
+      const fmt = existing.format === 'story' ? '9:16' : existing.format === 'feed' ? '4:5' : '1:1';
       const overlays = await generateOverlays({ job, kunde, spruch: neuHook, benefits: null, formats: [fmt] });
       const match = overlays.find(o => o.format === fmt) || overlays[0];
       if (!match?.bild_url) throw new Error('Overlay-Render lieferte kein Bild.');

@@ -52,7 +52,7 @@ export default function Lightbox({ items, index, onClose, onNavigate, filenameFo
     <div className="lb-overlay" onClick={onClose}>
       <div className="lb-topbar" onClick={e => e.stopPropagation()}>
         <div className="lb-meta">
-          <span className={`format-badge format-${item.format}`}>{item.format === 'story' ? '9:16' : '1:1'}</span>
+          <span className={`format-badge format-${item.format}`}>{item.format === 'story' ? '9:16' : item.format === 'feed' ? '4:5' : '1:1'}</span>
           <span className="lb-meta-date">{dateStr}</span>
           <span className="lb-meta-counter">{index + 1} / {items.length}</span>
         </div>

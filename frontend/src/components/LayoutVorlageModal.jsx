@@ -17,9 +17,14 @@ export default function LayoutVorlageModal({ open, job, vorlage, fotoId, spruch,
   const [loading, setLoading] = useState(false);   // Vorschau rendert
   const [saving, setSaving] = useState(false);      // Übernehmen läuft
   const [error, setError] = useState('');
+  const [layoutFormats, setLayoutFormats] = useState(['quadrat', 'feed', 'story']);
   const initRef = useRef(false);
 
   const isB = vorlage === 'B';
+  const FMT_LABEL = { quadrat: '1:1', feed: '4:5', story: '9:16' };
+  const fmtLabelList = ['quadrat', 'feed', 'story'].filter(f => layoutFormats.includes(f)).map(f => FMT_LABEL[f]).join(' + ');
+  const toggleLayoutFormat = (f) => setLayoutFormats(prev =>
+    prev.includes(f) ? (prev.length > 1 ? prev.filter(x => x !== f) : prev) : [...prev, f]);
 
   useEffect(() => {
     if (!open) { initRef.current = false; return; }
@@ -58,7 +63,7 @@ export default function LayoutVorlageModal({ open, job, vorlage, fotoId, spruch,
     try {
       const res = await api('/creatives/layout-render', {
         method: 'POST',
-        body: { job_id: job.id, vorlage, foto_id: fotoId, slots: slots || {}, freisteller: freistellerOn },
+        body: { job_id: job.id, vorlage, foto_id: fotoId, slots: slots || {}, freisteller: freistellerOn, formats: layoutFormats },
       });
       if (onCreated) onCreated(res.creatives || []);
       onClose();
@@ -87,11 +92,21 @@ export default function LayoutVorlageModal({ open, job, vorlage, fotoId, spruch,
             {loading ? 'Rendere…' : '↻ Vorschau aktualisieren'}
           </button>
           <button type="button" className="btn-primary" onClick={commit} disabled={saving || loading || !previewUrl}>
-            {saving ? 'Rendere 1:1 + 9:16…' : 'Übernehmen (1:1 + 9:16)'}
+            {saving ? `Rendere ${fmtLabelList}…` : `Übernehmen (${fmtLabelList})`}
           </button>
         </>
       }
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#5a5955' }}>Formate rendern:</span>
+        {[['quadrat', '1:1'], ['feed', '4:5'], ['story', '9:16']].map(([key, label]) => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', padding: '4px 10px', borderRadius: 8, border: layoutFormats.includes(key) ? '1.5px solid #16a34a' : '1px solid var(--line, #ddd)', background: layoutFormats.includes(key) ? '#f0fdf4' : '#fff' }}>
+            <input type="checkbox" checked={layoutFormats.includes(key)} onChange={() => toggleLayoutFormat(key)} />
+            {label}
+          </label>
+        ))}
+        <span style={{ fontSize: 11, color: '#9a9994' }}>Vorschau immer 1:1</span>
+      </div>
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
         {/* Vorschau (1:1) */}
         <div style={{ flex: '0 0 300px' }}>
@@ -106,7 +121,7 @@ export default function LayoutVorlageModal({ open, job, vorlage, fotoId, spruch,
             )}
           </div>
           <p style={{ fontSize: 11, color: '#8a8a8a', marginTop: 8 }}>
-            Vorschau in 1:1. Beim Übernehmen wird zusätzlich die 9:16-Story gerendert (Elemente in der Safe-Zone).
+            Vorschau in 1:1. Beim Übernehmen werden die oben gewählten Formate gerendert (Safe-Zones je Format).
           </p>
         </div>
 

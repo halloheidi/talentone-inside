@@ -220,7 +220,7 @@ export default function PublicReview() {
                             ? <><video src={c.bild_url} preload="metadata" muted playsInline /><span className="creative-play-icon" aria-hidden>▶</span></>
                             : <img src={c.bild_url} alt="" loading="lazy" />}
                           <span className={`format-badge format-${c.format}`}>
-                            {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
+                            {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : '1:1')}
                           </span>
                         </button>
                         {a && (
@@ -287,7 +287,7 @@ export default function PublicReview() {
                           ? <><video src={c.bild_url} preload="metadata" muted playsInline /><span className="creative-play-icon" aria-hidden>▶</span></>
                           : <img src={c.bild_url} alt="" loading="lazy" />}
                         <span className={`format-badge format-${c.format}`}>
-                          {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : '1:1')}
+                          {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : '1:1')}
                         </span>
                       </button>
                       <textarea

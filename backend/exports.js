@@ -31,6 +31,7 @@ const STYLE_LABEL = {
 
 const FORMAT_LABEL = {
   quadrat: '1x1',
+  feed:    '4x5',
   story:   '9x16',
 };
 
@@ -493,10 +494,11 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
   const firma = escape(kunde?.firmenname || '');
   const stelle = escape(job?.stelle || '');
 
-  // Sortiere Creatives — Bilder zuerst (1x1 vor 9x16), dann Videos
+  // Sortiere Creatives — Bilder zuerst (1:1 → 4:5 → 9:16), dann Videos
+  const FORMAT_RANK = { quadrat: 0, feed: 1, story: 2 };
   const sortedCreatives = [...creatives].sort((a, b) => {
     if (a.typ !== b.typ) return a.typ === 'video' ? 1 : -1;
-    if (a.format !== b.format) return a.format === 'quadrat' ? -1 : 1;
+    if (a.format !== b.format) return (FORMAT_RANK[a.format] ?? 9) - (FORMAT_RANK[b.format] ?? 9);
     return 0;
   });
 
@@ -506,7 +508,7 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
   const bs = a => (Array.isArray(a?.ueberschriften) ? a.ueberschriften[1] : '') || '';
   // Medien-Kachel (Bild/Video) für ein Creative.
   const mediaHtml = c => {
-    const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : '1:1 Feed');
+    const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : c.format === 'feed' ? '4:5 Feed' : '1:1 Feed');
     if (c.typ === 'video') {
       return `<a href="${c.bild_url}" target="_blank" style="display:block;text-decoration:none;color:#0a0a0a;background:#fafaf8;border-bottom:1px solid #ececea;padding:16px;text-align:center;"><strong>▶ ${badge}</strong><br><span style="font-size:11px;color:#5a5955;">Video ansehen</span></a>`;
     }
@@ -547,7 +549,7 @@ ${allgemein.map(a => `
 <h2 style="font-size:16px;font-weight:700;color:#0a0a0a;margin:32px 0 14px;">Creatives</h2>
 <table width="100%" cellpadding="0" cellspacing="0">
   ${sortedCreatives.map(c => {
-    const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : '1:1 Feed');
+    const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : c.format === 'feed' ? '4:5 Feed' : '1:1 Feed');
     if (c.typ === 'video') {
       return `<tr><td style="padding:8px 0;"><a href="${c.bild_url}" target="_blank" style="display:block;text-decoration:none;color:#0a0a0a;background:#fafaf8;border:1px solid #ececea;border-radius:8px;padding:16px;text-align:center;"><strong>▶ ${badge}</strong><br><span style="font-size:11px;color:#5a5955;">Video ansehen</span></a></td></tr>`;
     }

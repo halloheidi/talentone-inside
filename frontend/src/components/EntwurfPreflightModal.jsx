@@ -64,7 +64,7 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
                 onClick={() => setLightboxIndex(i)}
                 title="Klicken für Groß-Ansicht"
                 style={{
-                  position: 'relative', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1',
+                  position: 'relative', aspectRatio: c.format === 'story' ? '9 / 16' : c.format === 'feed' ? '4 / 5' : '1 / 1',
                   background: '#000', borderRadius: 6, overflow: 'hidden',
                   border: 'none', padding: 0, cursor: 'zoom-in',
                 }}
@@ -77,7 +77,7 @@ export default function EntwurfPreflightModal({ open, onClose, kunde, creatives,
                   background: 'rgba(0,0,0,0.65)', color: '#fff',
                   fontSize: 10, padding: '2px 6px', borderRadius: 100,
                   pointerEvents: 'none',
-                }}>{c.format === 'story' ? '9:16' : '1:1'}{c.typ === 'video' ? ' · Reel' : ''}</span>
+                }}>{c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : '1:1'}{c.typ === 'video' ? ' · Reel' : ''}</span>
                 <span style={{
                   position: 'absolute', bottom: 4, right: 4,
                   background: 'rgba(0,0,0,0.65)', color: '#fff',

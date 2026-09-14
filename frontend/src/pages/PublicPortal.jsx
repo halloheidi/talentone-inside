@@ -351,7 +351,7 @@ function CreativePaareSection({ creatives, adcopies, kunde }) {
             return (
               <div key={c.id} style={{ border: '1px solid #ececea', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
                 <button onClick={() => setLightbox(i)} title="Groß-Ansicht"
-                  style={{ background: '#000', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1' }}>
+                  style={{ background: '#000', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : c.format === 'feed' ? '4 / 5' : '1 / 1' }}>
                   {c.typ === 'video'
                     ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
@@ -994,7 +994,7 @@ function CreativesSection({ creatives, token, kunde, onSaved }) {
         {creatives.map((c, i) => (
           <div key={c.id} style={{ background: '#000', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
             <button onClick={() => setLightbox(i)} title="Groß-Ansicht"
-              style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : '1 / 1' }}>
+              style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', display: 'block', aspectRatio: c.format === 'story' ? '9 / 16' : c.format === 'feed' ? '4 / 5' : '1 / 1' }}>
               {c.typ === 'video'
                 ? <video src={c.bild_url} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 : <img src={c.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}

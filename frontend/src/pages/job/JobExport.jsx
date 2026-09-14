@@ -23,7 +23,7 @@ const STYLE_LABEL = {
 
 function badgeFor(c) {
   if (c.typ === 'video') return 'REEL';
-  return c.format === 'story' ? '9:16' : '1:1';
+  return c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : '1:1';
 }
 
 export default function JobExport() {
@@ -612,7 +612,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
                 <ul className="review-kommentar-list">
                   {kommentarEntries.map(([key, text]) => {
                     const stilLabels = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
-                    const fmtLabels  = { quadrat: '1:1', story: '9:16' };
+                    const fmtLabels  = { quadrat: '1:1', feed: '4:5', story: '9:16' };
                     const snap = review?.kommentare_snapshot?.[key];
                     if (key.startsWith('creative_')) {
                       const id = key.slice('creative_'.length);

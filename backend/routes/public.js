@@ -1343,7 +1343,7 @@ router.patch('/anfragen/:token/:anfrageId', async (req, res) => {
  * den Verantwortlichen per Mail. Alles best-effort.
  * ════════════════════════════════════════════════════════════════ */
 const STIL_LABEL = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
-const FORMAT_LABEL = { quadrat: '1:1', story: '9:16' };
+const FORMAT_LABEL = { quadrat: '1:1', feed: '4:5', story: '9:16' };
 
 async function findProjektForJob(job, kunde) {
   if (!kunde && !job?.kunde_id) return null;

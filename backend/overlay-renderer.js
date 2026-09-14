@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 
 const FORMAT_DIMS = {
   '1:1':  { w: 1080, h: 1080 },
+  '4:5':  { w: 1080, h: 1350 },
   '9:16': { w: 1080, h: 1920 },
 };
 
@@ -54,13 +55,16 @@ function escapeHtml(s) {
 function buildOverlayHtml(ctx) {
   const { width, height, primary, ink, hook, stelle, ort, arbeitszeit, diversitat, benefits, logoDataUri } = ctx;
   const isPortrait = height > width;
+  const ratio = height / width;
+  const isStory = ratio >= 1.6;                 // 9:16 ≈ 1.78
+  const isFeed  = ratio > 1.05 && ratio < 1.6;  // 4:5 = 1.25 (Mittelstufe)
 
-  // Feinjustierung fuer 9:16 (grosszuegiger Job-Block, kleinerer Banner)
-  const bannerFontSize = isPortrait ? 62 : 54;
-  const stelleFontSize = isPortrait ? 74 : 62;
-  const benefitFontSize = isPortrait ? 30 : 26;
-  const metaFontSize = isPortrait ? 28 : 24;
-  const jobBlockHeight = isPortrait ? '38%' : '40%';
+  // Feinjustierung je Format (9:16 grosszuegig, 4:5 mittel, 1:1 kompakt)
+  const bannerFontSize  = isStory ? 62 : isFeed ? 58 : 54;
+  const stelleFontSize  = isStory ? 74 : isFeed ? 68 : 62;
+  const benefitFontSize = isStory ? 30 : isFeed ? 28 : 26;
+  const metaFontSize    = isStory ? 28 : isFeed ? 26 : 24;
+  const jobBlockHeight  = isStory ? '38%' : '40%';
   const gradientHeight = 140; // sanfter Uebergang ueber dem Job-Block
 
   const metaParts = [

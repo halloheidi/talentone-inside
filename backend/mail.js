@@ -688,7 +688,7 @@ ${rows.map(([k, v]) => `
 /* ── Kunde gibt Entwürfe frei oder schickt Änderungswünsche ── */
 
 const STIL_LABEL = { emotional: 'Emotional', benefit: 'Benefits', kompakt: 'Knackig' };
-const FORMAT_LABEL = { quadrat: '1:1', story: '9:16' };
+const FORMAT_LABEL = { quadrat: '1:1', feed: '4:5', story: '9:16' };
 
 export async function sendReviewBenachrichtigung({ kunde, job, status, kommentare, jobUrl, creatives = [], adcopies = [], snapshot = {} }) {
   const brand = getBranding(kunde?.agentur);

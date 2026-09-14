@@ -14,6 +14,10 @@ import sharp from 'sharp';
 const REEL_WIDTH  = 1080;
 const REEL_HEIGHT = 1920;
 
+// 4:5 Mobile-Feed (Meta empfohlen)
+const FEED_WIDTH  = 1080;
+const FEED_HEIGHT = 1350;
+
 // OpenAI /images/edits akzeptiert nur PNG/JPEG/WebP in RGB, <50MB, max 4096px.
 // 2048 ist bewusst konservativ: kleiner als das Limit, aber weit ueber der
 // Aufloesung, die gpt-image-2 tatsaechlich auswertet.
@@ -168,6 +172,55 @@ export async function extendTo9x16(inputBuffer) {
       { input: topStrip,    top: 0,           left: 0 },
       { input: scaled.data, top: topPad,      left: 0 },
       { input: bottomStrip, top: topPad + H,  left: 0 },
+    ])
+    .png()
+    .toBuffer();
+}
+
+/**
+ * Bringt ein Bild auf exakt 1080×1350 (4:5, Mobile-Feed). Der Regelfall ist ein
+ * hochformatiges 2:3-Motiv (1024×1536 von gpt-image-2): auf Breite 1080 skaliert
+ * → 1080×1620, dann mittig auf 1350 beschnitten (oben/unten je ~8% weg — deshalb
+ * fordert der Prompt oben/unten ~10% beschnittfreien Rand). NIE stauchen/verzerren.
+ * Ist das Bild zu flach (< 4:5), wird oben/unten dezent ambient-erweitert statt
+ * gestreckt. Fallback bei Sharp-Fehler: Input unverändert.
+ */
+export async function cropTo4x5(inputBuffer) {
+  const scaled = await sharp(inputBuffer)
+    .resize({ width: FEED_WIDTH, withoutEnlargement: false })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const W = scaled.info.width;
+  const H = scaled.info.height;
+
+  // Hoch genug → mittig auf 4:5 beschneiden (Regelfall).
+  if (H >= FEED_HEIGHT) {
+    const top = Math.round((H - FEED_HEIGHT) / 2);
+    return await sharp(scaled.data)
+      .extract({ left: 0, top, width: W, height: FEED_HEIGHT })
+      .png()
+      .toBuffer();
+  }
+
+  // Zu flach → oben/unten ambient erweitern (kein Stretch des Motivs).
+  const totalMissing = FEED_HEIGHT - H;
+  const topPad    = Math.floor(totalMissing / 2);
+  const bottomPad = totalMissing - topPad;
+  const EDGE_SAMPLE = Math.max(24, Math.min(80, Math.floor(H * 0.06)));
+
+  const topStrip = await sharp(scaled.data)
+    .extract({ left: 0, top: 0, width: W, height: EDGE_SAMPLE })
+    .flip().resize({ width: W, height: topPad, fit: 'fill' }).blur(32).png().toBuffer();
+  const bottomStrip = await sharp(scaled.data)
+    .extract({ left: 0, top: H - EDGE_SAMPLE, width: W, height: EDGE_SAMPLE })
+    .flip().resize({ width: W, height: bottomPad, fit: 'fill' }).blur(32).png().toBuffer();
+
+  return await sharp({ create: { width: FEED_WIDTH, height: FEED_HEIGHT, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+    .composite([
+      { input: topStrip,    top: 0,          left: 0 },
+      { input: scaled.data, top: topPad,     left: 0 },
+      { input: bottomStrip, top: topPad + H, left: 0 },
     ])
     .png()
     .toBuffer();

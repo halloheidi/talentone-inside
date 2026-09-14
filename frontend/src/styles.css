@@ -1836,6 +1836,7 @@ button { font-family: inherit; }
   border-radius: 100px;
   backdrop-filter: blur(4px);
 }
+.format-badge.format-feed { background: rgba(37,99,235,0.82); }
 .creative-upload-badge {
   position: absolute;
   top: 40px;          /* unterhalb des format-badge */

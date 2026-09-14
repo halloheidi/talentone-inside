@@ -19,13 +19,17 @@ const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
 const FORMAT_DIMS = {
   quadrat: { w: 1080, h: 1080 },
+  feed:    { w: 1080, h: 1350 },  // 4:5 Mobile-Feed
   story:   { w: 1080, h: 1920 },
 };
 
-// Meta-Safe-Zone bei 9:16 (1080×1920): oben ~250px, unten ~340px sind reserviert.
-// Bei 'story' werden die Elemente in diese sichere Zone gerückt (gleiche Logik
-// wie beim Story-Logo im freien Modus).
-const SAFE = { story: { top: 260, bottom: 340 }, quadrat: { top: 48, bottom: 48 } };
+// Safe-Zonen je Format. 9:16 (1080×1920): oben ~250px, unten ~340px reserviert.
+// 4:5 (1080×1350): kein reservierter Meta-Overlay-Bereich → nur dezente Ränder.
+const SAFE = {
+  story:   { top: 260, bottom: 340 },
+  feed:    { top: 64,  bottom: 64 },
+  quadrat: { top: 48,  bottom: 48 },
+};
 
 export const LAYOUT_VORLAGEN = [
   {
