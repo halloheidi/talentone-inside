@@ -2,7 +2,7 @@
 // Branding pro Agentur via getBranding() / getMailFrom() / getMailReplyTo().
 
 import { getBranding, getMailFrom, getMailReplyTo, getOfferMailFrom, getOfferMailReplyTo, agenturForOfferBrand } from './branding.js';
-import { anrede, t } from './anrede.js';
+import { anrede, t, stripLeadingGreeting } from './anrede.js';
 import { renderEmail } from './email-templates.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
@@ -117,7 +117,9 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
             `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür noch ein paar Fotos vom Team / Arbeitsplatz. Über den unten stehenden Link können Sie sie ganz einfach hochladen.`)
       : t(k, `wir bereiten gerade eure Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von euch. Über den unten stehenden Link könnt ihr ganz einfach euer Logo und Fotos vom Team / Arbeitsplatz hochladen.`,
             `wir bereiten gerade Ihre Recruiting-Kampagne vor und brauchen dafür ein paar Materialien von Ihnen. Über den unten stehenden Link können Sie ganz einfach Ihr Logo und Fotos vom Team / Arbeitsplatz hochladen.`);
-  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
+  // Zentrale Anrede-Hygiene: eine evtl. im customText/Template mitgelieferte
+  // Grußzeile entfernen — die Begrüßung setzt ausschließlich der Renderer (oben).
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultIntro);
 
   const bulletLogo  = `<li><strong>${t(k, 'Euer Logo', 'Ihr Logo')}</strong> in guter Qualität (PNG, JPG, SVG)</li>`;
   const bulletFotos = `<li><strong>3–5 Fotos vom Arbeitsplatz, Team oder typische Tätigkeiten</strong> — gerne auch Handy-Schnappschüsse</li>`;
@@ -142,7 +144,7 @@ export async function sendUploadAnfrage({ to, kunde, kundenname, ansprechpartner
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Falls etwas unklar ist, einfach auf diese Mail antworten — wir helfen gern.<br>Vielen Dank im Voraus!</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
@@ -191,7 +193,9 @@ export async function sendDatenPruefungMail({ to, betreff, customText, kunde, jo
     : t(k,
       `wir haben die Informationen zu deiner Stelle ${stelleTxt} bereits zusammengetragen. Schau einmal drüber, ob alles stimmt — du kannst direkt ergänzen oder korrigieren.`,
       `wir haben die Informationen zu Ihrer Stelle ${stelleTxt} bereits zusammengetragen. Schauen Sie einmal drüber, ob alles stimmt — Sie können direkt ergänzen oder korrigieren.`);
-  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
+  // Zentrale Anrede-Hygiene: eine evtl. im customText/Template mitgelieferte
+  // Grußzeile entfernen — die Begrüßung setzt ausschließlich der Renderer (oben).
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultIntro);
   const subject = (betreff || '').trim() || tpl?.subject
     || (istNeukunden
       ? t(k, 'Bitte kurz prüfen: die Angaben zu deiner Kampagne', 'Bitte kurz prüfen: die Angaben zu Ihrer Kampagne')
@@ -320,7 +324,9 @@ export async function sendAvvAnfrage({ to, kunde, avvUrl, customText, agentur })
   const defaultIntro = t(k,
     `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten kannst du den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'eurem Unternehmen'} akzeptieren.`,
     `für unsere Zusammenarbeit fehlt noch die Bestätigung des Auftragsverarbeitungsvertrags (AVV) — datenschutzrechtlich sind wir dazu verpflichtet. Über den Button unten können Sie den Vertrag ansehen und mit einem Klick im Namen von ${k.firmenname || 'Ihrem Unternehmen'} akzeptieren.`);
-  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
+  // Zentrale Anrede-Hygiene: eine evtl. im customText/Template mitgelieferte
+  // Grußzeile entfernen — die Begrüßung setzt ausschließlich der Renderer (oben).
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultIntro);
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -406,7 +412,7 @@ export async function sendAvvBestaetigung({ to, kunde, version, akzeptiert_von, 
       to: [to].flat(),
       bcc: getInternalBcc([], [to].flat()),
       reply_to: getMailReplyTo(brand),
-      subject: tpl?.subject || `Ihre AVV-Kopie für die Unterlagen (${brand.name})`,
+      subject: tpl?.subject || `${t(kunde, 'Deine', 'Ihre')} AVV-Kopie für die Unterlagen (${brand.name})`,
       html,
       ...(attachments ? { attachments } : {}),
     }),
@@ -434,7 +440,9 @@ export async function sendFormularEinladung({ to, kunde, ansprechpartner, formul
             `wir freuen uns auf Ihre Neukunden-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihr Angebot, Ihre Zielgruppe und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`)
     : t(k, `wir freuen uns auf eure Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für euch vorbereitet — dort tragt ihr alles rund um eure offene Stelle, eure Benefits und euer Unternehmen ein. Dauert etwa 10 Minuten.`,
             `wir freuen uns auf Ihre Recruiting-Kampagne! Damit wir starten können, haben wir ein kurzes Briefing-Formular für Sie vorbereitet — dort tragen Sie alles rund um Ihre offene Stelle, Ihre Benefits und Ihr Unternehmen ein. Dauert etwa 10 Minuten.`);
-  const intro = (customText || '').trim() || tpl?.body || defaultIntro;
+  // Zentrale Anrede-Hygiene: eine evtl. im customText/Template mitgelieferte
+  // Grußzeile entfernen — die Begrüßung setzt ausschließlich der Renderer (oben).
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultIntro);
 
   const bullets = isNeukunden
     ? [
@@ -470,11 +478,11 @@ export async function sendFormularEinladung({ to, kunde, ansprechpartner, formul
     </td></tr>
     <tr><td align="center" style="padding:0 32px 28px;">
       <a href="${escape(formularUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Formular ausfüllen</a>
-      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link ist persönlich für euch.</p>
+      <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">${t(k, 'Der Link ist persönlich für euch.', 'Der Link ist persönlich für Sie.')}</p>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Fragen? Einfach auf diese Mail antworten.</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
@@ -1078,7 +1086,7 @@ export async function sendReaktivierungsMail({ to, replyTo, kunde, job, ansprech
 
 wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
 
-Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.
+${t(k, 'Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.', 'Unser Vorschlag: Gehen Sie nochmal für 30 Tage online — Sie zahlen nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.')}
 
 ${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich):', 'Sollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich):')} ${calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl}`;
 
@@ -1118,7 +1126,7 @@ ${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch 
       <a href="${escape(calUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">→ Termin buchen (unverbindlich)</a>
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
@@ -1186,7 +1194,7 @@ Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen
     ${bewerbungenButton}
     <tr><td style="padding:14px 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten — ${t(k, 'wir sind für dich da.', 'wir sind für Sie da.')}</p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>Euer ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Viel Erfolg!<br>${t(k, 'Euer', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
@@ -1200,7 +1208,7 @@ Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: tpl?.subject || '🚀 Deine Kampagne ist live!',
+      subject: tpl?.subject || t(k, '🚀 Deine Kampagne ist live!', '🚀 Ihre Kampagne ist live!'),
       html, text,
     }),
   });
@@ -1332,7 +1340,7 @@ export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUr
   const defaultText = t(k,
     `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`,
     `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Hatten Sie schon Gelegenheit reinzuschauen?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback:`);
-  const intro = (customText || '').trim() || tpl?.body || defaultText;
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultText);
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -1362,7 +1370,7 @@ export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUr
       to: recipients,
       bcc: bccList,
       reply_to: getMailReplyTo(brand),
-      subject: tpl?.subject || `Kurze Erinnerung: deine Entwürfe warten auf Freigabe`,
+      subject: tpl?.subject || t(k, 'Kurze Erinnerung: deine Entwürfe warten auf Freigabe', 'Kurze Erinnerung: Ihre Entwürfe warten auf Freigabe'),
       html, text,
     }),
   });
@@ -1389,7 +1397,10 @@ export async function sendTerminEinladung({
   const k = kunde || { ansprechpartner };
   const gruss = anrede(k);
 
-  const bodyHtml = String(customText || '')
+  // Grußzeile ausschließlich zentral (unten via `gruss`) — evtl. im customText
+  // mitgelieferte Begrüßung entfernen, sonst doppelt.
+  const cleanCustomText = stripLeadingGreeting(customText || '');
+  const bodyHtml = String(cleanCustomText)
     .split(/\n\s*\n/)
     .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
     .join('');
@@ -1409,7 +1420,7 @@ export async function sendTerminEinladung({
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `${gruss},\n\n${customText || ''}\n\nTermin auswählen: ${calLink}\n\nBei Fragen einfach antworten.\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
+  const text = `${gruss},\n\n${cleanCustomText}\n\nTermin auswählen: ${calLink}\n\nBei Fragen einfach antworten.\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
 
   const recipients = Array.isArray(to) ? to : [to];
   const bccList = getInternalBcc([], recipients);
@@ -1462,7 +1473,7 @@ export async function sendPortalEinladung({ to, kunde, name, portalUrl, setupUrl
     </td></tr>
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;">Später-Zugang: <a href="${escape(portalUrl)}">${escape(portalUrl)}</a></p>
-      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">Dein ${escape(brand.name)}-Team</p>
+      <p style="font-size:13px;line-height:1.6;color:#0a0a0a;margin:14px 0 0;font-weight:600;">${t(k, 'Dein', 'Ihr')} ${escape(brand.name)}-Team</p>
     </td></tr>`;
   const html = brandedShell({ brand, contentHtml: content });
   const text = `${gruss},\n\n${t(k, 'wir haben für dich einen Zugang zum Kampagnen-Dashboard eingerichtet.', 'wir haben für Sie einen Zugang zum Kampagnen-Dashboard eingerichtet.')}\n\nPasswort setzen: ${setupUrl}\n\n${t(k, `Spaeter kannst du dich jederzeit mit deiner E-Mail-Adresse (${to}) und deinem Passwort einloggen.`, `Spaeter koennen Sie sich jederzeit mit Ihrer E-Mail-Adresse (${to}) und Ihrem Passwort einloggen.`)}\n\n${t(k, 'Dein', 'Ihr')} ${brand.name}-Team`;
@@ -1525,7 +1536,7 @@ export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, custom
       to: recipients,
       bcc: getInternalBcc([], recipients),
       reply_to: getMailReplyTo(brand),
-      subject: tpl?.subject || '⏸ Deine Kampagne ist kurz pausiert',
+      subject: tpl?.subject || t(k, '⏸ Deine Kampagne ist kurz pausiert', '⏸ Ihre Kampagne ist kurz pausiert'),
       html, text,
     }),
   });
@@ -1806,7 +1817,7 @@ export async function sendKriterienAnfrage({ to, kunde, job, portalUrl, customTe
   const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
   const tpl = await renderEmail('kriterien_anfrage', k, { stelle });
 
-  const intro = (customText || '').trim() || tpl?.body || t(k,
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body) || t(k,
     `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was dir wichtig ist: Was sind deine wichtigsten Kriterien?\n\nÜber den Link unten kannst du sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`,
     `wir telefonieren gerade die Bewerber für ${stelle} vor. Damit wir genau auf das achten, was Ihnen wichtig ist: Was sind Ihre wichtigsten Kriterien?\n\nÜber den Link unten können Sie sie direkt eintragen — dauert 2 Minuten. Wir prüfen sie dann bei jedem Bewerber systematisch ab.`);
 

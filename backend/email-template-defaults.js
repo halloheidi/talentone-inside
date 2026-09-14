@@ -120,7 +120,7 @@ export const EMAIL_TEMPLATE_CATALOG = [
     betreff_du: 'Deine überarbeiteten Entwürfe — Runde {{runde}}',
     betreff_sie: 'Ihre überarbeiteten Entwürfe — Runde {{runde}}',
     body_du: 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:',
-    body_sie: 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:',
+    body_sie: 'Danke für Ihr Feedback! Wir haben die Entwürfe überarbeitet — sehen Sie sie sich an:',
   },
   {
     key: 'entwurf_resend',
@@ -132,7 +132,7 @@ export const EMAIL_TEMPLATE_CATALOG = [
     betreff_du: 'Deine Entwürfe sind fertig 🎨',
     betreff_sie: 'Ihre Entwürfe sind fertig 🎨',
     body_du: 'Hier nochmal deine Entwürfe:',
-    body_sie: 'Hier nochmal deine Entwürfe:',
+    body_sie: 'Hier nochmal Ihre Entwürfe:',
   },
   {
     key: 'entwurf_reminder',
@@ -180,7 +180,7 @@ export const EMAIL_TEMPLATE_CATALOG = [
     betreff_du: 'Frische KI-Werbeanzeigen für {{stelle}} — reaktivieren?',
     betreff_sie: 'Frische KI-Werbeanzeigen für {{stelle}} — reaktivieren?',
     body_du: '{{anrede}},\n\nwir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für deine offene Stelle als {{stelle}} erstellt — und das Ergebnis kann sich sehen lassen!\n\nUnser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.\n\nSollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich): {{cal_link}}',
-    body_sie: '{{anrede}},\n\nwir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für Ihre offene Stelle als {{stelle}} erstellt — und das Ergebnis kann sich sehen lassen!\n\nUnser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.\n\nSollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich): {{cal_link}}',
+    body_sie: '{{anrede}},\n\nwir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für Ihre offene Stelle als {{stelle}} erstellt — und das Ergebnis kann sich sehen lassen!\n\nUnser Vorschlag: Gehen Sie nochmal für 30 Tage online — Sie zahlen nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.\n\nSollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich): {{cal_link}}',
   },
 
   // ─────────────── Feedback ───────────────

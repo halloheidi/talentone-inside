@@ -255,10 +255,11 @@ export default function JobExport() {
     if (kontext === 'update') return;
     const istResend = mode === 'same_round';
     const istNeueRunde = mode === 'new_round';
+    // KEINE Begrüßung vorbelegen — die "Hallo …,"-Zeile setzt der Mail-Renderer zentral.
     const anschreibenDefault = istResend
       ? t(k,
-          `Hallo ${k?.ansprechpartner || 'zusammen'},\n\nhier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`,
-          `${anrede(k)},\n\nhier nochmal Ihre Entwürfe zur Freigabe — falls die letzte Mail bei Ihnen untergegangen ist.\n\nSie können auf der Review-Seite wieder kommentieren oder direkt freigeben.`)
+          `hier nochmal deine Entwürfe zur Freigabe — falls die letzte Mail bei dir untergegangen ist.\n\nDu kannst auf der Review-Seite wieder kommentieren oder direkt freigeben.`,
+          `hier nochmal Ihre Entwürfe zur Freigabe — falls die letzte Mail bei Ihnen untergegangen ist.\n\nSie können auf der Review-Seite wieder kommentieren oder direkt freigeben.`)
       : '';
     setMailForm(prev => ({
       ...prev,
@@ -288,10 +289,11 @@ export default function JobExport() {
     applyMailDefaults(mailIntent.mode, mailIntent.kontext, k);
   }
 
+  // KEINE Begrüßung vorbelegen — die "Hallo …,"-Zeile setzt der Mail-Renderer zentral.
   function buildReminderText(k) {
     return t(k,
-      `Hallo ${k?.ansprechpartner || 'zusammen'},\n\nvor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback.\n\nBei Fragen melde dich gerne jederzeit!`,
-      `${anrede(k)},\n\nvor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Haben Sie schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback.\n\nBei Fragen melden Sie sich gerne jederzeit!`);
+      `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback.\n\nBei Fragen melde dich gerne jederzeit!`,
+      `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Haben Sie schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback.\n\nBei Fragen melden Sie sich gerne jederzeit!`);
   }
   function openReminder() {
     setReminderKunde(kunde);

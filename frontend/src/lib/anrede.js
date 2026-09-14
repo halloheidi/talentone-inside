@@ -29,8 +29,10 @@ export function anredeOffen(kunde) {
 }
 
 /**
- * Brief-Anrede ohne Komma:
- *   du  → "Hallo Uwe" / sie → "Hallo Herr Junk"
+ * Brief-Anrede ohne Komma — die EINZIGE Quelle jeder Begrüßungszeile.
+ *   du  → "Hallo Uwe" (nur Vorname, nie Vorname+Nachname; ohne Namen: "Hallo")
+ *   sie → "Hallo Herr Junk"; ohne Nachname: voller Ansprechpartner-Name;
+ *         ganz ohne Namen: "Guten Tag".
  */
 export function anrede(kunde) {
   if (anredeForm(kunde) === 'sie') {
@@ -38,10 +40,30 @@ export function anrede(kunde) {
       : kunde?.anrede_titel === 'herr' ? 'Herr' : null;
     const nach = (kunde?.nachname || '').trim() || nachnameAus(kunde?.ansprechpartner);
     if (titel && nach) return `Hallo ${titel} ${nach}`;
+    // Fallback NUR bei fehlendem Nachnamen: voller Ansprechpartner-Name.
+    if (!nach) {
+      const voll = String(kunde?.ansprechpartner || '').trim();
+      if (voll) return `Hallo ${voll}`;
+    }
     return 'Guten Tag';
   }
   const vor = vornameAus(kunde?.ansprechpartner);
   return vor ? `Hallo ${vor}` : 'Hallo';
+}
+
+// Erkennt eine führende Grußformel (erste Zeile) — inkl. {{anrede}}.
+const GRUSS_RE = /^[^\S\r\n]*(?:\{\{\s*anrede\s*\}\}|(?:hallo|hi|hey|moin|servus|liebe(?:r|s)?|guten\s+(?:tag|morgen|abend)|sehr\s+geehrte(?:r|s)?(?:\s+damen\s+und\s+herren)?)\b)[^\r\n]*(?:\r?\n)?/i;
+
+/** true, wenn der Text mit einer Grußzeile beginnt (Speicher-Warnung im Editor). */
+export function startsWithGreeting(text) {
+  return GRUSS_RE.test(String(text ?? ''));
+}
+
+/** Entfernt eine führende Grußzeile (inkl. Folge-Leerzeile). */
+export function stripLeadingGreeting(text) {
+  const s = String(text ?? '');
+  if (!GRUSS_RE.test(s)) return text;
+  return s.replace(GRUSS_RE, '').replace(/^\s+/, '');
 }
 
 /** Wählt zwischen zwei Formulierungen: t(kunde, "dein Funnel", "Ihr Funnel"). */

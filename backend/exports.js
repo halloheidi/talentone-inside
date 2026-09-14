@@ -13,7 +13,7 @@ import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './br
 // länger als die UI-Auslieferung. Der durable Zugang bleibt das Bewerber-Portal.
 const MAIL_ANHANG_TTL = 60 * 60 * 24 * 30; // 30 Tage
 import { getInternalBcc, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER, mitAbsendername } from './mail.js';
-import { anrede, t, anredePromptHinweis } from './anrede.js';
+import { anrede, t, anredePromptHinweis, stripLeadingGreeting } from './anrede.js';
 import { renderEmail } from './email-templates.js';
 
 const VORQUAL_BCC = 'jessica.buchmueller@nowagwirth.de';
@@ -177,7 +177,7 @@ export async function generateAnschreibensVorschlag(job, kunde, { neueRunde = fa
   const prompt = `Du schreibst eine kurze, professionelle Mail von der Agentur "${brand.name}" an einen Kunden, ${kontextSatz} Sprache: Deutsch, ${anredePromptHinweis(kunde)} (keine Floskeln wie "Sehr geehrte Damen und Herren").
 
 WICHTIG: Verwende durchgängig NUR diese eine Anredeform — niemals mischen.
-Beginne exakt mit der Grußzeile "${anrede(kunde)}," (genau so, danach Leerzeile).
+Beginne NICHT mit einer Grußzeile/Anrede (die "${anrede(kunde)},"-Zeile wird separat davorgesetzt) und ende NICHT mit einer Grußformel/Signatur. Starte direkt mit dem ersten inhaltlichen Satz (kleingeschrieben, als Fortsetzung nach der Anrede).
 
 Kontext:
 - Kunde: ${kunde?.firmenname || '-'}
@@ -486,7 +486,10 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
   const brand = brandLogoUrl
     ? { ...brandBasis, logoHtml: `<img src="${brandLogoUrl}" alt="${escape(absenderName || brandBasis.name)}" style="max-height:48px;width:auto;display:block;background:#fff;border-radius:6px;padding:6px 10px;">` }
     : brandBasis;
-  const safeAnschreiben = escape(anschreiben || '').replace(/\n/g, '<br>');
+  // Begrüßung zentral (eine Quelle): Grußzeile aus anrede(kunde), Anschreiben
+  // ohne eigene Begrüßung (evtl. mitgelieferte wird entfernt).
+  const gruss = anrede(kunde);
+  const safeAnschreiben = escape(stripLeadingGreeting(anschreiben || '')).replace(/\n/g, '<br>');
   const firma = escape(kunde?.firmenname || '');
   const stelle = escape(job?.stelle || '');
 
@@ -616,6 +619,7 @@ ${sortedAdcopies.map(a => `
   <tr><td style="padding:28px 32px 8px;">
     <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 6px;color:#0a0a0a;">${stelle}${stelle && firma ? ' · ' : ''}${firma}</h1>
     <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 22px;">${eyebrow}</p>
+    <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(gruss)},</p>
     <p style="font-size:14px;line-height:1.6;color:#2a2a2a;margin:0 0 8px;">${safeAnschreiben}</p>
   </td></tr>
   <tr><td style="padding:0 32px 24px;">
@@ -636,7 +640,7 @@ ${sortedAdcopies.map(a => `
   </td></tr>
 </table></td></tr></table></body></html>`;
 
-  const textParts = [anschreiben || ''];
+  const textParts = [`${gruss},\n\n${stripLeadingGreeting(anschreiben || '')}`];
   if (reviewUrl) textParts.push(`\n→ ${istUpdate ? 'Neue Anzeigen ansehen & freigeben' : 'Entwürfe kommentieren & freigeben'}: ${reviewUrl}`);
   if (landingUrl) textParts.push(`\nZur Landingpage: ${landingUrl}`);
   if (sortedCreatives.length) textParts.push(`\n${sortedCreatives.length} Creative(s) im Anhang/eingebettet.`);

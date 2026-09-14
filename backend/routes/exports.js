@@ -11,7 +11,7 @@ import { renderEmail } from '../email-templates.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 import { normalizeResendMode, resolveVersandVariante } from '../versand-variante.js';
-import { t } from '../anrede.js';
+import { t, stripLeadingGreeting } from '../anrede.js';
 import { buildAktivitaet } from '../aktivitaet.js';
 
 const router = Router();
@@ -237,13 +237,15 @@ router.post('/jobs/:id/export/email', async (req, res) => {
     // Intro-Prefix ist variantengesteuert — nur die echte Feedback-Runde
     // bedankt sich fuers Feedback.
     const introPrefix = variante === 'neue_runde'
-      ? (tplRound?.body || 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:')
+      ? (tplRound?.body || t(kunde, 'Danke für dein Feedback! Wir haben die Entwürfe überarbeitet — schau sie dir an:', 'Danke für Ihr Feedback! Wir haben die Entwürfe überarbeitet — sehen Sie sie sich an:'))
       : variante === 'resend'
-        ? (tplRound?.body || 'Hier nochmal deine Entwürfe:')
+        ? (tplRound?.body || t(kunde, 'Hier nochmal deine Entwürfe:', 'Hier nochmal Ihre Entwürfe:'))
         : null; // Erstversand: kein Bezug auf Feedback/Vorrunde
+    // Anschreiben ohne eigene Begrüßung — die Grußzeile setzt der Renderer zentral.
+    const anschreibenClean = stripLeadingGreeting(anschreiben || '');
     const finalAnschreiben = introPrefix
-      ? `${introPrefix}\n\n${anschreiben || ''}`.trim()
-      : (anschreiben || null);
+      ? `${introPrefix}\n\n${anschreibenClean}`.trim()
+      : (anschreibenClean || null);
 
     // AVV-Fallback: falls der Kunde noch nicht akzeptiert hat, dezenten
     // Bestätigungs-Link in die Entwürfe-Mail geben (Public-Token-Seite).
@@ -909,7 +911,7 @@ router.get('/termine/config', (req, res) => {
   const cfg = {};
   for (const [key, t] of Object.entries(TERMINE)) {
     cfg[key] = {
-      label: t.label, subject: t.subject, intro: t.intro,
+      label: t.label, subject: t.subject, intro: t.intro, intro_sie: t.intro_sie || t.intro,
       personen: [
         ...(t.daniel   ? [{ key: 'daniel',   label: 'Daniel' }] : []),
         ...(t.johannes ? [{ key: 'johannes', label: 'Johannes' }] : []),

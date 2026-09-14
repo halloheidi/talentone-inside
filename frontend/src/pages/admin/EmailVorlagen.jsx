@@ -193,7 +193,7 @@ function Editor({ template, agentur, myEmail, onClose, onSaved }) {
   async function save() {
     setBusy('save'); setNotice('');
     try {
-      await api(`/email-vorlagen/${template.key}/${agentur}`, {
+      const res = await api(`/email-vorlagen/${template.key}/${agentur}`, {
         method: 'PUT',
         body: {
           betreff_du: draft.betreff_du, betreff_sie: draft.betreff_sie,
@@ -202,7 +202,7 @@ function Editor({ template, agentur, myEmail, onClose, onSaved }) {
           aktiv: draft.aktiv,
         },
       });
-      setNotice('Gespeichert ✓');
+      setNotice(res?.warnung ? `Gespeichert ✓ — ⚠️ ${res.warnung}` : 'Gespeichert ✓');
       onSaved();
     } catch (err) {
       setNotice('Fehler: ' + (err.body?.error || err.message));
@@ -320,6 +320,9 @@ function Editor({ template, agentur, myEmail, onClose, onSaved }) {
               Live-Vorschau · {tab === 'du' ? 'Du' : 'Sie'} · Demo-Kunde „Elektrotechnik Sonnberg GmbH"
             </div>
             {previewErr && <div className="alert alert-error">{previewErr}</div>}
+            <div style={{ fontSize: 11, color: '#8a7500', background: '#fffdf5', border: '1px dashed #e6cf7a', borderRadius: 8, padding: '8px 10px', marginBottom: 10, lineHeight: 1.4 }}>
+              🔒 Die gelb umrandeten Bereiche (Anrede, Button, Abbinder) fügt das Tool automatisch hinzu — bitte <strong>nicht</strong> in den Vorlagen-Text schreiben. Die Begrüßung „Hallo …," kommt zentral; für eine personalisierte Anrede im Text den Platzhalter <code>{'{{anrede}}'}</code> nutzen.
+            </div>
             <div style={{ background: '#fff', border: '1px solid #ececea', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
               <div style={{ fontSize: 11, color: '#9a9994' }}>Betreff</div>
               <div style={{ fontSize: 14, fontWeight: 600 }}>{preview?.subject || <em style={{ color: '#c0bfba' }}>—</em>}</div>

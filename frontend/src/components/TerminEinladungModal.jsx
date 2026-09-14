@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Modal from './Modal.jsx';
 import CloseLeadWarnung from './CloseLeadWarnung.jsx';
 import AnredeAbfrage from './AnredeAbfrage.jsx';
-import { anredeOffen, anrede } from '../lib/anrede.js';
+import { anredeOffen, t } from '../lib/anrede.js';
 import { api } from '../lib/api.js';
 
 // Termin-Einladung senden. Kontext = Job (endpoint=/jobs/:id/export/termin-einladung)
@@ -49,9 +49,11 @@ export default function TerminEinladungModal({
     // Betreff + Text-Default aus Config vorbelegen. Der Mail-Text wird in der am
     // Kunden gesetzten Anrede (Du/Sie) erzeugt — erst wenn diese feststeht.
     setSubject(config[terminKey].subject || '');
+    // KEINE Begrüßung vorbelegen — die "Hallo …,"-Zeile setzt der Mail-Renderer
+    // zentral. Nur der (anrede-korrekte) Intro-Text kommt in den Editor.
     setCustomText(anredeOffen(kunde)
       ? ''
-      : `${anrede(kunde)},\n\n${config[terminKey].intro || ''}`);
+      : (t(kunde, config[terminKey].intro, config[terminKey].intro_sie || config[terminKey].intro) || ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminKey, config, kunde?.anrede_form]);
 

@@ -39,9 +39,11 @@ export function anredeOffen(kunde) {
 }
 
 /**
- * Brief-Anrede ohne Komma:
- *   du  → "Hallo Uwe"        (Vorname; ohne Namen: "Hallo")
- *   sie → "Hallo Herr Junk"  (Titel + Nachname; ohne Titel/Namen: "Guten Tag")
+ * Brief-Anrede ohne Komma — die EINZIGE Quelle jeder Begrüßungszeile.
+ *   du  → "Hallo Uwe"          (nur Vorname; nie Vorname+Nachname; ohne Namen: "Hallo")
+ *   sie → "Hallo Herr Junk"    (Titel + Nachname)
+ *        Fallback ohne Nachname: voller Ansprechpartner-Name ("Hallo Nadine Bizjak"),
+ *        ganz ohne Namen: "Guten Tag".
  */
 export function anrede(kunde) {
   if (anredeForm(kunde) === 'sie') {
@@ -49,10 +51,35 @@ export function anrede(kunde) {
       : kunde?.anrede_titel === 'herr' ? 'Herr' : null;
     const nach = (kunde?.nachname || '').trim() || nachnameAus(kunde?.ansprechpartner);
     if (titel && nach) return `Hallo ${titel} ${nach}`;
+    // Fallback NUR bei fehlendem Nachnamen: voller Ansprechpartner-Name.
+    if (!nach) {
+      const voll = String(kunde?.ansprechpartner || '').trim();
+      if (voll) return `Hallo ${voll}`;
+    }
     return 'Guten Tag';
   }
   const vor = vornameAus(kunde?.ansprechpartner);
   return vor ? `Hallo ${vor}` : 'Hallo';
+}
+
+// Erkennt eine führende Grußformel (erste nicht-leere Zeile). Deckt {{anrede}}
+// (noch nicht ersetzt) sowie die üblichen deutschen Anreden ab.
+const GRUSS_RE = /^[^\S\r\n]*(?:\{\{\s*anrede\s*\}\}|(?:hallo|hi|hey|moin|servus|liebe(?:r|s)?|guten\s+(?:tag|morgen|abend)|sehr\s+geehrte(?:r|s)?(?:\s+damen\s+und\s+herren)?)\b)[^\r\n]*(?:\r?\n)?/i;
+
+/** true, wenn der Text mit einer Grußzeile beginnt (für die Speicher-Warnung). */
+export function startsWithGreeting(text) {
+  return GRUSS_RE.test(String(text ?? ''));
+}
+
+/**
+ * Entfernt eine führende Grußzeile (inkl. der folgenden Leerzeile), damit die
+ * zentrale Anrede nie doppelt erscheint. Ohne Grußzeile bleibt der Text
+ * unverändert (auch der Typ: gibt dann den Originalwert zurück).
+ */
+export function stripLeadingGreeting(text) {
+  const s = String(text ?? '');
+  if (!GRUSS_RE.test(s)) return text;
+  return s.replace(GRUSS_RE, '').replace(/^\s+/, '');
 }
 
 /** Wählt zwischen zwei Formulierungen: t(kunde, "dein Funnel", "Ihr Funnel"). */
