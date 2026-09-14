@@ -36,7 +36,7 @@ create table if not exists talentone_bk_rechnungen (
   quelle text,
   created_at timestamptz not null default now()
 );
-create unique index if not exists uq_bk_rechnungen_easybill on talentone_bk_rechnungen(easybill_document_id) where easybill_document_id is not null;
+create unique index if not exists uq_bk_rechnungen_easybill on talentone_bk_rechnungen(easybill_document_id);
 create index if not exists idx_bk_rechnungen_kunde on talentone_bk_rechnungen(bk_kunde_id);
 
 -- Sync-Protokoll (easybill + close)
