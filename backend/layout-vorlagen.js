@@ -44,12 +44,13 @@ export function istLayoutVorlage(id) {
   return LAYOUT_VORLAGEN.some(v => v.id === id);
 }
 
-// ── Ort aus der Region säubern (Umkreis/+30km/Klammern weg) ──
+// ── Ort aus der Region säubern (PLZ/Umkreis/+30km/Klammern weg) ──
 function cleanOrt(region) {
   if (!region) return '';
   return String(region)
     .split(/[,(]|\+|\bumkreis\b|\bumgebung\b/i)[0]
     .replace(/\d+\s*km/gi, '')
+    .replace(/^\s*\d{4,5}\s+/, '')   // führende Postleitzahl entfernen
     .trim();
 }
 
@@ -153,6 +154,16 @@ function dim(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// Markenfarbe fürs Neon-Fill aufhellen, damit dunkle CI-Töne (z.B. Marineblau)
+// auf dunklem Foto lesbar leuchten. amt=0 → Original, amt=1 → Weiß.
+function lighten(hex, amt) {
+  const h = String(hex || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(h)) return '#5ab0ff';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const mix = c => Math.round(c + (255 - c) * amt);
+  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+}
+
 function pickInk(hex) {
   const h = String(hex || '').replace('#', '');
   if (!/^[0-9a-f]{6}$/i.test(h)) return '#ffffff';
@@ -176,6 +187,7 @@ function head(accent) {
 
 // Vorlage A — Frage + Glow-Headline + Team unten.
 function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe }) {
+  const neon = lighten(accent, 0.5); // helles, lesbares Neon-Fill für den Titel
   const hookLines = String(slots.hook || '').split('\n').filter(l => l.trim().length);
   const bars = hookLines.map((line, i) => `
     <div style="align-self:flex-start; max-width:88%; background:${accent}; color:${ink};
@@ -199,7 +211,8 @@ function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, s
       <div style="height:26px"></div>
       <div data-autofit data-max="150" data-min="60"
         style="width:100%;font-weight:900;font-size:150px;line-height:0.98;letter-spacing:-0.02em;
-        text-transform:uppercase;color:${accent};" class="glow-accent">${escapeHtml(slots.stelle || '')}</div>
+        text-transform:uppercase;color:${neon};
+        text-shadow:0 0 4px ${dim(accent, 0.9)}, 0 0 16px ${accent}, 0 0 40px ${accent}, 0 2px 8px rgba(0,0,0,0.6);">${escapeHtml(slots.stelle || '')}</div>
       <div style="height:24px"></div>
       ${slots.pill ? `<div><span class="pill" style="font-size:30px;padding:12px 30px;">${escapeHtml(slots.pill)}</span></div>` : ''}
     </div>
