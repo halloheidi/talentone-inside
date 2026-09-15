@@ -47,9 +47,9 @@ function buildLinesHtml(zeilen, stil, accent, fontMax) {
     const txt = escapeHtml(line);
     if (stil === 'balken') {
       const ink = pickInk(accent);
-      return `<div style="align-self:flex-start;max-width:94%;margin-left:${i * 34}px;background:${accent};color:${ink};
+      return `<div data-fit style="align-self:flex-start;max-width:100%;margin-left:${i * 34}px;background:${accent};color:${ink};
         font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.06;padding:8px 22px;border-radius:8px;
-        text-transform:uppercase;box-shadow:0 10px 30px rgba(0,0,0,0.35);">${txt}</div>`;
+        white-space:nowrap;overflow:hidden;text-transform:uppercase;box-shadow:0 10px 30px rgba(0,0,0,0.35);">${txt}</div>`;
     }
     if (stil === 'neon') {
       return `<div data-fit style="font-family:${FONT_STACK.anton};font-size:${fontMax}px;line-height:1.02;letter-spacing:0.01em;

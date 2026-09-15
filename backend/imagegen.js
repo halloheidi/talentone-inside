@@ -659,16 +659,71 @@ DESIGN-REGELN:
 // der Overlay-Ebene. Hat VORRANG vor allen folgenden Farb-/Text-Anweisungen.
 const STRIKT_MOTIV_HINWEIS = `STRIKTER CI-MODUS — HAT VORRANG VOR ALLEM FOLGENDEN: Male AUSSCHLIESSLICH ein neutrales, fotorealistisches Motiv (Szene, Personen, Umgebung). Zeichne KEINE Schriftzüge, KEINE Headline, KEINEN Text, KEINE Zahlen, KEINE Logos/Wortmarken und KEINE markenfarbigen Grafikflächen, Balken, Banner, Buttons oder Farb-Overlays ins Bild. Ignoriere jede weiter unten stehende Anweisung, Text oder markenfarbige Flächen ins Motiv zu malen — Markenfarbe und alle Textzeilen werden nachträglich als exakte Code-Overlay-Ebene ergänzt. Das Motiv selbst bleibt vollständig textfrei und ohne CI-Farbflächen; halte die Bildränder ruhig für spätere Overlays.`;
 
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll', strikt = false }) {
-  let prompt;
-  if (job?.projekttyp === 'neukundengewinnung') {
-    prompt = buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
-  } else if (mode === 'foto') {
-    prompt = buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
-  } else {
-    prompt = buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
+// Strikt-Modus: EIGENSTÄNDIGER, minimaler Motiv-Prompt (KEIN Prefix auf den
+// Voll-Prompt — der Voll-Prompt verlangt Job-Block/Hook/Benefits/Balken, was die
+// KI trotz Vorwort-Verbot ins Bild malt). Hier gibt es NUR die neutrale Szene:
+// null Text, null Grafikflächen. Sämtliche CI-Farben + Schrift kommen ausschließlich
+// aus der nachgelagerten Sharp/Puppeteer-Overlay-Ebene.
+function buildPromptStrikt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person }) {
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const orientation = format === 'story'
+    ? 'hochkant (2:3, geeignet für Stories/Reels)'
+    : format === 'feed'
+      ? 'hochkant im Seitenverhältnis 4:5 (Mobile-Feed). Motiv mittig/zentriert komponieren und oben sowie unten je ~10% frei von wichtigen Elementen (Köpfe) halten — dieser Randbereich wird beschnitten.'
+      : 'quadratisch (1:1, geeignet für Feed-Posts)';
+
+  const refHinweis = [];
+  const LOGO_ECK = `Halte den Bereich oben rechts (ca. 22% Breite × 18% Höhe, ~3% Abstand zum Rand) ruhig und weitgehend flächig frei (keine Gesichter, keine wichtigen Details) — dort wird nachträglich per Code das exakte Logo-Overlay eingefügt.`;
+  if (mode === 'foto') {
+    if (hasLogo) {
+      refHinweis.push(`MITGELIEFERTE BILDER:\n[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR interne Referenz, NIEMALS ins Bild zeichnen. ${LOGO_ECK}\n[BILD 2 — DATEINAME "hintergrundfoto"] = HINTERGRUND. Übernimm dieses Foto EXAKT als Motiv, ohne Verfremdung, ohne Filter, ohne hinzugefügten Text/Grafik.`);
+    } else {
+      refHinweis.push(`MITGELIEFERTES BILD = HINTERGRUND. Übernimm dieses Foto EXAKT als Motiv, ohne Verfremdung, ohne hinzugefügten Text/Grafik.`);
+    }
+  } else if (hasLogo && person) {
+    refHinweis.push(
+      `MITGELIEFERTE BILDER:`,
+      `[BILD 1 — DATEINAME "firmenlogo"] = FIRMENLOGO. NUR interne Referenz, NIEMALS ins Bild zeichnen. ${LOGO_ECK}`,
+      `[BILD 2 — DATEINAME "person"] = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. Stelle GENAU DIESE Person (Gesichtszüge, Hauttyp, Haarfarbe, Frisur, Statur) in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben.`,
+    );
+  } else if (hasLogo) {
+    refHinweis.push(`MITGELIEFERTES BILD = FIRMENLOGO. NUR interne Referenz, NIEMALS ins Bild zeichnen. ${LOGO_ECK}`);
+  } else if (person) {
+    refHinweis.push(`MITGELIEFERTES BILD = HAUPTMOTIV. Foto einer realen Person${person.beschreibung ? ` (Beschreibung: "${person.beschreibung}")` : ''}. Stelle GENAU DIESE Person in der unten beschriebenen Szene dar — sie muss als dieselbe Person erkennbar bleiben.`);
   }
-  return strikt ? `${STRIKT_MOTIV_HINWEIS}\n\n${prompt}` : prompt;
+
+  const motivText = motiv?.trim()
+    || (mode === 'foto' ? 'Verwende das mitgelieferte Foto als Motiv.' : 'Authentische, fotorealistische Arbeitssituation, warmes Tageslicht.');
+
+  return `Erstelle EIN neutrales, rein fotografisches Motiv ${orientation}. Es ist KEINE fertige Anzeige, sondern nur der Bild-Hintergrund — Schrift, Farbbalken und Logo werden später per Code exakt darübergelegt.
+
+${refHinweis.length ? refHinweis.join('\n') + '\n\n' : ''}BILDMOTIV (die vollständige Bildfläche):
+${motivText}
+- Fotorealistisch, cinematic, warme Farben, natürliche Beleuchtung${branche ? `\n- Branche: ${branche}` : ''}
+- Authentisch, kein gestelltes Stock-Foto${person ? '\n- Die Person aus dem Referenzbild ist die Hauptfigur der Szene.' : ''}
+
+ABSOLUTES VERBOT (führt zur Verwerfung):
+- KEIN Text, KEINE Buchstaben, KEINE Wörter, KEINE Zahlen, KEINE Headline, KEIN Slogan — nirgends im Bild.
+- KEINE Logos, Wortmarken, Signets, Firmennamen-Schriftzüge.
+- KEINE grafischen Flächen: keine farbigen Balken, Banner, Buttons, Pillen, Badges, Icon-Kreise, Rahmen, Farb-Overlays, Pinselstrich-Grafiken oder Farbspritzer.
+- KEINE markenfarbig eingefärbten Design-Elemente. Die Farben im Bild sind ausschließlich die natürlichen Farben der fotografierten Szene (Haut, Kleidung, Umgebung, Licht).
+
+Das Bild muss aussehen wie ein reines Pressefoto/Stockfoto der Szene — vollständig textfrei, ohne jedes Grafik- oder CI-Element. Ränder ruhig halten für spätere Overlays. Keine QR-Codes, keine Rahmen ums Bild.`;
+}
+
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll', strikt = false }) {
+  // Strikt: eigenständiger Minimal-Motiv-Prompt (kein Job-Block, kein Hook, keine
+  // Grafikflächen). Der Voll-Prompt würde die KI sonst zu gemalten Schriftzügen/
+  // Balken zwingen — genau das, was der Strikt-Modus verhindern soll.
+  if (strikt) {
+    return buildPromptStrikt({ job, kunde, motiv, format, mode, hasLogo, person });
+  }
+  if (job?.projekttyp === 'neukundengewinnung') {
+    return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
+  } else if (mode === 'foto') {
+    return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
+  }
+  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
 }
 
 // Prompt für Neukundengewinnung (Lead-Gen-Ad).
