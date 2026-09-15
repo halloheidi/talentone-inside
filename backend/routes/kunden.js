@@ -539,7 +539,8 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   const allowed = ['firmenname', 'ansprechpartner', 'email', 'telefon', 'logo_url', 'branche', 'notizen', 'farben', 'website_url', 'agentur',
                    'paypal_enabled', 'campaign_payment_status', 'close_lead_id', 'keine_ki_bilder', 'funnel_stellen_mapping',
-                   'anrede_form', 'anrede_titel', 'nachname', 'strasse', 'plz', 'ort', 'feedback_mails', 'logo_ohne_flaeche_default'];
+                   'anrede_form', 'anrede_titel', 'nachname', 'strasse', 'plz', 'ort', 'feedback_mails', 'logo_ohne_flaeche_default',
+                   'ci_farben_strikt', 'farben_verifiziert'];
   const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
 
   // Anrede validieren + konsistent halten: Titel gehört nur zur Sie-Form.
@@ -777,6 +778,24 @@ router.post('/:id/farben/from-logo', async (req, res) => {
     res.json({ farben });
   } catch (err) {
     console.error('[farben/from-logo]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Exakte Farbpalette aus dem (transparenten) Logo — Sharp, mit Flächenanteil.
+// Rückgabe: { farben: [{ hex, anteil }] } (3–5 dominante Farben), zum Übernehmen.
+router.post('/:id/logo-palette', async (req, res) => {
+  const { data: kunde } = await supabase
+    .from('talentone_kunden').select('logo_transparent_url, logo_url').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  const url = kunde.logo_transparent_url || kunde.logo_url;
+  if (!url) return res.status(400).json({ error: 'Kein Logo hinterlegt.' });
+  try {
+    const { extractLogoPaletteFromUrl } = await import('../logo-farben.js');
+    const { farben, opaque } = await extractLogoPaletteFromUrl(url);
+    res.json({ farben, opaque, quelle: kunde.logo_transparent_url ? 'transparent' : 'logo' });
+  } catch (err) {
+    console.error('[logo-palette]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

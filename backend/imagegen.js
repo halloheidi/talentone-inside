@@ -8,6 +8,7 @@ import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
 import { extendTo9x16, cropTo4x5, normalizeImageForOpenAI } from './imageops.js';
+import { renderTextOverlay, assertExactColors } from './text-overlay.js';
 import sharp from 'sharp';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
@@ -653,12 +654,21 @@ DESIGN-REGELN:
 // Wrapper — wählt den passenden Prompt anhand des Projekttyps und Modus.
 // Projekttyp „neukundengewinnung" → Lead-Gen-Layout (Produkt/Ergebnis im Fokus,
 // CTA „Kostenloses Angebot", keine Stellenbezeichnung). Sonst Recruiting.
-export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll' }) {
+// Übergeordnete Auflage im Strikt-Modus: neutrales Motiv, keine gemalten
+// Schriftzüge/Logos/markenfarbigen Grafikflächen — Farbe + Text kommen exakt aus
+// der Overlay-Ebene. Hat VORRANG vor allen folgenden Farb-/Text-Anweisungen.
+const STRIKT_MOTIV_HINWEIS = `STRIKTER CI-MODUS — HAT VORRANG VOR ALLEM FOLGENDEN: Male AUSSCHLIESSLICH ein neutrales, fotorealistisches Motiv (Szene, Personen, Umgebung). Zeichne KEINE Schriftzüge, KEINE Headline, KEINEN Text, KEINE Zahlen, KEINE Logos/Wortmarken und KEINE markenfarbigen Grafikflächen, Balken, Banner, Buttons oder Farb-Overlays ins Bild. Ignoriere jede weiter unten stehende Anweisung, Text oder markenfarbige Flächen ins Motiv zu malen — Markenfarbe und alle Textzeilen werden nachträglich als exakte Code-Overlay-Ebene ergänzt. Das Motiv selbst bleibt vollständig textfrei und ohne CI-Farbflächen; halte die Bildränder ruhig für spätere Overlays.`;
+
+export function buildCreativePrompt({ job, kunde, motiv, format, mode = 'ki', hasLogo, person, spruch, stilvorlage, hatStilbeispiel = false, logoAufKleidung = false, logoModus = 'voll', strikt = false }) {
+  let prompt;
   if (job?.projekttyp === 'neukundengewinnung') {
-    return buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
+    prompt = buildPromptNeukunden({ job, kunde, motiv, format, mode, hasLogo, person, spruch });
+  } else if (mode === 'foto') {
+    prompt = buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
+  } else {
+    prompt = buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
   }
-  if (mode === 'foto') return buildPromptFoto({ job, kunde, format, hasLogo, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
-  return buildPromptKI({ job, kunde, motiv, format, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung, logoModus });
+  return strikt ? `${STRIKT_MOTIV_HINWEIS}\n\n${prompt}` : prompt;
 }
 
 // Prompt für Neukundengewinnung (Lead-Gen-Ad).
@@ -827,7 +837,7 @@ function bufferToFile(buf, name, type) {
 //   mode='ki'   → komplett neu generieren (optional mit Person als Vorlage)
 //   mode='foto' → Foto als Hintergrund übernehmen, nur Overlay (Foto MUSS in referenceImages enthalten sein)
 // referenceImages-Reihenfolge: Logo (isLogo:true) IMMER zuerst falls vorhanden, dann Person/Foto.
-export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll' }) {
+export async function generateOneCreative({ job, kunde, motiv, format, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll', strikt = false, textStil = null }) {
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
   const size = FORMAT_SIZE[format];
   if (!size) throw new Error(`Unbekanntes Format: ${format}`);
@@ -841,7 +851,10 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   const hatStilbeispiel = referenceImages.some(r => r.isStyle);
   // Logo-auf-Kleidung nur, wenn ueberhaupt ein Logo mitgeht.
   const logoImMotiv = logoAufKleidung && hasLogo;
-  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch, stilvorlage, hatStilbeispiel, logoAufKleidung: logoImMotiv, logoModus });
+  // Strikt-Modus: der Hook wird NICHT in die KI gegeben (kein gemalter Schriftzug) —
+  // er kommt exakt-farbig aus der Overlay-Ebene. buildCreativePrompt setzt zusätzlich
+  // eine übergeordnete „neutrales Motiv, keine CI-Flächen/Schrift"-Auflage.
+  const prompt = buildCreativePrompt({ job, kunde, motiv, format, mode, hasLogo, person, spruch: strikt ? '' : spruch, stilvorlage, hatStilbeispiel, logoAufKleidung: logoImMotiv, logoModus, strikt });
 
   let response;
   if (refs.length > 0) {
@@ -909,6 +922,15 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     }
   }
 
+  // Strikt-Modus: markenfarbige Schriftzüge exakt als Overlay-Ebene aufs neutrale
+  // Motiv legen (nicht der KI überlassen). Danach kommt das Logo-Overlay obendrauf.
+  let farbCheck = null;
+  if (strikt && (spruch || '').trim() && kunde?.farben?.primaer) {
+    try {
+      rawBuffer = await renderTextOverlay({ baseBuffer: rawBuffer, format, stil: textStil, hook: spruch, accent: kunde.farben.primaer });
+    } catch (err) { console.warn('[strikt-overlay]', err.message); }
+  }
+
   let finalBuffer = rawBuffer;
   let bildOhneLogoUrl = null;
   let logoPosition = null;
@@ -939,9 +961,19 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
     }
   }
 
+  // Farb-Check (Assertion, kein Toleranzband): exakter Akten-Hex MUSS als Fläche
+  // im gerenderten Creative vorkommen.
+  if (strikt && kunde?.farben?.primaer) {
+    try {
+      const hexList = [kunde.farben.primaer, kunde.farben.sekundaer, kunde.farben.akzent].filter(Boolean);
+      farbCheck = await assertExactColors(finalBuffer, hexList);
+      console.log(`[strikt-farbcheck] ${format}: ${JSON.stringify(farbCheck.treffer)}`);
+    } catch (err) { console.warn('[strikt-farbcheck]', err.message); }
+  }
+
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
-  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche: weisseFlaeche };
+  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche: weisseFlaeche, strikt, textStil: textStil || null, farbCheck };
 }
 
 /**
@@ -976,9 +1008,9 @@ async function ensureTransparentLogo(kunde, originalLogoBuffer) {
 }
 
 // Generiert eine Variante in den angeforderten Formaten (Default quadrat + story) parallel.
-export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll', formats = ['quadrat', 'story'] }) {
+export async function generateVariant({ job, kunde, motiv, mode = 'ki', referenceImages = [], spruch, stilvorlage, logoAufKleidung = false, logoModus = 'voll', formats = ['quadrat', 'story'], strikt = false, textStil = null }) {
   const results = await Promise.allSettled(
-    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus })),
+    formats.map(format => generateOneCreative({ job, kunde, motiv, format, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus, strikt, textStil })),
   );
   const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value);
   const errors = results.filter(r => r.status === 'rejected').map(r => r.reason.message);

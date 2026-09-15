@@ -191,6 +191,8 @@ export default function KundeDetail() {
   const [websiteUrlBusy, setWebsiteUrlBusy] = useState(false);
   const [extractBusy, setExtractBusy] = useState(null); // 'logo' | 'url' | null
   const [farbenPreview, setFarbenPreview] = useState(null); // { source, farben } | null
+  const [palette, setPalette] = useState(null);   // [{ hex, anteil }] aus Logo
+  const [paletteBusy, setPaletteBusy] = useState(false);
   const [extractError, setExtractError] = useState('');
 
   async function downloadKundenLogo(k) {
@@ -368,6 +370,33 @@ export default function KundeDetail() {
     });
     setFarbenDirty(true);
     setFarbenPreview(null);
+  }
+
+  // Exakte Palette aus dem (transparenten) Logo — mit Flächenanteil.
+  async function ladePalette() {
+    setPaletteBusy(true); setExtractError('');
+    try {
+      const res = await api(`/kunden/${kundeId}/logo-palette`, { method: 'POST' });
+      setPalette(res.farben || []);
+      if (!(res.farben || []).length) setExtractError('Keine dominanten Farben im Logo gefunden.');
+    } catch (err) { setExtractError(err.message); }
+    finally { setPaletteBusy(false); }
+  }
+  // Palette-Swatch in den nächsten freien Slot (primär→sekundär→akzent) übernehmen.
+  function paletteInSlot(hex) {
+    setFarben(prev => {
+      const next = { ...prev };
+      const slot = !next.primaer ? 'primaer' : !next.sekundaer ? 'sekundaer' : 'akzent';
+      next[slot] = hex;
+      return next;
+    });
+    setFarbenDirty(true);
+  }
+  // Boolean-Flag (farben_verifiziert / ci_farben_strikt) sofort speichern.
+  async function toggleFlag(field, value) {
+    setKunde(k => ({ ...k, [field]: value }));
+    try { await api(`/kunden/${kundeId}`, { method: 'PATCH', body: { [field]: value } }); }
+    catch (err) { setExtractError(err.message); setKunde(k => ({ ...k, [field]: !value })); }
   }
 
   // Farben separat polling — bei Quick-Create aus URL kommen die Farben asynchron rein.
@@ -786,14 +815,37 @@ export default function KundeDetail() {
         <div className="farb-quellen">
           <div className="farb-quelle">
             <div className="farb-quelle-label">Aus Logo</div>
-            <button
-              className="btn-ghost btn-sm"
-              onClick={extractFromLogo}
-              disabled={!kunde.logo_url || extractBusy === 'logo'}
-              title={kunde.logo_url ? '' : 'Kein Logo hinterlegt'}
-            >
-              {extractBusy === 'logo' ? 'Ermittle…' : 'Logo-Farben ermitteln'}
-            </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                className="btn-ghost btn-sm"
+                onClick={extractFromLogo}
+                disabled={!kunde.logo_url || extractBusy === 'logo'}
+                title={kunde.logo_url ? '' : 'Kein Logo hinterlegt'}
+              >
+                {extractBusy === 'logo' ? 'Ermittle…' : '3 Farben schätzen'}
+              </button>
+              <button
+                className="btn-ghost btn-sm"
+                onClick={ladePalette}
+                disabled={!(kunde.logo_transparent_url || kunde.logo_url) || paletteBusy}
+                title="Exakte dominante Farben aus dem Logo (mit Flächenanteil)"
+              >
+                {paletteBusy ? 'Analysiere…' : '🎯 Farben exakt aus Logo ziehen'}
+              </button>
+            </div>
+            {palette && palette.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                {palette.map((c, i) => (
+                  <button key={i} type="button" onClick={() => paletteInSlot(c.hex)}
+                    title="In nächste freie Farbe übernehmen"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: '1px solid var(--line,#ddd)', borderRadius: 8, padding: '4px 8px', background: '#fff' }}>
+                    <span className="swatch-box" style={{ background: c.hex, width: 22, height: 22 }} />
+                    <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.hex}</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-4,#999)' }}>{c.anteil}%</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="farb-quelle">
             <div className="farb-quelle-label">Aus Karriereseite / Homepage</div>
@@ -871,6 +923,19 @@ export default function KundeDetail() {
             Noch keine Farben hinterlegt — entweder oben aus Logo oder Website ermitteln, oder manuell unten eintragen.
           </div>
         )}
+
+        {/* Verifizierung + strikter CI-Modus */}
+        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line,#ececea)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!kunde.farben_verifiziert} onChange={e => toggleFlag('farben_verifiziert', e.target.checked)} />
+            Palette geprüft {kunde.farben_verifiziert && <span style={{ color: '#15803d', fontWeight: 700 }}>✓ verifiziert</span>}
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
+            title="Text-/Grafikelemente in Markenfarbe werden exakt per Overlay gerendert (nie der KI überlassen); KI malt ein neutrales Motiv.">
+            <input type="checkbox" checked={!!kunde.ci_farben_strikt} onChange={e => toggleFlag('ci_farben_strikt', e.target.checked)} />
+            🎯 Strikte CI-Farben (exakt, kein KI-Approximieren)
+          </label>
+        </div>
       </div>
 
       <div className="ref-strip" id="referenzbilder">

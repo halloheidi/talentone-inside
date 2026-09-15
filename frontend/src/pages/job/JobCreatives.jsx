@@ -82,6 +82,13 @@ export default function JobCreatives() {
   // Generation
   const [varianten, setVarianten] = useState(1);
   // Ausgabeformate (Mehrfachauswahl): 1:1 / 4:5 / 9:16. Default = 1:1 + 9:16.
+  // Strikte CI-Farben (default vom Kunden) + Typo-Stil-Preset für den Strikt-Modus.
+  const [ciStrikt, setCiStrikt] = useState(false);
+  const [textStil, setTextStil] = useState('clean');
+  const [textStile, setTextStile] = useState([]);
+  useEffect(() => { setCiStrikt(!!kunde?.ci_farben_strikt); }, [kunde?.id, kunde?.ci_farben_strikt]);
+  useEffect(() => { api('/creatives/text-stile').then(r => setTextStile(r.stile || [])).catch(() => {}); }, []);
+
   const [genFormats, setGenFormats] = useState(['quadrat', 'story']);
   const toggleGenFormat = (f) => setGenFormats(prev =>
     prev.includes(f) ? (prev.length > 1 ? prev.filter(x => x !== f) : prev) : [...prev, f]);
@@ -533,10 +540,11 @@ export default function JobCreatives() {
     const baseline = creatives.length;
     try {
       const trimmedSpruch = spruch.trim() || undefined;
+      const ci = { ci_farben_strikt: ciStrikt, text_stil: ciStrikt ? textStil : undefined };
       const body = mode === 'ki'
-        ? { job_id: job.id, mode, motiv, varianten, formats: genFormats, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
+        ? { job_id: job.id, mode, motiv, varianten, formats: genFormats, personenfoto_id: personId || undefined, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen, ...ci }
         : mode === 'foto'
-        ? { job_id: job.id, mode, varianten, formats: genFormats, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen }
+        ? { job_id: job.id, mode, varianten, formats: genFormats, foto_id: fotoId, spruch: trimmedSpruch, stilvorlage_id: stilvorlageId || undefined, logo_auf_kleidung: logoAufKleidungGen, logo_kleidung_modus: logoKleidungModusGen, ...ci }
         : { job_id: job.id, mode: 'overlay', varianten, formats: genFormats, spruch: trimmedSpruch, benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [] };
       const res = await api('/creatives/generate', { method: 'POST', body });
       const exp = res.expected || varianten * (genFormats.length || 2);
@@ -1134,6 +1142,52 @@ export default function JobCreatives() {
                   <span style={{ color: 'var(--ink-4)', maxWidth: 320 }}>
                     Bei sehr kleiner Platzierung kann feiner Schriftzug unleserlich werden — dann das Logo größer platzieren lassen (z.&nbsp;B. Brust statt Mini-Stick).
                   </span>
+                </div>
+              )}
+            </div>
+          )}
+          {mode !== 'overlay' && mode !== 'layout' && (
+            <div style={{ flex: '1 1 100%', marginTop: 6, paddingTop: 12, borderTop: '1px dashed var(--line,#e5e5e5)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+                title="Markenfarbige Schriftzüge exakt per Overlay (nie KI); KI malt ein neutrales, textfreies Motiv.">
+                <input type="checkbox" checked={ciStrikt} onChange={e => setCiStrikt(e.target.checked)} />
+                🎯 Strikte CI-Farben {kunde?.ci_farben_strikt && <span style={{ fontSize: 11, color: 'var(--ink-4,#999)', fontWeight: 400 }}>(Kunden-Standard)</span>}
+              </label>
+              {ciStrikt && (
+                <div style={{ marginTop: 10 }}>
+                  {/* CI-Swatch-Leiste */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, marginBottom: 10 }}>
+                    <span style={{ color: 'var(--ink-3,#666)' }}>CI-Farben:</span>
+                    {['primaer', 'sekundaer', 'akzent'].map(k => kunde?.farben?.[k] ? (
+                      <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <span className="swatch-box" style={{ background: kunde.farben[k], width: 18, height: 18 }} />
+                        <code style={{ fontSize: 11 }}>{kunde.farben[k]}</code>
+                      </span>
+                    ) : null)}
+                    {kunde?.farben_verifiziert
+                      ? <span style={{ color: '#15803d', fontWeight: 700 }}>— verifiziert ✓</span>
+                      : <span style={{ color: '#a16207' }}>— nicht verifiziert</span>}
+                    {!kunde?.farben?.primaer && <span style={{ color: '#c2410c' }}>⚠ keine Markenfarbe hinterlegt</span>}
+                  </div>
+                  {/* Typo-Stil-Presets mit Mini-Thumbnails */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {(textStile.length ? textStile : [{ id: 'clean', name: 'Clean Bold' }, { id: 'neon', name: 'Neon-Glow' }, { id: 'balken', name: 'Balken' }, { id: 'outline', name: 'Outline' }]).map(s => {
+                      const acc = kunde?.farben?.primaer || '#005fa9';
+                      const aktiv = textStil === s.id;
+                      const thumb = s.id === 'neon' ? { color: acc, textShadow: `0 0 6px ${acc},0 0 14px ${acc}` }
+                        : s.id === 'balken' ? { color: '#fff', background: acc, padding: '2px 8px', borderRadius: 4 }
+                        : s.id === 'outline' ? { color: acc, WebkitTextStroke: '1px #fff', textShadow: '2px 2px 0 rgba(0,0,0,.5)' }
+                        : { color: acc, textShadow: '0 2px 6px rgba(0,0,0,.4)' };
+                      return (
+                        <button key={s.id} type="button" onClick={() => setTextStil(s.id)}
+                          title={s.beschreibung || s.name}
+                          style={{ cursor: 'pointer', border: aktiv ? '2px solid #16a34a' : '1px solid var(--line,#ddd)', borderRadius: 8, padding: '8px 10px', background: '#111', minWidth: 96, textAlign: 'center' }}>
+                          <div style={{ fontWeight: 900, fontSize: 22, lineHeight: 1, textTransform: 'uppercase', ...thumb }}>Aa</div>
+                          <div style={{ fontSize: 11, color: '#ddd', marginTop: 6 }}>{s.name}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

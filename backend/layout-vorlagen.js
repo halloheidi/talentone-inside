@@ -190,8 +190,9 @@ function head(accent) {
 }
 
 // Vorlage A — Frage + Glow-Headline + Team unten.
-function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe }) {
-  const neon = lighten(accent, 0.5); // helles, lesbares Neon-Fill für den Titel
+function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt }) {
+  // Strikt: EXAKTE Markenfarbe (kein Aufhellen). Sonst helles, lesbares Neon-Fill.
+  const neon = strikt ? accent : lighten(accent, 0.5);
   const hookLines = String(slots.hook || '').split('\n').filter(l => l.trim().length);
   const bars = hookLines.map((line, i) => `
     <div style="align-self:flex-start; max-width:88%; background:${accent}; color:${ink};
@@ -289,14 +290,14 @@ function autofitScript() {
 /**
  * Rendert EIN Format einer Vorlage → PNG-Buffer.
  */
-async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri }) {
+async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt }) {
   const dims = FORMAT_DIMS[format];
   if (!dims) throw new Error(`Unbekanntes Format: ${format}`);
   const safe = SAFE[format] || SAFE.quadrat;
 
   const html = vorlage === 'B'
     ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe })
-    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe });
+    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt });
 
   const page = await browser.newPage();
   await page.setViewport({ width: dims.w, height: dims.h, deviceScaleFactor: 1 });
@@ -327,7 +328,7 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
  * @param {string} p.jobId
  * @returns {Promise<Array<{ format, bild_url }>>}
  */
-export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, formats = ['quadrat'], jobId }) {
+export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, formats = ['quadrat'], jobId, strikt = false }) {
   const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
   const ink = pickInk(accent);
 
@@ -340,7 +341,7 @@ export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, 
   try {
     const out = [];
     for (const format of formats) {
-      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri });
+      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt });
       const key = `layout/${jobId}/${randomUUID()}_${vorlage}_${format}.png`;
       const url = await uploadBuffer({ bucket: STORAGE_BUCKET, path: key, buffer, contentType: 'image/png' });
       out.push({ format, bild_url: url });

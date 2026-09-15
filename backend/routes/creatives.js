@@ -17,6 +17,7 @@ import { generateOverlays } from '../overlay-renderer.js';
 import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
 import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWarnung, renderLayoutVorlage } from '../layout-vorlagen.js';
+import { TEXT_STILE } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
@@ -328,7 +329,7 @@ router.post('/spruch-verbessern', async (req, res) => {
    läuft im Hintergrund (gpt-image-2 dauert pro Bild 30-90s, Traefik-Timeout ~180s).
    Frontend pollt /api/creatives?job_id=… und merkt am Anstieg, wenn fertig. */
 router.post('/generate', async (req, res) => {
-  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung, logo_kleidung_modus, formats } = req.body || {};
+  const { job_id, motiv, varianten = 1, mode = 'ki', personenfoto_id, foto_id, spruch, stilvorlage_id, benefits, logo_auf_kleidung, logo_kleidung_modus, formats, text_stil, ci_farben_strikt } = req.body || {};
   // Ausgabeformate (Mehrfachauswahl): 1:1 / 4:5 / 9:16. Default = quadrat + story.
   const FORMAT_KEYS = ['quadrat', 'feed', 'story'];
   const selFormats = (Array.isArray(formats) ? formats.filter(f => FORMAT_KEYS.includes(f)) : []);
@@ -349,6 +350,10 @@ router.post('/generate', async (req, res) => {
   const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
   if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
   const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  // Strikte CI-Farben: expliziter Request-Override, sonst Kunden-Default.
+  const strikt = (typeof ci_farben_strikt === 'boolean') ? ci_farben_strikt : !!kunde?.ci_farben_strikt;
+  const textStil = text_stil || null;
 
   // Reference-Images zusammenstellen.
   // mode='ki':   Logo (falls vorhanden) zuerst, dann optional Personen-Foto.
@@ -441,20 +446,22 @@ router.post('/generate', async (req, res) => {
     console.log(`[generate-bg] job ${job_id.slice(0,8)} mode=${mode} varianten=${n} expected=${expected} refs=${refSummary}`);
     try {
       const variantResults = await Promise.all(
-        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus, formats: zielFormate })),
+        Array.from({ length: n }).map(() => generateVariant({ job, kunde, motiv, mode, referenceImages, spruch, stilvorlage, logoAufKleidung, logoModus, formats: zielFormate, strikt, textStil })),
       );
       const allOk = variantResults.flatMap(v => v.ok);
       const allErrors = variantResults.flatMap(v => v.errors);
       if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
       if (allOk.length > 0) {
-        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche }) => ({
+        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche, strikt: st, textStil: ts }) => ({
           job_id, format, typ: 'bild', bild_url: bildUrl,
           bild_ohne_logo_url: bildOhneLogoUrl || null,
           prompt, status: 'fertig',
           logo_position: logoPosition || null,
           logo_weisse_flaeche: logoWeisseFlaeche !== false,
           stilvorlage_id: stilvorlage?.id || null,
+          ci_farben_strikt: st ? true : null,
+          text_stil: ts || null,
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
         if (insErr) {
@@ -533,6 +540,9 @@ async function prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller 
 }
 
 // GET /api/creatives/layout-vorlagen → Vorlagen-Metadaten + Verfügbarkeit
+// GET /api/creatives/text-stile — Typo-Presets für den Strikt-Modus.
+router.get('/text-stile', (req, res) => res.json({ stile: TEXT_STILE }));
+
 router.get('/layout-vorlagen', (req, res) => {
   res.json({ vorlagen: LAYOUT_VORLAGEN, freisteller_verfuegbar: freistellerVerfuegbar() });
 });
@@ -574,6 +584,7 @@ router.post('/layout-render', async (req, res) => {
     const rendered = await renderLayoutVorlage({
       vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri,
       logoUri: ctx.logoUri, slots: ctx.slots, formats: layoutFormate, jobId: job_id,
+      strikt: !!ctx.kunde?.ci_farben_strikt,
     });
     const hookText = ctx.slots.hook || ctx.slots.textblock || '';
     const rows = rendered.map(r => ({
