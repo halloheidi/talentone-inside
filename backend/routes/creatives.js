@@ -17,8 +17,9 @@ import { generateOverlays } from '../overlay-renderer.js';
 import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
 import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWarnung, renderLayoutVorlage } from '../layout-vorlagen.js';
-import { TEXT_STILE } from '../text-overlay.js';
+import { TEXT_STILE, renderTextOverlay } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
+import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponierePositionen, safeFrac } from '../text-bloecke.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -453,7 +454,7 @@ router.post('/generate', async (req, res) => {
       if (allErrors.length) console.warn(`[generate-bg] Teilfehler:`, allErrors);
 
       if (allOk.length > 0) {
-        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche, strikt: st, textStil: ts }) => ({
+        const rows = allOk.map(({ format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche, strikt: st, textStil: ts, renderSpec }) => ({
           job_id, format, typ: 'bild', bild_url: bildUrl,
           bild_ohne_logo_url: bildOhneLogoUrl || null,
           prompt, status: 'fertig',
@@ -462,6 +463,7 @@ router.post('/generate', async (req, res) => {
           stilvorlage_id: stilvorlage?.id || null,
           ci_farben_strikt: st ? true : null,
           text_stil: ts || null,
+          render_spec: renderSpec || null,
         }));
         const { error: insErr } = await supabase.from('talentone_creatives').insert(rows);
         if (insErr) {
@@ -587,16 +589,164 @@ router.post('/layout-render', async (req, res) => {
       strikt: !!ctx.kunde?.ci_farben_strikt,
     });
     const hookText = ctx.slots.hook || ctx.slots.textblock || '';
+    // render_spec: alles, um die Textebene je Format verlustfrei neu zu rendern
+    // (Textblock-Positionierung). freisteller-Flag wie effektiv genutzt.
+    const renderSpec = {
+      kind: 'layout', vorlage, foto_id,
+      freisteller: freisteller !== false,
+      slots: ctx.slots,
+    };
     const rows = rendered.map(r => ({
       job_id, format: r.format, typ: 'bild', bild_url: r.bild_url,
       bild_ohne_logo_url: null, status: 'fertig',
       prompt: `Layout-Vorlage ${vorlage} · Hook: "${(hookText || '').replace(/\n/g, ' ').slice(0, 120)}"`,
+      render_spec: renderSpec,
     }));
     const { data: created, error: insErr } = await supabase
       .from('talentone_creatives').insert(rows).select();
     if (insErr) return res.status(500).json({ error: `DB-Insert fehlgeschlagen: ${insErr.message}` });
     res.status(201).json({ creatives: created || [] });
   } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/* ═══════════════ Verschiebbare Textblöcke (Layout-Vorlagen + Strikt) ═══════════════
+   Rendert die Textebene eines Creatives neu — geteilt von PATCH /:id/text-positionen
+   (gleiches Format, neue Positionen) und der Format-Ableitung (Zielformat,
+   proportional transponierte Positionen). Quelle ist render_spec. */
+async function rerenderTextLayer({ existing, job, kunde, targetFormat, overrides }) {
+  const spec = existing.render_spec;
+  if (!spec || !spec.kind) {
+    const e = new Error('Kein render_spec — Textblöcke lassen sich für dieses Creative nicht verschieben. Bitte neu rendern.'); e.status = 409; throw e;
+  }
+
+  if (spec.kind === 'layout') {
+    const ctx = await prepLayoutContext({
+      job_id: existing.job_id, vorlage: spec.vorlage, foto_id: spec.foto_id,
+      slots: spec.slots || {}, freisteller: spec.freisteller !== false,
+    });
+    const rendered = await renderLayoutVorlage({
+      vorlage: spec.vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri,
+      logoUri: ctx.logoUri, slots: ctx.slots, formats: [targetFormat], jobId: existing.job_id,
+      strikt: !!ctx.kunde?.ci_farben_strikt, overrides,
+    });
+    return { bildUrl: rendered[0]?.bild_url, bildOhneLogoUrl: null };
+  }
+
+  if (spec.kind === 'strikt') {
+    if (!spec.base_url) { const e = new Error('Kein textfreies Basis-Motiv gespeichert.'); e.status = 409; throw e; }
+    const base = (await fetchAsBuffer(spec.base_url)).buffer;
+    const withText = await renderTextOverlay({
+      baseBuffer: base, format: targetFormat, stil: spec.text_stil,
+      hook: spec.hook, accent: spec.accent, overrides,
+    });
+    let finalBuffer = withText, bildOhneLogoUrl = null;
+    if (kunde?.logo_url) {
+      try {
+        const rand = Math.random().toString(36).slice(2, 8);
+        bildOhneLogoUrl = await uploadBuffer({
+          bucket: CREATIVES_BUCKET, path: `${existing.job_id}/raw-txt-${targetFormat}-${Date.now()}-${rand}.png`,
+          buffer: withText, contentType: 'image/png',
+        });
+        const transparentLogo = await resolveTransparentLogo(kunde);
+        finalBuffer = await composeLogoOverlay(withText, transparentLogo, existing.logo_position || {}, { weisseFlaeche: existing.logo_weisse_flaeche !== false });
+      } catch (err) { console.warn('[text-layer strikt-logo]', err.message); finalBuffer = withText; }
+    }
+    const url = await uploadBuffer({
+      bucket: CREATIVES_BUCKET, path: `${existing.job_id}/${targetFormat}-txt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`,
+      buffer: finalBuffer, contentType: 'image/png',
+    });
+    return { bildUrl: url, bildOhneLogoUrl };
+  }
+
+  const e = new Error(`Unbekannter render_spec.kind: ${spec.kind}`); e.status = 400; throw e;
+}
+
+// Sind für ein Creative Textblöcke verschiebbar? (render_spec vorhanden)
+function textBloeckeVerfuegbar(c) { return !!c?.render_spec?.kind; }
+
+// GET /api/creatives/:id/text-bloecke → alles für den Positionier-Dialog:
+// Blöcke (Key+Label, nur befüllte), aktuelle + Default-Positionen, Safe-Zone,
+// Hintergrundbild (textfrei) und Slot-Texte/Akzent für den CSS-Proxy.
+router.get('/:id/text-bloecke', async (req, res) => {
+  const { data: c } = await supabase.from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (!c) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  const spec = c.render_spec;
+  if (!spec?.kind) return res.status(409).json({ error: 'Für dieses Creative sind keine verschiebbaren Textblöcke verfügbar (kein render_spec). Bitte neu rendern.' });
+
+  const kind = spec.kind, vorlage = spec.vorlage || null, format = c.format;
+  const slots = kind === 'layout' ? (spec.slots || {}) : { hook: spec.hook };
+  const hatText = (key) => {
+    if (key === 'hook')      return !!String(slots.hook || spec.hook || '').trim();
+    if (key === 'textblock') return !!String(slots.textblock || '').trim();
+    if (key === 'stelle')    return !!String(slots.stelle || '').trim();
+    if (key === 'pill')      return !!String(slots.pill || '').trim();
+    return true;
+  };
+  const bloecke = blockDefs(kind, vorlage).filter(d => hatText(d.key)).map(d => ({ key: d.key, label: d.label }));
+
+  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
+  const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+  const accent = spec.accent || kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
+
+  let baseBildUrl = null;
+  if (kind === 'strikt') baseBildUrl = spec.base_url || c.bild_ohne_logo_url || c.bild_url;
+  else {
+    const { data: ref } = await supabase.from('talentone_referenzbilder').select('bild_url').eq('id', spec.foto_id).maybeSingle();
+    baseBildUrl = ref?.bild_url || c.bild_url;
+  }
+
+  res.json({
+    kind, vorlage, format,
+    bloecke,
+    slots,
+    positionen: mergePositionen(kind, vorlage, format, c.text_positionen),
+    defaults: defaultPositionen(kind, vorlage, format),
+    safe: safeFrac(format),
+    accent,
+    base_bild_url: baseBildUrl,
+    current_bild_url: c.bild_url,
+    dunkel: kind === 'layout', // Layout dunkelt das Foto ab → Proxy zeigt Scrim
+  });
+});
+
+/* PATCH /api/creatives/:id/text-positionen  body: { positionen: { blockKey:{x,y,scale} } }
+   Rendert die Textebene mit den neuen Positionen neu (gleiches Format), ersetzt
+   bild_url und speichert text_positionen. */
+router.patch('/:id/text-positionen', async (req, res) => {
+  const { positionen } = req.body || {};
+  if (!positionen || typeof positionen !== 'object' || Array.isArray(positionen)) {
+    return res.status(400).json({ error: 'positionen (Objekt) ist Pflicht.' });
+  }
+  for (const [k, v] of Object.entries(positionen)) {
+    if (!v || typeof v !== 'object') return res.status(400).json({ error: `Block ${k}: ungültig.` });
+    for (const f of ['x', 'y', 'scale']) {
+      if (v[f] != null && !Number.isFinite(Number(v[f]))) return res.status(400).json({ error: `Block ${k}.${f} muss eine Zahl sein.` });
+    }
+  }
+
+  const { data: existing } = await supabase.from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (!existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (!textBloeckeVerfuegbar(existing)) {
+    return res.status(409).json({ error: 'Textblöcke für dieses Creative nicht verschiebbar (kein render_spec). Bitte neu rendern.' });
+  }
+  const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+
+  try {
+    const oldUrl = existing.bild_url, oldRaw = existing.bild_ohne_logo_url;
+    const { bildUrl, bildOhneLogoUrl } = await rerenderTextLayer({ existing, job, kunde, targetFormat: existing.format, overrides: positionen });
+    const patch = { bild_url: bildUrl, text_positionen: positionen };
+    if (bildOhneLogoUrl) patch.bild_ohne_logo_url = bildOhneLogoUrl;
+    const { data: updated, error } = await supabase.from('talentone_creatives').update(patch).eq('id', existing.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    if (oldUrl && oldUrl !== bildUrl) await deleteFromStorage(oldUrl);
+    if (bildOhneLogoUrl && oldRaw && oldRaw !== bildOhneLogoUrl) await deleteFromStorage(oldRaw);
+    res.json({ creative: updated });
+  } catch (err) {
+    console.error('[text-positionen]', err.message);
     res.status(err.status || 500).json({ error: err.message });
   }
 });
@@ -770,6 +920,27 @@ router.post('/:id/reel', async (req, res) => {
    (getGenError) fürs Frontend; es entsteht NIE eine Zeile ohne Bild-URL. */
 async function deriveStoryInBackground(existing, job, kunde, targetFormat = 'story') {
   try {
+    // Layout-/Strikt-Creatives (render_spec vorhanden): deterministisch im
+    // Zielformat NEU rendern (exakt, kein KI-Outpainting) und die Textblock-
+    // Positionen proportional übernehmen. Genau das verlangt die Verifikation.
+    if (textBloeckeVerfuegbar(existing)) {
+      const overrides = transponierePositionen(existing.text_positionen, existing.format, targetFormat);
+      const { bildUrl, bildOhneLogoUrl } = await rerenderTextLayer({ existing, job, kunde, targetFormat, overrides });
+      const { error: insErr } = await supabase.from('talentone_creatives').insert({
+        job_id: existing.job_id, format: targetFormat, typ: 'bild',
+        bild_url: bildUrl, bild_ohne_logo_url: bildOhneLogoUrl || null,
+        logo_position: existing.logo_position || null,
+        logo_weisse_flaeche: existing.logo_weisse_flaeche !== false,
+        prompt: existing.prompt, status: 'fertig', parent_id: existing.id,
+        stilvorlage_id: existing.stilvorlage_id || null,
+        render_spec: existing.render_spec,
+        text_positionen: overrides || null,
+      });
+      if (insErr) { console.error(`[${targetFormat}-derive-spec] DB-Insert:`, insErr.message); recordGenError(existing.job_id, new Error(insErr.message)); }
+      else console.log(`[${targetFormat}-derive-spec] ${targetFormat} (deterministisch) fertig für creative ${existing.id.slice(0, 8)}`);
+      return;
+    }
+
     let stilPrompt = '';
     if (existing.stilvorlage_id) {
       const { data: sv } = await supabase.from('talentone_stilvorlagen')
@@ -802,11 +973,14 @@ async function deriveStoryInBackground(existing, job, kunde, targetFormat = 'sto
 
 /* POST /api/creatives/:id/story-ableiten — eine Feed-Zeile → 9:16-Story. */
 router.post('/:id/story-ableiten', async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
-
   const { data: existing, error } = await supabase
     .from('talentone_creatives').select('*').eq('id', req.params.id).single();
   if (error || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  // Deterministische Layout-/Strikt-Ableitung braucht kein OpenAI; nur der
+  // KI-Outpainting-Pfad benötigt den Key.
+  if (!textBloeckeVerfuegbar(existing) && !process.env.OPENAI_API_KEY) {
+    return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
+  }
   if (existing.format !== 'quadrat') return res.status(400).json({ error: 'Story-Ableitung nur aus Feed-Creatives (1:1) möglich.' });
   if (existing.typ === 'video') return res.status(400).json({ error: 'Quelle muss ein Bild sein, kein Video.' });
   if (!existing.bild_url && !existing.bild_ohne_logo_url) return res.status(400).json({ error: 'Keine Bild-URL am Creative.' });
@@ -857,11 +1031,12 @@ router.post('/story-ableiten-alle', async (req, res) => {
 
 /* POST /api/creatives/:id/feed-ableiten — eine 1:1-Zeile → 4:5-Feed (Mobile-Feed). */
 router.post('/:id/feed-ableiten', async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
-
   const { data: existing, error } = await supabase
     .from('talentone_creatives').select('*').eq('id', req.params.id).single();
   if (error || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (!textBloeckeVerfuegbar(existing) && !process.env.OPENAI_API_KEY) {
+    return res.status(501).json({ error: 'OPENAI_API_KEY nicht konfiguriert.' });
+  }
   if (existing.format !== 'quadrat') return res.status(400).json({ error: '4:5-Ableitung nur aus 1:1-Creatives möglich.' });
   if (existing.typ === 'video') return res.status(400).json({ error: 'Quelle muss ein Bild sein, kein Video.' });
   if (!existing.bild_url && !existing.bild_ohne_logo_url) return res.status(400).json({ error: 'Keine Bild-URL am Creative.' });

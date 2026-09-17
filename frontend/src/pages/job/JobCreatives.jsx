@@ -8,6 +8,7 @@ import Lightbox from '../../components/Lightbox.jsx';
 import MultiPhotoUpload from '../../components/MultiPhotoUpload.jsx';
 import UploadCreativesModal from '../../components/UploadCreativesModal.jsx';
 import LogoPositionModal from '../../components/LogoPositionModal.jsx';
+import TextPositionModal from '../../components/TextPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 import CreativeEditModal from '../../components/CreativeEditModal.jsx';
 import LayoutVorlageModal from '../../components/LayoutVorlageModal.jsx';
@@ -101,6 +102,7 @@ export default function JobCreatives() {
   const istNeukunden = job.projekttyp === 'neukundengewinnung';
   const [adcopies, setAdcopies] = useState([]);
   const [logoPosTarget, setLogoPosTarget] = useState(null);
+  const [textPosTarget, setTextPosTarget] = useState(null);
   const [loadingGalerie, setLoadingGalerie] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const [showLogoRefresh, setShowLogoRefresh] = useState(false);
@@ -1407,6 +1409,12 @@ export default function JobCreatives() {
                     {c.typ !== 'video' && c.bild_ohne_logo_url && kunde?.logo_url && (
                       <button className="btn-ghost btn-sm" onClick={() => setLogoPosTarget(c)}>Logo anpassen</button>
                     )}
+                    {c.typ !== 'video' && c.render_spec && (
+                      <button className="btn-ghost btn-sm" onClick={() => setTextPosTarget(c)}
+                        title="Textblöcke (Hook, Stellentitel, Badge) verschieben und skalieren">
+                        ✍️ Text anpassen
+                      </button>
+                    )}
                     {!showArchived && c.format === 'quadrat' && c.typ !== 'video' && (
                       <button
                         className="btn-ghost btn-sm"
@@ -1529,6 +1537,14 @@ export default function JobCreatives() {
         logoUrl={kunde?.logo_url}
         logoTransparentUrl={kunde?.logo_transparent_url}
         onClose={() => setLogoPosTarget(null)}
+        onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
+      />
+
+      {/* ───────── Textblock-Positions-Modal ───────── */}
+      <TextPositionModal
+        open={!!textPosTarget}
+        creative={textPosTarget}
+        onClose={() => setTextPosTarget(null)}
         onSaved={(updated) => setCreatives(prev => prev.map(c => c.id === updated.id ? updated : c))}
       />
 

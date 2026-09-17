@@ -6,17 +6,7 @@
 
 import sharp from 'sharp';
 import { FONT_FACE_CSS, FONT_STACK } from './fonts.js';
-
-const FORMAT_DIMS = {
-  quadrat: { w: 1080, h: 1080 },
-  feed:    { w: 1080, h: 1350 },
-  story:   { w: 1080, h: 1920 },
-};
-const SAFE = {
-  story:   { top: 300, bottom: 340 },
-  feed:    { top: 90,  bottom: 90 },
-  quadrat: { top: 70,  bottom: 70 },
-};
+import { FORMAT_DIMS, SAFE, mergePositionen } from './text-bloecke.js';
 
 export const TEXT_STILE = [
   { id: 'neon',    name: 'Neon-Glow',  beschreibung: 'Versalien mit weichem, mehrschichtigem Schein in Markenfarbe.' },
@@ -80,17 +70,20 @@ function autofitScript() {
  * Rendert die Schriftzug-Ebene und legt sie auf das (neutrale) Basisbild.
  * @returns {Promise<Buffer>} PNG des fertigen Creatives.
  */
-export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil = 'clean', hook, accent }) {
+export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil = 'clean', hook, accent, overrides = null }) {
   const dims = FORMAT_DIMS[format] || FORMAT_DIMS.quadrat;
-  const safe = SAFE[format] || SAFE.quadrat;
   const zeilen = String(hook || '').split('\n').map(l => l.trim()).filter(Boolean);
   if (!zeilen.length || !accent) return baseBuffer;
   const s = normStil(stil);
 
+  // Default-Position + Feinjustage (Top-Left-Anker, Safe-Zone-geclamped).
+  const pos = mergePositionen('strikt', null, format, overrides).hook;
+  const baseFont = format === 'story' ? 120 : format === 'feed' ? 104 : 96;
+  const fontMax = Math.round(baseFont * (pos.scale || 1));
+
   // Basis exakt auf Zielgröße (kein Stretch der Semantik — Motiv ist bereits im Format).
   const base = await sharp(baseBuffer).resize(dims.w, dims.h, { fit: 'cover' }).png().toBuffer();
   const baseUri = `data:image/png;base64,${base.toString('base64')}`;
-  const fontMax = format === 'story' ? 120 : format === 'feed' ? 104 : 96;
 
   const scrim = s === 'balken' ? '' :
     `<div style="position:absolute;left:0;right:0;top:0;height:${Math.round(dims.h * 0.5)}px;
@@ -103,7 +96,8 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
   <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#000;">
     <img src="${baseUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
     ${scrim}
-    <div style="position:absolute;left:56px;right:56px;top:${safe.top}px;display:flex;flex-direction:column;align-items:flex-start;z-index:2;">
+    <div style="position:absolute;left:${(pos.x * 100).toFixed(3)}%;top:${(pos.y * 100).toFixed(3)}%;
+      width:${(pos.w * 100).toFixed(3)}%;display:flex;flex-direction:column;align-items:flex-start;z-index:2;">
       ${buildLinesHtml(zeilen, s, accent, fontMax)}
     </div>
   </body></html>`;

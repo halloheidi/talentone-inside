@@ -14,22 +14,9 @@ import { uploadBuffer } from './storage.js';
 import { STORAGE_BUCKET } from './imagegen.js';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { randomUUID } from 'node:crypto';
+import { FORMAT_DIMS, SAFE, mergePositionen } from './text-bloecke.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
-
-const FORMAT_DIMS = {
-  quadrat: { w: 1080, h: 1080 },
-  feed:    { w: 1080, h: 1350 },  // 4:5 Mobile-Feed
-  story:   { w: 1080, h: 1920 },
-};
-
-// Safe-Zonen je Format. 9:16 (1080×1920): oben ~250px, unten ~340px reserviert.
-// 4:5 (1080×1350): kein reservierter Meta-Overlay-Bereich → nur dezente Ränder.
-const SAFE = {
-  story:   { top: 260, bottom: 340 },
-  feed:    { top: 64,  bottom: 64 },
-  quadrat: { top: 48,  bottom: 48 },
-};
 
 export const LAYOUT_VORLAGEN = [
   {
@@ -189,15 +176,41 @@ function head(accent) {
   </style>`;
 }
 
+// Absolut positionierter Block-Wrapper (Top-Left-Anker aus positionen).
+// p = { x, y, w, align, scale }. z = z-index.
+function blockWrap(p, z, inner) {
+  const align = p.align || 'left';
+  return `<div style="position:absolute;left:${(p.x * 100).toFixed(3)}%;top:${(p.y * 100).toFixed(3)}%;
+    width:${(p.w * 100).toFixed(3)}%;text-align:${align};z-index:${z};">${inner}</div>`;
+}
+function sc(base, scale) { return Math.round(base * (scale || 1)); }
+
 // Vorlage A — Frage + Glow-Headline + Team unten.
-function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt }) {
+function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos }) {
   // Strikt: EXAKTE Markenfarbe (kein Aufhellen). Sonst helles, lesbares Neon-Fill.
   const neon = strikt ? accent : lighten(accent, 0.5);
+  const P = pos;
   const hookLines = String(slots.hook || '').split('\n').filter(l => l.trim().length);
+  const hookFs = sc(52, P.hook?.scale);
   const bars = hookLines.map((line, i) => `
-    <div style="align-self:flex-start; max-width:88%; background:${accent}; color:${ink};
-      padding:14px 26px; border-radius:12px; font-weight:800; font-size:52px; line-height:1.12;
-      text-transform:none; margin-left:${i * 34}px; box-shadow:0 10px 30px rgba(0,0,0,0.35);">${nl2br(line)}</div>`).join('<div style="height:12px"></div>');
+    <div style="display:inline-block; max-width:100%; background:${accent}; color:${ink};
+      padding:14px 26px; border-radius:12px; font-weight:800; font-size:1em; line-height:1.12;
+      text-transform:none; margin-left:${i * 34}px; box-shadow:0 10px 30px rgba(0,0,0,0.35);">${nl2br(line)}</div>`)
+    .join('<div style="height:12px"></div>');
+
+  const hookBlock = hookLines.length ? blockWrap(P.hook, 3,
+    `<div data-autofit data-max="${hookFs}" data-min="26" style="width:100%;font-size:${hookFs}px;">${bars}</div>`) : '';
+
+  const stelleFs = sc(150, P.stelle?.scale);
+  const stelleBlock = blockWrap(P.stelle, 3,
+    `<div data-autofit data-max="${stelleFs}" data-min="60"
+      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:0.98;letter-spacing:-0.02em;
+      text-transform:uppercase;color:${neon};
+      text-shadow:0 0 4px ${dim(accent, 0.9)}, 0 0 16px ${accent}, 0 0 40px ${accent}, 0 2px 8px rgba(0,0,0,0.6);">${escapeHtml(slots.stelle || '')}</div>`);
+
+  const pillFs = sc(30, P.pill?.scale);
+  const pillBlock = slots.pill ? blockWrap(P.pill, 3,
+    `<span class="pill" style="font-size:${pillFs}px;padding:12px 30px;">${escapeHtml(slots.pill)}</span>`) : '';
 
   return `<!doctype html><html><head>${head(accent)}</head>
   <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#000;">
@@ -210,17 +223,10 @@ function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, s
     <!-- freigestellte Person: untere Bildhälfte -->
     ${cutoutUri ? `<img src="${cutoutUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.42)}px;transform:translateX(-50%);height:52%;max-width:96%;object-fit:contain;object-position:bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));">` : ''}
 
-    <!-- Text-Ebene -->
-    <div style="position:absolute;left:60px;right:60px;top:${safe.top}px;display:flex;flex-direction:column;gap:0;z-index:3;">
-      ${bars}
-      <div style="height:26px"></div>
-      <div data-autofit data-max="150" data-min="60"
-        style="width:100%;font-weight:900;font-size:150px;line-height:0.98;letter-spacing:-0.02em;
-        text-transform:uppercase;color:${neon};
-        text-shadow:0 0 4px ${dim(accent, 0.9)}, 0 0 16px ${accent}, 0 0 40px ${accent}, 0 2px 8px rgba(0,0,0,0.6);">${escapeHtml(slots.stelle || '')}</div>
-      <div style="height:24px"></div>
-      ${slots.pill ? `<div><span class="pill" style="font-size:30px;padding:12px 30px;">${escapeHtml(slots.pill)}</span></div>` : ''}
-    </div>
+    <!-- Text-Ebene (frei positionierbare Blöcke) -->
+    ${hookBlock}
+    ${stelleBlock}
+    ${pillBlock}
 
     <!-- Logo unten mittig -->
     ${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.55)}px;transform:translateX(-50%);max-width:34%;max-height:${Math.round(dims.h * 0.09)}px;object-fit:contain;z-index:4;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}
@@ -228,8 +234,9 @@ function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, s
 }
 
 // Vorlage B — Person links + Textblock rechts.
-function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe }) {
+function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos }) {
   const hasCut = !!cutoutUri;
+  const P = pos;
   // Mit Freisteller: dunkler Marken-Verlauf als Grund + Person links.
   // Ohne Freisteller: Foto als abgedunkelter Vollhintergrund, Textlayout identisch.
   const bg = hasCut
@@ -237,6 +244,22 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe }
          radial-gradient(90% 80% at 20% 60%, ${dim(accent, 0.28)} 0%, rgba(10,10,12,0.96) 60%), #0a0a0c;"></div>`
     : `<img src="${fotoUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
        <div style="position:absolute;inset:0;background:linear-gradient(to right, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.82) 62%);"></div>`;
+
+  const tbFs = sc(76, P.textblock?.scale);
+  const textBlock = blockWrap(P.textblock, 4,
+    `<div data-autofit data-max="${tbFs}" data-min="34"
+      style="width:100%;font-weight:900;font-size:${tbFs}px;line-height:1.06;letter-spacing:-0.01em;
+      text-transform:uppercase;color:#fff;">${highlightMarkup(slots.textblock || '', accent)}</div>`);
+
+  const stelleFs = sc(120, P.stelle?.scale);
+  const stelleBlock = blockWrap(P.stelle, 4,
+    `<div data-autofit data-max="${stelleFs}" data-min="52"
+      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:0.98;letter-spacing:-0.02em;
+      text-transform:uppercase;color:#fff;" class="glow-white">${escapeHtml(slots.stelle || '')}</div>`);
+
+  const pillFs = sc(30, P.pill?.scale);
+  const pillBlock = slots.pill ? blockWrap(P.pill, 4,
+    `<span class="pill" style="font-size:${pillFs}px;padding:12px 30px;border-color:${accent};">${escapeHtml(slots.pill)}</span>`) : '';
 
   return `<!doctype html><html><head>${head(accent)}</head>
   <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#0a0a0c;">
@@ -248,21 +271,10 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe }
     <!-- Person links (untere zwei Drittel) -->
     ${hasCut ? `<img src="${cutoutUri}" style="position:absolute;left:0;bottom:${Math.round(safe.bottom * 0.5)}px;height:64%;max-width:56%;object-fit:contain;object-position:left bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));z-index:2;">` : ''}
 
-    <!-- Rechter Textblock: rechtsbündig, Versalien -->
-    <div style="position:absolute;right:56px;top:${safe.top + Math.round(dims.h * 0.14)}px;${hasCut ? 'left:48%;' : 'left:40%;'}text-align:right;z-index:4;">
-      <div data-autofit data-max="76" data-min="34"
-        style="width:100%;font-weight:900;font-size:76px;line-height:1.06;letter-spacing:-0.01em;
-        text-transform:uppercase;color:#fff;">${highlightMarkup(slots.textblock || '', accent)}</div>
-    </div>
-
-    <!-- Stellentitel unten mit Glow + Pill -->
-    <div style="position:absolute;left:56px;right:56px;bottom:${safe.bottom}px;text-align:center;z-index:4;">
-      <div data-autofit data-max="120" data-min="52"
-        style="width:100%;font-weight:900;font-size:120px;line-height:0.98;letter-spacing:-0.02em;
-        text-transform:uppercase;color:#fff;" class="glow-white">${escapeHtml(slots.stelle || '')}</div>
-      <div style="height:22px"></div>
-      ${slots.pill ? `<div><span class="pill" style="font-size:30px;padding:12px 30px;border-color:${accent};">${escapeHtml(slots.pill)}</span></div>` : ''}
-    </div>
+    <!-- Rechter Textblock + Stellentitel + Pill (frei positionierbar) -->
+    ${textBlock}
+    ${stelleBlock}
+    ${pillBlock}
   </body></html>`;
 }
 
@@ -290,14 +302,16 @@ function autofitScript() {
 /**
  * Rendert EIN Format einer Vorlage → PNG-Buffer.
  */
-async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt }) {
+async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides }) {
   const dims = FORMAT_DIMS[format];
   if (!dims) throw new Error(`Unbekanntes Format: ${format}`);
   const safe = SAFE[format] || SAFE.quadrat;
+  // Default-Positionen + gespeicherte Overrides (Feinjustage), in Safe-Zone geclamped.
+  const pos = mergePositionen('layout', vorlage, format, overrides);
 
   const html = vorlage === 'B'
-    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe })
-    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt });
+    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos })
+    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos });
 
   const page = await browser.newPage();
   await page.setViewport({ width: dims.w, height: dims.h, deviceScaleFactor: 1 });
@@ -328,7 +342,10 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
  * @param {string} p.jobId
  * @returns {Promise<Array<{ format, bild_url }>>}
  */
-export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, formats = ['quadrat'], jobId, strikt = false }) {
+// overrides: gespeicherte Textblock-Positionen (Feinjustage). Bei mehreren
+// Formaten gilt derselbe Override-Satz je Format (Initial-Render hat keine
+// Overrides → Defaults; Re-Render läuft pro Format mit dessen Overrides).
+export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, formats = ['quadrat'], jobId, strikt = false, overrides = null }) {
   const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
   const ink = pickInk(accent);
 
@@ -341,7 +358,7 @@ export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, 
   try {
     const out = [];
     for (const format of formats) {
-      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt });
+      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides });
       const key = `layout/${jobId}/${randomUUID()}_${vorlage}_${format}.png`;
       const url = await uploadBuffer({ bucket: STORAGE_BUCKET, path: key, buffer, contentType: 'image/png' });
       out.push({ format, bild_url: url });

@@ -979,9 +979,15 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   // Strikt-Modus: markenfarbige Schriftzüge exakt als Overlay-Ebene aufs neutrale
   // Motiv legen (nicht der KI überlassen). Danach kommt das Logo-Overlay obendrauf.
+  // Das textfreie Motiv wird separat gespeichert (render_spec.base_url), damit der
+  // Schriftzug später verschoben/neu gerendert werden kann.
   let farbCheck = null;
+  let renderSpec = null;
   if (strikt && (spruch || '').trim() && kunde?.farben?.primaer) {
     try {
+      const baseFilename = `${job.id}/strikt-base-${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+      const baseUrl = await uploadToStorage(rawBuffer, baseFilename);
+      renderSpec = { kind: 'strikt', base_url: baseUrl, hook: spruch, text_stil: textStil || null, accent: kunde.farben.primaer };
       rawBuffer = await renderTextOverlay({ baseBuffer: rawBuffer, format, stil: textStil, hook: spruch, accent: kunde.farben.primaer });
     } catch (err) { console.warn('[strikt-overlay]', err.message); }
   }
@@ -1028,7 +1034,7 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   const filename = `${job.id}/${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const bildUrl = await uploadToStorage(finalBuffer, filename);
-  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche: weisseFlaeche, strikt, textStil: textStil || null, farbCheck };
+  return { format, bildUrl, prompt, bildOhneLogoUrl, logoPosition, logoWeisseFlaeche: weisseFlaeche, strikt, textStil: textStil || null, farbCheck, renderSpec };
 }
 
 /**
