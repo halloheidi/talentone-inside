@@ -333,18 +333,23 @@ router.get('/kampagnen/:metaCampaignId/adsets', async (req, res) => {
 });
 
 // GET /api/meta/adsets/nicht-zugeordnet — offene Ad Sets gemischter Kampagnen (Projekt-Dropdown).
+// meta_campaign_id ist kein FK → Kampagnen-Name separat gemappt (kein PostgREST-Embed).
 router.get('/adsets/nicht-zugeordnet', async (req, res) => {
   try {
+    const { data: gem } = await supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, name').eq('gemischt', true);
+    const gemIds = (gem || []).map(k => k.meta_campaign_id);
+    if (!gemIds.length) return res.json({ adsets: [] });
+    const campName = Object.fromEntries((gem || []).map(k => [k.meta_campaign_id, k.name]));
     const { data, error } = await supabase.from('talentone_meta_adsets')
-      .select('meta_adset_id, name, meta_campaign_id, werbekonto_id, effective_status, meta_start_time, kunde_id, talentone_kunden(firmenname), talentone_meta_kampagnen!inner(name, gemischt)')
-      .is('projekt_id', null).eq('talentone_meta_kampagnen.gemischt', true).order('name');
+      .select('meta_adset_id, name, meta_campaign_id, werbekonto_id, effective_status, meta_start_time, kunde_id, talentone_kunden(firmenname)')
+      .is('projekt_id', null).in('meta_campaign_id', gemIds).order('name');
     if (error) return res.status(500).json({ error: error.message });
     const kn = await kontoNamen();
     res.json({ adsets: (data || []).map(a => ({
       meta_adset_id: a.meta_adset_id, name: a.name, meta_campaign_id: a.meta_campaign_id,
       werbekonto_id: a.werbekonto_id, effective_status: a.effective_status,
       kunde_name: a.talentone_kunden?.firmenname || null,
-      kampagne_name: a.talentone_meta_kampagnen?.name || null,
+      kampagne_name: campName[a.meta_campaign_id] || null,
       konto_name: kn[normKonto(a.werbekonto_id)] || null,
       start: a.meta_start_time ? a.meta_start_time.slice(0, 10) : null,
     })) });
