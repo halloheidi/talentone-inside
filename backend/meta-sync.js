@@ -192,8 +192,9 @@ function eindeutigBest(kandidaten, name, textOf) {
 
 export async function matchKampagnen() {
   // Nur noch nicht zugeordnete Kampagnen (projekt_id null) automatisch matchen.
+  // Gemischte Kampagnen NIE wholesale zuordnen — deren Attribution läuft pro Ad Set.
   const { data: kampagnen } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, name, werbekonto_id, projekt_id').is('projekt_id', null);
+    .select('meta_campaign_id, name, werbekonto_id, projekt_id').is('projekt_id', null).eq('gemischt', false);
   if (!kampagnen?.length) return { geprueft: 0, zugeordnet: 0, offen: 0 };
 
   const [{ data: konten }, { data: kunden }, { data: kundenAcc }, { data: jobs }] = await Promise.all([
@@ -239,6 +240,133 @@ export async function matchKampagnen() {
   const offen = kampagnen.length - zugeordnet;
   console.log(`[meta-match] ${kampagnen.length} geprüft, ${zugeordnet} zugeordnet, ${offen} offen.`);
   return { geprueft: kampagnen.length, zugeordnet, offen };
+}
+
+/* ── Ad-Set-Ebene (gemischte Kampagnen) ──────────────────────────────────────
+   Eine gemischte Kampagne bedient mehrere Stellen über Anzeigengruppen. Wir laden
+   deren Ad Sets + Ad-Set-Tages-Insights; die Attribution läuft dann pro Ad Set statt
+   pro Kampagne. Kampagnen-Insights bleiben führend für UNGEMISCHTE Kampagnen, sodass
+   nichts doppelt zählt. */
+async function upsertAdSet(konto, campaignId, a) {
+  const { data: bestehend } = await supabase.from('talentone_meta_adsets')
+    .select('effective_status').eq('meta_adset_id', a.id).maybeSingle();
+  await supabase.from('talentone_meta_adsets').upsert({
+    meta_adset_id: a.id,
+    meta_campaign_id: campaignId,
+    werbekonto_id: konto,
+    name: a.name || null,
+    effective_status: a.effective_status || null,
+    meta_start_time: a.start_time || null,
+    vorheriger_status: bestehend?.effective_status ?? null,
+    zuletzt_gesynct: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'meta_adset_id' });
+}
+
+// Ad Sets + Ad-Set-Insights EINER Kampagne ziehen (endpoint ist kampagnen-scoped →
+// nur für die wenigen als gemischt markierten Kampagnen aufgerufen, spart API-Last).
+async function syncAdSetsEiner(campaignId, konto, token, since, until) {
+  const adsets = await graphAll(`${campaignId}/adsets`, {
+    fields: 'id,name,effective_status,start_time', limit: PAGE_LIMIT,
+  }, token);
+  for (const a of adsets) await upsertAdSet(konto, campaignId, a);
+  await sleep(300);
+  const insights = await graphAll(`${campaignId}/insights`, {
+    level: 'adset', time_increment: '1',
+    time_range: JSON.stringify({ since, until }),
+    fields: 'adset_id,campaign_id,spend,impressions,clicks,ctr,cpm,actions', limit: PAGE_LIMIT,
+  }, token);
+  let n = 0;
+  for (const row of insights) {
+    const datum = row.date_start;
+    if (!row.adset_id || !datum) continue;
+    await supabase.from('talentone_meta_adset_insights').upsert({
+      meta_adset_id: row.adset_id,
+      meta_campaign_id: row.campaign_id || campaignId,
+      datum,
+      spend: row.spend != null ? Number(row.spend) : null,
+      impressions: row.impressions != null ? Number(row.impressions) : null,
+      clicks: row.clicks != null ? Number(row.clicks) : null,
+      ctr: row.ctr != null ? Number(row.ctr) : null,
+      cpm: row.cpm != null ? Number(row.cpm) : null,
+      leads: leadsAusActions(row.actions),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'meta_adset_id,datum' });
+    n++;
+  }
+  await sleep(400);
+  return { adsets: adsets.length, insights: n };
+}
+
+// Ad-Sets aller als gemischt markierten Kampagnen ziehen (im Nacht-Sync). Rückgabe:
+// {adsets, insights}. Konten-scoping über die in der Kampagne gespeicherte werbekonto_id.
+async function syncGemischteAdSets(token, since, until) {
+  const { data: gem } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id, werbekonto_id').eq('gemischt', true);
+  let adsets = 0, insights = 0;
+  for (const c of (gem || [])) {
+    try {
+      const r = await syncAdSetsEiner(c.meta_campaign_id, normKonto(c.werbekonto_id), token, since, until);
+      adsets += r.adsets; insights += r.insights;
+    } catch (e) { console.warn(`[meta-sync] Ad-Sets ${c.meta_campaign_id}: ${e.message}`); }
+  }
+  return { adsets, insights };
+}
+
+/**
+ * On-demand: eine gerade als „gemischt" markierte Kampagne sofort mit Ad Sets +
+ * Insights befüllen (ohne auf den Nacht-Sync zu warten). Danach Ad-Set-Matching.
+ */
+export async function adsetsNachladen(metaCampaignId, { backfill = true } = {}) {
+  const token = await getMetaToken();
+  if (!token) return { skipped: true, reason: 'kein_token' };
+  const { data: k } = await supabase.from('talentone_meta_kampagnen')
+    .select('werbekonto_id').eq('meta_campaign_id', metaCampaignId).maybeSingle();
+  if (!k) return { skipped: true, reason: 'kampagne_unbekannt' };
+  const tage = backfill ? 90 : 7;
+  const until = ymd(Date.now()), since = ymd(Date.now() - tage * 86400000);
+  const r = await syncAdSetsEiner(metaCampaignId, normKonto(k.werbekonto_id), token, since, until);
+  try { await matchAdSets(); } catch (e) { console.warn('[meta-sync] adset-match:', e.message); }
+  return { ok: true, ...r };
+}
+
+// Ad-Set-Namens-Matching (analog matchKampagnen). Kunde kommt aus der Kampagne
+// (bzw. Exklusiv-Konto); dann eindeutiger Job/Projekt-Treffer am Ad-Set-Namen.
+// Nur EINDEUTIGES wird gesetzt; manuell zugeordnete (projekt_id≠null) bleiben.
+export async function matchAdSets() {
+  const { data: adsets } = await supabase.from('talentone_meta_adsets')
+    .select('meta_adset_id, name, meta_campaign_id, werbekonto_id, projekt_id').is('projekt_id', null);
+  if (!adsets?.length) return { geprueft: 0, zugeordnet: 0 };
+
+  const campIds = [...new Set(adsets.map(a => a.meta_campaign_id))];
+  const [{ data: kamps }, { data: konten }, { data: kundenAcc }, { data: jobs }] = await Promise.all([
+    supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, kunde_id, werbekonto_id, name').in('meta_campaign_id', campIds),
+    supabase.from('talentone_meta_konten').select('konto_id, typ, kunde_id'),
+    supabase.from('talentone_kunden').select('id, meta_werbekonto_id').not('meta_werbekonto_id', 'is', null),
+    supabase.from('talentone_jobs').select('id, stelle, kunde_id, projekt_id, projekttyp').not('projekt_id', 'is', null),
+  ]);
+  const campById = Object.fromEntries((kamps || []).map(k => [k.meta_campaign_id, k]));
+  const exklusivKundeByKonto = {};
+  for (const x of (konten || [])) if (x.typ === 'exklusiv' && x.kunde_id) exklusivKundeByKonto[normKonto(x.konto_id)] = x.kunde_id;
+  for (const x of (kundenAcc || [])) { const kn = normKonto(x.meta_werbekonto_id); if (kn && !exklusivKundeByKonto[kn]) exklusivKundeByKonto[kn] = x.id; }
+  const jobsByKunde = {};
+  for (const j of (jobs || [])) if (j.projekttyp !== 'sonstiges' && j.projekttyp !== 'video') (jobsByKunde[j.kunde_id] ||= []).push(j);
+
+  let zugeordnet = 0;
+  for (const a of adsets) {
+    const camp = campById[a.meta_campaign_id];
+    const kundeId = camp?.kunde_id || exklusivKundeByKonto[normKonto(a.werbekonto_id)] || null;
+    if (!kundeId) continue;
+    const kand = jobsByKunde[kundeId] || [];
+    let jb = null;
+    if (kand.length === 1) jb = kand[0];
+    else if (kand.length > 1) jb = eindeutigBest(kand, a.name, x => x.stelle);
+    const patch = { kunde_id: kundeId, updated_at: new Date().toISOString() };
+    if (jb) { patch.projekt_id = jb.projekt_id; patch.job_id = jb.id; zugeordnet++; }
+    await supabase.from('talentone_meta_adsets').update(patch).eq('meta_adset_id', a.meta_adset_id);
+  }
+  console.log(`[meta-adset-match] ${adsets.length} geprüft, ${zugeordnet} zugeordnet.`);
+  return { geprueft: adsets.length, zugeordnet };
 }
 
 /* ── Zahlungsproblem-Wächter ─────────────────────────────────────────────────
@@ -506,6 +634,13 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
       }
     }
 
+    // Ad-Sets + Ad-Set-Insights der gemischten Kampagnen ziehen (Attribution pro Ad Set).
+    let adsetGesamt = 0, adsetInsightsGesamt = 0;
+    try {
+      const r = await syncGemischteAdSets(token, since, until);
+      adsetGesamt = r.adsets; adsetInsightsGesamt = r.insights;
+    } catch (e) { console.warn('[meta-sync] gemischte Ad-Sets:', e.message); }
+
     // Laufphasen der berührten Kampagnen neu berechnen + Reaktivierungen erkennen/melden.
     let reaktivierungen = 0;
     for (const cid of beruehrteKampagnen) {
@@ -520,16 +655,18 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
     try { planIst = await befuelleGeplanterLivegang(beruehrteKampagnen); } catch (e) { console.warn('[meta-sync] Plan=Ist:', e.message); }
 
     // Kampagnen automatisch Projekten/Kunden zuordnen (Namens-Match). Rest bleibt offen
-    // und sichtbar in der „Nicht zugeordnet"-Liste.
-    let match = null;
+    // und sichtbar in der „Nicht zugeordnet"-Liste. Danach Ad-Sets gemischter Kampagnen.
+    let match = null, adsetMatch = null;
     try { match = await matchKampagnen(); } catch (e) { console.warn('[meta-sync] match:', e.message); }
+    if (adsetGesamt) { try { adsetMatch = await matchAdSets(); } catch (e) { console.warn('[meta-sync] adset-match:', e.message); } }
 
     lastResult = {
       ok: true, konten: konten.length, kampagnen: kampagnenGesamt, insights: insightsGesamt,
-      reaktivierungen, plan_ist: planIst, backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, duration_ms: Date.now() - t0,
+      adsets: adsetGesamt, adset_insights: adsetInsightsGesamt,
+      reaktivierungen, plan_ist: planIst, backfill, zeitraum: { since, until }, konto_fehler: kontoFehler, match, adset_match: adsetMatch, duration_ms: Date.now() - t0,
     };
     lastRunAt = new Date().toISOString();
-    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage, ${reaktivierungen} Reaktivierungen, ${planIst} Plan=Ist — ${kontoFehler.length} Kontofehler.`);
+    console.log(`[meta-sync] ${konten.length} Konten, ${kampagnenGesamt} Kampagnen, ${insightsGesamt} Insight-Tage, ${adsetGesamt} Ad-Sets/${adsetInsightsGesamt} Ad-Set-Insights, ${reaktivierungen} Reaktivierungen, ${planIst} Plan=Ist — ${kontoFehler.length} Kontofehler.`);
     return lastResult;
   } finally { running = false; }
 }

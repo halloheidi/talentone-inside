@@ -26,6 +26,7 @@ import JobCreatives from './pages/job/JobCreatives.jsx';
 import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
+import JobMeta from './pages/job/JobMeta.jsx';
 import OfferKatalog from './pages/admin/OfferKatalog.jsx';
 import StilvorlagenAdmin from './pages/admin/Stilvorlagen.jsx';
 import EigeneLeads from './pages/admin/EigeneLeads.jsx';
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="adcopies" element={<JobAdCopies />} />
           <Route path="funnel" element={<JobFunnel />} />
           <Route path="export" element={<JobExport />} />
+          <Route path="meta" element={<JobMeta />} />
         </Route>
       </Route>
     </Routes>

@@ -430,6 +430,7 @@ const TABS = [
   { to: 'adcopies', label: 'Ad Copies' },
   { to: 'funnel', label: 'Funnel' },
   { to: 'export', label: 'Freigabe & Go-Live' },
+  { to: 'meta', label: 'Meta' },
 ];
 
 const STATUS_LABELS = {

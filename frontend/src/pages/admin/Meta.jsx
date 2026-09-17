@@ -28,6 +28,13 @@ export default function Meta() {
   const [savingKamp, setSavingKamp] = useState(null);
   const [matchBusy, setMatchBusy] = useState(false);
 
+  // Ad-Set-Ebene (gemischte Kampagnen)
+  const [adsetsByKamp, setAdsetsByKamp] = useState({}); // meta_campaign_id -> [adsets]
+  const [gemischtBusy, setGemischtBusy] = useState(null);
+  const [offeneAdsets, setOffeneAdsets] = useState([]);  // nicht zugeordnete Ad Sets
+  const [adsetSel, setAdsetSel] = useState({});          // meta_adset_id -> projekt_id
+  const [savingAdset, setSavingAdset] = useState(null);
+
   // Reaktivierungen & Zahlungsprobleme
   const [reaktivierungen, setReaktivierungen] = useState([]);
   const [zahlungsprobleme, setZahlungsprobleme] = useState([]);
@@ -50,18 +57,61 @@ export default function Meta() {
     catch (e) { setErr(e.body?.error || e.message); }
   }
   async function loadKampagnen() {
-    try { const r = await api('/meta/kampagnen/nicht-zugeordnet'); setKampagnen(r.kampagnen || []); }
+    try {
+      const r = await api('/meta/kampagnen/nicht-zugeordnet');
+      const list = r.kampagnen || [];
+      setKampagnen(list);
+      // Ad Sets der bereits gemischt markierten Kampagnen direkt mitladen.
+      for (const k of list) if (k.gemischt) loadAdsetsFuerKampagne(k.meta_campaign_id);
+    }
+    catch (e) { setErr(e.body?.error || e.message); }
+  }
+  async function loadOffeneAdsets() {
+    try { const r = await api('/meta/adsets/nicht-zugeordnet'); setOffeneAdsets(r.adsets || []); }
+    catch (e) { setErr(e.body?.error || e.message); }
+  }
+  async function loadAdsetsFuerKampagne(cid) {
+    try { const r = await api(`/meta/kampagnen/${encodeURIComponent(cid)}/adsets`); setAdsetsByKamp(p => ({ ...p, [cid]: r.adsets || [] })); }
     catch (e) { setErr(e.body?.error || e.message); }
   }
   useEffect(() => {
     load();
     loadKonten();
     loadKampagnen();
+    loadOffeneAdsets();
     loadReaktivierungen();
     loadZahlungsprobleme();
     api('/kunden').then(r => setKunden(r.kunden || [])).catch(() => {});
     api('/projekte').then(r => setProjekte(r.projekte || [])).catch(() => {});
   }, []);
+
+  // ── Ad-Set-Ebene ──
+  async function toggleGemischt(kamp, gemischt) {
+    setGemischtBusy(kamp.meta_campaign_id); setErr(''); setMsg('');
+    try {
+      const r = await api(`/meta/kampagnen/${encodeURIComponent(kamp.meta_campaign_id)}/gemischt`, {
+        method: 'PUT', body: { gemischt },
+      });
+      setMsg(gemischt
+        ? `Als gemischt markiert${r.nachgeladen?.adsets != null ? ` — ${r.nachgeladen.adsets} Anzeigengruppen geladen` : ''}.`
+        : 'Gemischt-Markierung entfernt.');
+      await Promise.all([loadKampagnen(), loadOffeneAdsets()]);
+      if (gemischt) await loadAdsetsFuerKampagne(kamp.meta_campaign_id);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setGemischtBusy(null); }
+  }
+  async function zuordneAdset(adset, projektId) {
+    if (!projektId) return;
+    setSavingAdset(adset.meta_adset_id); setErr(''); setMsg('');
+    try {
+      await api(`/meta/adsets/${encodeURIComponent(adset.meta_adset_id)}/zuordnung`, {
+        method: 'PUT', body: { projekt_id: projektId },
+      });
+      setMsg('Anzeigengruppe zugeordnet.');
+      await Promise.all([loadOffeneAdsets(), adset.meta_campaign_id ? loadAdsetsFuerKampagne(adset.meta_campaign_id) : Promise.resolve()]);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setSavingAdset(null); }
+  }
 
   async function bestaetigeReaktivierung(kamp, modus) {
     setReakBusy(kamp.meta_campaign_id); setErr(''); setMsg('');
@@ -437,31 +487,110 @@ export default function Meta() {
                     <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8, overflowWrap: 'anywhere' }}>
                       Start {kamp.start || '—'} · zuletzt aktiv {kamp.letzter_aktiv || '—'}
                     </div>
-                    {/* Bedienzeile */}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <SearchableSelect
-                        style={{ flex: '1 1 200px', minWidth: 0 }}
-                        value={sel}
-                        disabled={rowBusy}
-                        placeholder="— Projekt wählen —"
-                        options={[...kundeProjekte, ...andere].map(p => ({ value: p.id, label: projLabel(p) }))}
-                        onChange={v => setKampSel(p => ({ ...p, [kamp.meta_campaign_id]: v || '' }))}
-                      />
-                      <button
-                        className="btn-primary btn-sm"
-                        style={{ flex: '0 0 auto' }}
-                        onClick={() => zuordneKampagne(kamp, sel)}
-                        disabled={rowBusy || !sel}
-                      >
-                        {rowBusy ? 'Ordne zu…' : 'Zuordnen'}
-                      </button>
-                    </div>
+                    {/* Gemischt-Schalter */}
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: 'var(--ink-3)', marginBottom: 8 }}
+                      title="Diese Kampagne bedient mehrere Stellen über Anzeigengruppen. Dann wird pro Anzeigengruppe zugeordnet statt für die ganze Kampagne.">
+                      <input type="checkbox" checked={!!kamp.gemischt} disabled={gemischtBusy === kamp.meta_campaign_id}
+                        onChange={e => toggleGemischt(kamp, e.target.checked)} />
+                      Gemischt (mehrere Stellen){gemischtBusy === kamp.meta_campaign_id ? ' — lädt…' : ''}
+                    </label>
+
+                    {kamp.gemischt ? (
+                      /* Zuordnung pro Anzeigengruppe */
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px dashed var(--line)', paddingTop: 8 }}>
+                        {(adsetsByKamp[kamp.meta_campaign_id] || []).length === 0
+                          ? <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Keine Anzeigengruppen geladen — beim nächsten Sync oder erneutem Umschalten.</div>
+                          : (adsetsByKamp[kamp.meta_campaign_id] || []).map(as => {
+                            const asSel = adsetSel[as.meta_adset_id] ?? (as.projekt_id || '');
+                            const asBusy = savingAdset === as.meta_adset_id;
+                            return (
+                              <div key={as.meta_adset_id} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                <div style={{ flex: '1 1 160px', minWidth: 0, fontSize: 12 }}>
+                                  <span title={as.name || ''} style={{ fontWeight: 600 }}>{as.name || '(ohne Name)'}</span>
+                                  {as.projekt_name ? <span style={{ color: '#0a8043' }}> · ✓ {as.projekt_name}</span> : ''}
+                                  <div style={{ color: 'var(--ink-3)' }}>Start {as.start || '—'} · {as.aktive_lauftage || 0} aktive Tage{as.effective_status ? ` · ${as.effective_status}` : ''}</div>
+                                </div>
+                                <SearchableSelect
+                                  style={{ flex: '1 1 160px', minWidth: 0 }}
+                                  value={asSel} disabled={asBusy} placeholder="— Projekt wählen —"
+                                  options={[...kundeProjekte, ...andere].map(p => ({ value: p.id, label: projLabel(p) }))}
+                                  onChange={v => setAdsetSel(p => ({ ...p, [as.meta_adset_id]: v || '' }))}
+                                />
+                                <button className="btn-primary btn-sm" style={{ flex: '0 0 auto' }}
+                                  onClick={() => zuordneAdset(as, asSel)} disabled={asBusy || !asSel}>
+                                  {asBusy ? 'Ordne zu…' : 'Zuordnen'}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ) : (
+                      /* Zuordnung für die ganze Kampagne */
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <SearchableSelect
+                          style={{ flex: '1 1 200px', minWidth: 0 }}
+                          value={sel}
+                          disabled={rowBusy}
+                          placeholder="— Projekt wählen —"
+                          options={[...kundeProjekte, ...andere].map(p => ({ value: p.id, label: projLabel(p) }))}
+                          onChange={v => setKampSel(p => ({ ...p, [kamp.meta_campaign_id]: v || '' }))}
+                        />
+                        <button
+                          className="btn-primary btn-sm"
+                          style={{ flex: '0 0 auto' }}
+                          onClick={() => zuordneKampagne(kamp, sel)}
+                          disabled={rowBusy || !sel}
+                        >
+                          {rowBusy ? 'Ordne zu…' : 'Zuordnen'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
       </div>
+
+      {/* ══ Nicht zugeordnete Anzeigengruppen (gemischte Kampagnen) ══ */}
+      {offeneAdsets.length > 0 && (
+        <div className="card">
+          <h2 className="section-title" style={{ marginTop: 0 }}>Nicht zugeordnete Anzeigengruppen</h2>
+          <p className="section-sub">Anzeigengruppen aus gemischten Kampagnen, die noch keinem Projekt zugeordnet sind.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            {offeneAdsets.map(as => {
+              const asSel = adsetSel[as.meta_adset_id] ?? '';
+              const asBusy = savingAdset === as.meta_adset_id;
+              const projLabel = p => `${p.projekt || '(Unbenannt)'}${p.gesuchte_positionen ? ` — ${p.gesuchte_positionen}` : ''}`;
+              return (
+                <div key={as.meta_adset_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12, minWidth: 0, overflow: 'hidden' }}>
+                  <div title={as.name || ''} style={{ fontWeight: 600, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {as.name || '(ohne Name)'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8, overflowWrap: 'anywhere' }}>
+                    {as.kampagne_name ? `Kampagne: ${as.kampagne_name}` : ''}
+                    {as.konto_name ? ` · ${as.konto_name} (${as.werbekonto_id})` : ` · ${as.werbekonto_id || ''}`}
+                    {as.kunde_name ? ` · Hinweis: ${as.kunde_name}` : ''}
+                    {as.start ? ` · Start ${as.start}` : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <SearchableSelect
+                      style={{ flex: '1 1 200px', minWidth: 0 }}
+                      value={asSel} disabled={asBusy} placeholder="— Projekt wählen —"
+                      options={projekte.map(p => ({ value: p.id, label: projLabel(p) }))}
+                      onChange={v => setAdsetSel(p => ({ ...p, [as.meta_adset_id]: v || '' }))}
+                    />
+                    <button className="btn-primary btn-sm" style={{ flex: '0 0 auto' }}
+                      onClick={() => zuordneAdset(as, asSel)} disabled={asBusy || !asSel}>
+                      {asBusy ? 'Ordne zu…' : 'Zuordnen'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
