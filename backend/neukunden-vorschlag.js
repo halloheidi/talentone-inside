@@ -60,7 +60,8 @@ export async function erzeugeVorschlag({ base64, fileType, dateiname, datei_url 
 }
 
 export async function speichereVorschlag(jobId, payload) {
+  // talentone_jobs hat KEINE updated_at-Spalte — nicht mitschreiben.
   const { error } = await supabase.from('talentone_jobs')
-    .update({ neukunden_vorschlag: payload, updated_at: new Date().toISOString() }).eq('id', jobId);
+    .update({ neukunden_vorschlag: payload }).eq('id', jobId);
   if (error) throw new Error(error.message);
 }

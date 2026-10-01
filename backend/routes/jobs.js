@@ -746,7 +746,7 @@ router.post('/:id/neukunden/auswerten', async (req, res) => {
 // DELETE /api/jobs/:id/neukunden/vorschlag — Vorschlag verwerfen (die Datei bleibt in der Akte).
 router.delete('/:id/neukunden/vorschlag', async (req, res) => {
   const { error } = await supabase.from('talentone_jobs')
-    .update({ neukunden_vorschlag: null, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+    .update({ neukunden_vorschlag: null }).eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
