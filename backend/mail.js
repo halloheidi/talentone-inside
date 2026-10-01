@@ -577,6 +577,48 @@ export async function sendBewerbungUnzugeordnetWarnung({ kunde, job, antwortText
   });
 }
 
+/* ── Sofort-Mail bei handlungsauslösendem Kunden-Feedback (eingestellt / VG-Termin) ──
+   Nur diese zwei Status lösen eine Sofort-Mail aus; alle übrigen Änderungen laufen
+   gebündelt über die tägliche Sammel-Mail (kein Spam bei jedem „ungeeignet"). */
+export async function sendeKundenFeedbackSofort({ art, kunde, job, bewerberName, termin }) {
+  const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+  const jobUrl = (job && kunde?.id)
+    ? `${insideBase}/kunden/${kunde.id}/jobs/${job.id}/funnel#bewerbungen`
+    : insideBase;
+  const name = bewerberName || 'Ein Bewerber';
+  const firma = kunde?.firmenname || 'Kunde';
+  const stelle = job?.stelle || '—';
+
+  if (art === 'eingestellt') {
+    const html = `
+      <div style="font-family:-apple-system,Arial,sans-serif;color:#0a0a0a;max-width:600px;">
+        <h2 style="margin:0 0 8px;">🎉 Einstellung über das Portal</h2>
+        <p style="font-size:14px;line-height:1.6;"><strong>${escape(firma)}</strong> hat <strong>${escape(name)}</strong>
+          für die Stelle „${escape(stelle)}" als <strong>eingestellt</strong> markiert. Glückwunsch!</p>
+        <p style="font-size:14px;line-height:1.6;background:#fff7e6;border:1px solid #ffe0a3;border-radius:8px;padding:10px 12px;color:#8a5a00;">
+          ⚠️ <strong>Einstellung im Projekt erfassen — Garantie-relevant.</strong> In der Bewerberliste gibt es dafür
+          den Button „Als Einstellung erfassen", der die Einstellung direkt in die Projekt-Phase schreibt (Garantie-Uhr).</p>
+        <p><a href="${jobUrl}">→ Zur Bewerberliste</a></p>
+      </div>`;
+    const text = `🎉 Einstellung über das Portal: ${firma} hat ${name} für „${stelle}" eingestellt.\n⚠️ Einstellung im Projekt erfassen (Garantie-relevant) — Button „Als Einstellung erfassen".\n${jobUrl}`;
+    return sendInternalNotification({ subject: `🎉 Einstellung: ${name} bei ${firma} (${stelle})`, html, text });
+  }
+
+  // Vorstellungsgespräch-Termin
+  const terminLabel = termin ? new Date(termin).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '(Termin offen)';
+  const html = `
+    <div style="font-family:-apple-system,Arial,sans-serif;color:#0a0a0a;max-width:600px;">
+      <h2 style="margin:0 0 8px;">📅 Vorstellungsgespräch-Termin eingetragen</h2>
+      <p style="font-size:14px;line-height:1.6;"><strong>${escape(firma)}</strong> hat für <strong>${escape(name)}</strong>
+        (Stelle „${escape(stelle)}") einen Vorstellungsgespräch-Termin eingetragen:
+        <strong>${escape(terminLabel)}</strong>.</p>
+      <p style="font-size:14px;line-height:1.6;">Das Team kann flankieren (Erinnerung, Vorbereitung, Nachfassen).</p>
+      <p><a href="${jobUrl}">→ Zur Bewerberliste</a></p>
+    </div>`;
+  const text = `📅 Vorstellungsgespräch-Termin: ${firma} hat für ${name} („${stelle}") einen Termin eingetragen: ${terminLabel}.\n${jobUrl}`;
+  return sendInternalNotification({ subject: `📅 VG-Termin: ${name} bei ${firma} (${terminLabel})`, html, text });
+}
+
 /* ── Formular ausgefüllt — interne Mail mit allen Daten ── */
 
 export async function sendFormularEingang({ kunde, job, formdata, kundeUrl }) {

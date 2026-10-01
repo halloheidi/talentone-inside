@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import WoraufAchtenBox from './WoraufAchtenBox.jsx';
+import KundenFeedbackCell, { KUNDEN_STATUS, KUNDEN_STATUS_FILTER, kundenStatusLabel } from './KundenFeedbackCell.jsx';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
 
@@ -41,7 +42,9 @@ const FEEDBACK_LABELS = {
   interessant: 'Interessant',
   vorstellungsgespraech: 'Vorstellungsgespräch',
   eingestellt: 'Eingestellt',
-  abgesagt: 'Abgesagt',
+  ungeeignet: 'Ungeeignet',
+  absage: 'Absage',
+  abgesagt: 'Absage',
 };
 
 /* ─── Debounced Input ─── */
@@ -386,10 +389,10 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
             </section>
           )}
 
-          {fb.status && (
+          {(fb.status || fb.vorstellungsgespraech_am || fb.notizen || (fb.vorqual_werte_kunde && Object.keys(fb.vorqual_werte_kunde).length > 0)) && (
             <section>
-              <h3>Kundenfeedback <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span></h3>
-              {fb.notizen && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0' }}>{fb.notizen}</p>}
+              <h3>Kundenfeedback</h3>
+              <KundenFeedbackCell fb={fb} bewerbungId={bewerbung.id} showVorqual onHired={() => {}} />
             </section>
           )}
         </div>
@@ -421,6 +424,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
   const [showConfig, setShowConfig] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState('alle'); // alle | offen | erledigt
+  const [kundenStatusFilter, setKundenStatusFilter] = useState(''); // '' = alle
   const [kundeJobs, setKundeJobs] = useState([]); // alle Stellen des Kunden (für Umzuordnung)
 
   async function loadAll() {
@@ -534,8 +538,21 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
     let list = data.bewerbungen;
     if (filter === 'offen')    list = list.filter(b => !data.notizen[b.id]?.erledigt);
     if (filter === 'erledigt') list = list.filter(b =>  !!data.notizen[b.id]?.erledigt);
+    if (kundenStatusFilter) list = list.filter(b => (data.feedback[b.id]?.status || '') === kundenStatusFilter);
     return list;
-  }, [data, filter]);
+  }, [data, filter, kundenStatusFilter]);
+
+  // Kunden-Feedback-Zähler für den Job-Kopf.
+  const kundenStats = useMemo(() => {
+    let bewertet = 0, gespraeche = 0, einstellungen = 0;
+    for (const b of data.bewerbungen) {
+      const s = data.feedback[b.id]?.status;
+      if (s && s !== 'neu') bewertet++;
+      if (s === 'vorstellungsgespraech') gespraeche++;
+      if (s === 'eingestellt') einstellungen++;
+    }
+    return { bewertet, gespraeche, einstellungen };
+  }, [data]);
 
   /* CSV-Export */
   function exportCsv() {
@@ -589,6 +606,9 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
     <div className="bewerbungen-wrap">
       <div className="bewerbungen-toolbar">
         <strong>{data.bewerbungen.length} Bewerbungen</strong>
+        <span className="bew-kundenstats" style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+          davon vom Kunden bewertet: <strong>{kundenStats.bewertet}</strong> · Gespräche: <strong>{kundenStats.gespraeche}</strong> · Einstellungen: <strong>{kundenStats.einstellungen}</strong>
+        </span>
         {telefonistenMode && (
           <div className="bew-filter-group">
             <button className={`bew-filter ${filter === 'alle' ? 'is-active' : ''}`} onClick={() => setFilter('alle')}>Alle ({data.bewerbungen.length})</button>
@@ -596,6 +616,13 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
             <button className={`bew-filter ${filter === 'erledigt' ? 'is-active' : ''}`} onClick={() => setFilter('erledigt')}>Erledigt ({erledigt})</button>
           </div>
         )}
+        <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          Kunden-Status:
+          <select className="cell-input" style={{ maxWidth: 170 }} value={kundenStatusFilter} onChange={e => setKundenStatusFilter(e.target.value)}>
+            <option value="">Alle</option>
+            {KUNDEN_STATUS_FILTER.map(s => <option key={s} value={s}>{kundenStatusLabel(s)}</option>)}
+          </select>
+        </label>
         <button className="btn-ghost btn-sm" onClick={() => setShowConfig(v => !v)}>
           {showConfig ? '✕ Konfiguration' : '⚙ Spalten konfigurieren'}
         </button>
@@ -765,18 +792,24 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                     {frageSpalten.map(f => (
                       <td key={`q-${b.id}-${f}`} className="td-antwort">{antwortFor(b, f) || <span className="muted">—</span>}</td>
                     ))}
-                    {telefonistenMode && vorqualFelder.map((f, i) => (
-                      <td key={`vq-${b.id}-${i}`} onClick={e => e.stopPropagation()}>
-                        <VorqualField
-                          feld={f}
-                          value={(n.vorqualifizierung_werte || {})[f.name] || ''}
-                          onChange={v => {
-                            const next = { ...(n.vorqualifizierung_werte || {}), [f.name]: v };
-                            updateNotiz(b.id, { vorqualifizierung_werte: next });
-                          }}
-                        />
-                      </td>
-                    ))}
+                    {telefonistenMode && vorqualFelder.map((f, i) => {
+                      const kundeWert = (fb.vorqual_werte_kunde || {})[f.name];
+                      return (
+                        <td key={`vq-${b.id}-${i}`} onClick={e => e.stopPropagation()}>
+                          <VorqualField
+                            feld={f}
+                            value={(n.vorqualifizierung_werte || {})[f.name] || ''}
+                            onChange={v => {
+                              const next = { ...(n.vorqualifizierung_werte || {}), [f.name]: v };
+                              updateNotiz(b.id, { vorqualifizierung_werte: next });
+                            }}
+                          />
+                          {kundeWert != null && String(kundeWert).trim() !== '' && (
+                            <div className="kf-vq-kunde" title="Vom Kunden gepflegter Wert">👤 {String(kundeWert)}</div>
+                          )}
+                        </td>
+                      );
+                    })}
                     {!telefonistenMode && internalSpalten.map(key => {
                       if (!INTERNE_SPALTEN_DEFS[key]) return null;
                       if (key === 'status') return (
@@ -820,9 +853,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                       </td>
                     ))}
                     <td onClick={e => e.stopPropagation()}>
-                      {fb.status ? (
-                        <span className="kundenfeedback-badge">{FEEDBACK_LABELS[fb.status] || fb.status}</span>
-                      ) : <span className="muted">—</span>}
+                      <KundenFeedbackCell fb={fb} bewerbungId={b.id} showVorqual={!telefonistenMode} onHired={() => {}} />
                       {!telefonistenMode && <ResendKundeMailButton bewerbungId={b.id} />}
                     </td>
                   </tr>

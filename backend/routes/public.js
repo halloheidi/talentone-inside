@@ -10,7 +10,7 @@ import { attachSignedAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, sendeKundenFeedbackSofort, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
 import { vermerkeUpload, markAnfrageBeantwortetWennErfuellt } from '../upload-benachrichtigung.js';
 
 // mail_brand → { logo_url, name } für die Public-Seiten (Review/Anfragen). EINE Quelle
@@ -1229,6 +1229,10 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
     .from('talentone_bewerbungen').select('id, job_id').eq('id', req.params.bewId).maybeSingle();
   if (!bew || bew.job_id !== job.id) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Link.' });
 
+  // Vorzustand laden — für Sofort-Mail-Trigger (Übergang nach „eingestellt" / neuer VG-Termin).
+  const { data: vorher } = await supabase.from('talentone_bewerber_kundenfeedback')
+    .select('status, vorstellungsgespraech_am').eq('bewerbung_id', bew.id).maybeSingle();
+
   const patch = { bewerbung_id: bew.id, updated_at: new Date().toISOString() };
   const body = req.body || {};
   const changes = []; // fuer den internen Projekt-Kommentar
@@ -1266,6 +1270,27 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
     logKundenBewerberAenderung({ jobId: job.id, kundeId: job.kunde_id, bewId: bew.id, changes })
       .catch(err => console.warn('[bewerber-kunde-change]', err.message));
   }
+
+  // Sofort-Mail NUR bei handlungsauslösenden Übergängen: „eingestellt" (neu) oder
+  // ein neu/geändert eingetragener VG-Termin. Alles andere läuft über die Sammel-Mail.
+  const wurdeEingestellt = patch.status === 'eingestellt' && vorher?.status !== 'eingestellt';
+  const neuerVgTermin = patch.vorstellungsgespraech_am != null
+    && patch.vorstellungsgespraech_am !== (vorher?.vorstellungsgespraech_am || null);
+  if (wurdeEingestellt || neuerVgTermin) {
+    (async () => {
+      const { data: jobFull } = await supabase.from('talentone_jobs').select('id, stelle, kunde_id').eq('id', job.id).maybeSingle();
+      const { data: kunde } = jobFull?.kunde_id
+        ? await supabase.from('talentone_kunden').select('id, firmenname').eq('id', jobFull.kunde_id).maybeSingle() : { data: null };
+      const { data: bewFull } = await supabase.from('talentone_bewerbungen').select('name').eq('id', bew.id).maybeSingle();
+      if (wurdeEingestellt) {
+        await sendeKundenFeedbackSofort({ art: 'eingestellt', kunde, job: jobFull, bewerberName: bewFull?.name });
+      }
+      if (neuerVgTermin) {
+        await sendeKundenFeedbackSofort({ art: 'vg', kunde, job: jobFull, bewerberName: bewFull?.name, termin: patch.vorstellungsgespraech_am });
+      }
+    })().catch(err => console.warn('[kunden-feedback-sofortmail]', err.message));
+  }
+
   res.json({ feedback: data });
 });
 

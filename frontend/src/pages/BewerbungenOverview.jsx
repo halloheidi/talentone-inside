@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
 import PageContainer from '../components/PageContainer.jsx';
+import KundenFeedbackCell, { KUNDEN_STATUS_FILTER, kundenStatusLabel } from '../components/KundenFeedbackCell.jsx';
 
 const STATUS_OPTIONS = [
   { value: 'neu', label: 'Neu' },
@@ -110,6 +111,7 @@ export default function BewerbungenOverview() {
   const [jobFilter, setJobFilter] = useState('');
   const [quelleFilter, setQuelleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState([]); // multi
+  const [kundenStatusFilter, setKundenStatusFilter] = useState(''); // Kunden-Feedback-Status, '' = alle
   const [agenturFilter, setAgenturFilter] = useState('');
   const [vonFilter, setVonFilter] = useState('');
   const [bisFilter, setBisFilter] = useState('');
@@ -190,6 +192,7 @@ export default function BewerbungenOverview() {
     if (kundeFilter) list = list.filter(b => b.talentone_jobs?.kunde_id === kundeFilter);
     if (jobFilter) list = list.filter(b => b.job_id === jobFilter);
     if (agenturFilter) list = list.filter(b => b.talentone_jobs?.talentone_kunden?.agentur === agenturFilter);
+    if (kundenStatusFilter) list = list.filter(b => (data.feedback[b.id]?.status || '') === kundenStatusFilter);
     if (statusFilter.length > 0) {
       // Explizite Auswahl gewinnt — inkl. ausgeschiedener Status.
       list = list.filter(b => statusFilter.includes((data.notizen[b.id]?.status) || 'neu'));
@@ -207,6 +210,7 @@ export default function BewerbungenOverview() {
       else if (sortKey === 'kunde') { av = a.talentone_jobs?.talentone_kunden?.firmenname || ''; bv = b.talentone_jobs?.talentone_kunden?.firmenname || ''; }
       else if (sortKey === 'stelle') { av = a.talentone_jobs?.stelle || ''; bv = b.talentone_jobs?.stelle || ''; }
       else if (sortKey === 'status') { av = data.notizen[a.id]?.status || 'neu'; bv = data.notizen[b.id]?.status || 'neu'; }
+      else if (sortKey === 'kundenStatus') { av = data.feedback[a.id]?.status || ''; bv = data.feedback[b.id]?.status || ''; }
       else if (sortKey === 'bewertung') { av = data.notizen[a.id]?.bewertung || 0; bv = data.notizen[b.id]?.bewertung || 0; }
       else { av = ''; bv = ''; }
       if (av < bv) return -1 * dir;
@@ -214,7 +218,7 @@ export default function BewerbungenOverview() {
       return 0;
     });
     return list;
-  }, [data, nurVorqual, nurOffen, kundeFilter, jobFilter, agenturFilter, statusFilter, sortKey, sortAsc]);
+  }, [data, nurVorqual, nurOffen, kundeFilter, jobFilter, agenturFilter, statusFilter, kundenStatusFilter, sortKey, sortAsc]);
 
   async function updateNotiz(bewId, patch) {
     setData(prev => ({ ...prev, notizen: { ...prev.notizen, [bewId]: { ...(prev.notizen[bewId] || {}), ...patch } } }));
@@ -354,6 +358,13 @@ export default function BewerbungenOverview() {
             ))}
           </div>
         </div>
+        <div className="filter-group">
+          <label>Kunden-Status</label>
+          <select className="cell-input" value={kundenStatusFilter} onChange={e => setKundenStatusFilter(e.target.value)}>
+            <option value="">Alle</option>
+            {KUNDEN_STATUS_FILTER.map(s => <option key={s} value={s}>{kundenStatusLabel(s)}</option>)}
+          </select>
+        </div>
       </section>
 
       {loading ? (
@@ -380,7 +391,7 @@ export default function BewerbungenOverview() {
                 {vorqualSpalten.map((f, i) => (
                   <th key={`vq-h-${i}`} className="th-vorqual">{f.name}</th>
                 ))}
-                <th>Kundenfeedback</th>
+                <SortHeader k="kundenStatus" label="Kunden-Status" />
               </tr>
             </thead>
             <tbody>
@@ -452,12 +463,7 @@ export default function BewerbungenOverview() {
                       );
                     })}
                     <td>
-                      {fb.status ? (
-                        <span className={`kundenfeedback-badge kundenfeedback-${fb.status}`}>
-                          Kunde: {FEEDBACK_LABELS[fb.status]}
-                          {fb.vorstellungsgespraech_am && ` · ${new Date(fb.vorstellungsgespraech_am).toLocaleDateString('de-DE')}`}
-                        </span>
-                      ) : <span className="muted">—</span>}
+                      <KundenFeedbackCell fb={fb} bewerbungId={b.id} showVorqual onHired={() => {}} />
                     </td>
                   </tr>
                 );

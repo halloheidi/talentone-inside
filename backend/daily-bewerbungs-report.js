@@ -121,6 +121,61 @@ async function collectRows() {
   return { rows, neu24hTotal };
 }
 
+// Kunden-Feedback-Änderungen der letzten 24h, gruppiert je Kunde mit Status-Aufschlüsselung.
+// Quelle: talentone_bewerber_kundenfeedback.updated_at (vom Kunden im Portal gepflegt).
+const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsgespraech: 'Gespräch', eingestellt: 'Eingestellt', ungeeignet: 'ungeeignet', absage: 'Absage', abgesagt: 'Absage' };
+async function collectKundenFeedbackAenderungen() {
+  const seit24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { data: fb = [] } = await supabase.from('talentone_bewerber_kundenfeedback')
+    .select('bewerbung_id, status, vorstellungsgespraech_am, updated_at').gte('updated_at', seit24h);
+  if (!fb.length) return [];
+  const bewIds = [...new Set(fb.map(f => f.bewerbung_id))];
+  const { data: bews = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id').in('id', bewIds);
+  const jobVonBew = Object.fromEntries(bews.map(b => [b.id, b.job_id]));
+  const jobIds = [...new Set(bews.map(b => b.job_id).filter(Boolean))];
+  const { data: jobs = [] } = jobIds.length ? await supabase.from('talentone_jobs').select('id, stelle, kunde_id').in('id', jobIds) : { data: [] };
+  const jobById = Object.fromEntries(jobs.map(j => [j.id, j]));
+  const kundeIds = [...new Set(jobs.map(j => j.kunde_id).filter(Boolean))];
+  const { data: kunden = [] } = kundeIds.length ? await supabase.from('talentone_kunden').select('id, firmenname').in('id', kundeIds) : { data: [] };
+  const kundeById = Object.fromEntries(kunden.map(k => [k.id, k]));
+
+  const gruppen = {}; // kunde_id → { kunde, link, counts: {status:n}, total }
+  for (const f of fb) {
+    const job = jobById[jobVonBew[f.bewerbung_id]]; if (!job) continue;
+    const kunde = kundeById[job.kunde_id]; if (!kunde) continue;
+    const g = gruppen[kunde.id] ||= { kunde: kunde.firmenname, link: `${INSIDE_BASE}/kunden/${kunde.id}/jobs/${job.id}/funnel#bewerbungen`, counts: {}, total: 0 };
+    const st = f.status || 'neu';
+    g.counts[st] = (g.counts[st] || 0) + 1;
+    g.total++;
+  }
+  // „Eingestellt" und „Gespräch" nach vorne sortieren, dann nach Menge.
+  const prio = { eingestellt: 0, vorstellungsgespraech: 1 };
+  return Object.values(gruppen).map(g => ({
+    ...g,
+    breakdown: Object.entries(g.counts)
+      .sort((a, b) => (prio[a[0]] ?? 2) - (prio[b[0]] ?? 2) || b[1] - a[1])
+      .map(([st, n]) => `${n}× ${FEEDBACK_LABEL[st] || st}`).join(' · '),
+  })).sort((a, b) => b.total - a.total);
+}
+
+function renderFeedbackSektion(gruppen) {
+  if (!gruppen.length) return '';
+  const rows = gruppen.map(g => {
+    const hervor = g.counts.eingestellt || g.counts.vorstellungsgespraech;
+    return `<tr style="border-bottom:1px solid #ececea;${hervor ? 'background:#f0fdf4;' : ''}">
+      <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(g.kunde)}</td>
+      <td style="padding:8px 10px;font-size:13px;color:#0a0a0a;">${escape(g.breakdown)}</td>
+      <td style="padding:8px 10px;font-size:11px;text-align:right;"><a href="${escape(g.link)}" style="color:#3b82f6;text-decoration:none;">Öffnen →</a></td>
+    </tr>`;
+  }).join('');
+  return `<h2 style="margin:22px 0 6px;font-size:16px;color:#0a0a0a;">👥 Kunden-Feedback (letzte 24h)</h2>
+    <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fafaf8;border-bottom:2px solid #ececea;">
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Kunde</th>
+      <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#5a5955;">Bewertungen</th>
+      <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#5a5955;">Liste</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 // Budget-Wächter (≥80%/100% des Monatsbudgets) + Garantie-Hinweise (Fenster endet in
 // ≤14 aktiven Lauftagen). Beides über LIVE-Projekte; Projekte ohne Budget/ohne Meta bleiben stumm.
 async function collectMetaWarnungen() {
@@ -251,7 +306,7 @@ function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMe
   return html;
 }
 
-function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] } }) {
+function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] }, feedbackGruppen = [] }) {
   const anyWarn = rows.some(r => r.warnung);
   const rowsHtml = rows.map(r => `
     <tr style="border-bottom:1px solid #ececea;${r.warnung ? 'background:#fef2f2;' : ''}">
@@ -293,6 +348,7 @@ function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWar
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table>
+      ${renderFeedbackSektion(feedbackGruppen)}
       ${renderMetaSektionen(metaWarnungen)}
     </div>
   </body></html>`;
@@ -323,17 +379,21 @@ export async function runDailyBewerbungsReport() {
     const { rows, neu24hTotal } = await collectRows();
     let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] };
     try { metaWarnungen = await collectMetaWarnungen(); } catch (e) { console.warn('[daily-bewerbungs-report] meta-warnungen:', e.message); }
+    let feedbackGruppen = [];
+    try { feedbackGruppen = await collectKundenFeedbackAenderungen(); } catch (e) { console.warn('[daily-bewerbungs-report] kunden-feedback:', e.message); }
     const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length;
-    if (!rows.length && neu24hTotal === 0 && !anyMeta) {
+    if (!rows.length && neu24hTotal === 0 && !anyMeta && !feedbackGruppen.length) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
       console.log('[daily-bewerbungs-report] Nichts los — Mail übersprungen.');
       return lastResult;
     }
     const datumLabel = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const html = renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen });
+    const html = renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen, feedbackGruppen });
     const budgetN = metaWarnungen.budgetWarnungen.length, garantieN = metaWarnungen.garantieHinweise.length, ueberN = metaWarnungen.ueberfaelligMeldungen.length;
+    const fbEinst = feedbackGruppen.reduce((s, g) => s + (g.counts.eingestellt || 0), 0);
     const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
+      + (fbEinst ? ` · ${fbEinst} Einstellung${fbEinst === 1 ? '' : 'en'}🎉` : '')
       + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };

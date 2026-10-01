@@ -407,4 +407,35 @@ router.get('/', async (req, res) => {
   });
 });
 
+/* POST /api/bewerbungen/:id/als-einstellung
+   Hire-Verzahnung: schreibt die Portal-Einstellung in die aktive Projekt-Phase
+   (phase1/phase2_einstellungen — Freitext), die der Garantie-Wächter liest. So
+   landen Portal-Hires und Garantie-Uhr in derselben Welt. Idempotent (kein
+   Doppeleintrag desselben Namens). */
+router.post('/:id/als-einstellung', async (req, res) => {
+  const { data: bew } = await supabase.from('talentone_bewerbungen').select('id, name, job_id').eq('id', req.params.id).maybeSingle();
+  if (!bew) return res.status(404).json({ error: 'Bewerbung nicht gefunden.' });
+  const { data: job } = await supabase.from('talentone_jobs').select('id, stelle, projekt_id').eq('id', bew.job_id).maybeSingle();
+  if (!job?.projekt_id) return res.status(409).json({ error: 'Der Job ist keinem Projekt zugeordnet — Einstellung kann nicht erfasst werden.' });
+  const { data: projekt } = await supabase.from('talentone_projekte')
+    .select('id, projekt, start_phase1, start_phase2, phase1_einstellungen, phase2_einstellungen').eq('id', job.projekt_id).maybeSingle();
+  if (!projekt) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+
+  // Aktive Phase: Phase 2 wenn gestartet, sonst Phase 1.
+  const phase = projekt.start_phase2 ? 'phase2' : 'phase1';
+  const feld = `${phase}_einstellungen`;
+  const bestehend = (projekt[feld] || '').trim();
+  const name = (bew.name || 'Bewerber').trim();
+  if (bestehend && bestehend.toLowerCase().includes(name.toLowerCase())) {
+    return res.json({ ok: true, bereits_erfasst: true, projekt_id: projekt.id, phase, feld, wert: bestehend });
+  }
+  const heute = new Date().toISOString().slice(0, 10);
+  const eintrag = `${name} — eingestellt via Portal (${heute})`;
+  const wert = bestehend ? `${bestehend}\n${eintrag}` : eintrag;
+  const { error } = await supabase.from('talentone_projekte')
+    .update({ [feld]: wert, updated_at: new Date().toISOString() }).eq('id', projekt.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, projekt_id: projekt.id, projekt_name: projekt.projekt, phase, feld, wert });
+});
+
 export default router;

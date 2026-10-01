@@ -4332,6 +4332,24 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 .kundenfeedback-vorstellungsgespraech, .kundenfeedback-eingestellt { background: #d8edd9; color: #145c1f; }
 .kundenfeedback-abgesagt { background: #f4d6d6; color: #80201f; }
 
+/* Kunden-Status-Badges (farbcodiert): eingestellt grün, Gespräch blau,
+   ungeeignet/absage grau-rot, offen/interessant neutral. */
+.kundenfeedback-badge.kf-eingestellt  { background: #d8edd9; color: #145c1f; }
+.kundenfeedback-badge.kf-gespraech     { background: #dce8fb; color: #1b3f80; }
+.kundenfeedback-badge.kf-interessant   { background: #eef3f7; color: #334a5e; }
+.kundenfeedback-badge.kf-neu           { background: #f0efea; color: #5a5955; }
+.kundenfeedback-badge.kf-ungeeignet,
+.kundenfeedback-badge.kf-absage        { background: #efe0e0; color: #7a3b36; }
+.kf-note-btn { border: none; background: #f3f2ee; color: #4a4945; font-size: 11px; padding: 2px 7px; border-radius: 6px; cursor: pointer; }
+.kf-note-btn:hover { background: #e7e5df; }
+.kf-note-pop { position: absolute; z-index: 20; top: 100%; left: 0; margin-top: 4px; max-width: 260px; min-width: 160px;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--ink-2);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12); white-space: pre-wrap; }
+.kf-vorqual { font-size: 11px; color: var(--ink-3); border-left: 2px solid var(--line); padding-left: 6px; }
+.kf-vq-k { color: var(--ink-2); font-weight: 600; }
+.kf-vq-kunde { font-size: 11px; color: #1b3f80; margin-top: 2px; }
+.kf-hire { margin-top: 2px; }
+
 .link-button { background: transparent; border: none; padding: 0; color: var(--ink-1);
   cursor: pointer; text-align: left; font: inherit; }
 .link-button:hover strong { text-decoration: underline; }
