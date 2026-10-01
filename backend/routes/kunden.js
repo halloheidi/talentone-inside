@@ -8,6 +8,7 @@ import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mai
 import { notifyKunde } from '../close.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
 import { findVerwaisteAngeboteForKunde } from '../offer-linking.js';
+import { erzeugeVorschlag, speichereVorschlag, dateiTyp } from '../neukunden-vorschlag.js';
 
 const router = Router();
 
@@ -1000,6 +1001,75 @@ router.delete('/referenzbilder/:id', async (req, res) => {
     .from('talentone_referenzbilder').select('bild_url').eq('id', req.params.id).maybeSingle();
   if (existing?.bild_url) await deleteFromBucket('talentone-referenzbilder', existing.bild_url);
   const { error } = await supabase.from('talentone_referenzbilder').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+/* ─────────────────── Kunden-Dokumente (Formulare/Unterlagen, PDF/DOCX) ───────────────────
+   Bisher landeten nur Bilder in der Akte; Formular-PDFs gingen verloren. Dokumente
+   können per „Auswerten" in neukunden_daten-Vorschläge gemappt werden; beim Upload zu
+   einem Neukunden-Projekt läuft die Auswertung automatisch. */
+
+// GET /api/kunden/:id/dokumente
+router.get('/:id/dokumente', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_kunden_dokumente')
+    .select('*').eq('kunde_id', req.params.id).order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ dokumente: data || [] });
+});
+
+// POST /api/kunden/:id/dokumente  body: { fileData (base64), fileName, contentType?, job_id? }
+router.post('/:id/dokumente', async (req, res) => {
+  const { fileData, fileName = 'dokument.pdf', contentType, job_id } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
+  const typ = dateiTyp(fileName, null, contentType);
+  if (!typ) return res.status(400).json({ error: 'Nur PDF- oder DOCX-Dateien.' });
+  const { data: kunde } = await supabase.from('talentone_kunden').select('id').eq('id', req.params.id).maybeSingle();
+  if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+  try {
+    const buffer = Buffer.from(fileData, 'base64');
+    const stem = safeFilenameStem(fileName);
+    const ext = typ === 'pdf' ? 'pdf' : 'docx';
+    const ctype = typ === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const path = `${kunde.id}/${Date.now()}-${stem}.${ext}`;
+    const datei_url = await uploadBuffer({ bucket: 'talentone-kunden-dokumente', path, buffer, contentType: ctype });
+
+    // Ziel-Job bestimmen: explizit übergeben, sonst der (jüngste) Neukunden-Job des Kunden.
+    let zielJob = null;
+    if (job_id) { const { data } = await supabase.from('talentone_jobs').select('id, projekttyp').eq('id', job_id).maybeSingle(); if (data) zielJob = data; }
+    if (!zielJob) { const { data } = await supabase.from('talentone_jobs').select('id, projekttyp').eq('kunde_id', kunde.id).eq('projekttyp', 'neukundengewinnung').order('created_at', { ascending: false }).limit(1).maybeSingle(); zielJob = data || null; }
+
+    const { data: row, error } = await supabase.from('talentone_kunden_dokumente')
+      .insert({ kunde_id: kunde.id, job_id: zielJob?.id || null, datei_url, storage_path: path, dateiname: fileName, content_type: ctype, uploaded_via: 'intern' })
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Auto-Auswertung bei Neukunden-Job (best-effort — Scan/Fehler blockiert den Upload nicht).
+    let vorschlag = null, hinweis = null;
+    if (zielJob?.projekttyp === 'neukundengewinnung') {
+      try {
+        const payload = await erzeugeVorschlag({ base64: fileData, fileType: typ, dateiname: fileName, datei_url });
+        await speichereVorschlag(zielJob.id, payload);
+        vorschlag = payload;
+      } catch (e) {
+        hinweis = e.code === 'kein_text'
+          ? 'Scan ohne Textebene — nicht automatisch ausgewertet. Bitte Felder manuell pflegen.'
+          : (e.code === 'kein_mapping' ? 'Keine Neukunden-Felder erkannt.' : null);
+      }
+    }
+    res.status(201).json({ ok: true, dokument: row, job_id: zielJob?.id || null, vorschlag, hinweis });
+  } catch (err) {
+    console.error('[kunden-dokument-upload]', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// DELETE /api/kunden/dokumente/:id
+router.delete('/dokumente/:id', async (req, res) => {
+  const { data: d } = await supabase.from('talentone_kunden_dokumente').select('datei_url').eq('id', req.params.id).maybeSingle();
+  if (!d) return res.status(404).json({ error: 'Dokument nicht gefunden.' });
+  if (d.datei_url) { try { await deleteFromBucket('talentone-kunden-dokumente', d.datei_url); } catch (e) { console.warn('[dokument-delete]', e.message); } }
+  const { error } = await supabase.from('talentone_kunden_dokumente').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });

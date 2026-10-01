@@ -108,7 +108,16 @@ async function runUploadBenachrichtigungRound() {
         const artZeile = teile.join(' · ');
 
         const namen = dateien.map(d => `• ${d.dateiname || 'datei'}${d.typ === 'logo' ? ' (Logo)' : ''}`).join('\n');
-        const lead = `${firmenname} hat Dateien über den Upload-Link hochgeladen.\n\n${artZeile}\n\nDateien:\n${namen}`;
+        let lead = `${firmenname} hat Dateien über den Upload-Link hochgeladen.\n\n${artZeile}\n\nDateien:\n${namen}`;
+
+        // Verzahnung: liegt für ein Neukunden-Projekt dieses Kunden ein Daten-Vorschlag bereit?
+        try {
+          const { data: njobs } = await supabase.from('talentone_jobs')
+            .select('projekttyp, neukunden_vorschlag').eq('kunde_id', row.kunde_id).eq('projekttyp', 'neukundengewinnung');
+          if ((njobs || []).some(j => j.neukunden_vorschlag)) {
+            lead += `\n\n📄 inkl. ausgefülltem Formular — Vorschlag zur Übernahme liegt im Neukunden-Tab.`;
+          }
+        } catch (e) { /* best-effort — Mail trotzdem senden */ }
 
         await sendTeamAlertMail({
           subject: `📸 ${firmenname} hat Dateien hochgeladen (${anzahl} Stück)`,

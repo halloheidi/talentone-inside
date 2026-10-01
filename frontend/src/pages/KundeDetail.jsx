@@ -46,6 +46,10 @@ export default function KundeDetail() {
   const [anfrageMsg, setAnfrageMsg] = useState('');
 
   const [referenzbilder, setReferenzbilder] = useState([]);
+  const [dokumente, setDokumente] = useState([]);
+  const [dokBusy, setDokBusy] = useState(false);
+  const [dokMsg, setDokMsg] = useState('');
+  const [auswertenBusy, setAuswertenBusy] = useState(null); // dokument.id während Auswertung
   const [refLightboxIndex, setRefLightboxIndex] = useState(null);
 
   // Archivieren + Löschen
@@ -459,7 +463,43 @@ export default function KundeDetail() {
     api(`/kunden/${kundeId}/referenzbilder`)
       .then(res => setReferenzbilder(res.referenzbilder || []))
       .catch(() => {});
+    api(`/kunden/${kundeId}/dokumente`)
+      .then(res => setDokumente(res.dokumente || []))
+      .catch(() => {});
   }, [kundeId]);
+
+  async function uploadDokument(file) {
+    if (!file) return;
+    const ok = /\.(pdf|docx)$/i.test(file.name);
+    if (!ok) { setDokMsg('Nur PDF- oder DOCX-Dateien.'); return; }
+    setDokBusy(true); setDokMsg('');
+    try {
+      const fileData = await fileToBase64(file);
+      const res = await api(`/kunden/${kundeId}/dokumente`, {
+        method: 'POST', body: { fileData, fileName: file.name, contentType: file.type },
+      });
+      setDokumente(prev => [res.dokument, ...prev]);
+      if (res.vorschlag) setDokMsg('📄 Dokument hochgeladen — Daten-Vorschlag erstellt (im Neukunden-Tab übernehmen).');
+      else if (res.hinweis) setDokMsg(res.hinweis);
+      else setDokMsg('Dokument hochgeladen.');
+    } catch (err) { setDokMsg(err.body?.error || err.message); }
+    finally { setDokBusy(false); }
+  }
+  async function auswertenDokument(dok) {
+    if (!dok.job_id) { setDokMsg('Dieses Dokument ist keinem Neukunden-Projekt zugeordnet — Auswertung nicht möglich.'); return; }
+    setAuswertenBusy(dok.id); setDokMsg('');
+    try {
+      await api(`/jobs/${dok.job_id}/neukunden/auswerten`, { method: 'POST', body: { dokument_id: dok.id } });
+      setDokMsg('📄 Daten-Vorschlag erstellt — im Neukunden-Tab des Projekts Feld für Feld übernehmen.');
+    } catch (err) {
+      setDokMsg(err.body?.hinweis || err.body?.error || err.message);
+    } finally { setAuswertenBusy(null); }
+  }
+  async function deleteDokument(dok) {
+    if (!confirm(`Dokument „${dok.dateiname || 'Datei'}" wirklich löschen?`)) return;
+    try { await api(`/kunden/dokumente/${dok.id}`, { method: 'DELETE' }); setDokumente(prev => prev.filter(x => x.id !== dok.id)); }
+    catch (err) { alert(err.message); }
+  }
 
   // Umfang wechseln: den Standard-Text mitziehen, solange der Nutzer den Text
   // nicht selbst angepasst hat (aktueller Text ist noch einer der Defaults).
@@ -977,6 +1017,36 @@ export default function KundeDetail() {
             trigger={<span>+ Foto(s)<br/><small>Drag &amp; Drop</small></span>}
           />
         </div>
+      </div>
+
+      <div className="ref-strip" id="dokumente">
+        <div className="ref-strip-title">
+          Dokumente (Formulare/Unterlagen){dokumente.length ? `: ${dokumente.length}` : ' — noch keine'}
+          <label className="btn-ghost btn-sm" style={{ marginLeft: 10, cursor: dokBusy ? 'wait' : 'pointer' }}>
+            {dokBusy ? 'Lädt…' : '+ Dokument (PDF/DOCX)'}
+            <input type="file" accept=".pdf,.docx" style={{ display: 'none' }} disabled={dokBusy}
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; uploadDokument(f); }} />
+          </label>
+        </div>
+        {dokMsg && <div style={{ fontSize: 13, color: '#1b3f80', margin: '4px 0 8px' }}>{dokMsg}</div>}
+        {dokumente.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {dokumente.map(dok => (
+              <div key={dok.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 10px' }}>
+                <span style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13 }}>
+                  📄 <a href={dok.datei_url} target="_blank" rel="noreferrer">{dok.dateiname || 'Dokument'}</a>
+                  <span style={{ color: 'var(--ink-3)', fontSize: 11 }}> · {new Date(dok.created_at).toLocaleDateString('de-DE')}{dok.uploaded_via === 'kunde' ? ' · vom Kunden' : ''}</span>
+                </span>
+                <button type="button" className="btn-ghost btn-sm" disabled={auswertenBusy === dok.id || !dok.job_id}
+                  title={dok.job_id ? 'Formular auswerten → Daten-Vorschlag für den Neukunden-Tab' : 'Keinem Neukunden-Projekt zugeordnet'}
+                  onClick={() => auswertenDokument(dok)}>
+                  {auswertenBusy === dok.id ? 'Werte aus…' : '🔎 Auswerten'}
+                </button>
+                <button type="button" className="btn-ghost btn-sm" title="Löschen" onClick={() => deleteDokument(dok)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <ProjektStatusRow projekte={projekte} />

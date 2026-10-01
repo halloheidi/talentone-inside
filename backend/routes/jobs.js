@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { extractFromUrl, extractFromFile, toJob } from '../extractor.js';
+import { erzeugeVorschlag, speichereVorschlag } from '../neukunden-vorschlag.js';
 import { sendUploadAnfrage, sendFormularEinladung } from '../mail.js';
 import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
@@ -224,7 +225,7 @@ const ALLOWED_JOB_FIELDS = [
   'formdata_komplett', 'analyse_ergebnis', 'bewerbung_email',
   'interne_spalten', 'vorqualifizierung', 'vorqualifizierung_felder', 'wichtige_kriterien',
   // Projekttyp „Neukundengewinnung" (Migration 021):
-  'projekttyp', 'neukunden_daten',
+  'projekttyp', 'neukunden_daten', 'neukunden_vorschlag',
   // Arbeitshinweise-Banner (Migration 023)
   'arbeitshinweise',
   // Tab-Häkchen (manuelle Erledigt-Overrides pro Tab)
@@ -710,6 +711,44 @@ router.post('/:id/kriterien-anfrage', async (req, res) => {
     console.error('[jobs/kriterien-anfrage]', err.message);
     res.status(503).json({ error: err.message });
   }
+});
+
+/* ═══════════ Neukunden: Formular-Auswertung → Daten-Vorschlag ═══════════
+   Extrahiert ein hochgeladenes Formular (PDF/DOCX) und mappt per KI auf die
+   neukunden_daten-Felder. Speichert NICHT direkt, sondern als Vorschlag
+   (job.neukunden_vorschlag) — Übernahme erfolgt im Neukunden-Tab Feld für Feld.
+   Quelle: dokument_id (Akte-Dokument) ODER datei_url ODER fileData (Direkt-Upload). */
+router.post('/:id/neukunden/auswerten', async (req, res) => {
+  const { fileData, fileType, dateiname, datei_url, dokument_id } = req.body || {};
+  const { data: job } = await supabase.from('talentone_jobs').select('id, projekttyp').eq('id', req.params.id).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  if (job.projekttyp !== 'neukundengewinnung') return res.status(400).json({ error: 'Auswertung nur für Neukundengewinnungs-Projekte.' });
+
+  let url = datei_url, name = dateiname;
+  if (dokument_id) {
+    const { data: d } = await supabase.from('talentone_kunden_dokumente').select('datei_url, dateiname').eq('id', dokument_id).maybeSingle();
+    if (!d) return res.status(404).json({ error: 'Dokument nicht gefunden.' });
+    url = d.datei_url; name = name || d.dateiname;
+  }
+  try {
+    const payload = await erzeugeVorschlag({ base64: fileData, fileType, dateiname: name, datei_url: url });
+    await speichereVorschlag(job.id, payload);
+    res.json({ ok: true, neukunden_vorschlag: payload });
+  } catch (e) {
+    if (e.code === 'kein_text') return res.status(422).json({ error: 'kein_text', hinweis: `Aus „${name || 'der Datei'}" ließ sich kein Text lesen — vermutlich ein Scan ohne Textebene. Bitte ein durchsuchbares PDF/DOCX hochladen oder die Felder manuell pflegen.` });
+    if (e.code === 'kein_mapping') return res.status(422).json({ error: 'kein_mapping', hinweis: `Aus „${name || 'der Datei'}" konnten keine Neukunden-Felder erkannt werden.` });
+    if (e.code === 'format') return res.status(400).json({ error: e.message });
+    console.error('[neukunden-auswerten]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/jobs/:id/neukunden/vorschlag — Vorschlag verwerfen (die Datei bleibt in der Akte).
+router.delete('/:id/neukunden/vorschlag', async (req, res) => {
+  const { error } = await supabase.from('talentone_jobs')
+    .update({ neukunden_vorschlag: null, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 export default router;

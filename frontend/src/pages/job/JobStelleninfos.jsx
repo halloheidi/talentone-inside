@@ -759,6 +759,46 @@ function NeukundenProduktTab({ job, kunde, reload }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // Daten-Vorschlag aus hochgeladenem Formular (job.neukunden_vorschlag).
+  const VFELD_LABEL = { produkt: 'Produkt / Dienstleistung', kundenprofil: 'Wofür Kunden gesucht werden', zielgruppe: 'Zielgruppe', einzugsgebiet: 'Region / Einzugsgebiet', preisrahmen: 'Preisrahmen', vorteile: 'Vorteile', unterschied: 'USP / Unterschied' };
+  const vorschlag = job.neukunden_vorschlag;
+  const [vSel, setVSel] = useState({});
+  const [vBusy, setVBusy] = useState(false);
+  useEffect(() => {
+    if (!vorschlag?.vorschlag) { setVSel({}); return; }
+    const init = {};
+    for (const k of Object.keys(vorschlag.vorschlag)) {
+      const cur = form[k];
+      const leer = k === 'vorteile' ? !(Array.isArray(cur) && cur.length) : !(cur && String(cur).trim());
+      init[k] = leer; // bereits befüllte Felder standardmäßig ABgewählt (schützt manuelle Arbeit)
+    }
+    setVSel(init);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vorschlag?.erstellt_am]);
+
+  async function vUebernehmen(keys) {
+    const apply = keys || Object.keys(vorschlag.vorschlag).filter(k => vSel[k]);
+    setVBusy(true);
+    if (apply.length) setForm(prev => {
+      const next = { ...prev };
+      for (const k of apply) {
+        const v = vorschlag.vorschlag[k];
+        if (k === 'vorteile') next.vorteile = Array.isArray(v) ? v.filter(Boolean) : prev.vorteile;
+        else next[k] = v;
+      }
+      return next;
+    });
+    try { await api(`/jobs/${job.id}/neukunden/vorschlag`, { method: 'DELETE' }); } catch { /* ignore */ }
+    if (reload) await reload();
+    setVBusy(false);
+  }
+  async function vVerwerfen() {
+    setVBusy(true);
+    try { await api(`/jobs/${job.id}/neukunden/vorschlag`, { method: 'DELETE' }); } catch { /* ignore */ }
+    if (reload) await reload();
+    setVBusy(false);
+  }
+
   function set(k, v) { setForm(prev => ({ ...prev, [k]: v })); }
   function addVorteil() {
     const v = newVorteil.trim();
@@ -803,6 +843,42 @@ function NeukundenProduktTab({ job, kunde, reload }) {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <PruefungVersand job={job} kunde={kunde} reload={reload} />
       </div>
+
+      {/* Daten-Vorschlag aus hochgeladenem Formular — Feld für Feld übernehmen. */}
+      {vorschlag?.vorschlag && Object.keys(vorschlag.vorschlag).length > 0 && (
+        <div style={{ border: '1px solid #ffe0a3', background: '#fff8ec', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>📄 Daten-Vorschlag aus „{vorschlag.dateiname}"</div>
+          <p style={{ fontSize: 12.5, color: '#8a5a00', margin: '0 0 10px' }}>
+            Aus dem hochgeladenen Formular erkannt. Bereits befüllte Felder sind abgewählt — es wird nichts ohne deine Auswahl überschrieben.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {Object.entries(vorschlag.vorschlag).map(([k, v]) => {
+              const cur = form[k];
+              const curStr = k === 'vorteile' ? (Array.isArray(cur) ? cur.join(' · ') : '') : (cur || '');
+              const vStr = k === 'vorteile' ? (Array.isArray(v) ? v.join(' · ') : '') : v;
+              return (
+                <label key={k} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', background: '#fff', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!vSel[k]} style={{ marginTop: 3 }}
+                    onChange={e => setVSel(prev => ({ ...prev, [k]: e.target.checked }))} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{VFELD_LABEL[k] || k}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Aktuell: {curStr ? curStr : <em>leer</em>}</div>
+                    <div style={{ fontSize: 13, color: '#1b3f80' }}>Vorschlag: {vStr}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <button type="button" className="btn-primary btn-sm" disabled={vBusy} onClick={() => vUebernehmen()}>
+              {vBusy ? 'Übernehme…' : 'Ausgewählte übernehmen'}
+            </button>
+            <button type="button" className="btn-ghost btn-sm" disabled={vBusy} onClick={() => vUebernehmen(Object.keys(vorschlag.vorschlag))}>Alle übernehmen</button>
+            <button type="button" className="btn-ghost btn-sm" disabled={vBusy} onClick={vVerwerfen}>Verwerfen</button>
+          </div>
+        </div>
+      )}
+
       <div className="section-head">
         <div>
           <h2 className="section-title">Produkt &amp; Zielgruppe</h2>
