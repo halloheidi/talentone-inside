@@ -47,7 +47,17 @@ function extractRawObjects(antworten) {
 export function normalizeBewerbung(bewerbung) {
   if (!bewerbung) return { name: null, email: null, telefon: null, antworten: [] };
 
-  const rawAntworten = Array.isArray(bewerbung.antworten) ? bewerbung.antworten : [];
+  // antworten liegt vor als Array [{frage_text,antwort}] (Normalfall), als Array mit
+  // Legacy-Key {frage,antwort} (3 alte Webhook-Zeilen) ODER als Objekt
+  // {frage_text: antwort} (~10 ältere Importe). Alle drei auf das Paar-Array normalisieren.
+  let rawAntworten;
+  if (Array.isArray(bewerbung.antworten)) {
+    rawAntworten = bewerbung.antworten.map(a => (a && a.frage_text == null && a.frage != null) ? { ...a, frage_text: a.frage } : a);
+  } else if (bewerbung.antworten && typeof bewerbung.antworten === 'object') {
+    rawAntworten = Object.entries(bewerbung.antworten).map(([frage_text, antwort]) => ({ frage_text, antwort }));
+  } else {
+    rawAntworten = [];
+  }
 
   // Wenn keiner der Einträge ein Meta-Key ist UND keine Antwort JSON-Roh-Object enthält,
   // dann ist alles bereits sauber → direkt zurückgeben.

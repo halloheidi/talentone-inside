@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
 import PageContainer from '../components/PageContainer.jsx';
 import KundenFeedbackCell, { KUNDEN_STATUS_FILTER, kundenStatusLabel } from '../components/KundenFeedbackCell.jsx';
+import FunnelAntwortenPanel, { erstePreview } from '../components/FunnelAntwortenPanel.jsx';
 
 const STATUS_OPTIONS = [
   { value: 'neu', label: 'Neu' },
@@ -103,6 +104,9 @@ export default function BewerbungenOverview() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ bewerbungen: [], notizen: {}, feedback: {}, stats: {} });
   const [selectedBewerbung, setSelectedBewerbung] = useState(null);
+  const [openAntworten, setOpenAntworten] = useState(() => new Set());
+  const fragenFor = (b) => (data.funnels && data.funnels[b.funnel_id]) || [];
+  const toggleAntworten = (id) => setOpenAntworten(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   // Filter — Telefonisten-Defaults: nur Vorqualifizierung + nur offen
   const [nurVorqual, setNurVorqual] = useState(true);
@@ -404,7 +408,8 @@ export default function BewerbungenOverview() {
                 const kunde = b.talentone_jobs?.talentone_kunden;
                 const job = b.talentone_jobs;
                 return (
-                  <tr key={b.id} className={b.ko_kriterium ? 'is-ko' : ''}>
+                  <Fragment key={b.id}>
+                  <tr className={b.ko_kriterium ? 'is-ko' : ''}>
                     <td onClick={e => e.stopPropagation()}>
                       <AmpelSelector value={n.ampel} onChange={v => updateNotiz(b.id, { ampel: v })} />
                     </td>
@@ -414,6 +419,10 @@ export default function BewerbungenOverview() {
                         <strong>{norm.name || '—'}</strong>
                       </button>
                       <div className="td-name-meta">{norm.email || ''}{norm.email && norm.telefon ? ' · ' : ''}{norm.telefon || ''}</div>
+                      {(() => { const pv = erstePreview(b); return pv ? <div className="bew-antwort-preview" title={pv}>{pv}</div> : null; })()}
+                      <button type="button" className="bew-antwort-toggle" onClick={() => toggleAntworten(b.id)}>
+                        {openAntworten.has(b.id) ? '▾ Funnel-Antworten' : '▸ Funnel-Antworten'}
+                      </button>
                     </td>
                     <td>{kunde ? <Link to={`/kunden/${kunde.id}`}>{kunde.firmenname}</Link> : '—'}</td>
                     <td>{job && kunde ? <Link to={`/kunden/${kunde.id}/jobs/${job.id}/funnel`}>{job.stelle || '—'}</Link> : '—'}</td>
@@ -466,6 +475,14 @@ export default function BewerbungenOverview() {
                       <KundenFeedbackCell fb={fb} bewerbungId={b.id} showVorqual onHired={() => {}} />
                     </td>
                   </tr>
+                  {openAntworten.has(b.id) && (
+                    <tr className="bew-antworten-row">
+                      <td colSpan={99} style={{ padding: '8px 14px 12px', background: '#fafaf8' }}>
+                        <FunnelAntwortenPanel bewerbung={b} fragen={fragenFor(b)} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -474,13 +491,13 @@ export default function BewerbungenOverview() {
       )}
 
       {selectedBewerbung && (
-        <SlideOver bewerbung={selectedBewerbung} notiz={data.notizen[selectedBewerbung.id]} feedback={data.feedback[selectedBewerbung.id]} onClose={() => setSelectedBewerbung(null)} onUpdate={(patch) => updateNotiz(selectedBewerbung.id, patch)} />
+        <SlideOver bewerbung={selectedBewerbung} notiz={data.notizen[selectedBewerbung.id]} feedback={data.feedback[selectedBewerbung.id]} fragen={fragenFor(selectedBewerbung)} onClose={() => setSelectedBewerbung(null)} onUpdate={(patch) => updateNotiz(selectedBewerbung.id, patch)} />
       )}
     </div>
   );
 }
 
-function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) {
+function SlideOver({ bewerbung: b, notiz: n, feedback: fb, fragen = [], onClose, onUpdate }) {
   const note = n || {};
   const feedback = fb || {};
   const norm = normalizeBewerbung(b);
@@ -590,21 +607,11 @@ function SlideOver({ bewerbung: b, notiz: n, feedback: fb, onClose, onUpdate }) 
             <DebouncedInput rows={5} value={note.notizen || ''} onSave={v => onUpdate({ notizen: v })} />
           </section>
 
-          {/* 6. Funnel-Antworten — aufklappbar */}
-          {norm.antworten.length > 0 && (
-            <section>
-              <details className="slideover-details">
-                <summary><h3>Funnel-Antworten ({norm.antworten.length})</h3></summary>
-                <ul className="slideover-antworten">
-                  {norm.antworten.map((a, i) => (
-                    <li key={i}>
-                      <div className="slideover-frage">Frage: {a.frage_text}</div>
-                      <div className="slideover-antwort">→ Antwort: {a.antwort}</div>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </section>
+          {/* 6. Funnel-Antworten (mit KO-Markierung) */}
+          <section>
+            <h3>Funnel-Antworten</h3>
+            <FunnelAntwortenPanel bewerbung={b} fragen={fragen} />
+          </section>
           )}
 
           {/* 7. Kundenfeedback */}

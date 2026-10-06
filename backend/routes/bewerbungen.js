@@ -299,6 +299,17 @@ router.put('/:bewId/spalten/:spalteId', async (req, res) => {
 
 /* ════════════════════ Listing für einen Job ════════════════════ */
 
+// Funnel-Definitionen {funnel_id: fragen[]} der beteiligten Bewerbungen laden.
+async function ladeFunnels(bewerbungen) {
+  const funnelIds = [...new Set((bewerbungen || []).map(b => b.funnel_id).filter(Boolean))];
+  const funnels = {};
+  if (funnelIds.length) {
+    const { data: fs } = await supabase.from('talentone_funnels').select('id, fragen').in('id', funnelIds);
+    for (const f of (fs || [])) funnels[f.id] = f.fragen || [];
+  }
+  return funnels;
+}
+
 async function loadBewerbungenFuerJob(jobId) {
   const { data: bewerbungen, error } = await supabase
     .from('talentone_bewerbungen')
@@ -332,7 +343,11 @@ async function loadBewerbungenFuerJob(jobId) {
   // lösen Storage-Calls aus.
   const bewerbungenMitAnhaengen = await attachSignedAnhaenge(bewerbungen);
 
-  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte };
+  // Funnel-Definitionen (fragen + KO-Flags) der beteiligten Funnels — für die
+  // KO-Markierung der Antworten im Frontend (per-Antwort-KO wird NICHT gespeichert).
+  const funnels = await ladeFunnels(bewerbungen);
+
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels };
 }
 
 // GET /api/bewerbungen/job/:jobId — komplette Tabellen-Daten für einen Job
@@ -399,10 +414,12 @@ router.get('/', async (req, res) => {
   }
 
   const filteredMitAnhaengen = await attachSignedAnhaenge(filtered);
+  const funnels = await ladeFunnels(filtered);
   res.json({
     bewerbungen: filteredMitAnhaengen,
     notizen,
     feedback,
+    funnels,
     stats: { neueHeute, offen, inBearbeitung, weitergeleitetWoche },
   });
 });

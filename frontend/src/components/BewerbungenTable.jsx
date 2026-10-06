@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import WoraufAchtenBox from './WoraufAchtenBox.jsx';
 import KundenFeedbackCell, { KUNDEN_STATUS, KUNDEN_STATUS_FILTER, kundenStatusLabel } from './KundenFeedbackCell.jsx';
+import FunnelAntwortenPanel, { erstePreview, istKo } from './FunnelAntwortenPanel.jsx';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { effektiveVorqualFelder } from '../lib/vorqual.js';
 
@@ -215,7 +216,7 @@ function AnhaengeLinks({ anhaenge, compact = false }) {
 }
 
 /* ═════════════════════ Slide-Over für Telefonisten ═════════════════════ */
-function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, wichtigeKriterien = [], kundenname, kundeJobs = [], currentJobId, onReassign, onPatch, onPatchAnrufversuche, onClose }) {
+function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder, wichtigeKriterien = [], kundenname, kundeJobs = [], currentJobId, funnelFragen = [], onReassign, onPatch, onPatchAnrufversuche, onClose }) {
   if (!bewerbung) return null;
   const n = notiz || {};
   const fb = feedback || {};
@@ -372,22 +373,11 @@ function TelefonistenSlideOver({ bewerbung, norm, notiz, feedback, vorqualFelder
             </div>
           </section>
 
-          {/* Funnel-Antworten (Referenz) */}
-          {antworten.length > 0 && (
-            <section>
-              <details className="slideover-details">
-                <summary><h3>Funnel-Antworten ({antworten.length})</h3></summary>
-                <ul className="slideover-antworten">
-                  {antworten.map((a, i) => (
-                    <li key={i}>
-                      <div className="slideover-frage">{a.frage_text}</div>
-                      <div className="slideover-antwort">→ {a.antwort}</div>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </section>
-          )}
+          {/* Funnel-Antworten (fürs Gespräch — mit KO-Markierung) */}
+          <section>
+            <h3>Funnel-Antworten</h3>
+            <FunnelAntwortenPanel bewerbung={bewerbung} fragen={funnelFragen} />
+          </section>
 
           {(fb.status || fb.vorstellungsgespraech_am || fb.notizen || (fb.vorqual_werte_kunde && Object.keys(fb.vorqual_werte_kunde).length > 0)) && (
             <section>
@@ -425,6 +415,9 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
   const [selectedId, setSelectedId] = useState(null);
   const [filter, setFilter] = useState('alle'); // alle | offen | erledigt
   const [kundenStatusFilter, setKundenStatusFilter] = useState(''); // '' = alle
+  const [openAntworten, setOpenAntworten] = useState(() => new Set()); // bewerbung.id → Funnel-Antworten aufgeklappt
+  const fragenFor = (b) => (data.funnels && data.funnels[b.funnel_id]) || [];
+  const toggleAntworten = (id) => setOpenAntworten(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [kundeJobs, setKundeJobs] = useState([]); // alle Stellen des Kunden (für Umzuordnung)
 
   async function loadAll() {
@@ -740,7 +733,8 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                   selectedId === b.id && 'is-selected',
                 ].filter(Boolean).join(' ');
                 return (
-                  <tr key={b.id} className={rowClass} onClick={() => telefonistenMode && setSelectedId(b.id)} style={telefonistenMode ? { cursor: 'pointer' } : {}}>
+                  <Fragment key={b.id}>
+                  <tr className={rowClass} onClick={() => telefonistenMode && setSelectedId(b.id)} style={telefonistenMode ? { cursor: 'pointer' } : {}}>
                     {telefonistenMode && (
                       <td onClick={e => e.stopPropagation()} className="td-erledigt">
                         <input type="checkbox" checked={!!n.erledigt} onChange={e => updateNotiz(b.id, { erledigt: e.target.checked })} />
@@ -755,6 +749,10 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                     <td className="td-name">
                       <strong>{norm.name || '—'}</strong>
                       <AnhaengeLinks anhaenge={b.anhaenge} compact />
+                      {(() => { const pv = erstePreview(b); return pv ? <div className="bew-antwort-preview" title={pv}>{pv}</div> : null; })()}
+                      <button type="button" className="bew-antwort-toggle" onClick={e => { e.stopPropagation(); toggleAntworten(b.id); }}>
+                        {openAntworten.has(b.id) ? '▾ Funnel-Antworten' : '▸ Funnel-Antworten'}
+                      </button>
                       {b.zuordnung_unklar && kundeJobs.length > 1 && (
                         <div onClick={e => e.stopPropagation()} style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span className="avv-warn" title="Konnte keiner Stelle eindeutig zugeordnet werden">⚠️ Stelle unklar</span>
@@ -789,9 +787,15 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                     <td>{norm.email ? <a href={`mailto:${norm.email}`} onClick={e => e.stopPropagation()}>{norm.email}</a> : '—'}</td>
                     {!telefonistenMode && <td><span className={`quelle-badge quelle-${b.quelle || 'funnel'}`}>{b.quelle === 'perspective' ? 'Perspective' : 'TalentOne'}</span></td>}
                     {!telefonistenMode && <td>{b.ko_kriterium ? <span className="ko-badge">KO</span> : ''}</td>}
-                    {frageSpalten.map(f => (
-                      <td key={`q-${b.id}-${f}`} className="td-antwort">{antwortFor(b, f) || <span className="muted">—</span>}</td>
-                    ))}
+                    {frageSpalten.map(f => {
+                      const ant = antwortFor(b, f);
+                      const ko = ant && istKo(f, ant, fragenFor(b));
+                      return (
+                        <td key={`q-${b.id}-${f}`} className={`td-antwort${ko ? ' is-ko' : ''}`}>
+                          {ant ? <>{ant}{ko && <span className="fa-ko-badge">KO</span>}</> : <span className="muted">—</span>}
+                        </td>
+                      );
+                    })}
                     {telefonistenMode && vorqualFelder.map((f, i) => {
                       const kundeWert = (fb.vorqual_werte_kunde || {})[f.name];
                       return (
@@ -857,6 +861,14 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
                       {!telefonistenMode && <ResendKundeMailButton bewerbungId={b.id} />}
                     </td>
                   </tr>
+                  {openAntworten.has(b.id) && (
+                    <tr className="bew-antworten-row">
+                      <td colSpan={99} style={{ padding: '8px 14px 12px', background: '#fafaf8' }} onClick={e => e.stopPropagation()}>
+                        <FunnelAntwortenPanel bewerbung={b} fragen={fragenFor(b)} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -875,6 +887,7 @@ export default function BewerbungenTable({ job, kunde, internalSpalten: internal
           kundenname={kunde?.firmenname}
           kundeJobs={kundeJobs}
           currentJobId={job.id}
+          funnelFragen={fragenFor(selected)}
           onReassign={(zielJobId) => reassign(selected.id, zielJobId)}
           onPatch={patch => updateNotiz(selected.id, patch)}
           onPatchAnrufversuche={arr => updateNotiz(selected.id, { anrufversuche: arr })}
