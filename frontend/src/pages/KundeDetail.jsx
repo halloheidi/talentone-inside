@@ -7,6 +7,7 @@ import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
 import Lightbox from '../components/Lightbox.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
+import ProjektStatusSelect from '../components/ProjektStatusSelect.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
@@ -288,6 +289,7 @@ export default function KundeDetail() {
       .then(res => setActivity(res.activity || []))
       .catch(() => setActivity([]));
   }
+  const onProjektUpdated = (u) => setProjekte(prev => prev.map(p => p.id === u.id ? { ...p, ...u } : p));
   function loadProjekte() {
     api(`/projekte?kunde_id=${kundeId}`)
       .then(res => setProjekte(res.projekte || []))
@@ -1049,8 +1051,8 @@ export default function KundeDetail() {
         )}
       </div>
 
-      <ProjektStatusRow projekte={projekte} />
-      <ProjektInfoCards projekte={projekte} schritteItems={schritteItems} kundeId={kundeId} />
+      <ProjektStatusRow projekte={projekte} onUpdated={onProjektUpdated} />
+      <ProjektInfoCards projekte={projekte} schritteItems={schritteItems} kundeId={kundeId} onUpdated={onProjektUpdated} />
 
       <div className="section-head">
         <div>
@@ -1605,12 +1607,11 @@ const PROJEKT_STATUS_META = {
 // Kompakte Karten mit den Kern-Vertragsdaten pro Projekt — direkt sichtbar
 // unterhalb der Status-Chip-Row, damit man beim Öffnen des Kunden sofort
 // die Vertragslage sieht (Migration 025 Felder + Status + Live-Termin).
-function ProjektInfoCards({ projekte, schritteItems = [], kundeId }) {
+function ProjektInfoCards({ projekte, schritteItems = [], kundeId, onUpdated }) {
   if (!projekte?.length) return null;
   return (
     <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', marginBottom: 14 }}>
       {projekte.map(p => {
-        const meta = PROJEKT_STATUS_META[p.status] || { emoji: '·', label: p.status || '—', bg: '#e5e7eb', color: '#374151' };
         // Passenden Naechster-Schritt-Badge zum Projekt finden (best-effort ueber gesuchte_positionen)
         const badge = schritteItems.find(it =>
           it.stelle && p.gesuchte_positionen && it.stelle.trim() === p.gesuchte_positionen.trim()
@@ -1628,10 +1629,7 @@ function ProjektInfoCards({ projekte, schritteItems = [], kundeId }) {
               <strong style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p.projekt || p.gesuchte_positionen || '—'}
               </strong>
-              <span style={{
-                padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700,
-                background: meta.bg, color: meta.color,
-              }}>{meta.emoji} {meta.label}</span>
+              <ProjektStatusSelect projekt={p} onUpdated={onUpdated} compact />
             </div>
             {badge && (
               <div onClick={e => e.stopPropagation()}>
@@ -1680,36 +1678,27 @@ function ProjektInfoCards({ projekte, schritteItems = [], kundeId }) {
   );
 }
 
-function ProjektStatusRow({ projekte }) {
+function ProjektStatusRow({ projekte, onUpdated }) {
   if (!projekte?.length) return null;
   return (
     <div style={{
       padding: '10px 14px', marginBottom: 14, borderRadius: 10,
       background: 'var(--gray-50)', border: '1px solid var(--line)',
-      display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 13,
+      display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 13,
     }}>
       <strong style={{ marginRight: 4 }}>Projekt-Status:</strong>
-      {projekte.map(p => {
-        const meta = PROJEKT_STATUS_META[p.status] || { emoji: '·', label: p.status || '—', bg: 'var(--gray-100)', color: 'var(--ink-3)' };
-        return (
-          <Link
-            key={p.id} to="/projekte"
-            title={`${p.projekt || p.kunde || '—'} — im Projekte-Board öffnen`}
-            style={{
-              padding: '4px 10px', borderRadius: 100,
-              background: meta.bg, color: meta.color, fontSize: 12, fontWeight: 700,
-              textDecoration: 'none', display: 'inline-flex', gap: 4, alignItems: 'center',
-            }}
-          >
-            {meta.emoji} {meta.label}
-            {p.live_termin && (
-              <span style={{ fontSize: 10, opacity: 0.85, marginLeft: 4 }}>
-                · Go-Live {new Date(p.live_termin).toLocaleDateString('de-DE')}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+      {projekte.map(p => (
+        <span key={p.id} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}
+          title={`${p.projekt || p.kunde || '—'}`}>
+          <ProjektStatusSelect projekt={p} onUpdated={onUpdated} />
+          {p.live_termin && (
+            <span style={{ fontSize: 10, color: 'var(--ink-3)' }}>
+              · Go-Live {new Date(p.live_termin).toLocaleDateString('de-DE')}
+            </span>
+          )}
+          <Link to="/projekte" title="Im Projekte-Board öffnen" style={{ textDecoration: 'none', color: 'var(--ink-3)', fontSize: 12 }}>↗</Link>
+        </span>
+      ))}
     </div>
   );
 }

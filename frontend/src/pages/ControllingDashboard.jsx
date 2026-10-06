@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import PageContainer from '../components/PageContainer.jsx';
+import ProjektStatusSelect from '../components/ProjektStatusSelect.jsx';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
@@ -181,7 +182,7 @@ function CockpitTh({ label, sortKey, sort, onSort, align }) {
 }
 
 // 🎛️ Kunden-Cockpit — Aggregat-Kopf + einheitliches Regelwerk (rot-zuerst vom Server)
-function KundenCockpit({ meta, rows, onReload }) {
+function KundenCockpit({ meta, rows, onReload, onProjektUpdated }) {
   const navigate = useNavigate();
   const [sort, setSort] = useState({ key: null, dir: 'desc' }); // key null = Server-Reihenfolge
   const [filter, setFilter] = useState({ ueberfaellig: false, zahlung: false, nw: false });
@@ -355,6 +356,9 @@ function KundenCockpit({ meta, rows, onReload }) {
                         {/* Kunde / Stelle + Kampagnen-Chip + Gründe-Chips */}
                         <td style={cockpitTd}>
                           <div style={{ fontWeight: 700 }}>{r.kunde}</div>
+                          <div style={{ margin: '3px 0' }}>
+                            <ProjektStatusSelect projekt={{ id: r.projekt_id, status: r.status }} onUpdated={onProjektUpdated} compact />
+                          </div>
                           <div style={{ fontSize: 12, color: '#5a5955', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <span>{r.stelle}{r.anzahl_stellen > 1 ? ` (+${r.anzahl_stellen - 1})` : ''}</span>
                             {nKamp >= 2 && (
@@ -618,7 +622,8 @@ export default function ControllingDashboard() {
           </div>
 
           {/* ── 🎛️ Kunden-Cockpit (prominent ganz oben, einheitliches Regelwerk) ── */}
-          <KundenCockpit meta={data.totals.meta || {}} rows={data.rows} onReload={reloadOverview} />
+          <KundenCockpit meta={data.totals.meta || {}} rows={data.rows} onReload={reloadOverview}
+            onProjektUpdated={(u) => setData(prev => prev ? { ...prev, rows: prev.rows.map(r => r.projekt_id === u.id ? { ...r, status: u.status } : r) } : prev)} />
 
           {/* ── 📣 Meta-Ads (Spend & CPL) ── */}
           <MetaAdsSection rows={data.rows} />

@@ -5,21 +5,7 @@ import Modal from '../components/Modal.jsx';
 import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
 import PageContainer from '../components/PageContainer.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
-
-/* ─── Konstanten ─── */
-const STATUS_LABELS = {
-  vorbereitung: 'Vorbereitung',
-  kickoff_vereinbart: 'Kick-Off vereinbart',
-  onboarding: 'Onboarding',
-  golive_vereinbart: 'Go-Live vereinbart',
-  warte_auf_go: 'Warte auf Go!',
-  feedbackschleife: 'Feedbackschleife',
-  go: 'Go',
-  live: 'Live',
-  pausiert: 'Pausiert',
-  hold: 'Hold',
-  abgeschlossen: 'Abgeschlossen',
-};
+import ProjektStatusSelect, { STATUS_LABELS } from '../components/ProjektStatusSelect.jsx';
 
 // Kanban-Spalten — jede Status-Stufe einzeln
 const PROJEKTART_OPTIONEN = [
@@ -377,6 +363,9 @@ export default function ProjekteOverview() {
     } catch (err) { console.error('save-fail', err.message); }
   }
 
+  // Merge-Update aus dem Inline-Status-Dropdown (ProjektStatusSelect macht das PATCH selbst).
+  const onProjektUpdated = (u) => setProjekte(prev => prev.map(p => p.id === u.id ? { ...p, ...u } : p));
+
   async function duplicateProjekt(id) {
     try {
       const res = await api(`/projekte/${id}/duplicate`, { method: 'POST' });
@@ -527,7 +516,7 @@ export default function ProjekteOverview() {
       {loading ? <div className="motiv-sub">Lade Projekte…</div>
         : !filtered.length ? <div className="motiv-sub">Keine Projekte gefunden.</div>
         : view === 'kanban'
-          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} onDuplicate={duplicateProjekt} onReload={load} />
+          ? <KanbanBoard filtered={filtered} onCardClick={id => setSelectedId(id)} onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} checklistDone={checklistDone} paymentStatusById={paymentStatusById} onOpenMerge={id => setKanbanMergeSource(id)} onDuplicate={duplicateProjekt} onReload={load} onProjektUpdated={onProjektUpdated} />
           : <ListView filtered={filtered} onCardClick={id => setSelectedId(id)} updateField={updateField} checklistDone={checklistDone}
                        selectedIds={selectedIds} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll} onReload={load} />
       }
@@ -561,7 +550,7 @@ export default function ProjekteOverview() {
 
 /* ═════════════════════ KANBAN-BOARD ═════════════════════ */
 
-function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge, onDuplicate, onReload }) {
+function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, checklistDone, paymentStatusById = {}, onOpenMerge, onDuplicate, onReload, onProjektUpdated }) {
   const [openMenu, setOpenMenu] = useState(null); // id der offenen Menü-Karte
   return (
     <div className="kanban">
@@ -627,6 +616,9 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                         >📋 Projekt duplizieren</button>
                       </div>
                     )}
+                    <div style={{ margin: '2px 0 6px' }}>
+                      <ProjektStatusSelect projekt={p} onUpdated={onProjektUpdated} compact />
+                    </div>
                     {p.status === 'feedbackschleife' && (
                       <span className="kanban-card-status-pill is-feedback">🔔 Neues Kundenfeedback</span>
                     )}
@@ -720,9 +712,7 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
                 <td><strong>{p.projekt || '—'}</strong></td>
                 <td>{p.kunde || '—'}</td>
                 <td onClick={e => e.stopPropagation()}>
-                  <select className="cell-input" value={p.status} onChange={e => updateField(p.id, 'status', e.target.value)}>
-                    {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </select>
+                  <ProjektStatusSelect projekt={p} onUpdated={onProjektUpdated} />
                 </td>
                 <td>{p.verantwortlich || '—'}</td>
                 <td><span className="chip" style={{ fontSize: 11 }}>{p.projektart || '—'}</span></td>
