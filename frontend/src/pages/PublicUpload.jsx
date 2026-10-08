@@ -46,6 +46,7 @@ export default function PublicUpload() {
   const [error, setError] = useState('');
   const [uploads, setUploads] = useState([]);  // [{name, status, error?}]
   const [pendingFotos, setPendingFotos] = useState([]); // [{file, beschreibung}]
+  const [personenZustimmung, setPersonenZustimmung] = useState(false);
   const logoInputRef = useRef(null);
   const fotosInputRef = useRef(null);
 
@@ -55,7 +56,7 @@ export default function PublicUpload() {
       .catch(err => setError(err.message));
   }, [token]);
 
-  async function uploadOne(file, typ, beschreibung) {
+  async function uploadOne(file, typ, beschreibung, personenZustimmung = false) {
     const id = `${Date.now()}-${Math.random()}`;
     setUploads(prev => [...prev, { id, name: file.name, typ, status: 'lade' }]);
     try {
@@ -67,6 +68,7 @@ export default function PublicUpload() {
           fileName: file.name,
           contentType: file.type || 'application/octet-stream',
           beschreibung: beschreibung || null,
+          personen_zustimmung: typ === 'foto' ? !!personenZustimmung : undefined,
         },
       });
       setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'fertig' } : u));
@@ -98,9 +100,10 @@ export default function PublicUpload() {
 
   async function submitFotos() {
     const items = pendingFotos.slice();
+    const zustimmung = personenZustimmung;
     setPendingFotos([]);
     for (const item of items) {
-      await uploadOne(item.file, 'foto', item.beschreibung.trim());
+      await uploadOne(item.file, 'foto', item.beschreibung.trim(), zustimmung);
     }
   }
 
@@ -161,7 +164,11 @@ export default function PublicUpload() {
                   <button className="btn-ghost btn-sm" onClick={() => removePending(p.id)}>×</button>
                 </div>
               ))}
-              <button className="btn-primary" onClick={submitFotos} style={{ marginTop: 12 }}>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginTop: 12, lineHeight: 1.4 }}>
+                <input type="checkbox" checked={personenZustimmung} onChange={e => setPersonenZustimmung(e.target.checked)} style={{ marginTop: 2 }} />
+                <span>Die abgebildeten Personen haben der Nutzung ihrer Fotos in Stellenanzeigen / Werbung zugestimmt.</span>
+              </label>
+              <button className="btn-primary" onClick={submitFotos} style={{ marginTop: 12 }} disabled={!personenZustimmung}>
                 {pendingFotos.length} Foto{pendingFotos.length === 1 ? '' : 's'} hochladen
               </button>
             </div>

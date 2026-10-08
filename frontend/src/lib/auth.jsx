@@ -60,6 +60,7 @@ export function AuthProvider({ children }) {
       loading,
       me,
       isAdmin: !!me?.is_admin,
+      flags: me?.flags || {},
       signIn,
       signOut,
       resetPassword,

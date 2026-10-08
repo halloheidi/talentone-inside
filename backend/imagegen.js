@@ -61,6 +61,38 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
   return Array.isArray(parsed.motive) ? parsed.motive.slice(0, 3) : [];
 }
 
+// V2-Variante (Creative-Wizard V2) — EIGENER Prompt, Alt-Prompt bleibt unangetastet.
+// Fachmotiv-Sperre: keine Arbeitsplatz-Interieurs mit fachspezifischer Geometrie
+// (Führerstand, Cockpit, Schaltschrank, Bedienpult …) — Fachpublikum erkennt KI-Fehler
+// sofort. Stattdessen Außen-/Symbolmotive. Liefert zusätzlich einen Hinweis-Chip-Text.
+export async function generateMotivVorschlaegeV2(job, kunde) {
+  const stelle = job.stelle || 'Mitarbeiter:in';
+  const branche = BRANCHE_LABEL[kunde?.branche] || kunde?.branche || '';
+  const region = job.region || '';
+
+  const prompt = `Du bist Bildregisseur für Recruiting-Ads (Variante V2). Schlage 3 unterschiedliche, konkrete Bildmotive vor für die Stelle "${stelle}"${branche ? ` in der Branche ${branche}` : ''}${region ? ` (${region})` : ''}.
+
+HARTE SPERRE (nicht verletzen): KEINE Arbeitsplatz-Innenräume mit fachspezifischer Geometrie oder Bedien-Technik — also KEIN Führerstand, Cockpit, Schaltschrank, Bedienpult, Maschinen-Steuerstand, Kontrollraum, OP-/Medizintechnik-Detail, Armaturenbrett mit Instrumenten. Solche Motive wirken für Fachpublikum sofort falsch, sobald die KI Anzeigen/Hebel/Instrumente erfindet (z. B. ein Führerstand mit Lenkrad).
+
+Stattdessen Außen- und Symbolmotive, die die Tätigkeit ANDEUTEN, ohne fachtechnische Details zu zeigen:
+- die Person vor dem Betrieb, Fahrzeug oder Firmengebäude (Außenaufnahme)
+- Weg zur Arbeit / Ankommen / Feierabend
+- Hände oder Werkzeug in neutraler, allgemeiner Umgebung (keine erfundenen Instrumente)
+- symbolische Szene (Team, Zusammenhalt, Region, Natur), die zur Stelle passt
+
+Jedes Motiv: 1 Satz, 12-20 Wörter, konkret, fotografisch, authentisch, kein Stock-Klischee. KEINE Texte/Logos/UI im Motiv erwähnen.
+
+Antworte NUR mit JSON, keine Markdown-Backticks:
+{ "motive": ["Motiv 1", "Motiv 2", "Motiv 3"] }`;
+
+  const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 600, messages: [{ role: 'user', content: prompt }] });
+  const parsed = parseJsonContent(data);
+  return {
+    motive: Array.isArray(parsed.motive) ? parsed.motive.slice(0, 3) : [],
+    hinweis: 'Nur mit echtem Kundenfoto — Fachpublikum erkennt KI-Fehler bei fachspezifischen Motiven.',
+  };
+}
+
 /* ───────────────────────── Spruch-Vorschläge (Headline) ───────────────────────── */
 
 /**

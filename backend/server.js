@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { requireAuth, requireAdmin } from './auth.js';
 import { isAdminEmail } from './team.js';
+import { resolveFlags, listFlags, setFlag } from './feature-flags.js';
 import kundenRouter from './routes/kunden.js';
 import sucheRouter from './routes/suche.js';
 import jobsRouter from './routes/jobs.js';
@@ -122,12 +123,26 @@ app.use('/api/eigene-leads', requireAuth, eigeneLeadsRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.
-app.get('/api/me', requireAuth, (req, res) => {
+app.get('/api/me', requireAuth, async (req, res) => {
   const email = req.user?.email || null;
+  let flags = {};
+  try { flags = await resolveFlags(email); } catch (e) { console.warn('[me] flags:', e.message); }
   res.json({
     email,
     is_admin: !!(email && isAdminEmail(email)),
+    flags,
   });
+});
+
+// Feature-Flags verwalten (Admin). GET Liste, PUT { flag, email?, enabled }.
+app.get('/api/flags', requireAuth, requireAdmin, async (req, res) => {
+  try { res.json({ flags: await listFlags() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/flags', requireAuth, requireAdmin, async (req, res) => {
+  const { flag, email, enabled } = req.body || {};
+  try { await setFlag({ flag, email: email || null, enabled, updatedBy: req.user?.email || null }); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.use((err, req, res, _next) => {

@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     harfbuzz \
     ca-certificates \
     ttf-freefont \
+    ffmpeg \
   && rm -rf /var/cache/apk/*
 
 ENV PUPPETEER_SKIP_DOWNLOAD=true \

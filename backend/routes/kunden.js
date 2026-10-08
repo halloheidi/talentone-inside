@@ -984,12 +984,22 @@ router.post('/referenzbilder/:id/verbessern/save', async (req, res) => {
   }
 });
 
-// PATCH /api/kunden/referenzbilder/:id  body: { beschreibung }
+// PATCH /api/kunden/referenzbilder/:id  body: { beschreibung?, werbefreigabe?, ki_verarbeitung_erlaubt?, hat_person? }
+// Einwilligungs-/Diagnose-Flags (Creative-Wizard V2). Nur gesetzte Felder werden geschrieben.
 router.patch('/referenzbilder/:id', async (req, res) => {
-  const { beschreibung } = req.body || {};
+  const b = req.body || {};
+  const patch = {};
+  if (b.beschreibung !== undefined) patch.beschreibung = b.beschreibung || null;
+  if (b.werbefreigabe !== undefined) {
+    if (!['ja', 'nein', 'ungeklaert'].includes(b.werbefreigabe)) return res.status(400).json({ error: "werbefreigabe muss ja|nein|ungeklaert sein." });
+    patch.werbefreigabe = b.werbefreigabe;
+  }
+  if (b.ki_verarbeitung_erlaubt !== undefined) patch.ki_verarbeitung_erlaubt = !!b.ki_verarbeitung_erlaubt;
+  if (b.hat_person !== undefined) patch.hat_person = b.hat_person === null ? null : !!b.hat_person;
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Keine Felder zum Aktualisieren.' });
   const { data, error } = await supabase
     .from('talentone_referenzbilder')
-    .update({ beschreibung: beschreibung || null })
+    .update(patch)
     .eq('id', req.params.id)
     .select().single();
   if (error) return res.status(500).json({ error: error.message });

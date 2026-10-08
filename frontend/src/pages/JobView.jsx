@@ -605,7 +605,15 @@ function ArbeitshinweiseInline({ job, onSaved }) {
 
 export default function JobView() {
   const { kundeId, jobId } = useParams();
-  const { me, user } = useAuth();
+  const { me, user, flags } = useAuth();
+  // Creative-Wizard V2 (Test): Reiter per Flag. Alt-Reiter „Creatives" wird bei
+  // hide_creatives_v1 ausgeblendet (nicht gelöscht — Rückweg bleibt jederzeit).
+  const sichtbareTabs = TABS.flatMap(t => {
+    if (t.to !== 'creatives') return [t];
+    const alt = flags?.hide_creatives_v1 ? [] : [t];
+    const v2 = flags?.creative_wizard_v2 ? [{ to: 'creatives-v2', label: 'Creatives V2 (Test)' }] : [];
+    return [...alt, ...v2];
+  });
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);
   const [projekt, setProjekt] = useState(null);
@@ -931,7 +939,7 @@ export default function JobView() {
       )}
 
       <div className="tabs">
-        {TABS.map(t => {
+        {sichtbareTabs.map(t => {
           const done = tabStatus?.effective?.[t.to] === true;
           const manuell = typeof tabStatus?.manual?.[t.to] === 'boolean';
           return (

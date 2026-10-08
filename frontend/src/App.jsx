@@ -23,6 +23,7 @@ import AnalyseFunnel from './pages/AnalyseFunnel.jsx';
 import JobView from './pages/JobView.jsx';
 import JobStelleninfos from './pages/job/JobStelleninfos.jsx';
 import JobCreatives from './pages/job/JobCreatives.jsx';
+import JobCreativesV2 from './pages/job/JobCreativesV2.jsx';
 import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
@@ -98,6 +99,7 @@ export default function App() {
           <Route index element={<Navigate to="stelle" replace />} />
           <Route path="stelle" element={<JobStelleninfos />} />
           <Route path="creatives" element={<JobCreatives />} />
+          <Route path="creatives-v2" element={<JobCreativesV2 />} />
           <Route path="adcopies" element={<JobAdCopies />} />
           <Route path="funnel" element={<JobFunnel />} />
           <Route path="export" element={<JobExport />} />

@@ -59,7 +59,7 @@ router.get('/upload/:token', async (req, res) => {
 
 // POST /api/public/upload/:token  body: { typ: 'logo' | 'foto', fileData (base64), fileName, contentType, beschreibung? }
 router.post('/upload/:token', async (req, res) => {
-  const { typ, fileData, fileName = 'datei.jpg', contentType = 'image/jpeg', beschreibung } = req.body || {};
+  const { typ, fileData, fileName = 'datei.jpg', contentType = 'image/jpeg', beschreibung, personen_zustimmung } = req.body || {};
   if (!['logo', 'foto'].includes(typ)) return res.status(400).json({ error: 'typ muss "logo" oder "foto" sein.' });
   if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
 
@@ -120,6 +120,9 @@ router.post('/upload/:token', async (req, res) => {
         kunde_id: kunde.id, bild_url: publicUrl, typ: 'foto',
         beschreibung: beschreibung || null,
         uploaded_via: 'kunde',
+        // Einwilligung „abgebildete Personen haben zugestimmt" (protokolliert).
+        personen_zustimmung: !!personen_zustimmung,
+        personen_zustimmung_am: personen_zustimmung ? new Date().toISOString() : null,
       })
       .select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import {
   generateMotivVorschlaege,
+  generateMotivVorschlaegeV2,
   generateSpruchVorschlaege,
   verbessereSpruch,
   generateVariant,
@@ -270,6 +271,23 @@ router.post('/motiv-vorschlaege', async (req, res) => {
     res.json({ motive });
   } catch (err) {
     console.error('[motiv-vorschlaege]', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+/* POST /api/creatives/v2/motiv-vorschlaege — Creative-Wizard V2 (Fachmotiv-Sperre).
+   Eigener Prompt; der Alt-Endpoint /motiv-vorschlaege bleibt unverändert. */
+router.post('/v2/motiv-vorschlaege', async (req, res) => {
+  const { job_id } = req.body || {};
+  if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+  try {
+    const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
+    if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const { motive, hinweis } = await generateMotivVorschlaegeV2(job, kunde);
+    res.json({ motive, hinweis });
+  } catch (err) {
+    console.error('[v2-motiv-vorschlaege]', err.message);
     res.status(503).json({ error: err.message });
   }
 });
