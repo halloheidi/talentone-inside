@@ -26,6 +26,30 @@ function sanitizeAnrufversuche(arr) {
   }));
 }
 
+/**
+ * Lädt alle Rows einer Child-Tabelle, die zu einer Liste von bewerbung_ids gehören,
+ * in gechunkten `.in()`-Queries. Grund: ein einzelner `.in('bewerbung_id', ids)` mit
+ * mehreren hundert UUIDs übersteigt das PostgREST-URL-Längen-Limit — der Request wird
+ * dann abgeschnitten oder liefert silent ein leeres Set zurück. Resultat vor dem Fix:
+ * die globale Overview (/api/bewerbungen) baute `notizen = {}` obwohl 276 Rows in
+ * talentone_bewerber_notizen stehen — alle Zeilen rendern Default-Werte (Status "Neu",
+ * 0 Anrufversuche, leere Sterne, graue Ampel).
+ *
+ * Chunk-Größe 100 ist konservativ: 100 × (36-char UUID + ,) ≈ 3.7 KB, bleibt sicher
+ * unter den typischen 8 KB URL-Caps von Nginx/Traefik.
+ */
+export async function fetchChildrenByBewerbungIds(table, ids, { chunkSize = 100, client = supabase } = {}) {
+  if (!ids || ids.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const { data, error } = await client.from(table).select('*').in('bewerbung_id', chunk);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
 /* ════════════════════ Notizen (intern) ════════════════════ */
 
 // PATCH /api/bewerbungen/:id/notiz  body: { status?, bewertung?, erledigt?, nw_kontaktiert?, kunde_kontaktiert?, vg_vereinbart_am?, eingestellt?, vorqualifizierung_werte?, ... }
@@ -323,18 +347,21 @@ async function loadBewerbungenFuerJob(jobId) {
     return { bewerbungen: [], notizen: {}, feedback: {}, werte: {} };
   }
 
-  const [notizenRes, feedbackRes, werteRes] = await Promise.all([
-    supabase.from('talentone_bewerber_notizen').select('*').in('bewerbung_id', ids),
-    supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
-    supabase.from('talentone_bewerber_spalten_werte').select('*').in('bewerbung_id', ids),
+  // Child-Tabellen gechunked laden, siehe `fetchChildrenByBewerbungIds` oben.
+  // Ein einzelner Job hat selten >100 Bewerbungen — der Chunking-Overhead ist dann
+  // null, aber die Code-Pfade bleiben identisch zur globalen Overview.
+  const [notizenRows, feedbackRows, werteRows] = await Promise.all([
+    fetchChildrenByBewerbungIds('talentone_bewerber_notizen', ids),
+    fetchChildrenByBewerbungIds('talentone_bewerber_kundenfeedback', ids),
+    fetchChildrenByBewerbungIds('talentone_bewerber_spalten_werte', ids),
   ]);
 
   const notizen = {};
-  for (const n of notizenRes.data || []) notizen[n.bewerbung_id] = n;
+  for (const n of notizenRows) notizen[n.bewerbung_id] = n;
   const feedback = {};
-  for (const f of feedbackRes.data || []) feedback[f.bewerbung_id] = f;
+  for (const f of feedbackRows) feedback[f.bewerbung_id] = f;
   const werte = {};
-  for (const w of werteRes.data || []) {
+  for (const w of werteRows) {
     if (!werte[w.bewerbung_id]) werte[w.bewerbung_id] = {};
     werte[w.bewerbung_id][w.spalte_id] = w.wert;
   }
@@ -389,12 +416,17 @@ router.get('/', async (req, res) => {
   let notizen = {};
   let feedback = {};
   if (ids.length > 0) {
-    const [n, f] = await Promise.all([
-      supabase.from('talentone_bewerber_notizen').select('*').in('bewerbung_id', ids),
-      supabase.from('talentone_bewerber_kundenfeedback').select('*').in('bewerbung_id', ids),
+    // Gechunkt (siehe `fetchChildrenByBewerbungIds`). Vor dem Fix lief die globale
+    // Overview mit >400 UUIDs in einem einzelnen `.in()`-Call ins URL-Längen-Limit
+    // und bekam ein leeres Set zurück → `notizen = {}` → alle Zeilen zeigten
+    // Default-Werte (Status "Neu", 0 Anrufe, Sterne leer, Ampel grau) obwohl die
+    // Daten in talentone_bewerber_notizen vollständig in der DB stehen.
+    const [notizenRows, feedbackRows] = await Promise.all([
+      fetchChildrenByBewerbungIds('talentone_bewerber_notizen', ids),
+      fetchChildrenByBewerbungIds('talentone_bewerber_kundenfeedback', ids),
     ]);
-    for (const x of n.data || []) notizen[x.bewerbung_id] = x;
-    for (const x of f.data || []) feedback[x.bewerbung_id] = x;
+    for (const x of notizenRows) notizen[x.bewerbung_id] = x;
+    for (const x of feedbackRows) feedback[x.bewerbung_id] = x;
   }
 
   // Stats berechnen (auf ungefilterte Basis-Liste basierend auf Datums-/KO-Filter,
