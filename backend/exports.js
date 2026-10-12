@@ -509,10 +509,15 @@ export async function sendEntwurfsMail({ to, betreff, anschreiben, job, kunde, c
   // Medien-Kachel (Bild/Video) für ein Creative.
   const mediaHtml = c => {
     const badge = c.typ === 'video' ? 'Reel' : (c.format === 'story' ? '9:16 Story' : c.format === 'feed' ? '4:5 Feed' : '1:1 Feed');
+    // Vermerk bei generischen KI-Personen (Creative-Wizard V2) — nur bei gesetztem Flag,
+    // bestehende Creatives (false) bleiben unverändert.
+    const kiVermerk = c.enthaelt_ki_personen
+      ? `<div style="font-size:11px;color:#8a5a00;background:#fff7e6;padding:5px 10px;border-top:1px solid #ffe0a3;">🤖 Hinweis: enthält generische KI-Personen (keine real abgebildeten Personen).</div>`
+      : '';
     if (c.typ === 'video') {
-      return `<a href="${c.bild_url}" target="_blank" style="display:block;text-decoration:none;color:#0a0a0a;background:#fafaf8;border-bottom:1px solid #ececea;padding:16px;text-align:center;"><strong>▶ ${badge}</strong><br><span style="font-size:11px;color:#5a5955;">Video ansehen</span></a>`;
+      return `<a href="${c.bild_url}" target="_blank" style="display:block;text-decoration:none;color:#0a0a0a;background:#fafaf8;border-bottom:1px solid #ececea;padding:16px;text-align:center;"><strong>▶ ${badge}</strong><br><span style="font-size:11px;color:#5a5955;">Video ansehen</span></a>${kiVermerk}`;
     }
-    return `<img src="${c.bild_url}" alt="" width="500" style="max-width:100%;display:block;"/>`;
+    return `<img src="${c.bild_url}" alt="" width="500" style="max-width:100%;display:block;"/>${kiVermerk}`;
   };
   // Copy-Block wie bei Meta: Primary Text, darunter Headline + Beschreibung.
   const copyHtml = a => `

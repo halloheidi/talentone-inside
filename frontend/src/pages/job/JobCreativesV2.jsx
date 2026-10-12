@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useJob } from '../JobView.jsx';
+import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api.js';
 
 // Creative-Wizard V2 (Test, paralleler Reiter). Reine VERDRAHTUNG der bestehenden
@@ -14,6 +15,8 @@ const FORMATE = [{ k: 'quadrat', l: '1:1' }, { k: 'feed', l: '4:5' }, { k: 'stor
 
 export default function JobCreativesV2() {
   const { job, kunde } = useJob();
+  const { isAdmin } = useAuth();
+  const [reelBusy, setReelBusy] = useState(null);
   const [fotos, setFotos] = useState([]);
   const [vorlagenInfo, setVorlagenInfo] = useState({ freisteller_verfuegbar: false });
   const [step, setStep] = useState(1);
@@ -74,7 +77,9 @@ export default function JobCreativesV2() {
   async function rendern() {
     setErr(''); setMsg(''); setRendering(true);
     try {
-      if (gestaltung === 'layout_a' || gestaltung === 'layout_b') {
+      if (gestaltung === 'szene') {
+        await szeneRendern(false);
+      } else if (gestaltung === 'layout_a' || gestaltung === 'layout_b') {
         const res = await api('/creatives/layout-render', {
           method: 'POST',
           body: { job_id: job.id, vorlage: gestaltung === 'layout_a' ? 'A' : 'B', foto_id: fotoId, slots: { spruch }, freisteller, formats: formatKeys.length ? formatKeys : ['quadrat'] },
@@ -100,18 +105,52 @@ export default function JobCreativesV2() {
     const t = setInterval(() => { n++; ladeResults(); if (n >= 12) clearInterval(t); }, 5000);
   }
 
+  async function szeneRendern(bestaetigt) {
+    const fmt = (formatKeys[0] || 'quadrat');
+    try {
+      const res = await api('/creatives/v2/szenen-komposition', {
+        method: 'POST',
+        body: { job_id: job.id, foto_id: fotoId, spruch, text_stil: null, format: fmt, kunde_informiert_bestaetigt: bestaetigt },
+      });
+      setMsg('Szenen-Komposition erstellt (enthält generische KI-Personen).');
+      ladeResults();
+      return res;
+    } catch (e) {
+      if (e.status === 409 && e.body?.needs_confirm) {
+        if (window.confirm(e.body.error + '\n\nFortfahren und als „Kunde informiert" vermerken?')) {
+          setRendering(true);
+          try { await szeneRendern(true); } finally { setRendering(false); }
+        }
+        return;
+      }
+      throw e;
+    }
+  }
+
+  async function reelAbleiten(creativeId) {
+    setReelBusy(creativeId); setErr(''); setMsg('');
+    try {
+      await api(`/creatives/${creativeId}/reel-v2`, { method: 'POST' });
+      setMsg('Story-Video (10s) erstellt.');
+      ladeResults();
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setReelBusy(null); }
+  }
+
   // Gestaltungs-Optionen je Bildquelle (Enablement)
   const gestaltungsOpts = useMemo(() => {
     if (bildquelle === 'ki_motiv') return [{ k: 'ki_look', l: 'Freier KI-Look', ok: true, hint: 'Die KI komponiert das gesamte Motiv.' }];
     if (bildquelle === 'ohne_bild') return [{ k: 'overlay', l: 'Nur Overlay-PNG', ok: true, hint: 'Transparentes Text-Overlay zum Selbst-Zusammenbauen.' }];
     // eigenes_foto
+    const envOnly = selFoto && selFoto.hat_person !== true;
     return [
       { k: 'foto_ki', l: 'Foto als KI-Basis', ok: !fotoKiGesperrt, hint: fotoKiGesperrt ? 'Gesperrt — dieses Foto darf nicht extern (KI) verarbeitet werden. Nur lokale Verarbeitung.' : 'Foto als Hintergrund, KI ergänzt das Overlay (externe API).' },
+      { k: 'szene', l: 'Umgebung beleben (KI-Personen)', ok: !fotoKiGesperrt && envOnly, hint: fotoKiGesperrt ? 'Gesperrt — KI-Verarbeitung für dieses Foto nicht erlaubt.' : (envOnly ? 'Setzt generische KI-Personen in das Umgebungsfoto (externe API). Kennzeichnung „enthält KI-Personen".' : 'Nur für personenlose Umgebungsfotos.') },
       { k: 'layout_a', l: 'Layout-Vorlage A', ok: true, hint: 'Deterministisch (serverseitig) — immer erlaubt.' },
       { k: 'layout_b', l: 'Layout-Vorlage B', ok: true, hint: 'Deterministisch (serverseitig) — immer erlaubt.' },
       { k: 'overlay', l: 'Nur Overlay-PNG', ok: true, hint: 'Transparentes Text-Overlay (serverseitig).' },
     ];
-  }, [bildquelle, fotoKiGesperrt]);
+  }, [bildquelle, fotoKiGesperrt, selFoto]);
 
   const canStep2 = bildquelle && (bildquelle !== 'eigenes_foto' || fotoId);
   const canStep3 = gestaltung && (gestaltung !== 'ki_look' || motiv.trim());
@@ -239,9 +278,19 @@ export default function JobCreativesV2() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px,1fr))', gap: 10, marginTop: 8 }}>
           {results.map(c => (
-            <a key={c.id} href={c.bild_url} target="_blank" rel="noreferrer" style={{ display: 'block', border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden' }}>
-              {c.typ === 'video' ? <video src={c.bild_url} style={{ width: '100%' }} muted /> : <img src={c.bild_url} alt="" style={{ width: '100%', display: 'block' }} />}
-            </a>
+            <div key={c.id} style={{ border: '1px solid var(--line)', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
+              <a href={c.bild_url} target="_blank" rel="noreferrer" style={{ display: 'block' }}>
+                {c.typ === 'video' ? <video src={c.bild_url} style={{ width: '100%', display: 'block' }} muted /> : <img src={c.bild_url} alt="" style={{ width: '100%', display: 'block' }} />}
+              </a>
+              {c.enthaelt_ki_personen && <span style={{ position: 'absolute', top: 4, left: 4, background: '#fff7e6', color: '#8a5a00', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4 }} title="Enthält generische KI-Personen">🤖 KI-Personen</span>}
+              {c.typ === 'video' && <span style={{ position: 'absolute', top: 4, right: 4, background: '#1b3f80', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4 }}>Story-Video</span>}
+              {isAdmin && c.typ !== 'video' && (
+                <button type="button" className="btn-ghost btn-sm" style={{ width: '100%', borderTop: '1px solid var(--line)', borderRadius: 0 }}
+                  disabled={reelBusy === c.id} onClick={() => reelAbleiten(c.id)}>
+                  {reelBusy === c.id ? '🎬 Reel läuft…' : '🎬 Als Reel ableiten (10s)'}
+                </button>
+              )}
+            </div>
           ))}
           {results.length === 0 && <p className="pane-hint">Noch keine Creatives.</p>}
         </div>

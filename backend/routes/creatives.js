@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { isAdminEmail } from '../team.js';
+import { generateReelFromCreative } from '../reel-ffmpeg.js';
 import {
   generateMotivVorschlaege,
   generateMotivVorschlaegeV2,
+  generateSzenenKomposition,
   generateSpruchVorschlaege,
   verbessereSpruch,
   generateVariant,
@@ -1332,6 +1335,80 @@ router.post('/:id/edit-apply', async (req, res) => {
 
   console.log(`[edit-apply] job ${original.job_id.slice(0,8)}: gezielte Änderung als neue Version ${created.id.slice(0,8)}.`);
   res.status(201).json({ creative: created });
+});
+
+/* ═══════════════ Creative-Wizard V2 — Etappe 2 ═══════════════ */
+
+// Lektorat: auf KI-Personen-Creatives sind Namens-/Identitätsclaims verboten
+// (die Personen sind generisch, nicht real). Gibt einen Grund zurück oder null.
+function identitaetsclaimGrund(spruch) {
+  const s = String(spruch || '');
+  if (/\b(ich hei[sß]e|mein name ist|ich bin\s+[A-ZÄÖÜ][a-zäöü]+)\b/i.test(s)) return 'Erste-Person-Namensnennung';
+  if (/[„"][^"“]{1,60}[“"]\s*[–-]\s*[A-ZÄÖÜ][a-zäöü]+/.test(s)) return 'Zitat mit Namensnennung';
+  if (/\b[A-ZÄÖÜ][a-zäöü]+\s+[A-ZÄÖÜ][a-zäöü]+,\s*(unser|unsere|mitarbeiter|kollege|kollegin|chef)/i.test(s)) return 'Namentliche Testimonial-Zuschreibung';
+  return null;
+}
+
+/* POST /api/creatives/v2/szenen-komposition
+   body: { job_id, foto_id, spruch?, text_stil?, format?, kunde_informiert_bestaetigt? }
+   Setzt generische KI-Personen in ein personenloses Eigenfoto. Gesperrt, wenn das
+   Foto ki_verarbeitung_erlaubt=false hat. Erste Nutzung pro Kunde → Bestätigung nötig. */
+router.post('/v2/szenen-komposition', async (req, res) => {
+  const { job_id, foto_id, spruch, text_stil, format = 'quadrat', kunde_informiert_bestaetigt } = req.body || {};
+  if (!job_id || !foto_id) return res.status(400).json({ error: 'job_id und foto_id sind Pflicht.' });
+  const grund = identitaetsclaimGrund(spruch);
+  if (grund) return res.status(400).json({ error: `Lektorat: Namens-/Identitätsclaim auf KI-Personen-Creative nicht erlaubt (${grund}). Bitte neutralen Spruch ohne echten Namen.` });
+  try {
+    const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+    const { data: foto } = await supabase.from('talentone_referenzbilder').select('*').eq('id', foto_id).maybeSingle();
+    if (!foto?.bild_url) return res.status(404).json({ error: 'Foto nicht gefunden.' });
+    if (foto.ki_verarbeitung_erlaubt === false) return res.status(403).json({ error: 'Für dieses Foto ist KI-Verarbeitung gesperrt (nur lokale Verarbeitung erlaubt).' });
+
+    // Erste Nutzung pro Kunde: Bestätigung „Kunde ist informiert".
+    if (!kunde?.ki_personen_informiert_am && !kunde_informiert_bestaetigt) {
+      return res.status(409).json({ needs_confirm: true, error: 'Erste Szenen-Komposition für diesen Kunden: Bitte bestätigen, dass der Kunde über den Einsatz generischer KI-Personen informiert ist.' });
+    }
+    if (!kunde?.ki_personen_informiert_am && kunde_informiert_bestaetigt) {
+      await supabase.from('talentone_kunden').update({ ki_personen_informiert_am: new Date().toISOString() }).eq('id', kunde.id);
+    }
+
+    const { bildUrl, bildOhneLogoUrl } = await generateSzenenKomposition({ job, kunde, fotoUrl: foto.bild_url, spruch, format, textStil: text_stil || null });
+    const { data: created, error: insErr } = await supabase.from('talentone_creatives').insert({
+      job_id, format, typ: 'bild', bild_url: bildUrl, bild_ohne_logo_url: bildOhneLogoUrl || null,
+      status: 'fertig', enthaelt_ki_personen: true,
+      prompt: `Szenen-Komposition (KI-Personen) · Hook: "${(spruch || '').slice(0, 80)}"`,
+    }).select().single();
+    if (insErr) return res.status(500).json({ error: insErr.message });
+    res.status(201).json({ creative: created });
+  } catch (err) {
+    console.error('[szenen-komposition]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* POST /api/creatives/:id/reel-v2 — 10s-Story-Video (ffmpeg Ken-Burns) aus einem
+   fertigen Eigenes-Foto-/Vorlagen-Creative. Testphase: nur Admins. */
+router.post('/:id/reel-v2', async (req, res) => {
+  if (!isAdminEmail(req.user?.email)) return res.status(403).json({ error: 'Reel-Ableitung ist in der Testphase nur für Admins.' });
+  const { data: c } = await supabase.from('talentone_creatives').select('*').eq('id', req.params.id).maybeSingle();
+  if (!c) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (c.typ === 'video') return res.status(400).json({ error: 'Quelle ist bereits ein Video.' });
+  if (!c.bild_url) return res.status(400).json({ error: 'Creative hat kein Bild.' });
+  try {
+    const { url } = await generateReelFromCreative({ bildUrl: c.bild_url, jobId: c.job_id });
+    const { data: created, error: insErr } = await supabase.from('talentone_creatives').insert({
+      job_id: c.job_id, format: 'story', typ: 'video', bild_url: url, parent_id: c.id,
+      status: 'fertig', enthaelt_ki_personen: !!c.enthaelt_ki_personen,
+      prompt: 'Story-Video (ffmpeg Ken-Burns, 10s) aus Creative ' + c.id,
+    }).select().single();
+    if (insErr) return res.status(500).json({ error: insErr.message });
+    res.status(201).json({ creative: created });
+  } catch (err) {
+    console.error('[reel-v2]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

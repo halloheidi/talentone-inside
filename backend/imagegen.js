@@ -1229,6 +1229,71 @@ export async function generateGezielteAenderung({ job, kunde, creative, wunsch, 
   return { bildUrl, bildOhneLogoUrl };
 }
 
+/* ─────────────── Szenen-Komposition (Creative-Wizard V2) ───────────────
+   „Umgebungsfoto beleben": gpt-image-2-Edit setzt generische KI-Personen bei
+   plausibler Tätigkeit in die ECHTE Umgebung. Keine Schilder/Texte ändern, keine
+   realen Logos erfinden. Danach serverseitig der Hook (text-overlay) + Logo. Jedes
+   Ergebnis ist mit enthaelt_ki_personen zu kennzeichnen (macht der Aufrufer). */
+const SZENE_PERSONEN_PROMPT =
+  `Setze in diese reale Umgebung (BILD 1) eine oder mehrere generische, fotorealistische Personen, ` +
+  `die dort eine plausible, zur Szene passende Tätigkeit ausführen.\n\n` +
+  `HARTE REGELN (nicht verletzen):\n` +
+  `1. Die echte Umgebung bleibt erhalten: Gebäude, Fahrzeuge, Technik, Hintergrund, Beleuchtung und Perspektive unverändert.\n` +
+  `2. Ändere KEINE vorhandenen Schilder, Beschriftungen, Texte, Nummern oder Markierungen im Bild. Erfinde KEINE Logos, Marken oder Firmennamen.\n` +
+  `3. Die Personen sind GENERISCH (keine real existierende, erkennbare Person), natürlich in Perspektive, Licht und Schattenwurf eingepasst, in zur Tätigkeit passender Arbeitskleidung.\n` +
+  `4. Kein zusätzlicher Text, keine Grafik-Overlays, keine Wasserzeichen, kein Rahmen.\n` +
+  `Fotorealistisch, authentisch, wie eine echte Reportage-Aufnahme.`;
+
+export async function generateSzenenKomposition({ job, kunde, fotoUrl, spruch, format = 'quadrat', textStil = null }) {
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY nicht gesetzt.');
+  if (!fotoUrl) throw new Error('Kein Umgebungsfoto.');
+
+  const { buffer: rawInput } = await fetchAsBuffer(fotoUrl);
+  const norm = await normalizeImageForOpenAI(rawInput, { label: 'Umgebungsfoto' });
+
+  const form = new FormData();
+  form.append('model', 'gpt-image-2');
+  form.append('prompt', SZENE_PERSONEN_PROMPT);
+  form.append('size', 'auto');
+  form.append('quality', 'high');
+  form.append('n', '1');
+  form.append('image[]', bufferToFile(norm.buffer, `umgebung.${norm.ext}`, norm.contentType));
+
+  const response = await fetch(OPENAI_EDITS_API, {
+    method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form,
+  });
+  if (!response.ok) { const body = await response.text(); throw new Error(`OpenAI ${response.status}: ${body.slice(0, 400)}`); }
+  const data = await response.json();
+  const b64 = data.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI: keine Bild-Daten in Response.');
+
+  // Auf Zielformat bringen.
+  let enlivened = Buffer.from(b64, 'base64');
+  const [w, h] = FORMAT_PIXELS[format] || FORMAT_PIXELS.quadrat;
+  enlivened = await sharp(enlivened).resize({ width: w, height: h, fit: 'cover' }).png().toBuffer();
+
+  // Hook serverseitig (text-overlay) — lokale Verarbeitung, kein weiterer externer Call.
+  const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || null;
+  if ((spruch || '').trim() && accent) {
+    try { enlivened = await renderTextOverlay({ baseBuffer: enlivened, format, stil: textStil, hook: spruch, accent }); }
+    catch (err) { console.warn('[szene-overlay]', err.message); }
+  }
+
+  // Basis (mit Text, ohne Logo) speichern + Logo kompositieren.
+  let finalBuffer = enlivened, bildOhneLogoUrl = null;
+  if (kunde?.logo_url) {
+    try {
+      bildOhneLogoUrl = await uploadToStorage(enlivened, `${job.id}/raw-szene-${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
+      const logoBuf = (await fetchAsBuffer(kunde.logo_url)).buffer;
+      const transparentLogo = await ensureTransparentLogo(kunde, logoBuf);
+      const logoPosition = format === 'story' ? STORY_LOGO_POSITION : format === 'feed' ? FEED_LOGO_POSITION : null;
+      finalBuffer = await composeLogoOverlay(enlivened, transparentLogo, logoPosition || undefined, { weisseFlaeche: kunde?.logo_ohne_flaeche_default !== true });
+    } catch (err) { console.warn('[szene-logo]', err.message); finalBuffer = enlivened; }
+  }
+  const bildUrl = await uploadToStorage(finalBuffer, `${job.id}/${format}-szene-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
+  return { bildUrl, bildOhneLogoUrl };
+}
+
 /* ─────────────── Story (9:16) aus Feed-Creative ableiten ───────────────
    Meta-Safe-Zones bei 1080×1920: oben ~250px, unten ~340px sind für Overlays
    reserviert. Das Logo wird in die sichere Zone gesetzt (unter dem oberen Rand).
