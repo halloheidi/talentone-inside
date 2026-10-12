@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { isAdminEmail } from '../team.js';
-import { generateReelFromCreative } from '../reel-ffmpeg.js';
+import { generateReelFromCreative, generateReelLayered } from '../reel-ffmpeg.js';
 import {
   generateMotivVorschlaege,
   generateMotivVorschlaegeV2,
@@ -20,7 +20,7 @@ import { uploadBuffer, extFromMime, safeFilenameStem, fetchAsBuffer } from '../s
 import { generateOverlays } from '../overlay-renderer.js';
 import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
-import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWarnung, renderLayoutVorlage } from '../layout-vorlagen.js';
+import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWarnung, renderLayoutVorlage, renderLayoutLayerBuffer } from '../layout-vorlagen.js';
 import { TEXT_STILE, renderTextOverlay } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponierePositionen, safeFrac } from '../text-bloecke.js';
@@ -1389,22 +1389,51 @@ router.post('/v2/szenen-komposition', async (req, res) => {
 });
 
 /* POST /api/creatives/:id/reel-v2 — 10s-Story-Video (ffmpeg Ken-Burns) aus einem
-   fertigen Eigenes-Foto-/Vorlagen-Creative. Testphase: nur Admins. */
+   fertigen Eigenes-Foto-/Vorlagen-Creative. Testphase: nur Admins.
+   Zweistufig (getrennte Ebenen): nur das Hintergrundfoto zoomt (9:16), darüber die
+   statische, scharfe Overlay-Ebene — Slots im 9:16-Layout neu gesetzt (Safe-Zone).
+   Fallback auf das 1:1-Komposit-Zoomen, wenn keine getrennten Quellen (render_spec)
+   vorliegen (Alt-Creatives). */
 router.post('/:id/reel-v2', async (req, res) => {
   if (!isAdminEmail(req.user?.email)) return res.status(403).json({ error: 'Reel-Ableitung ist in der Testphase nur für Admins.' });
   const { data: c } = await supabase.from('talentone_creatives').select('*').eq('id', req.params.id).maybeSingle();
   if (!c) return res.status(404).json({ error: 'Creative nicht gefunden.' });
   if (c.typ === 'video') return res.status(400).json({ error: 'Quelle ist bereits ein Video.' });
   if (!c.bild_url) return res.status(400).json({ error: 'Creative hat kein Bild.' });
+
+  const spec = c.render_spec;
   try {
-    const { url } = await generateReelFromCreative({ bildUrl: c.bild_url, jobId: c.job_id });
+    let url, hinweis = null;
+
+    if (spec?.kind === 'layout') {
+      // Getrennte Ebenen aus dem Layout-Spec im 9:16-Format rendern.
+      const ctx = await prepLayoutContext({ job_id: c.job_id, vorlage: spec.vorlage, foto_id: spec.foto_id, slots: spec.slots || {}, freisteller: spec.freisteller !== false });
+      const strikt = !!ctx.kunde?.ci_farben_strikt;
+      const [bgBuffer, overlayBuffer] = await Promise.all([
+        renderLayoutLayerBuffer({ vorlage: spec.vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri, logoUri: ctx.logoUri, slots: ctx.slots, format: 'story', layer: 'bg', strikt }),
+        renderLayoutLayerBuffer({ vorlage: spec.vorlage, kunde: ctx.kunde, fotoUri: ctx.fotoUri, cutoutUri: ctx.cutoutUri, logoUri: ctx.logoUri, slots: ctx.slots, format: 'story', layer: 'overlay', strikt }),
+      ]);
+      ({ url } = await generateReelLayered({ bgBuffer, overlayBuffer, jobId: c.job_id }));
+    } else if (spec?.kind === 'strikt' && spec.base_url) {
+      // Hintergrund = textfreies Motiv (zoomt); Overlay = Schriftzug im 9:16 (statisch).
+      const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
+      const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+      const accent = spec.accent || kunde?.farben?.primaer || '#e2001a';
+      const overlayBuffer = await renderTextOverlay({ overlayOnly: true, format: 'story', stil: spec.text_stil, hook: spec.hook, accent });
+      ({ url } = await generateReelLayered({ bgUrl: spec.base_url, overlayBuffer, jobId: c.job_id }));
+    } else {
+      // Fallback: ganzes Creative als Ken-Burns (Overlay zoomt mit) + Hinweis.
+      ({ url } = await generateReelFromCreative({ bildUrl: c.bild_url, jobId: c.job_id }));
+      hinweis = 'Keine getrennten Quellen (Alt-Creative) — ganzes Bild gezoomt; Textränder können beschnitten wirken.';
+    }
+
     const { data: created, error: insErr } = await supabase.from('talentone_creatives').insert({
       job_id: c.job_id, format: 'story', typ: 'video', bild_url: url, parent_id: c.id,
       status: 'fertig', enthaelt_ki_personen: !!c.enthaelt_ki_personen,
       prompt: 'Story-Video (ffmpeg Ken-Burns, 10s) aus Creative ' + c.id,
     }).select().single();
     if (insErr) return res.status(500).json({ error: insErr.message });
-    res.status(201).json({ creative: created });
+    res.status(201).json({ creative: created, hinweis });
   } catch (err) {
     console.error('[reel-v2]', err.message);
     res.status(500).json({ error: err.message });

@@ -185,8 +185,11 @@ function blockWrap(p, z, inner) {
 }
 function sc(base, scale) { return Math.round(base * (scale || 1)); }
 
+// layer: undefined = volles Komposit; 'bg' = nur Hintergrund (Foto+Scrim+Cutout,
+// für die Ken-Burns-Ebene); 'overlay' = nur Hook/Titel/Badge/Logo auf transparent
+// (statische Reel-Overlay-Ebene).
 // Vorlage A — Frage + Glow-Headline + Team unten.
-function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos }) {
+function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos, layer }) {
   // Strikt: EXAKTE Markenfarbe (kein Aufhellen). Sonst helles, lesbares Neon-Fill.
   const neon = strikt ? accent : lighten(accent, 0.5);
   const P = pos;
@@ -212,29 +215,27 @@ function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, s
   const pillBlock = slots.pill ? blockWrap(P.pill, 3,
     `<span class="pill" style="font-size:${pillFs}px;padding:12px 30px;">${escapeHtml(slots.pill)}</span>`) : '';
 
+  const zeigeBg = layer !== 'overlay';     // Foto + Scrim + Cutout (zoomende Ebene)
+  const zeigeOverlay = layer !== 'bg';     // Hook/Titel/Badge + Logo (statische Ebene)
   return `<!doctype html><html><head>${head(accent)}</head>
-  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#000;">
-    <!-- Foto-Hintergrund, stark abgedunkelt + Vignette -->
+  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:${layer === 'overlay' ? 'transparent' : '#000'};">
+    ${zeigeBg ? `<!-- Foto-Hintergrund, stark abgedunkelt + Vignette -->
     <img src="${fotoUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
     <div style="position:absolute;inset:0;background:
       radial-gradient(120% 90% at 50% 30%, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.78) 100%),
       linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 42%, rgba(0,0,0,0.85) 100%);"></div>
+    ${cutoutUri ? `<img src="${cutoutUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.42)}px;transform:translateX(-50%);height:52%;max-width:96%;object-fit:contain;object-position:bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));">` : ''}` : ''}
 
-    <!-- freigestellte Person: untere Bildhälfte -->
-    ${cutoutUri ? `<img src="${cutoutUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.42)}px;transform:translateX(-50%);height:52%;max-width:96%;object-fit:contain;object-position:bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));">` : ''}
-
-    <!-- Text-Ebene (frei positionierbare Blöcke) -->
+    ${zeigeOverlay ? `<!-- Text-Ebene (frei positionierbare Blöcke) -->
     ${hookBlock}
     ${stelleBlock}
     ${pillBlock}
-
-    <!-- Logo unten mittig -->
-    ${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.55)}px;transform:translateX(-50%);max-width:34%;max-height:${Math.round(dims.h * 0.09)}px;object-fit:contain;z-index:4;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}
+    ${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.55)}px;transform:translateX(-50%);max-width:34%;max-height:${Math.round(dims.h * 0.09)}px;object-fit:contain;z-index:4;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}` : ''}
   </body></html>`;
 }
 
-// Vorlage B — Person links + Textblock rechts.
-function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos }) {
+// Vorlage B — Person links + Textblock rechts. layer wie htmlVorlageA.
+function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer }) {
   const hasCut = !!cutoutUri;
   const P = pos;
   // Mit Freisteller: dunkler Marken-Verlauf als Grund + Person links.
@@ -261,20 +262,17 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, 
   const pillBlock = slots.pill ? blockWrap(P.pill, 4,
     `<span class="pill" style="font-size:${pillFs}px;padding:12px 30px;border-color:${accent};">${escapeHtml(slots.pill)}</span>`) : '';
 
+  const zeigeBg = layer !== 'overlay';
+  const zeigeOverlay = layer !== 'bg';
   return `<!doctype html><html><head>${head(accent)}</head>
-  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#0a0a0c;">
-    ${bg}
+  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:${layer === 'overlay' ? 'transparent' : '#0a0a0c'};">
+    ${zeigeBg ? `${bg}
+    ${hasCut ? `<img src="${cutoutUri}" style="position:absolute;left:0;bottom:${Math.round(safe.bottom * 0.5)}px;height:64%;max-width:56%;object-fit:contain;object-position:left bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));z-index:2;">` : ''}` : ''}
 
-    <!-- Logo oben mittig -->
-    ${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;top:${safe.top}px;transform:translateX(-50%);max-width:32%;max-height:${Math.round(dims.h * 0.08)}px;object-fit:contain;z-index:5;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}
-
-    <!-- Person links (untere zwei Drittel) -->
-    ${hasCut ? `<img src="${cutoutUri}" style="position:absolute;left:0;bottom:${Math.round(safe.bottom * 0.5)}px;height:64%;max-width:56%;object-fit:contain;object-position:left bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));z-index:2;">` : ''}
-
-    <!-- Rechter Textblock + Stellentitel + Pill (frei positionierbar) -->
+    ${zeigeOverlay ? `${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;top:${safe.top}px;transform:translateX(-50%);max-width:32%;max-height:${Math.round(dims.h * 0.08)}px;object-fit:contain;z-index:5;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}
     ${textBlock}
     ${stelleBlock}
-    ${pillBlock}
+    ${pillBlock}` : ''}
   </body></html>`;
 }
 
@@ -302,7 +300,7 @@ function autofitScript() {
 /**
  * Rendert EIN Format einer Vorlage → PNG-Buffer.
  */
-async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides }) {
+async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides, layer }) {
   const dims = FORMAT_DIMS[format];
   if (!dims) throw new Error(`Unbekanntes Format: ${format}`);
   const safe = SAFE[format] || SAFE.quadrat;
@@ -310,8 +308,8 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
   const pos = mergePositionen('layout', vorlage, format, overrides);
 
   const html = vorlage === 'B'
-    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos })
-    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos });
+    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer })
+    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos, layer });
 
   const page = await browser.newPage();
   await page.setViewport({ width: dims.w, height: dims.h, deviceScaleFactor: 1 });
@@ -323,9 +321,27 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
       : new Promise(r => { img.onload = img.onerror = () => r(); }))
   ));
   await page.evaluate(autofitScript);
-  const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: dims.w, height: dims.h } });
+  const png = await page.screenshot({ type: 'png', omitBackground: layer === 'overlay', clip: { x: 0, y: 0, width: dims.w, height: dims.h } });
   await page.close();
   return Buffer.from(png);
+}
+
+// Einzel-Layer-Buffer (für die Reel-Ableitung): layer='bg' (Foto+Scrim+Cutout) oder
+// 'overlay' (Hook/Titel/Badge/Logo, transparent). fotoUri bei 'overlay' optional.
+export async function renderLayoutLayerBuffer({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, format = 'story', overrides = null, layer, strikt = false }) {
+  const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
+  const ink = pickInk(accent);
+  const puppeteer = (await import('puppeteer')).default;
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  try {
+    return await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri: fotoUri || '', cutoutUri, logoUri, strikt, overrides, layer });
+  } finally {
+    await browser.close();
+  }
 }
 
 /**

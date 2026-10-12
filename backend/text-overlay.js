@@ -41,18 +41,21 @@ function buildLinesHtml(zeilen, stil, accent, fontMax) {
         font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.06;padding:8px 22px;border-radius:8px;
         white-space:nowrap;overflow:hidden;text-transform:uppercase;box-shadow:0 10px 30px rgba(0,0,0,0.35);">${txt}</div>`;
     }
+    // Breiten-fixe Textzeilen (width:100% + nowrap): Autofit verkleinert bis der Text
+    // mit Sicherheits-Padding (data-safety → ≥24px je Seite) in die Box passt. Verhindert
+    // den Randbeschnitt (u. a. beim 'clean'-Stil).
     if (stil === 'neon') {
-      return `<div data-fit style="font-family:${FONT_STACK.anton};font-size:${fontMax}px;line-height:1.02;letter-spacing:0.01em;
+      return `<div data-fit data-safety style="width:100%;white-space:nowrap;overflow:hidden;font-family:${FONT_STACK.anton};font-size:${fontMax}px;line-height:1.02;letter-spacing:0.01em;
         text-transform:uppercase;color:${accent};
         text-shadow:0 0 6px ${accent},0 0 18px ${accent},0 0 42px ${dim(accent, 0.85)},0 0 80px ${dim(accent, 0.6)};">${txt}</div>`;
     }
     if (stil === 'outline') {
-      return `<div data-fit style="font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.04;
+      return `<div data-fit data-safety style="width:100%;white-space:nowrap;overflow:hidden;font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.04;
         text-transform:uppercase;color:${accent};-webkit-text-stroke:3px #ffffff;paint-order:stroke fill;
         text-shadow:5px 5px 0 rgba(0,0,0,0.55);">${txt}</div>`;
     }
     // clean
-    return `<div data-fit style="font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.02;letter-spacing:-0.01em;
+    return `<div data-fit data-safety style="width:100%;white-space:nowrap;overflow:hidden;font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.02;letter-spacing:-0.01em;
       text-transform:uppercase;color:${accent};text-shadow:0 4px 14px rgba(0,0,0,0.5);">${txt}</div>`;
   });
   return rows.join('<div style="height:10px"></div>');
@@ -60,9 +63,12 @@ function buildLinesHtml(zeilen, stil, accent, fontMax) {
 
 function autofitScript() {
   document.querySelectorAll('[data-fit]').forEach(el => {
+    // data-safety → 48px Reserve (≥24px je Seite) für breiten-fixe Blöcke; sonst
+    // altes Verhalten (nur bei echtem Overflow verkleinern, content-sitzende Balken).
+    const reserve = el.hasAttribute('data-safety') ? 48 : -1;
     let size = parseFloat(getComputedStyle(el).fontSize) || 120;
     let guard = 0;
-    while (size > 30 && guard < 200 && el.scrollWidth > el.clientWidth + 1) { size -= 2; el.style.fontSize = size + 'px'; guard++; }
+    while (size > 30 && guard < 200 && el.scrollWidth > el.clientWidth - reserve) { size -= 2; el.style.fontSize = size + 'px'; guard++; }
   });
 }
 
@@ -70,10 +76,13 @@ function autofitScript() {
  * Rendert die Schriftzug-Ebene und legt sie auf das (neutrale) Basisbild.
  * @returns {Promise<Buffer>} PNG des fertigen Creatives.
  */
-export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil = 'clean', hook, accent, overrides = null }) {
+// overlayOnly:true → NUR die Schriftzug-/Scrim-Ebene auf transparentem Grund (für
+// die Reel-Ableitung: statisches Overlay über zoomendem Foto). Dann ist baseBuffer
+// optional; die Basis wird NICHT gerendert und der Screenshot hat omitBackground.
+export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil = 'clean', hook, accent, overrides = null, overlayOnly = false }) {
   const dims = FORMAT_DIMS[format] || FORMAT_DIMS.quadrat;
   const zeilen = String(hook || '').split('\n').map(l => l.trim()).filter(Boolean);
-  if (!zeilen.length || !accent) return baseBuffer;
+  if (!zeilen.length || !accent) return overlayOnly ? null : baseBuffer;
   const s = normStil(stil);
 
   // Default-Position + Feinjustage (Top-Left-Anker, Safe-Zone-geclamped).
@@ -81,9 +90,11 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
   const baseFont = format === 'story' ? 120 : format === 'feed' ? 104 : 96;
   const fontMax = Math.round(baseFont * (pos.scale || 1));
 
-  // Basis exakt auf Zielgröße (kein Stretch der Semantik — Motiv ist bereits im Format).
-  const base = await sharp(baseBuffer).resize(dims.w, dims.h, { fit: 'cover' }).png().toBuffer();
-  const baseUri = `data:image/png;base64,${base.toString('base64')}`;
+  let baseImg = '';
+  if (!overlayOnly) {
+    const base = await sharp(baseBuffer).resize(dims.w, dims.h, { fit: 'cover' }).png().toBuffer();
+    baseImg = `<img src="data:image/png;base64,${base.toString('base64')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">`;
+  }
 
   const scrim = s === 'balken' ? '' :
     `<div style="position:absolute;left:0;right:0;top:0;height:${Math.round(dims.h * 0.5)}px;
@@ -93,8 +104,8 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
     ${FONT_FACE_CSS}
     *{margin:0;padding:0;box-sizing:border-box;}
   </style></head>
-  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:#000;">
-    <img src="${baseUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
+  <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:${overlayOnly ? 'transparent' : '#000'};">
+    ${baseImg}
     ${scrim}
     <div style="position:absolute;left:${(pos.x * 100).toFixed(3)}%;top:${(pos.y * 100).toFixed(3)}%;
       width:${(pos.w * 100).toFixed(3)}%;display:flex;flex-direction:column;align-items:flex-start;z-index:2;">
@@ -114,7 +125,7 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
     await page.setContent(html, { waitUntil: 'networkidle0' });
     await page.evaluate(() => document.fonts && document.fonts.ready);
     await page.evaluate(autofitScript);
-    const png = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: dims.w, height: dims.h } });
+    const png = await page.screenshot({ type: 'png', omitBackground: overlayOnly, clip: { x: 0, y: 0, width: dims.w, height: dims.h } });
     return Buffer.from(png);
   } finally {
     await browser.close();

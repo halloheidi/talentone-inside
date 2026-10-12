@@ -56,3 +56,43 @@ export async function generateReelFromCreative({ bildUrl, jobId }) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+/**
+ * Zweistufiges Reel: (a) nur das Hintergrundfoto als 9:16-Ken-Burns-Ebene, (b) darüber
+ * die statische, scharfe Overlay-Ebene (Hook/Titel/Badge/Logo, transparentes PNG, bereits
+ * im 9:16-Layout gesetzt). So zoomt nur das Foto, der Text bleibt randscharf.
+ * @param {{ bgUrl?:string, bgBuffer?:Buffer, overlayBuffer:Buffer, jobId:string }} p
+ */
+export async function generateReelLayered({ bgUrl, bgBuffer, overlayBuffer, jobId }) {
+  if (!overlayBuffer) throw new Error('Keine Overlay-Ebene.');
+  const dir = await mkdtemp(path.join(tmpdir(), 'reel-'));
+  const inFile = path.join(dir, 'bg.png');
+  const ovFile = path.join(dir, 'ov.png');
+  const outFile = path.join(dir, 'out.mp4');
+  try {
+    const bg = bgBuffer || (await fetchAsBuffer(bgUrl)).buffer;
+    await writeFile(inFile, bg);
+    await writeFile(ovFile, overlayBuffer);
+
+    const filter = [
+      "[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840," +
+      "zoompan=z='min(zoom+0.0008,1.24)':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)*0.55':d=300:s=1080x1920:fps=30[bg]",
+      "[1:v]scale=1080:1920[ov]",
+      "[bg][ov]overlay=0:0:format=auto[out]",
+    ].join(';');
+
+    await runFfmpeg([
+      '-y', '-loop', '1', '-i', inFile, '-loop', '1', '-i', ovFile, '-t', '10', '-r', '30',
+      '-filter_complex', filter, '-map', '[out]',
+      '-c:v', 'libx264', '-crf', '19', '-preset', 'medium', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', outFile,
+    ]);
+
+    const mp4 = await readFile(outFile);
+    const key = `reels/${jobId}/${randomUUID()}.mp4`;
+    const url = await uploadBuffer({ bucket: STORAGE_BUCKET, path: key, buffer: mp4, contentType: 'video/mp4' });
+    return { url };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
