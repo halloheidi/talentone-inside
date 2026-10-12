@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../lib/api.js';
+import { api, openAnhang } from '../lib/api.js';
 import WoraufAchtenBox from './WoraufAchtenBox.jsx';
 import KundenFeedbackCell, { KUNDEN_STATUS, KUNDEN_STATUS_FILTER, kundenStatusLabel } from './KundenFeedbackCell.jsx';
 import FunnelAntwortenPanel, { erstePreview, istKo } from './FunnelAntwortenPanel.jsx';
@@ -197,17 +197,20 @@ function ResendKundeMailButton({ bewerbungId }) {
 }
 
 /* Datei-Anhänge (Lebenslauf o. Ä.) als klickbare Links (📎 + Dateiname, neuer Tab).
-   `anhaenge` kommt vom Backend bereits als [{label, dateiname, url(signed)}]. */
+   `anhaenge` kommt vom Backend als [{label, dateiname, url, auth?}] — `url` ist ein
+   STABILER Download-Endpoint (kein Ablauf). `auth:true` → intern login-geschützt:
+   erst beim Klick per authentifiziertem Fetch eine frische Signed URL holen. */
 function AnhaengeLinks({ anhaenge, compact = false }) {
   const arr = Array.isArray(anhaenge) ? anhaenge.filter(a => a?.url) : [];
   if (!arr.length) return null;
+  const linkStyle = { fontSize: 12, color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' };
   return (
     <div className="anhaenge-links" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: compact ? 4 : 6 }}>
       {arr.map((a, i) => (
         <a key={i} href={a.url} target="_blank" rel="noreferrer"
-          onClick={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); if (a.auth) { e.preventDefault(); openAnhang(a.url); } }}
           title={a.label ? `${a.label}: ${a.dateiname || ''}`.trim() : (a.dateiname || 'Datei')}
-          style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          style={linkStyle}>
           📎 {a.dateiname || a.label || 'Datei'}
         </a>
       ))}

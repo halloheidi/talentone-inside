@@ -13,6 +13,7 @@ import perspectiveRouter from './routes/perspective.js';
 import exportsRouter from './routes/exports.js';
 import publicRouter from './routes/public.js';
 import webhooksRouter from './routes/webhooks.js';
+import anhaengeRouter from './routes/anhaenge.js';
 import bewerbungenRouter from './routes/bewerbungen.js';
 import zahlungenRouter from './routes/zahlungen.js';
 import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
@@ -89,6 +90,9 @@ app.get('/api/health', (req, res) => {
 // Public — KEIN Login (Kunde lädt Logo/Fotos via Token-Link hoch).
 app.use('/api/public', publicRouter);
 app.use('/api/webhooks', webhooksRouter);
+// Stabiler Anhang-Download — eigene Dual-Auth (intern Bearer / Portal-Token),
+// daher bewusst VOR den requireAuth-Routern und ohne globales requireAuth.
+app.use('/api/anhaenge', anhaengeRouter);
 
 // Geschützt — nur eingeloggte Mitarbeiter.
 app.use('/api/kunden', requireAuth, kundenRouter);

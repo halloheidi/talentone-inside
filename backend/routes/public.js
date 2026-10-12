@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern } from '../kriterien.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
-import { attachSignedAnhaenge } from '../anhaenge.js';
+import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -1053,8 +1053,10 @@ router.get('/bewerbungen/:token', async (req, res) => {
     .eq('job_id', job.id)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
-  // Anhänge als Signed URLs ausliefern (Bewerberdaten, nie public).
-  const bewerbungen = await attachSignedAnhaenge(bewerbungenRaw);
+  // Anhänge als STABILE Download-Links ausliefern (kein Ablauf): der Link zeigt
+  // auf den Download-Endpoint mit dem Portal-Token; die frische Signed URL
+  // entsteht erst beim Klick. Scope: nur Anhänge dieses Token-Jobs.
+  const bewerbungen = attachStableAnhaenge(bewerbungenRaw, { token: req.params.token });
 
   const ids = (bewerbungen || []).map(b => b.id);
   let feedback = {};

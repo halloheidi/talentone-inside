@@ -6,12 +6,9 @@ import PDFDocument from 'pdfkit';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { fetchAsBuffer } from './storage.js';
 import { supabase } from './supabase.js';
-import { anhaengeMitSignedUrls } from './anhaenge.js';
+import { stableAnhaengeForBewerbung } from './anhaenge.js';
 import { getBranding, getMailFrom, getMailReplyTo, getPublicBaseUrl } from './branding.js';
 
-// Signed-URL-Lebensdauer für Mail-Links (Kunde öffnet evtl. später) — deutlich
-// länger als die UI-Auslieferung. Der durable Zugang bleibt das Bewerber-Portal.
-const MAIL_ANHANG_TTL = 60 * 60 * 24 * 30; // 30 Tage
 import { getInternalBcc, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER, mitAbsendername } from './mail.js';
 import { anrede, t, anredePromptHinweis, stripLeadingGreeting } from './anrede.js';
 import { renderEmail } from './email-templates.js';
@@ -218,7 +215,7 @@ export function bewerbungQuelleLabel(bewerbung) {
   return 'Bewerbungs-Funnel';                          // neutral, wenn Herkunft unklar
 }
 
-export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null, anhaenge = [] }) {
+export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eingegangenAm = null }) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
     return null;
@@ -276,15 +273,6 @@ ${antworten.map(a => {
   <span style="display:inline-block;margin-top:6px;">${escape(vorqualHinweis)}</span>
 </div>` : '';
 
-  // Datei-Anhänge (Lebenslauf o. Ä.) als Links — Bewerberdaten, daher Signed URLs
-  // (vom Aufrufer vorab aufgelöst).
-  const anhaengeArr = Array.isArray(anhaenge) ? anhaenge.filter(a => a?.url) : [];
-  const anhaengeHtml = anhaengeArr.length === 0 ? '' : `
-<h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:24px 0 10px;">Anhänge</h2>
-<table width="100%" cellpadding="0" cellspacing="0">
-${anhaengeArr.map(a => `<tr><td style="padding:6px 0;font-size:13px;"><a href="${escape(a.url)}" target="_blank" rel="noreferrer" style="color:#0a0a0a;">📎 ${escape(a.dateiname || a.label || 'Datei')}</a></td></tr>`).join('')}
-</table>`;
-
   // Bewerberlisten-Link IMMER bauen — auch wenn der Aufrufer ein reduziertes Job-
   // Objekt ohne bewerbungen_token übergibt (Multi-Stellen-/Fallback-Ingest-Pfad):
   // dann den Token per job.id nachladen. So kann die Mail-Variante nie wieder ohne
@@ -297,9 +285,24 @@ ${anhaengeArr.map(a => `<tr><td style="padding:6px 0;font-size:13px;"><a href="$
       bewerbungenToken = jobRow?.bewerbungen_token || null;
     } catch (err) { console.warn('[bewerbungs-mail] token-nachladen fehlgeschlagen:', err.message); }
   }
+  const publicBase = getPublicBaseUrl(kunde?.agentur);
   const bewerbungenUrl = bewerbungenToken
-    ? `${getPublicBaseUrl(kunde?.agentur)}/bewerbungen/${bewerbungenToken}`
+    ? `${publicBase}/bewerbungen/${bewerbungenToken}`
     : null;
+
+  // Datei-Anhänge (Lebenslauf o. Ä.) als STABILE Links — NIE eine rohe Signed URL
+  // mit Ablauf, sondern der Download-Endpoint mit Portal-Token (frische Signed URL
+  // erst beim Klick). Ohne Token kein auslieferbarer Kunden-Link → Anhänge weglassen.
+  const anhaengeArr = bewerbungenToken
+    ? stableAnhaengeForBewerbung(bewerbung?.anhaenge, {
+        bewerbungId: bewerbung?.id, token: bewerbungenToken, base: publicBase,
+      })
+    : [];
+  const anhaengeHtml = anhaengeArr.length === 0 ? '' : `
+<h2 style="font-size:14px;font-weight:700;color:#0a0a0a;margin:24px 0 10px;">Anhänge</h2>
+<table width="100%" cellpadding="0" cellspacing="0">
+${anhaengeArr.map(a => `<tr><td style="padding:6px 0;font-size:13px;"><a href="${escape(a.url)}" target="_blank" rel="noreferrer" style="color:#0a0a0a;">📎 ${escape(a.dateiname || a.label || 'Datei')}</a></td></tr>`).join('')}
+</table>`;
 
   const bewerbungenButtonHtml = bewerbungenUrl ? `
 <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;">
@@ -433,13 +436,13 @@ export async function sendeBewerbungsMailAnKunden(bewerbungId, { eingegangenAm }
     .filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
 
   const eingegangen = eingegangenAm ?? bew.created_at ?? null;
-  const anhaengeLinks = await anhaengeMitSignedUrls(bew.anhaenge, { expiresIn: MAIL_ANHANG_TTL });
+  // Anhänge baut sendBewerbungsMail selbst aus bewerbung.anhaenge als stabile
+  // Portal-Token-Links (keine rohe Signed URL mehr in der Mail).
   const resend = await sendBewerbungsMail({
     kunde, job,
     bewerbung: { ...bew, quelle: bew.quelle || 'perspective' },
     sheetUrl,
     eingegangenAm: eingegangen,
-    anhaenge: anhaengeLinks,
   });
 
   return {

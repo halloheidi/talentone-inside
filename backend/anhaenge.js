@@ -177,6 +177,10 @@ export async function anhaengeMitSignedUrls(anhaenge, { expiresIn = 3600 } = {})
  * Reichert eine Liste geladener Bewerbungen an: ersetzt `anhaenge` (interne Form)
  * durch die auslieferbare Signed-URL-Form. Bewerbungen ohne Anhänge lösen keine
  * Storage-Calls aus.
+ *
+ * @deprecated Signierte URLs mit Ablauf werden nicht mehr in Ansichten/Mails
+ * eingebettet (verwaiste Links nach Ablauf). Stattdessen `attachStableAnhaenge`
+ * (stabiler Klick-Endpoint `/api/anhaenge/:id/:index`). Bleibt nur als Fallback.
  */
 export async function attachSignedAnhaenge(bewerbungen, opts = {}) {
   const list = Array.isArray(bewerbungen) ? bewerbungen : [];
@@ -185,4 +189,98 @@ export async function attachSignedAnhaenge(bewerbungen, opts = {}) {
     if (!arr.length) return { ...b, anhaenge: [] };
     return { ...b, anhaenge: await anhaengeMitSignedUrls(arr, opts) };
   }));
+}
+
+/* ─────────────────── Stabiler Download-Endpoint ─────────────────── */
+
+/**
+ * Baut einen STABILEN Anhang-Link, der NIE abläuft: zeigt auf den Download-
+ * Endpoint, der erst beim Klick eine frische Signed URL erzeugt.
+ *   intern  → /api/anhaenge/:id/:index          (Auth per Login-Session)
+ *   Portal  → /api/anhaenge/:id/:index?token=…   (Auth per Portal-Token)
+ * `base` (absolut, z. B. https://inside.talent-one.de) nur für Mails nötig;
+ * in-App genügt der wurzel-relative Pfad.
+ */
+export function buildStableAnhangUrl({ bewerbungId, index, token = null, base = '' }) {
+  const q = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${base}/api/anhaenge/${encodeURIComponent(bewerbungId)}/${index}${q}`;
+}
+
+/**
+ * Auslieferungsform mit STABILEN Links statt Signed URLs. Behält den Index in
+ * der gespeicherten `anhaenge`-Reihenfolge bei (der Endpoint adressiert per Index).
+ * `auth: true` (intern, ohne Token) signalisiert dem Frontend, dass der Link per
+ * authentifiziertem Fetch (Login-Session) geöffnet werden muss, nicht als Direkt-
+ * Navigation. Bei Portal-Token entfällt das (Token steckt im Link).
+ * → [{ label, dateiname, url, auth? }]
+ */
+export function stableAnhaengeForBewerbung(anhaenge, { bewerbungId, token = null, base = '' }) {
+  const arr = Array.isArray(anhaenge) ? anhaenge : [];
+  const out = [];
+  arr.forEach((a, index) => {
+    if (!a) return;
+    if (!a.storage_path && !a.url_original) return; // nichts auslieferbar
+    const entry = {
+      label: a.label || 'Datei',
+      dateiname: a.dateiname || 'Datei',
+      url: buildStableAnhangUrl({ bewerbungId, index, token, base }),
+    };
+    if (!token) entry.auth = true;
+    out.push(entry);
+  });
+  return out;
+}
+
+/**
+ * Wie `attachSignedAnhaenge`, aber mit stabilen Endpoint-Links (kein Ablauf).
+ * token=null → interne Ansicht (auth-Fetch); token gesetzt → Kundenportal.
+ */
+export function attachStableAnhaenge(bewerbungen, { token = null, base = '' } = {}) {
+  const list = Array.isArray(bewerbungen) ? bewerbungen : [];
+  return list.map((b) => {
+    const arr = Array.isArray(b?.anhaenge) ? b.anhaenge : [];
+    if (!arr.length) return { ...b, anhaenge: [] };
+    return { ...b, anhaenge: stableAnhaengeForBewerbung(arr, { bewerbungId: b.id, token, base }) };
+  });
+}
+
+/**
+ * Löst EINEN Anhang beim Klick zu einer frischen, kurzlebigen Signed URL auf.
+ * Fallback bei fehlender Spiegelung: storage_path leer, aber url_original da →
+ * on demand laden, in den Bucket spiegeln, Pfad zurückgeben (Aufrufer trägt ihn
+ * in der Zeile nach). Ist die Original-URL tot → { dead: true } (sauberer Hinweis
+ * statt Fehlerseite). `backfilledPath` gesetzt → frisch gespiegelt, nachtragen.
+ * @returns {Promise<{ url?: string, dateiname?: string, backfilledPath?: string, dead?: boolean }>}
+ */
+export async function resolveAnhangDownload({ bewerbungId, anhang, index, expiresIn = 300 }) {
+  if (!anhang) return { dead: true };
+  const dateiname = anhang.dateiname || basenameFromUrl(anhang.url_original || '') || 'anhang';
+
+  // 1) Bereits gespiegelt → frische Signed URL.
+  if (anhang.storage_path) {
+    try {
+      const url = await createSignedUrl({ bucket: ANHAENGE_BUCKET, path: anhang.storage_path, expiresIn });
+      if (url) return { url, dateiname };
+    } catch (e) { console.warn(`[anhaenge] sign fehlgeschlagen (${anhang.storage_path}): ${e.message}`); }
+    // Signieren scheiterte, aber Pfad existiert → letzter Ausweg Original-URL.
+    if (anhang.url_original) return { url: anhang.url_original, dateiname };
+    return { dead: true };
+  }
+
+  // 2) Keine Spiegelung, aber Original-URL → on demand spiegeln + nachtragen.
+  if (anhang.url_original) {
+    try { await ensureBucket(ANHAENGE_BUCKET, { isPublic: false }); } catch {}
+    const path = `${bewerbungId}/${safeStorageName(anhang.dateiname, anhang.url_original, index + 1)}`;
+    try {
+      const { buffer, contentType } = await fetchAsBuffer(anhang.url_original);
+      await uploadBuffer({ bucket: ANHAENGE_BUCKET, path, buffer, contentType: contentType || 'application/octet-stream' });
+      const url = await createSignedUrl({ bucket: ANHAENGE_BUCKET, path, expiresIn });
+      return { url: url || anhang.url_original, dateiname, backfilledPath: path };
+    } catch (e) {
+      console.warn(`[anhaenge] on-demand-Spiegeln tot (${anhang.url_original}): ${e.message}`);
+      return { dead: true };
+    }
+  }
+
+  return { dead: true };
 }

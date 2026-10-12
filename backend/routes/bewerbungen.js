@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
-import { attachSignedAnhaenge } from '../anhaenge.js';
+import { attachStableAnhaenge } from '../anhaenge.js';
 
 const router = Router();
 
@@ -366,9 +366,9 @@ async function loadBewerbungenFuerJob(jobId) {
     werte[w.bewerbung_id][w.spalte_id] = w.wert;
   }
 
-  // Anhänge als frische Signed URLs ausliefern (privat) — nur Zeilen mit Anhängen
-  // lösen Storage-Calls aus.
-  const bewerbungenMitAnhaengen = await attachSignedAnhaenge(bewerbungen);
+  // Anhänge als STABILE Download-Links ausliefern (kein Ablauf) — die frische
+  // Signed URL entsteht erst beim Klick (intern via Login-Session).
+  const bewerbungenMitAnhaengen = attachStableAnhaenge(bewerbungen);
 
   // Funnel-Definitionen (fragen + KO-Flags) der beteiligten Funnels — für die
   // KO-Markierung der Antworten im Frontend (per-Antwort-KO wird NICHT gespeichert).
@@ -445,7 +445,7 @@ router.get('/', async (req, res) => {
     if (status === 'weitergeleitet' && new Date(n?.updated_at || b.created_at) >= weekStart) weitergeleitetWoche++;
   }
 
-  const filteredMitAnhaengen = await attachSignedAnhaenge(filtered);
+  const filteredMitAnhaengen = attachStableAnhaenge(filtered);
   const funnels = await ladeFunnels(filtered);
   res.json({
     bewerbungen: filteredMitAnhaengen,

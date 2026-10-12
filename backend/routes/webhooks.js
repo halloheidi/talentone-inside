@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { extractStelle } from '../sheets-mapping.js';
-import { extractAnhaenge, spiegeleAnhaenge, anhaengeMitSignedUrls } from '../anhaenge.js';
+import { extractAnhaenge, spiegeleAnhaenge } from '../anhaenge.js';
 
 const router = Router();
 
@@ -518,9 +518,6 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
         await supabase.from('talentone_bewerbungen').update({ anhaenge: gespiegelteAnhaenge }).eq('id', bew.id);
         console.log(`[anhaenge] Bewerbung ${bew.id}: ${nOk} gespiegelt, ${tot} tot`);
       }
-      // Mail-Links länger gültig (Kunde öffnet evtl. später); Portal bleibt durable.
-      const anhaengeLinks = await anhaengeMitSignedUrls(anhaengeFinal, { expiresIn: 60 * 60 * 24 * 30 });
-
       const kunde = job?.kunde_id
         ? (await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle()).data
         : null;
@@ -539,7 +536,9 @@ async function insertBewerbungUndBenachrichtige({ contact, job, funnel, zuordnun
       // unklare Zuordnung die reguläre Bewerbungs-Mail an den Kunden.
       if (kunde?.email) {
         const { sendBewerbungsMail } = await import('../exports.js');
-        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, quelle: 'perspective' }, sheetUrl, anhaenge: anhaengeLinks });
+        // anhaenge: gespiegelte Form mitgeben — sendBewerbungsMail baut daraus
+        // stabile Portal-Token-Download-Links (keine rohe Signed URL in der Mail).
+        await sendBewerbungsMail({ kunde, job, bewerbung: { ...bew, anhaenge: anhaengeFinal, quelle: 'perspective' }, sheetUrl });
       }
       if (zuordnungUnklar) {
         const { sendBewerbungUnzugeordnetWarnung } = await import('../mail.js');

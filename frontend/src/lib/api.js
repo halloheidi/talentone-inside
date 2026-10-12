@@ -8,6 +8,28 @@ async function authHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Öffnet einen Bewerber-Anhang über den stabilen Download-Endpoint. Intern ist
+ * der Endpoint login-geschützt → wir holen per authentifiziertem Fetch eine
+ * frische (kurzlebige) Signed URL und öffnen sie. `path` ist der vom Backend
+ * gelieferte Endpoint-Pfad, z. B. /api/anhaenge/<id>/<index>.
+ */
+export async function openAnhang(path) {
+  try {
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await fetch(`${path}${sep}format=json`, { headers: { ...(await authHeader()) } });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || 'Anhang konnte nicht geöffnet werden.');
+      return;
+    }
+    const { url } = await res.json();
+    if (url) window.open(url, '_blank', 'noopener');
+  } catch {
+    alert('Anhang konnte nicht geöffnet werden.');
+  }
+}
+
 export async function api(path, { method = 'GET', body, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
