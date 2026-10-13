@@ -262,6 +262,40 @@ export async function listOpenTasks({ closeUserId, bisIso = null } = {}) {
   return out;
 }
 
+/**
+ * Für das Heute-Dashboard: alle offenen Tasks des Users EINMAL paginieren und in
+ * (a) heute fällige/überfällige (+ ohne Datum) und (b) Gesamtzahl splitten.
+ * So zeigt die Kachel nur die Tages-Relevanz, der Zähler nennt aber die Gesamtzahl.
+ * @returns {{ faellig: Array, total: number }}
+ */
+export async function listOpenTasksSplit({ closeUserId } = {}) {
+  if (!(await getCloseKey()) || !closeUserId) return { faellig: [], total: 0 };
+  const heute = new Date().toISOString().slice(0, 10);
+  const all = [];
+  let skip = 0;
+  for (let page = 0; page < 20; page++) {
+    const res = await closeFetch(
+      `/task/?assigned_to=${encodeURIComponent(closeUserId)}&is_complete=false&_limit=100&_skip=${skip}`);
+    const data = res.data || [];
+    all.push(...data);
+    if (!res.has_more || data.length === 0) break;
+    skip += data.length;
+  }
+  const faellig = all
+    .filter(t => !t.date || t.date <= heute)   // heute fällig / überfällig / ohne Datum
+    .map(t => ({
+      id: t.id,
+      text: t.text || '(ohne Text)',
+      lead_id: t.lead_id || null,
+      lead_name: t.lead_name || t.lead_display_name || null,
+      date: t.date || null,
+      overdue: !!(t.date && t.date < heute),
+      url: t.lead_id ? `https://app.close.com/lead/${t.lead_id}/` : null,
+    }))
+    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  return { faellig, total: all.length };
+}
+
 /** Task als erledigt/offen markieren (Dashboard-Haken + Undo). */
 export async function setTaskComplete(taskId, complete = true) {
   if (!(await getCloseKey())) throw new Error('CLOSE_API_KEY nicht gesetzt');

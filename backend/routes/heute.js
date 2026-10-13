@@ -117,6 +117,25 @@ router.post('/close-task/:id/complete', async (req, res) => {
   }
 });
 
+/* ───── Layout-Prefs (Kachel-Reihenfolge + Sichtbarkeit, pro Nutzer) ───── */
+router.get('/prefs', async (req, res) => {
+  const { data } = await supabase.from('talentone_heute_prefs')
+    .select('layout').eq('email', req.user?.email).maybeSingle();
+  res.json({ layout: data?.layout || {} });
+});
+router.put('/prefs', async (req, res) => {
+  const layout = req.body?.layout;
+  if (!layout || typeof layout !== 'object') return res.status(400).json({ error: 'layout fehlt.' });
+  const clean = {
+    order: Array.isArray(layout.order) ? layout.order.filter(x => typeof x === 'string').slice(0, 20) : undefined,
+    hidden: Array.isArray(layout.hidden) ? layout.hidden.filter(x => typeof x === 'string').slice(0, 20) : undefined,
+  };
+  const { error } = await supabase.from('talentone_heute_prefs')
+    .upsert({ email: req.user?.email, layout: clean, updated_at: new Date().toISOString() }, { onConflict: 'email' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, layout: clean });
+});
+
 /* ───── API-Key-Verwaltung (Close / Instantly) — maskiert ───── */
 router.get('/keys', async (req, res) => {
   const out = {};

@@ -6,7 +6,7 @@
 import { supabase } from './supabase.js';
 import { computeOpsOverview } from './routes/controlling-ops.js';
 import { ermittleFaelligeKampagnen } from './campaign-reminder.js';
-import { listOpenTasks, listUsers, getCloseKey } from './close.js';
+import { listOpenTasksSplit, listUsers, getCloseKey } from './close.js';
 import { getInstantlyOverview } from './instantly.js';
 import { callClaudeWithRetry } from './claude.js';
 
@@ -273,16 +273,16 @@ async function collectBewerber() {
 
 /* ═══════════ ✅ Close-Tasks des Nutzers ═══════════ */
 async function collectClose(userEmail) {
-  if (!(await getCloseKey())) return { configured: false, tasks: [], hinweis: 'CLOSE_API_KEY nicht hinterlegt.' };
+  if (!(await getCloseKey())) return { configured: false, tasks: [], total_offen: 0, hinweis: 'CLOSE_API_KEY nicht hinterlegt.' };
   try {
     const users = await listUsers();
     const me = users.find(u => (u.email || '').toLowerCase() === (userEmail || '').toLowerCase());
-    if (!me) return { configured: true, tasks: [], hinweis: `Kein Close-User mit E-Mail ${userEmail} gefunden.` };
-    const tasks = await listOpenTasks({ closeUserId: me.id });
-    return { configured: true, close_user: { id: me.id, name: me.name }, tasks };
+    if (!me) return { configured: true, tasks: [], total_offen: 0, hinweis: `Kein Close-User mit E-Mail ${userEmail} gefunden.` };
+    const { faellig, total } = await listOpenTasksSplit({ closeUserId: me.id });
+    return { configured: true, close_user: { id: me.id, name: me.name }, tasks: faellig, total_offen: total };
   } catch (e) {
     console.warn('[heute] close:', e.message);
-    return { configured: true, tasks: [], error: e.message };
+    return { configured: true, tasks: [], total_offen: 0, error: e.message };
   }
 }
 
