@@ -7,8 +7,11 @@ import { supabase } from './supabase.js';
 
 // Registry: logischer Schlüssel in talentone_settings ↔ Env-Fallback-Variable.
 export const SECRET_KEYS = {
-  close_api_key:     { env: 'CLOSE_API_KEY',     label: 'Close CRM API-Key' },
-  instantly_api_key: { env: 'INSTANTLY_API_KEY', label: 'Instantly API-Key' },
+  close_api_key:            { env: 'CLOSE_API_KEY',            label: 'Close CRM API-Key' },
+  instantly_api_key:        { env: 'INSTANTLY_API_KEY',        label: 'Instantly API-Key' },
+  google_oauth_client_id:   { env: 'GOOGLE_OAUTH_CLIENT_ID',  label: 'Google OAuth Client-ID' },
+  google_oauth_client_secret: { env: 'GOOGLE_OAUTH_CLIENT_SECRET', label: 'Google OAuth Client-Secret' },
+  google_oauth_redirect:    { env: 'GOOGLE_OAUTH_REDIRECT',   label: 'Google OAuth Redirect-URI' },
 };
 
 const _cache = new Map(); // schluessel → { wert, ts }

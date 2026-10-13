@@ -75,6 +75,10 @@ function GlobalNav({ isAdmin }) {
             <Icon name="users" />
             <span>📊 Meta-Integration</span>
           </NavLink>
+          <NavLink to="/admin/gmail" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+            <Icon name="users" />
+            <span>📧 Gmail-Konten</span>
+          </NavLink>
           <NavLink to="/bestandskunden" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
             <Icon name="users" />
             <span>🔄 Bestandskunden</span>

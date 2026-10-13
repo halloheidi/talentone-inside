@@ -137,14 +137,15 @@ router.put('/prefs', async (req, res) => {
 });
 
 /* ───── API-Key-Verwaltung (Close / Instantly) — maskiert ───── */
+const DASHBOARD_KEYS = ['close_api_key', 'instantly_api_key']; // Google-OAuth läuft über /api/gmail
 router.get('/keys', async (req, res) => {
   const out = {};
-  for (const key of Object.keys(SECRET_KEYS)) out[key] = { label: SECRET_KEYS[key].label, ...(await secretStatus(key)) };
+  for (const key of DASHBOARD_KEYS) out[key] = { label: SECRET_KEYS[key].label, ...(await secretStatus(key)) };
   res.json({ keys: out });
 });
 router.put('/keys/:name', async (req, res) => {
   const name = req.params.name;
-  if (!SECRET_KEYS[name]) return res.status(400).json({ error: 'Unbekannter Key.' });
+  if (!DASHBOARD_KEYS.includes(name) || !SECRET_KEYS[name]) return res.status(400).json({ error: 'Unbekannter Key.' });
   const wert = (req.body?.wert || '').toString().trim();
   if (!wert) return res.status(400).json({ error: 'Wert fehlt.' });
   try {
@@ -155,7 +156,7 @@ router.put('/keys/:name', async (req, res) => {
 });
 router.delete('/keys/:name', async (req, res) => {
   const name = req.params.name;
-  if (!SECRET_KEYS[name]) return res.status(400).json({ error: 'Unbekannter Key.' });
+  if (!DASHBOARD_KEYS.includes(name) || !SECRET_KEYS[name]) return res.status(400).json({ error: 'Unbekannter Key.' });
   try {
     await clearSecret(name);
     _cache.clear();

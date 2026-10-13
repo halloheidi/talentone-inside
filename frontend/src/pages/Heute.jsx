@@ -10,6 +10,7 @@ const TILE_DEFS = [
   { id: 'todos', title: '📝 Meine To-dos' },
   { id: 'kampagnen', title: '📋 Kampagnen' },
   { id: 'bewerber', title: '👥 Bewerber' },
+  { id: 'mails', title: '📧 Wichtige Mails' },
   { id: 'instantly', title: '✉️ Instantly' },
 ];
 const DEFAULT_ORDER = TILE_DEFS.map(t => t.id);
@@ -85,6 +86,7 @@ export default function Heute() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [flash, setFlash] = useState(null);
+  const [mailsData, setMailsData] = useState(null);
   const rootRef = useRef(null);
   const tileRefs = useRef({});
   const dragId = useRef(null);
@@ -101,8 +103,13 @@ export default function Heute() {
     finally { setLoading(false); setRefreshing(false); }
   }, [applyData]);
 
+  const loadMails = useCallback(() => {
+    api('/gmail/wichtige').then(setMailsData).catch(e => setMailsData({ error: e.message, mails: [], konten: 0 }));
+  }, []);
+
   useEffect(() => {
     load(false);
+    loadMails();
     api('/heute/keys').then(r => setKeys(r.keys)).catch(() => {});
     api('/heute/prefs').then(r => {
       const lay = r.layout || {};
@@ -112,7 +119,7 @@ export default function Heute() {
       }
       if (Array.isArray(lay.hidden)) setHidden(lay.hidden.filter(id => DEFAULT_ORDER.includes(id)));
     }).catch(() => {});
-  }, [load]);
+  }, [load, loadMails]);
 
   // Feste Höhe (Desktop): Viewport minus Position der Wurzel. Mobile: CSS überschreibt.
   useLayoutEffect(() => {
@@ -234,6 +241,7 @@ export default function Heute() {
       ));
     }
     if (id === 'todos') return <TodosBody todos={todos} showDone={showDone} setShowDone={setShowDone} onAdd={addTodo} onToggle={toggleTodo} onDelete={deleteTodo} />;
+    if (id === 'mails') return <MailsBody data={mailsData} />;
     return null;
   }
 
@@ -244,10 +252,11 @@ export default function Heute() {
     if (id === 'kampagnen' || id === 'bewerber') { const n = (s[id] || []).length; return n > TOP_N ? `Top ${TOP_N} / ${n}` : `${n}`; }
     if (id === 'instantly') return `${(data.instantly?.kampagnen || []).length}`;
     if (id === 'todos') return `${todos.filter(t => !t.erledigt).length} offen`;
+    if (id === 'mails') return !mailsData ? '…' : (mailsData.konten ? `${(mailsData.mails || []).length}` : 'kein Konto');
     return '';
   }
   function tileFooter(id) {
-    const map = { kritisch: ['/controlling', 'Cockpit'], close: ['https://app.close.com/', 'Close'], kampagnen: ['/controlling', 'Cockpit'], bewerber: ['/bewerbungen', 'Bewerberliste'], instantly: [data.instantly?.unibox_url || 'https://app.instantly.ai/app/unibox', 'Unibox'] };
+    const map = { kritisch: ['/controlling', 'Cockpit'], close: ['https://app.close.com/', 'Close'], kampagnen: ['/controlling', 'Cockpit'], bewerber: ['/bewerbungen', 'Bewerberliste'], mails: ['/admin/gmail', 'Konten verwalten'], instantly: [data.instantly?.unibox_url || 'https://app.instantly.ai/app/unibox', 'Unibox'] };
     const f = map[id]; if (!f) return null;
     return /^https?:/.test(f[0])
       ? <a href={f[0]} target="_blank" rel="noreferrer">Alle anzeigen → {f[1]}</a>
@@ -360,6 +369,115 @@ function TodosBody({ todos, showDone, setShowDone, onAdd, onToggle, onDelete }) 
               <button className="heute-row-x" onClick={() => onDelete(t.id)}>✕</button>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MailsBody({ data }) {
+  if (!data) return <div className="heute-empty">Lade Mails…</div>;
+  if (data.error) return <div className="heute-empty" style={{ color: '#b42318' }}>{data.error}</div>;
+  if (!data.konten) return <div className="heute-empty">Kein Gmail-Konto verbunden — <Link to="/admin/gmail">unter /admin verbinden</Link>.</div>;
+  const mails = data.mails || [];
+  if (!mails.length) return <div className="heute-empty">Keine ungelesenen Mails. 🎉</div>;
+  let autoLeft = 5; // Auto-Vorschlag für die Top-5 des Tages (nur mit Kontext)
+  return mails.map(m => {
+    const auto = m.kontext && autoLeft-- > 0;
+    return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} />;
+  });
+}
+
+function KontextChip({ kontext }) {
+  if (!kontext) return <span style={{ fontSize: 11, color: '#b54708' }} title="Absender nicht im CRM gefunden">⚠︎ kein CRM-Kontext</span>;
+  if (kontext.typ === 'kunde') return <span style={{ fontSize: 11, color: '#027a48' }}>🏢 {kontext.firmenname}{kontext.projekt_status ? ` · ${kontext.projekt_status}` : ''}{kontext.naechster_schritt ? ` · ${kontext.naechster_schritt}` : ''}</span>;
+  return <span style={{ fontSize: 11, color: '#1d4ed8' }}>👤 {kontext.name}{kontext.job_stelle ? ` · ${kontext.job_stelle}` : ''} · {kontext.telefonisten_status}</span>;
+}
+
+function MailRow({ mail, auto }) {
+  const [vorschlag, setVorschlag] = useState('');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [hinweis, setHinweis] = useState(null);
+  const [status, setStatus] = useState(null); // 'gesendet' | 'draft'
+  const [countdown, setCountdown] = useState(0);
+  const timer = useRef(null);
+  const kontoId = mail.konto_email;
+
+  const request = useCallback(async () => {
+    setBusy(true); setOpen(true); setHinweis(null);
+    try {
+      const r = await api('/gmail/vorschlag', { method: 'POST', body: { kontoId, messageId: mail.id } });
+      setVorschlag(r.vorschlag || ''); setHinweis(r.hinweis || null);
+    } catch (e) { setVorschlag(''); setHinweis(e.message); }
+    finally { setBusy(false); }
+  }, [kontoId, mail.id]);
+
+  useEffect(() => { if (auto) request(); }, [auto, request]);
+
+  function startSend() {
+    setCountdown(10);
+    timer.current = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) {
+          clearInterval(timer.current); timer.current = null;
+          api('/gmail/senden', { method: 'POST', body: { kontoId, messageId: mail.id, text: vorschlag } })
+            .then(() => { setStatus('gesendet'); setOpen(false); })
+            .catch(e => { setHinweis(e.message); });
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }
+  function undo() { if (timer.current) { clearInterval(timer.current); timer.current = null; } setCountdown(0); }
+  async function draft() {
+    setBusy(true);
+    try { await api('/gmail/draft', { method: 'POST', body: { kontoId, messageId: mail.id, text: vorschlag } }); setStatus('draft'); setOpen(false); }
+    catch (e) { setHinweis(e.message); } finally { setBusy(false); }
+  }
+  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+
+  return (
+    <div style={{ padding: '6px 6px', borderBottom: '1px solid #f4f4f2' }}>
+      <div className="heute-row" style={{ padding: 0 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <a href={mail.link} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{mail.subject}</a>
+          <span style={{ color: '#9a9994' }}> — {mail.from?.replace(/<[^>]+>/, '').trim() || mail.fromEmail}</span>
+        </span>
+        <AgeBadge days={mail.ageTage} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 0' }}>
+        <KontextChip kontext={mail.kontext} />
+        <span style={{ flex: 1 }} />
+        {status === 'gesendet' ? <span style={{ fontSize: 11, color: '#027a48' }}>✓ gesendet</span>
+          : status === 'draft' ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>✓ als Entwurf abgelegt</span>
+          : !open ? <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={request}>✏︎ Antwort vorschlagen</button>
+          : null}
+      </div>
+      {open && status == null && (
+        <div style={{ marginTop: 5 }}>
+          {busy && !vorschlag ? <div className="heute-empty">KI formuliert…</div> : (
+            <>
+              {hinweis && <div style={{ fontSize: 11, color: '#b54708', marginBottom: 3 }}>Hinweis: {hinweis}</div>}
+              <textarea value={vorschlag} onChange={e => setVorschlag(e.target.value)} rows={5}
+                style={{ width: '100%', padding: '7px 9px', border: '1px solid #ececea', borderRadius: 7, fontSize: 12.5, resize: 'vertical' }} />
+              <div style={{ display: 'flex', gap: 6, marginTop: 5, alignItems: 'center' }}>
+                {countdown > 0 ? (
+                  <>
+                    <span style={{ fontSize: 12, color: '#b54708' }}>Senden in {countdown}s…</span>
+                    <button className="heute-chip" style={{ background: '#b42318', color: '#fff' }} onClick={undo}>↩ Rückgängig</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="heute-chip" style={{ background: '#0a0a0a', color: '#fff' }} disabled={busy || !vorschlag.trim()} onClick={startSend}>Senden</button>
+                    <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} disabled={busy || !vorschlag.trim()} onClick={draft}>Als Gmail-Entwurf</button>
+                    <button className="heute-chip" style={{ background: 'none', color: '#999', border: 'none' }} onClick={() => setOpen(false)}>✕</button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

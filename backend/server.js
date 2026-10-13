@@ -29,6 +29,7 @@ import controllingRouter from './routes/controlling.js';
 import metaRouter from './routes/meta.js';
 import bestandskundenRouter from './routes/bestandskunden.js';
 import heuteRouter from './routes/heute.js';
+import gmailRouter from './routes/gmail.js';
 import controllingOpsRouter from './routes/controlling-ops.js';
 import brandAssetsRouter from './routes/brand-assets.js';
 import anfragenRouter from './routes/anfragen.js';
@@ -94,6 +95,8 @@ app.use('/api/webhooks', webhooksRouter);
 // Stabiler Anhang-Download — eigene Dual-Auth (intern Bearer / Portal-Token),
 // daher bewusst VOR den requireAuth-Routern und ohne globales requireAuth.
 app.use('/api/anhaenge', anhaengeRouter);
+// Gmail (Phase 2): OAuth-Callback ist public, übrige Routen self-guarden Admin.
+app.use('/api/gmail', gmailRouter);
 
 // Geschützt — nur eingeloggte Mitarbeiter.
 app.use('/api/kunden', requireAuth, kundenRouter);
