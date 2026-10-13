@@ -62,6 +62,24 @@ async function collectKritisch() {
   return items;
 }
 
+// Zahlungsproblem-Werbekonten direkt aus dem bestehenden Flag (meta-sync schreibt
+// talentone_meta_konten.zahlungsproblem). Fängt auch nicht-projektgebundene bzw.
+// pausierte Konten ab, die als Projekt-Ampel nicht auftauchen (z. B. Sammelkonto).
+async function collectZahlungsprobleme() {
+  const { data } = await supabase.from('talentone_meta_konten')
+    .select('konto_id, name, zahlungsproblem_seit, kunde_id').eq('zahlungsproblem', true);
+  const kids = [...new Set((data || []).map(k => k.kunde_id).filter(Boolean))];
+  const kmap = new Map((kids.length ? await chunkedIn('talentone_kunden', 'id', kids, 'id, firmenname') : []).map(k => [k.id, k]));
+  return (data || []).map(k => ({
+    key: `kritisch:zahlung:${k.konto_id}`,
+    section: 'kritisch', severity: 'kritisch',
+    title: `Zahlungsproblem — Werbekonto „${k.name || k.konto_id}"${k.kunde_id ? ` (${kmap.get(k.kunde_id)?.firmenname || ''})` : ''}`,
+    meta: `Meta-Konto meldet ein Zahlungsproblem${k.zahlungsproblem_seit ? ` seit ${k.zahlungsproblem_seit}` : ''} — Zahlungsmethode prüfen`,
+    link: k.kunde_id ? `/kunden/${k.kunde_id}` : '/controlling',
+    age_days: k.zahlungsproblem_seit ? (tageSeit(k.zahlungsproblem_seit + 'T00:00:00Z') || 0) : 0,
+  }));
+}
+
 /* ═══════════ 📋 Kampagnen heute ═══════════ */
 async function collectKampagnen() {
   const items = [];
@@ -319,14 +337,18 @@ Antworte als JSON: {"text": "<3-5 Sätze inkl. 'Heute zuerst: …'>", "top3": ["
 
 /* ═══════════ Haupt-Aggregator ═══════════ */
 export async function buildHeute({ userEmail }) {
-  const [kritisch, kampagnen, bewerber, close, instantly] = await Promise.all([
+  const [kritischCockpit, zahlung, kampagnen, bewerber, close, instantly] = await Promise.all([
     collectKritisch().catch(e => { console.warn('[heute] kritisch:', e.message); return []; }),
+    collectZahlungsprobleme().catch(e => { console.warn('[heute] zahlung:', e.message); return []; }),
     collectKampagnen().catch(e => { console.warn('[heute] kampagnen:', e.message); return []; }),
     collectBewerber().catch(e => { console.warn('[heute] bewerber:', e.message); return []; }),
     collectClose(userEmail),
     collectInstantly(),
   ]);
 
+  // Zahlungsproblem-Konten zuerst, dann die Cockpit-Ampeln (Duplikate per key-Set raus).
+  const seen = new Set();
+  const kritisch = [...zahlung, ...kritischCockpit].filter(i => !seen.has(i.key) && seen.add(i.key));
   const alleItems = [...kritisch, ...kampagnen, ...bewerber];
   const briefing = await erzeugeBriefing(alleItems, close, instantly);
 
