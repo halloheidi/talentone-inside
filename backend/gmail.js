@@ -131,7 +131,7 @@ export async function listWichtigeMails(konto, { max = 25 } = {}) {
         from, fromEmail: emailAus(from), subject: hdr(hdrs, 'Subject') || '(kein Betreff)',
         date: dateStr, ageTage: Math.max(0, Math.floor((Date.now() - ts) / 86400000)),
         important: (msg.labelIds || []).includes('IMPORTANT'),
-        labelIds: msg.labelIds || [], headers: map,
+        labelIds: msg.labelIds || [], headers: map, snippet: msg.snippet || '',
         link: `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`,
       });
     } catch (e) { /* einzelne Mail-Fehler überspringen */ }
@@ -163,6 +163,33 @@ export function istVerteiler({ fromEmail = '', headers = {}, labelIds = [] } = {
   if (LOCAL_MUSTER.test(local) || /(no-?reply|newsletter|notification)/i.test(local)) return { bulk: true, grund: 'Absender-Muster' };
   if (SYSTEM_DOMAINS.includes(domain)) return { bulk: true, grund: 'eigene System-Mail' };
   if (PLATTFORM_DOMAINS.some(p => domain === p || domain.endsWith('.' + p))) return { bulk: true, grund: `Plattform (${domain})` };
+  return { bulk: false, grund: null };
+}
+
+// Beleg-/Transaktions-Betreffe (Zahlungen, Rechnungen, Bestellungen, Abos …).
+const BELEG_SUBJECT_RE = /(zahlung|zahlungsbest|zahlungseingang|abbuchung|lastschrift|ihre rechnung|rechnung\s*nr|bestellbest|ihre bestellung|buchungsbest|kontoauszug|gutschrift|mahnung|receipt|payment|invoice|order confirmation|subscription renewed)/i;
+// Distinktive Zahlungs-/Abo-/Provider-/Bank-Domains (Wortgrenzen, damit kein false-positive).
+const BELEG_DOMAIN_RE = /(^|\.)(paypal|stripe|klarna|mollie|gocardless|sumup|amazon|apple|easybill|lexoffice|sevdesk|sparkasse|volksbank|commerzbank|n26|qonto|hetzner|ionos|strato|telekom|vodafone)(\.|$)/i;
+const BELEG_LOCALS = new Set(['payment', 'payments', 'billing', 'rechnung', 'rechnungen', 'invoice', 'invoicing', 'buchhaltung']);
+
+/**
+ * Beleg-/Transaktions-Erkennung. Greift NUR, wenn kein CRM-Match vorliegt (der
+ * Aufrufer ruft dies erst nach dem CRM-Check). @returns { bulk, grund }
+ */
+export function istBeleg({ fromEmail = '', subject = '', headers = {}, snippet = '' } = {}) {
+  const grund = 'Beleg/Transaktion';
+  const local = (fromEmail.split('@')[0] || '').toLowerCase();
+  const domain = (fromEmail.split('@')[1] || '').toLowerCase();
+  const subjHit = BELEG_SUBJECT_RE.test(subject || '');
+  if (BELEG_DOMAIN_RE.test(domain)) return { bulk: true, grund };
+  if (BELEG_LOCALS.has(local)) return { bulk: true, grund };
+  if (local === 'service' && subjHit) return { bulk: true, grund };
+  if (subjHit) return { bulk: true, grund };
+  // Zusatzsignal: (fehlendes/noreply-Reply-To) UND Geldbetrag/Währung im Snippet.
+  const replyTo = (headers['reply-to'] || '').toLowerCase();
+  const noReply = !replyTo || /no-?reply|do-?not-?reply|donotreply/.test(replyTo);
+  const geld = /(€|\beur\b|\$|\bchf\b|\bgbp\b)/i.test(snippet) || /\d+[.,]\d{2}\s?(€|eur)/i.test(snippet);
+  if (noReply && geld) return { bulk: true, grund };
   return { bulk: false, grund: null };
 }
 

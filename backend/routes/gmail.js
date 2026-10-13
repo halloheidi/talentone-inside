@@ -11,7 +11,7 @@ import { callClaudeWithRetry } from '../claude.js';
 import {
   buildAuthUrl, exchangeCode, saveKonto, listKonten, deleteKonto, ladeKontoRow,
   listWichtigeMails, getMessageFull, sendReply, createDraftReply, getOAuthConfig,
-  istVerteiler, ruleMatches,
+  istVerteiler, istBeleg, ruleMatches,
 } from '../gmail.js';
 import { enrichMails, kundeAusKontext } from '../mail-context.js';
 
@@ -85,9 +85,11 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
       const allowR = regeln.find(r => r.regel === 'allow' && ruleMatches(r.muster, m.fromEmail));
       const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, subject: m.subject, date: m.date, ageTage: m.ageTage, important: m.important, link: m.link, kontext: m.kontext };
       if (blockR) { ausgeblendet.push({ ...basis, grund: 'Blockliste' }); continue; }
-      if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; }
+      if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; } // CRM bleibt unangetastet
+      // Verteiler/Automatik ODER Beleg/Transaktion (nur ohne CRM-Match) → ausgeblendet.
       const v = istVerteiler(m);
-      if (v.bulk && !allowR) { ausgeblendet.push({ ...basis, grund: v.grund }); continue; }
+      const cls = v.bulk ? v : istBeleg(m);
+      if (cls.bulk && !allowR) { ausgeblendet.push({ ...basis, grund: cls.grund }); continue; }
       sichtbar.push({ ...basis, prio: 2, klasse: 'persoenlich', ...(allowR ? { allow: true } : {}) });
     }
     sichtbar.sort((a, b) => (a.prio - b.prio) || ((Date.parse(b.date) || 0) - (Date.parse(a.date) || 0)));
