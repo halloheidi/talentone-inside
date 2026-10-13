@@ -326,7 +326,9 @@ ${kompakt}${closeTxt}${instTxt}
 Antworte als JSON: {"text": "<3-5 Sätze inkl. 'Heute zuerst: …'>", "top3": ["…","…","…"]}`;
     const resp = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 500, messages: [{ role: 'user', content: prompt }] });
     const raw = resp?.content?.[0]?.text || '';
-    const json = JSON.parse(raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim());
+    // Robust: nur das erste {...}-Objekt herausschneiden (Modell hängt bisweilen Prosa an).
+    const slice = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
+    const json = JSON.parse(slice);
     if (json?.text) return { text: String(json.text), top3: Array.isArray(json.top3) ? json.top3.slice(0, 3) : fallback.top3 };
     return fallback;
   } catch (e) {

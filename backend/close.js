@@ -282,7 +282,7 @@ export async function listOpenTasksSplit({ closeUserId } = {}) {
     skip += data.length;
   }
   const faellig = all
-    .filter(t => !t.date || t.date <= heute)   // heute fällig / überfällig / ohne Datum
+    .filter(t => t.date && t.date <= heute)   // NUR heute fällig oder überfällig (ohne Datum zählt nicht als „heute")
     .map(t => ({
       id: t.id,
       text: t.text || '(ohne Text)',
