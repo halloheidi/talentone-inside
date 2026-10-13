@@ -241,7 +241,7 @@ export default function Heute() {
       ));
     }
     if (id === 'todos') return <TodosBody todos={todos} showDone={showDone} setShowDone={setShowDone} onAdd={addTodo} onToggle={toggleTodo} onDelete={deleteTodo} />;
-    if (id === 'mails') return <MailsBody data={mailsData} />;
+    if (id === 'mails') return <MailsBody data={mailsData} onReload={loadMails} />;
     return null;
   }
 
@@ -375,26 +375,56 @@ function TodosBody({ todos, showDone, setShowDone, onAdd, onToggle, onDelete }) 
   );
 }
 
-function MailsBody({ data }) {
+function MailsBody({ data, onReload }) {
+  const [showHidden, setShowHidden] = useState(false);
   if (!data) return <div className="heute-empty">Lade Mails…</div>;
   if (data.error) return <div className="heute-empty" style={{ color: '#b42318' }}>{data.error}</div>;
   if (!data.konten) return <div className="heute-empty">Kein Gmail-Konto verbunden — <Link to="/admin/gmail">unter /admin verbinden</Link>.</div>;
   const mails = data.mails || [];
-  if (!mails.length) return <div className="heute-empty">Keine ungelesenen Mails. 🎉</div>;
-  let autoLeft = 5; // Auto-Vorschlag für die Top-5 des Tages (nur mit Kontext)
-  return mails.map(m => {
-    const auto = m.kontext && autoLeft-- > 0;
-    return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} />;
-  });
+  const ausgeblendet = data.ausgeblendet || [];
+
+  async function setRegel(muster, regel) {
+    try { await api('/gmail/regeln', { method: 'POST', body: { muster, regel } }); onReload?.(); }
+    catch (e) { alert(e.message); }
+  }
+
+  let autoLeft = 5; // Auto-Vorschlag nur für die Top-5 CRM-Mails (klasse 'crm')
+  return (
+    <>
+      {mails.length === 0
+        ? <div className="heute-empty">Keine beantwortbaren Mails. 🎉</div>
+        : mails.map(m => {
+            const auto = m.klasse === 'crm' && autoLeft-- > 0;
+            return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} onBlock={() => setRegel(m.fromEmail, 'block')} />;
+          })}
+
+      {ausgeblendet.length > 0 && (
+        <div style={{ marginTop: 8, borderTop: '1px dashed #ececea', paddingTop: 6 }}>
+          <button onClick={() => setShowHidden(s => !s)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: '#9a9994' }}>
+            {showHidden ? '▾' : '▸'} 🔇 {ausgeblendet.length} ausgeblendet (Verteiler/automatisch)
+          </button>
+          {showHidden && ausgeblendet.map(m => (
+            <div key={`${m.konto_email}:${m.id}`} className="heute-row" style={{ opacity: 0.7 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <a href={m.link} target="_blank" rel="noreferrer">{m.subject}</a>
+                <span style={{ color: '#9a9994' }}> — {m.fromEmail} · {m.grund}</span>
+              </span>
+              <button className="heute-row-x" title="Absender immer anzeigen" style={{ color: '#027a48', fontSize: 11 }} onClick={() => setRegel(m.fromEmail, 'allow')}>+ immer</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
-function KontextChip({ kontext }) {
-  if (!kontext) return <span style={{ fontSize: 11, color: '#b54708' }} title="Absender nicht im CRM gefunden">⚠︎ kein CRM-Kontext</span>;
-  if (kontext.typ === 'kunde') return <span style={{ fontSize: 11, color: '#027a48' }}>🏢 {kontext.firmenname}{kontext.projekt_status ? ` · ${kontext.projekt_status}` : ''}{kontext.naechster_schritt ? ` · ${kontext.naechster_schritt}` : ''}</span>;
-  return <span style={{ fontSize: 11, color: '#1d4ed8' }}>👤 {kontext.name}{kontext.job_stelle ? ` · ${kontext.job_stelle}` : ''} · {kontext.telefonisten_status}</span>;
+function KontextChip({ kontext, klasse }) {
+  if (kontext?.typ === 'kunde') return <span style={{ fontSize: 11, color: '#027a48' }}>🏢 {kontext.firmenname}{kontext.projekt_status ? ` · ${kontext.projekt_status}` : ''}{kontext.naechster_schritt ? ` · ${kontext.naechster_schritt}` : ''}</span>;
+  if (kontext?.typ === 'bewerber') return <span style={{ fontSize: 11, color: '#1d4ed8' }}>👤 {kontext.name}{kontext.job_stelle ? ` · ${kontext.job_stelle}` : ''} · {kontext.telefonisten_status}</span>;
+  return <span style={{ fontSize: 11, color: '#9a9994' }}>✉︎ persönlich</span>;
 }
 
-function MailRow({ mail, auto }) {
+function MailRow({ mail, auto, onBlock }) {
   const [vorschlag, setVorschlag] = useState('');
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -448,11 +478,14 @@ function MailRow({ mail, auto }) {
         <AgeBadge days={mail.ageTage} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 0' }}>
-        <KontextChip kontext={mail.kontext} />
+        <KontextChip kontext={mail.kontext} klasse={mail.klasse} />
         <span style={{ flex: 1 }} />
         {status === 'gesendet' ? <span style={{ fontSize: 11, color: '#027a48' }}>✓ gesendet</span>
           : status === 'draft' ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>✓ als Entwurf abgelegt</span>
-          : !open ? <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={request}>✏︎ Antwort vorschlagen</button>
+          : !open ? <>
+              <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={request}>✏︎ Antwort vorschlagen</button>
+              {onBlock && <button className="heute-row-x" title="Absender nie anzeigen" style={{ fontSize: 11 }} onClick={onBlock}>🔇</button>}
+            </>
           : null}
       </div>
       {open && status == null && (

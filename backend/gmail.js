@@ -109,29 +109,70 @@ async function gmailFetch(konto, path, opts = {}) {
 const hdr = (headers, name) => (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 const emailAus = (from) => { const m = String(from).match(/<([^>]+)>/); return (m ? m[1] : String(from)).trim().toLowerCase(); };
 
-/** Ungelesene INBOX-Mails eines Kontos (Metadaten). @returns [{id,threadId,from,fromEmail,subject,date,important,ageTage}] */
-export async function listWichtigeMails(konto, { max = 15 } = {}) {
+// Header, die für die Relevanz-Klassifizierung gebraucht werden.
+const KLASS_HEADERS = ['From', 'Subject', 'Date', 'To', 'List-Unsubscribe', 'List-Id', 'Precedence', 'Auto-Submitted', 'Reply-To'];
+
+/** Ungelesene INBOX-Mails eines Kontos (Metadaten inkl. Klassifizierungs-Header + labelIds). */
+export async function listWichtigeMails(konto, { max = 25 } = {}) {
   const list = await gmailFetch(konto, `/messages?q=${encodeURIComponent('is:unread in:inbox')}&maxResults=${max}`);
   const ids = (list.messages || []).map(m => m.id);
   const out = [];
+  const hq = KLASS_HEADERS.map(h => `metadataHeaders=${encodeURIComponent(h)}`).join('&');
   for (const id of ids) {
     try {
-      const msg = await gmailFetch(konto, `/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
-      const h = msg.payload?.headers || [];
-      const from = hdr(h, 'From');
-      const dateStr = hdr(h, 'Date');
+      const msg = await gmailFetch(konto, `/messages/${id}?format=metadata&${hq}`);
+      const hdrs = msg.payload?.headers || [];
+      const map = {}; for (const x of hdrs) map[x.name.toLowerCase()] = x.value;
+      const from = hdr(hdrs, 'From');
+      const dateStr = hdr(hdrs, 'Date');
       const ts = dateStr ? Date.parse(dateStr) : Date.now();
       out.push({
         konto_email: konto.email, id, threadId: msg.threadId,
-        from, fromEmail: emailAus(from), subject: hdr(h, 'Subject') || '(kein Betreff)',
+        from, fromEmail: emailAus(from), subject: hdr(hdrs, 'Subject') || '(kein Betreff)',
         date: dateStr, ageTage: Math.max(0, Math.floor((Date.now() - ts) / 86400000)),
         important: (msg.labelIds || []).includes('IMPORTANT'),
+        labelIds: msg.labelIds || [], headers: map,
         link: `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`,
       });
     } catch (e) { /* einzelne Mail-Fehler überspringen */ }
   }
   return out;
 }
+
+const SYSTEM_DOMAINS = ['inside.talent-one.de'];
+const PLATTFORM_DOMAINS = ['linkedin.com', 'facebookmail.com', 'facebook.com', 'meta.com', 'mail.instagram.com',
+  'google.com', 'accounts.google.com', 'googlemail.com', 'instantly.ai', 'mailchimp.com', 'sendgrid.net',
+  'substack.com', 'youtube.com', 'xing.com', 'indeed.com', 'stepstone.de'];
+const LOCAL_MUSTER = /^(no-?reply|do-?not-?reply|donotreply|newsletter|notifications?|mailer-daemon|bounce|postmaster|automailer|mailer|news)$/i;
+
+/**
+ * Verteiler-/Automatik-Erkennung (ausfiltern). @returns { bulk, grund|null }
+ * Header-Signale > Gmail-Kategorie > Absender-Muster/Plattform > eigene System-Mails.
+ */
+export function istVerteiler({ fromEmail = '', headers = {}, labelIds = [] } = {}) {
+  const h = headers || {};
+  if (h['list-unsubscribe']) return { bulk: true, grund: 'List-Unsubscribe' };
+  if (/\b(bulk|list|junk)\b/i.test(h['precedence'] || '')) return { bulk: true, grund: 'Precedence' };
+  if (h['list-id']) return { bulk: true, grund: 'List-Id' };
+  const as = (h['auto-submitted'] || '').toLowerCase();
+  if (as && as !== 'no') return { bulk: true, grund: 'Auto-Submitted' };
+  const cat = (labelIds || []).find(l => ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'].includes(l));
+  if (cat) return { bulk: true, grund: 'Gmail-Kategorie ' + cat.replace('CATEGORY_', '') };
+  const local = (fromEmail.split('@')[0] || '').toLowerCase();
+  const domain = (fromEmail.split('@')[1] || '').toLowerCase();
+  if (LOCAL_MUSTER.test(local) || /(no-?reply|newsletter|notification)/i.test(local)) return { bulk: true, grund: 'Absender-Muster' };
+  if (SYSTEM_DOMAINS.includes(domain)) return { bulk: true, grund: 'eigene System-Mail' };
+  if (PLATTFORM_DOMAINS.some(p => domain === p || domain.endsWith('.' + p))) return { bulk: true, grund: `Plattform (${domain})` };
+  return { bulk: false, grund: null };
+}
+
+const ruleMatches = (muster, fromEmail) => {
+  const m = (muster || '').trim().toLowerCase(); const e = (fromEmail || '').toLowerCase();
+  if (!m || !e) return false;
+  if (m.includes('@')) return m === e;
+  return e.endsWith('@' + m) || e.split('@')[1] === m;
+};
+export { ruleMatches };
 
 /** Eine Mail im Volltext (für KI-Vorschlag + korrekte Thread-Header). */
 export async function getMessageFull(konto, id) {

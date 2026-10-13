@@ -11,6 +11,7 @@ import { callClaudeWithRetry } from '../claude.js';
 import {
   buildAuthUrl, exchangeCode, saveKonto, listKonten, deleteKonto, ladeKontoRow,
   listWichtigeMails, getMessageFull, sendReply, createDraftReply, getOAuthConfig,
+  istVerteiler, ruleMatches,
 } from '../gmail.js';
 import { enrichMails, kundeAusKontext } from '../mail-context.js';
 
@@ -61,21 +62,58 @@ router.delete('/konten/:id', ...adminGuard, async (req, res) => {
   await deleteKonto(req.params.id); res.json({ ok: true });
 });
 
-/* ───── Wichtige Mails (ungelesen INBOX) + Kontext ───── */
+/* ───── Wichtige Mails (ungelesen INBOX) + Kontext + Relevanz-Filter ───── */
+// Klassen: 'crm' (Prio 1) / 'persoenlich' (Prio 2) sichtbar · 'verteiler' ausgeblendet.
+// Pro-Nutzer-Regeln: block → immer aus; allow → immer an (schlägt die Automatik).
 router.get('/wichtige', ...adminGuard, async (req, res) => {
   try {
     const konten = (await listKonten()).filter(k => k.status === 'aktiv');
-    if (!konten.length) return res.json({ konten: 0, mails: [] });
+    if (!konten.length) return res.json({ konten: 0, mails: [], ausgeblendet: [] });
     let mails = [];
     for (const kMeta of konten) {
       const konto = await ladeKontoRow(kMeta.id);
-      try { mails.push(...await listWichtigeMails(konto, { max: 15 })); }
+      try { mails.push(...await listWichtigeMails(konto, { max: 25 })); }
       catch (e) { console.warn('[gmail/wichtige]', kMeta.email, e.message); }
     }
     mails = await enrichMails(mails);
-    mails.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-    res.json({ konten: konten.length, mails });
+    const { data: regeln = [] } = await supabase.from('talentone_gmail_absender_regeln')
+      .select('muster, regel').eq('nutzer', req.user.email);
+
+    const sichtbar = [], ausgeblendet = [];
+    for (const m of mails) {
+      const blockR = regeln.find(r => r.regel === 'block' && ruleMatches(r.muster, m.fromEmail));
+      const allowR = regeln.find(r => r.regel === 'allow' && ruleMatches(r.muster, m.fromEmail));
+      const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, subject: m.subject, date: m.date, ageTage: m.ageTage, important: m.important, link: m.link, kontext: m.kontext };
+      if (blockR) { ausgeblendet.push({ ...basis, grund: 'Blockliste' }); continue; }
+      if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; }
+      const v = istVerteiler(m);
+      if (v.bulk && !allowR) { ausgeblendet.push({ ...basis, grund: v.grund }); continue; }
+      sichtbar.push({ ...basis, prio: 2, klasse: 'persoenlich', ...(allowR ? { allow: true } : {}) });
+    }
+    sichtbar.sort((a, b) => (a.prio - b.prio) || ((Date.parse(b.date) || 0) - (Date.parse(a.date) || 0)));
+    ausgeblendet.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+    res.json({ konten: konten.length, mails: sichtbar, ausgeblendet });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ───── Absender-Regeln (block/allow) pro Nutzer ───── */
+router.get('/regeln', ...adminGuard, async (req, res) => {
+  const { data } = await supabase.from('talentone_gmail_absender_regeln')
+    .select('id, muster, regel, created_at').eq('nutzer', req.user.email).order('created_at', { ascending: false });
+  res.json({ regeln: data || [] });
+});
+router.post('/regeln', ...adminGuard, async (req, res) => {
+  const muster = String(req.body?.muster || '').trim().toLowerCase();
+  const regel = req.body?.regel === 'allow' ? 'allow' : 'block';
+  if (!muster) return res.status(400).json({ error: 'muster fehlt.' });
+  const { error } = await supabase.from('talentone_gmail_absender_regeln')
+    .upsert({ nutzer: req.user.email, muster, regel }, { onConflict: 'nutzer,muster' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+router.delete('/regeln/:id', ...adminGuard, async (req, res) => {
+  await supabase.from('talentone_gmail_absender_regeln').delete().eq('id', req.params.id).eq('nutzer', req.user.email);
+  res.json({ ok: true });
 });
 
 /* ───── KI-Antwortvorschlag (nur die angezeigte Mail als KI-Input) ───── */
