@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { listUsers } from '../close.js';
+import { listUsers, getCloseKey } from '../close.js';
 import { applyCloseTaskState } from '../bestandskunden-close.js';
 import { runBestandskundenSync, runCloseTaskStatusSync, getBestandskundenSyncStatus } from '../bestandskunden-sync.js';
 
@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
 
 // GET /api/bestandskunden/close-users — für das Zuständig-Dropdown.
 router.get('/close-users', async (req, res) => {
-  if (!process.env.CLOSE_API_KEY) return res.json({ users: [] });
+  if (!(await getCloseKey())) return res.json({ users: [] });
   try { res.json({ users: await listUsers() }); }
   catch (err) { res.status(502).json({ error: err.message, users: [] }); }
 });

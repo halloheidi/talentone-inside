@@ -3,7 +3,7 @@
 // defensiv — Fehler blockieren nie das Speichern im Tool (Aufrufer zeigt Warnung).
 
 import { supabase } from './supabase.js';
-import { searchLeads, createLead, addTask, updateTask, deleteTask } from './close.js';
+import { searchLeads, createLead, addTask, updateTask, deleteTask, getCloseKey } from './close.js';
 import { normFirma } from './bestandskunden-sync.js';
 
 const eur = (n) => `${Math.round(Number(n) || 0).toLocaleString('de-DE')} €`;
@@ -19,7 +19,7 @@ function taskText(kunde) {
 
 /** Lead-Kandidaten für einen Kunden (Firma + frühere Bezeichnung). */
 export async function findLeadCandidates(kunde) {
-  if (!process.env.CLOSE_API_KEY) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
+  if (!(await getCloseKey())) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
   const namen = [kunde.firma, kunde.fruehere_bezeichnung].filter(Boolean);
   const seen = new Set();
   const candidates = [];
@@ -69,7 +69,7 @@ async function reload(kundeId) {
 export async function applyCloseTaskState(kundeId) {
   const kunde = await reload(kundeId);
   if (!kunde) return { kunde: null, close_warnung: 'Kunde nicht gefunden.' };
-  if (!process.env.CLOSE_API_KEY) return { kunde, close_warnung: 'CLOSE_API_KEY nicht gesetzt — Task nicht synchronisiert.' };
+  if (!(await getCloseKey())) return { kunde, close_warnung: 'CLOSE_API_KEY nicht gesetzt — Task nicht synchronisiert.' };
 
   const willTask = kunde.reaktivierung === 'angehen' && !!kunde.zustaendig_close_user_id;
 

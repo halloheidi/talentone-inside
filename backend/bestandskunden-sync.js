@@ -7,7 +7,7 @@
 
 import { supabase } from './supabase.js';
 import { listCustomers, listDocuments } from './easybill.js';
-import { getTask } from './close.js';
+import { getTask, getCloseKey } from './close.js';
 
 const DOC_TYPES = ['INVOICE', 'CREDIT', 'STORNO'];
 const PAGE_SIZE = 100;
@@ -159,7 +159,7 @@ async function runEasybillSync() {
 
 /** Rückrichtung: Close-Task-Status für alle Kunden mit close_task_id abgleichen. */
 export async function runCloseTaskStatusSync() {
-  if (!process.env.CLOSE_API_KEY) return { skipped: 'no_close_key' };
+  if (!(await getCloseKey())) return { skipped: 'no_close_key' };
   const { data: kunden } = await supabase.from('talentone_bk_kunden')
     .select('id, close_task_id, close_task_status').not('close_task_id', 'is', null);
   let erledigt = 0, geloescht = 0, geprueft = 0;

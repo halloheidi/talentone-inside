@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
+import { getStartView } from './lib/startview.js';
+import Heute from './pages/Heute.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import PublicUpload from './pages/PublicUpload.jsx';
@@ -53,6 +55,11 @@ function AdminOnly({ children }) {
   return children;
 }
 
+// Index-Redirect auf die eingestellte Start-Ansicht (Default /kunden).
+function StartRedirect() {
+  return <Navigate to={getStartView()} replace />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -77,7 +84,8 @@ export default function App() {
           </Protected>
         }
       >
-        <Route index element={<Navigate to="/kunden" replace />} />
+        <Route index element={<StartRedirect />} />
+        <Route path="heute" element={<AdminOnly><Heute /></AdminOnly>} />
         <Route path="kunden" element={<KundenList />} />
         <Route path="bewerbungen" element={<BewerbungenOverview />} />
         <Route path="zahlungen" element={<ZahlungenOverview />} />

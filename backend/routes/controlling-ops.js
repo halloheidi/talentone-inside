@@ -93,11 +93,12 @@ function funnelTyp(funnels) {
 }
 
 /* ═══════════════════ /overview ═══════════════════ */
-router.get('/overview', async (req, res) => {
-  try {
-    const { start, end, tage } = parseRange(req.query);
-    const statusKey = ['live', 'aktiv', 'alle'].includes(req.query.status) ? req.query.status : 'live';
-    const agenturFilter = ['talentone', 'nowagwirth'].includes(req.query.agentur) ? req.query.agentur : null;
+// Kompletter Operatives-Cockpit-Overview als wiederverwendbare Funktion.
+// /api/heute nutzt exakt dieselben Ampeln/Gründe (bewerteZeile) — keine Neuberechnung.
+export async function computeOpsOverview(query = {}) {
+    const { start, end, tage } = parseRange(query);
+    const statusKey = ['live', 'aktiv', 'alle'].includes(query.status) ? query.status : 'live';
+    const agenturFilter = ['talentone', 'nowagwirth'].includes(query.agentur) ? query.agentur : null;
     const now = new Date();
 
     // 1) Projekte nach Status
@@ -349,12 +350,17 @@ router.get('/overview', async (req, res) => {
       .filter(k => (jobsByKunde[k.id] || []).length)
       .sort((a, b) => a.firmenname.localeCompare(b.firmenname, 'de'));
 
-    res.json({
+    return {
       range: { from: start.toISOString(), to: end.toISOString(), tage },
       filter: { status: statusKey, agentur: agenturFilter || 'alle' },
       totals, rows, charts, kunden: kundenListe,
       thresholds: AMPEL_CONFIG,
-    });
+    };
+}
+
+router.get('/overview', async (req, res) => {
+  try {
+    res.json(await computeOpsOverview(req.query));
   } catch (err) {
     console.error('[controlling-ops/overview]', err.message);
     res.status(500).json({ error: err.message });

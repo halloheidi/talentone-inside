@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { supabase } from './supabase.js';
 import { readValues, firstSheetName, parseSpreadsheetId, isConfigured as sheetsConfigured } from './google-sheets.js';
 import {
-  findLeadByContact, createLead, addNote, addTask, deleteLead,
+  findLeadByContact, createLead, addNote, addTask, deleteLead, getCloseKey,
 } from './close.js';
 
 const MAX_VERSUCHE_WARN = 3; // ab so vielen Fehlversuchen: interne Warn-Mail
@@ -135,7 +135,7 @@ function formularNote(lead) {
  * @returns {{ ok: boolean, close_lead_id?, error? }}
  */
 export async function syncLeadToClose(lead, quelle) {
-  if (!process.env.CLOSE_API_KEY) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
+  if (!(await getCloseKey())) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
   try {
     let closeLead = await findLeadByContact({ email: lead.email, phone: lead.telefon });
     let reused = !!closeLead;

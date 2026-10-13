@@ -1,19 +1,27 @@
 // Close CRM Integration (Inside-Tool) — Best-effort, blockt niemals.
 // Wird u.a. nach Reaktivierungs-Mail-Versand getriggert.
 
+import { getSecret } from './settings-secrets.js';
+
 const CLOSE_API = 'https://api.close.com/api/v1';
 
 let cachedUserMap = null; // name → id
 
-function authHeader() {
-  const token = Buffer.from(`${process.env.CLOSE_API_KEY}:`).toString('base64');
+// API-Key: DB-Setting (close_api_key) bevorzugt, sonst env CLOSE_API_KEY.
+export async function getCloseKey() {
+  return (await getSecret('close_api_key')) || null;
+}
+
+async function authHeader() {
+  const key = await getCloseKey();
+  const token = Buffer.from(`${key || ''}:`).toString('base64');
   return { Authorization: `Basic ${token}`, 'Content-Type': 'application/json' };
 }
 
 async function closeFetch(path, options = {}) {
   const res = await fetch(`${CLOSE_API}${path}`, {
     ...options,
-    headers: { ...authHeader(), ...(options.headers || {}) },
+    headers: { ...(await authHeader()), ...(options.headers || {}) },
   });
   if (!res.ok) {
     const body = await res.text();
@@ -180,7 +188,7 @@ export async function searchLeads(query, limit = 8) {
  * @returns {Promise<{ok: boolean, leadId?: string, error?: string}>}
  */
 export async function notifyKunde(kunde, noteText) {
-  if (!process.env.CLOSE_API_KEY) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
+  if (!(await getCloseKey())) return { ok: false, error: 'CLOSE_API_KEY nicht gesetzt' };
   if (!kunde || !noteText) return { ok: false, error: 'kunde oder noteText fehlt' };
   const leadIdCandidate = kunde.close_lead_id;
   try {
@@ -217,9 +225,52 @@ export async function notifyKundeById(kundeId, noteText, supabaseClient) {
   }
 }
 
+/**
+ * Offene Tasks eines Close-Users (für das Heute-Dashboard). Nur unerledigte
+ * (is_complete=false). Liefert Lead-Name + Deep-Link mit. `bisIso` optional
+ * (Default: heute Ende) — nur Tasks mit date ≤ bisIso oder ohne date.
+ * @returns [{ id, text, lead_id, lead_name, date, overdue, url }]
+ */
+export async function listOpenTasks({ closeUserId, bisIso = null } = {}) {
+  if (!(await getCloseKey()) || !closeUserId) return [];
+  const bis = (bisIso || new Date().toISOString()).slice(0, 10);
+  const out = [];
+  let skip = 0;
+  // Close paginiert mit _skip/_limit; wir holen unerledigte Tasks des Users.
+  for (let page = 0; page < 10; page++) {
+    const res = await closeFetch(
+      `/task/?assigned_to=${encodeURIComponent(closeUserId)}&is_complete=false&_limit=100&_skip=${skip}`);
+    const data = res.data || [];
+    for (const t of data) {
+      const due = t.date || null;                 // YYYY-MM-DD oder null
+      if (due && due > bis) continue;             // noch nicht fällig → nicht heute
+      out.push({
+        id: t.id,
+        text: t.text || '(ohne Text)',
+        lead_id: t.lead_id || null,
+        lead_name: t.lead_name || t.lead_display_name || null,
+        date: due,
+        overdue: !!(due && due < new Date().toISOString().slice(0, 10)),
+        url: t.lead_id ? `https://app.close.com/lead/${t.lead_id}/` : null,
+      });
+    }
+    if (!res.has_more || data.length === 0) break;
+    skip += data.length;
+  }
+  // Fällig/überfällig zuerst, dann nach Datum aufsteigend.
+  out.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  return out;
+}
+
+/** Task als erledigt/offen markieren (Dashboard-Haken + Undo). */
+export async function setTaskComplete(taskId, complete = true) {
+  if (!(await getCloseKey())) throw new Error('CLOSE_API_KEY nicht gesetzt');
+  return updateTask(taskId, { is_complete: !!complete });
+}
+
 /** Convenience: Reaktivierungs-Task + Note kombiniert. */
 export async function logReaktivierung({ leadIdOrEmail, kundenname, stelle, assignToName = 'Daniel Nowag' }) {
-  if (!process.env.CLOSE_API_KEY) {
+  if (!(await getCloseKey())) {
     console.warn('[Close] CLOSE_API_KEY nicht gesetzt — Reaktivierungs-Log übersprungen.');
     return null;
   }

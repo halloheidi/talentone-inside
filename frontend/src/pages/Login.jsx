@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
+import { getStartView } from '../lib/startview.js';
 
 export default function Login() {
   const { signIn, resetPassword, session } = useAuth();
@@ -13,7 +14,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (session) nav('/kunden', { replace: true });
+    if (session) nav(getStartView(), { replace: true });
   }, [session, nav]);
 
   function switchMode(next) {
@@ -33,7 +34,7 @@ export default function Login() {
         setInfo('Wenn ein Konto existiert, haben wir dir einen Reset-Link geschickt. Bitte prüfe dein Postfach.');
       } else {
         await signIn(email, password);
-        nav('/kunden', { replace: true });
+        nav(getStartView(), { replace: true });
       }
     } catch (err) {
       setError(err.message || (mode === 'forgot' ? 'Reset-Link konnte nicht gesendet werden.' : 'Login fehlgeschlagen.'));
