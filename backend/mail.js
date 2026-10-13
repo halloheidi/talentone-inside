@@ -3,7 +3,7 @@
 
 import { getBranding, getMailFrom, getMailReplyTo, getOfferMailFrom, getOfferMailReplyTo, agenturForOfferBrand } from './branding.js';
 import { anrede, t, stripLeadingGreeting } from './anrede.js';
-import { renderEmail } from './email-templates.js';
+import { renderEmail, renderProjekttypMail } from './email-templates.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 
@@ -1119,18 +1119,32 @@ export async function sendReaktivierungsMail({ to, replyTo, kunde, job, ansprech
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
   const stelle = job?.stelle || 'eure offene Stelle';
   const _calSatzLink = calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl;
-  const tpl = await renderEmail('reaktivierung', k, { stelle, anrede: anrede(k), cal_link: _calSatzLink });
 
-  // Standard-Text falls Mitarbeiter nichts eintippt
-  const introText = (customText || '').trim() || tpl?.body || `${anrede(k)},
+  // „offene Stelle als {{stelle}}" ist recruiting-spezifisch → bei Neukunden
+  // neutral „Kampagne {{stelle}}".
+  const recruitingDefault = `${anrede(k)},
 
 wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} offene Stelle als ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
 
 ${t(k, 'Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.', 'Unser Vorschlag: Gehen Sie nochmal für 30 Tage online — Sie zahlen nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.')}
 
-${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich):', 'Sollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich):')} ${calLink || brand.calReaktivierungUrl || brand.calBeratungsUrl}`;
+${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich):', 'Sollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich):')} ${_calSatzLink}`;
+  const neukundenDefault = `${anrede(k)},
+
+wir haben spannende Neuigkeiten: Mit unserer neuen KI-Technologie haben wir frische Werbeanzeigen für ${t(k, 'deine', 'Ihre')} Kampagne ${stelle} erstellt — und das Ergebnis kann sich sehen lassen!
+
+${t(k, 'Unser Vorschlag: Geh nochmal für 30 Tage online — du zahlst nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.', 'Unser Vorschlag: Gehen Sie nochmal für 30 Tage online — Sie zahlen nur die Betreuungspauschale, die Erstellung der neuen Creatives ist inklusive.')}
+
+${t(k, 'Sollen wir kurz telefonieren? Antworte einfach auf diese Mail oder buch dir direkt einen Termin (unverbindlich):', 'Sollen wir kurz telefonieren? Antworten Sie einfach auf diese Mail oder buchen Sie sich direkt einen Termin (unverbindlich):')} ${_calSatzLink}`;
+
+  const { tpl, block } = await renderProjekttypMail('reaktivierung', k, { stelle, anrede: anrede(k), cal_link: _calSatzLink }, { istNeukunden, neukundenDefaultBody: neukundenDefault });
+  if (block) { const e = new Error('Neukunden-Vorlage fehlt: reaktivierung_neukunden'); e.code = 'NEUKUNDEN_VORLAGE_FEHLT'; throw e; }
+
+  // Standard-Text falls Mitarbeiter nichts eintippt
+  const introText = (customText || '').trim() || tpl?.body || (istNeukunden ? neukundenDefault : recruitingDefault);
 
   // Nur Bilder (keine Videos) für Image-Embed, max. 6 Stück
   const bildCreatives = (creatives || []).filter(c => c.typ !== 'video' && c.bild_url).slice(0, 6);
@@ -1200,10 +1214,25 @@ export async function sendKampagneLiveMail({ to, kunde, job, ansprechpartner, cu
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
   const stelle = job?.stelle || t(k, 'deine offene Stelle', 'Ihre offene Stelle');
-  const tpl = await renderEmail('kampagne_live', k, { stelle, anrede: anrede(k) });
 
-  const introText = (customText || '').trim() || tpl?.body || t(k, `${anrede(k)},
+  // Neukunden-Default (neutral: „Anfragen"/„Zielgruppe" statt „Bewerber").
+  const neukundenDefault = t(k, `${anrede(k)},
+
+gute Neuigkeiten — deine Kampagne für ${stelle} ist ab jetzt online! 🚀
+
+Ab sofort erreichen wir deine Zielgruppe mit deinen Anzeigen. Die ersten Anfragen können in den nächsten Tagen eintreffen — du wirst pro Anfrage automatisch per Mail benachrichtigt.
+
+Du kannst alle eingehenden Anfragen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`, `${anrede(k)},
+
+gute Neuigkeiten — Ihre Kampagne für ${stelle} ist ab jetzt online! 🚀
+
+Ab sofort erreichen wir Ihre Zielgruppe mit Ihren Anzeigen. Die ersten Anfragen können in den nächsten Tagen eintreffen — Sie werden pro Anfrage automatisch per Mail benachrichtigt.
+
+Sie können alle eingehenden Anfragen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`);
+
+  const recruitingDefault = t(k, `${anrede(k)},
 
 gute Neuigkeiten — deine Recruiting-Kampagne für ${stelle} ist ab jetzt online! 🚀
 
@@ -1217,14 +1246,20 @@ Ab sofort erreichen wir potenzielle Bewerber mit Ihren Anzeigen. Die ersten Bewe
 
 Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen, ihren Status pflegen und Notizen ergänzen.`);
 
+  const { tpl, block } = await renderProjekttypMail('kampagne_live', k, { stelle, anrede: anrede(k) }, { istNeukunden, neukundenDefaultBody: neukundenDefault });
+  if (block) { const e = new Error('Neukunden-Vorlage fehlt: kampagne_live_neukunden'); e.code = 'NEUKUNDEN_VORLAGE_FEHLT'; throw e; }
+
+  const introText = (customText || '').trim() || tpl?.body || (istNeukunden ? neukundenDefault : recruitingDefault);
+
   const introHtml = introText
     .split(/\n\s*\n/)
     .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
     .join('');
 
+  const listLabel = istNeukunden ? '📋 Zu den Anfragen' : '📋 Zur Bewerberliste';
   const bewerbungenButton = bewerbungenUrl ? `
     <tr><td align="center" style="padding:18px 32px 8px;">
-      <a href="${escape(bewerbungenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">📋 Zur Bewerberliste</a>
+      <a href="${escape(bewerbungenUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">${listLabel}</a>
       <p style="font-size:11px;color:#9a9994;margin:10px 0 0;">Der Link ist persönlich und für ${escape(kunde?.firmenname || t(k, 'euch', 'Sie'))} gültig.</p>
     </td></tr>` : '';
 
@@ -1240,7 +1275,7 @@ Sie können alle eingehenden Bewerbungen jederzeit unter dem Link unten einsehen
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `${introText}\n\n${bewerbungenUrl ? `Zur Bewerberliste: ${bewerbungenUrl}\n\n` : ''}Viel Erfolg!\nEuer ${brand.name}-Team`;
+  const text = `${introText}\n\n${bewerbungenUrl ? `${istNeukunden ? 'Zu den Anfragen' : 'Zur Bewerberliste'}: ${bewerbungenUrl}\n\n` : ''}Viel Erfolg!\nEuer ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',
@@ -1372,17 +1407,22 @@ export async function sendTeamAlertMail({ subject, headline, lead, linkUrl, link
    Kurze Du-Form-Nachfrage wenn der Kunde noch nicht auf die Entwuerfe
    reagiert hat. Enthaelt den Review-Link. Absender + BCC + Reply-To wie
    bei den anderen Kunden-Mails. */
-export async function sendEntwurfReminder({ to, kunde, ansprechpartner, reviewUrl, customText, agentur }) {
+export async function sendEntwurfReminder({ to, kunde, job, ansprechpartner, reviewUrl, customText, agentur }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agentur);
   const k = kunde || { ansprechpartner };
   const gruss = anrede(k);
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
 
-  const tpl = await renderEmail('entwurf_reminder', k, {});
-  const defaultText = t(k,
+  const recruitingDefault = t(k,
     `vor ein paar Tagen haben wir dir die Entwürfe für deine Recruiting-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`,
     `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Recruiting-Kampagne geschickt. Hatten Sie schon Gelegenheit reinzuschauen?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback:`);
-  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || defaultText);
+  const neukundenDefault = t(k,
+    `vor ein paar Tagen haben wir dir die Entwürfe für deine Neukunden-Kampagne geschickt. Hast du schon reinschauen können?\n\nDamit wir zeitnah live gehen können, brauchen wir noch dein Feedback:`,
+    `vor ein paar Tagen haben wir Ihnen die Entwürfe für Ihre Neukunden-Kampagne geschickt. Hatten Sie schon Gelegenheit reinzuschauen?\n\nDamit wir zeitnah live gehen können, brauchen wir noch Ihr Feedback:`);
+  const { tpl, block } = await renderProjekttypMail('entwurf_reminder', k, {}, { istNeukunden, neukundenDefaultBody: neukundenDefault });
+  if (block) { const e = new Error('Neukunden-Vorlage fehlt: entwurf_reminder_neukunden'); e.code = 'NEUKUNDEN_VORLAGE_FEHLT'; throw e; }
+  const intro = stripLeadingGreeting((customText || '').trim() || tpl?.body || (istNeukunden ? neukundenDefault : recruitingDefault));
 
   const content = `
     <tr><td style="padding:28px 32px 8px;">
@@ -1540,18 +1580,21 @@ export async function sendPortalEinladung({ to, kunde, name, portalUrl, setupUrl
   return await response.json();
 }
 
-export async function sendKampagnePauseMail({ to, kunde, ansprechpartner, customText }) {
+export async function sendKampagnePauseMail({ to, kunde, job, ansprechpartner, customText }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(kunde?.agentur);
   const recipients = Array.isArray(to) ? to : [to];
   const k = kunde || { ansprechpartner };
+  const istNeukunden = job?.projekttyp === 'neukundengewinnung';
 
-  const tpl = await renderEmail('kampagne_pause', k, { anrede: anrede(k) });
-  const introText = customText && customText.trim()
-    ? customText.trim()
-    : (tpl?.body || t(k,
-        `${anrede(k)},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`,
-        `${anrede(k)},\n\nwir müssen Sie kurz informieren: Ihre Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — Ihnen entsteht kein Nachteil.`));
+  // Pause-Text ist bereits neutral („Kampagne"), für beide Projekttypen identisch —
+  // die Weiche hält nur die Vorlagen-Trennung + Fallback-Sicherheit konsistent.
+  const defaultBody = t(k,
+    `${anrede(k)},\n\nwir müssen dich kurz informieren: Deine Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — dir entsteht kein Nachteil.`,
+    `${anrede(k)},\n\nwir müssen Sie kurz informieren: Ihre Kampagne ist aktuell aufgrund technischer Probleme pausiert. Wir arbeiten bereits an der Lösung und melden uns, sobald sie wieder live ist.\n\nDie Pausenzeit wird selbstverständlich hinten angehängt — Ihnen entsteht kein Nachteil.`);
+  const { tpl, block } = await renderProjekttypMail('kampagne_pause', k, { anrede: anrede(k) }, { istNeukunden, neukundenDefaultBody: defaultBody });
+  if (block) { const e = new Error('Neukunden-Vorlage fehlt: kampagne_pause_neukunden'); e.code = 'NEUKUNDEN_VORLAGE_FEHLT'; throw e; }
+  const introText = customText && customText.trim() ? customText.trim() : (tpl?.body || defaultBody);
 
   const introHtml = introText
     .split(/\n\s*\n/)

@@ -7,7 +7,7 @@ import {
 } from '../exports.js';
 import { sendReaktivierungsMail, sendKampagneLiveMail, sendKampagnePauseMail, sendEntwurfReminder, sendTerminEinladung } from '../mail.js';
 import { TERMINE, getTerminMeta } from '../termine.js';
-import { renderEmail } from '../email-templates.js';
+import { renderEmail, renderProjekttypMail } from '../email-templates.js';
 import { logReaktivierung, notifyKunde } from '../close.js';
 import { getPublicBaseUrl, getBranding } from '../branding.js';
 import { normalizeResendMode, resolveVersandVariante } from '../versand-variante.js';
@@ -470,14 +470,21 @@ router.post('/jobs/:id/export/kampagne-update', async (req, res) => {
         .eq('id', latestReview.id);
     }
 
-    const tplUpd = await renderEmail('kampagne_update', kunde, { runde: neueRundeNr, stelle: job?.stelle || '' });
+    // Projekttyp-Weiche: Neukunden → kampagne_update_neukunden (Text bereits neutral,
+    // „Werbeanzeigen/Kampagne"). Fehlt die Neukunden-Variante komplett → abbrechen,
+    // statt die Recruiting-Vorlage zu senden.
+    const istNeukundenUpd = job?.projekttyp === 'neukundengewinnung';
+    const updNeukundenBody = t(kunde,
+      'wir haben neue Werbeanzeigen für deine Kampagne erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei, damit wir sie live schalten können:',
+      'wir haben neue Werbeanzeigen für Ihre Kampagne erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei, damit wir sie live schalten können:');
+    const { tpl: tplUpd, block: blockUpd } = await renderProjekttypMail('kampagne_update', kunde,
+      { runde: neueRundeNr, stelle: job?.stelle || '' }, { istNeukunden: istNeukundenUpd, neukundenDefaultBody: updNeukundenBody });
+    if (blockUpd) return res.status(409).json({ error: 'Neukunden-Vorlage fehlt: kampagne_update_neukunden — Versand abgebrochen.' });
     const standardBetreff = tplUpd?.subject || t(kunde,
       `Neue Werbeanzeigen für deine Kampagne — Update ${neueRundeNr} 📬`,
       `Neue Werbeanzeigen für Ihre Kampagne — Update ${neueRundeNr} 📬`);
     const finalBetreff = (betreff || '').trim() || standardBetreff;
-    const introPrefix = tplUpd?.body || t(kunde,
-      'wir haben neue Werbeanzeigen für deine Kampagne erstellt, um die Performance weiter zu verbessern. Schau sie dir an und gib sie frei, damit wir sie live schalten können:',
-      'wir haben neue Werbeanzeigen für Ihre Kampagne erstellt, um die Performance weiter zu verbessern. Sehen Sie sie sich an und geben Sie sie frei, damit wir sie live schalten können:');
+    const introPrefix = tplUpd?.body || updNeukundenBody;
     const finalAnschreiben = `${introPrefix}\n\n${anschreiben || ''}`.trim();
 
     await sendEntwurfsMail({
@@ -636,9 +643,24 @@ router.post('/jobs/:id/export/kampagne-live', async (req, res) => {
     if (!recipient) return res.status(400).json({ error: 'Kunden-E-Mail fehlt.' });
 
     const baseUrl = getPublicBaseUrl(kunde?.agentur);
-    const bewerbungenUrl = job.bewerbungen_token
-      ? `${baseUrl}/bewerbungen/${job.bewerbungen_token}`
-      : null;
+    // Neukundengewinnung → neutrale Anfragen-Liste (/anfragen/:token); Recruiting →
+    // Bewerberliste (/bewerbungen/:token). Token bei Neukunden ggf. anlegen, damit
+    // der Portal-Button in der Live-Mail funktioniert.
+    const istNeukunden = job?.projekttyp === 'neukundengewinnung';
+    let bewerbungenUrl = null;
+    if (istNeukunden) {
+      let anfragenToken = job.anfragen_token;
+      if (!anfragenToken) {
+        const { randomUUID } = await import('node:crypto');
+        anfragenToken = randomUUID();
+        const { error: tokErr } = await supabase.from('talentone_jobs')
+          .update({ anfragen_token: anfragenToken }).eq('id', job.id);
+        if (tokErr) { console.warn('[kampagne-live] anfragen_token-Anlage:', tokErr.message); anfragenToken = null; }
+      }
+      bewerbungenUrl = anfragenToken ? `${baseUrl}/anfragen/${anfragenToken}` : null;
+    } else {
+      bewerbungenUrl = job.bewerbungen_token ? `${baseUrl}/bewerbungen/${job.bewerbungen_token}` : null;
+    }
 
     await sendKampagneLiveMail({
       to: recipient,
@@ -713,6 +735,7 @@ router.post('/jobs/:id/export/kampagne-pause', async (req, res) => {
     await sendKampagnePauseMail({
       to: recipient,
       kunde,
+      job,
       ansprechpartner: kunde?.ansprechpartner,
       customText,
     });
@@ -781,6 +804,7 @@ router.post('/jobs/:id/export/entwurf-reminder', async (req, res) => {
 
     await sendEntwurfReminder({
       kunde,
+      job,
       to: recipient,
       ansprechpartner: kunde?.ansprechpartner,
       reviewUrl, customText,

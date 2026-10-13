@@ -46,6 +46,21 @@ export function renderString(str, kunde, daten = {}, key = 'preview') {
   return replacePlaceholders(str, buildContext(kunde, daten), key);
 }
 
+// Wählt projekttyp-abhängig den richtigen Template-Key und rendert ihn. Für
+// Neukundengewinnungs-Projekte wird AUSSCHLIESSLICH die `<key>_neukunden`-Variante
+// geladen — der Recruiting-Text ist hier nicht erreichbar (kein stiller Fallback
+// auf „Bewerber"-Wortlaut). Rückgabe: { tpl, key, block }.
+//   block=true  → istNeukunden, aber WEDER DB-Vorlage NOCH ein (vom Aufrufer
+//                 übergebener) Neukunden-Code-Default vorhanden. Der Aufrufer MUSS
+//                 dann abbrechen statt die Recruiting-Variante zu senden
+//                 („lieber keine Mail als die falsche").
+export async function renderProjekttypMail(baseKey, kunde, daten = {}, { istNeukunden = false, neukundenDefaultBody = null } = {}) {
+  const key = istNeukunden ? `${baseKey}_neukunden` : baseKey;
+  const tpl = await renderEmail(key, kunde, daten);
+  const hatNeukundenText = !!(tpl?.body) || !!(neukundenDefaultBody && String(neukundenDefaultBody).trim());
+  return { tpl, key, block: !!istNeukunden && !hatNeukundenText };
+}
+
 export async function renderEmail(key, kunde, daten = {}) {
   const agentur = agenturOf(kunde);
   let tpl = null;

@@ -220,6 +220,14 @@ export async function sendBewerbungsMail({ kunde, job, bewerbung, sheetUrl, eing
     console.warn('[bewerbungs-mail] RESEND_API_KEY fehlt — überspringe.');
     return null;
   }
+  // Diese Mail ist recruiting-spezifisch („Neue Bewerbung", Bewerberliste).
+  // Neukundengewinnung läuft über talentone_anfragen → sendAnfrageMail (neutral).
+  // Defensive Absicherung: NIE den Bewerbungs-Wortlaut an einen Neukunden-Job
+  // senden (lieber keine Mail als die falsche).
+  if (job?.projekttyp === 'neukundengewinnung') {
+    console.warn(`[bewerbungs-mail] Neukunden-Job ${job?.id || '?'} — Bewerbungs-Mail übersprungen (Anfragen laufen über sendAnfrageMail).`);
+    return null;
+  }
   // Bei nachträglichem/erneutem Versand transparent das Original-Eingangsdatum
   // zeigen (dezent), damit der Kunde das Timing versteht. Kein Fehler-Hinweis.
   let eingegangenLabel = null;
