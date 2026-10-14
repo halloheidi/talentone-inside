@@ -104,7 +104,9 @@ async function gmailFetch(konto, path, opts = {}) {
   const token = await getAccessToken(konto);
   const res = await fetch(`${GMAIL}${path}`, { ...opts, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
   if (!res.ok) throw new Error(`Gmail ${opts.method || 'GET'} ${path} → ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return res.json();
+  if (res.status === 204) return {};
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : {};
 }
 
 const hdr = (headers, name) => (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
@@ -442,6 +444,11 @@ export async function getThreadVerlauf(konto, threadId) {
     const hh = m.payload?.headers || [];
     return { id: m.id, from: hdr(hh, 'From'), date: hdr(hh, 'Date'), snippet: m.snippet || '' };
   }).slice(-5);
+}
+
+/** Gmail-Entwurf löschen. */
+export async function deleteDraft(konto, draftId) {
+  return gmailFetch(konto, `/drafts/${draftId}`, { method: 'DELETE' });
 }
 
 /** Anhang-Rohdaten (Buffer) für die auth-geschützte Proxy-Route. */
