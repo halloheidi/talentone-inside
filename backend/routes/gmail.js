@@ -11,7 +11,7 @@ import { callClaudeWithRetry } from '../claude.js';
 import {
   buildAuthUrl, exchangeCode, saveKonto, listKonten, deleteKonto, ladeKontoRow,
   listWichtigeMails, getMessageFull, sendReply, createDraftReply, getOAuthConfig,
-  istVerteiler, istBeleg, ruleMatches,
+  istVerteiler, istBeleg, ruleMatches, getCalendarInvite, respondToEvent,
 } from '../gmail.js';
 import { enrichMails, kundeAusKontext } from '../mail-context.js';
 
@@ -63,30 +63,51 @@ router.delete('/konten/:id', ...adminGuard, async (req, res) => {
 });
 
 /* ───── Wichtige Mails (ungelesen INBOX) + Kontext + Relevanz-Filter ───── */
-// Klassen: 'crm' (Prio 1) / 'persoenlich' (Prio 2) sichtbar · 'verteiler' ausgeblendet.
-// Pro-Nutzer-Regeln: block → immer aus; allow → immer an (schlägt die Automatik).
+// Klassen: 'termin' (Prio 0) / 'crm' (Prio 1) / 'persoenlich' (Prio 2) sichtbar ·
+// 'verteiler'/'beleg'/blockiert/einzeln-ausgeblendet → draußen. Kurzer Cache je Nutzer,
+// genug Rohmails (max 40/Konto) werden gescannt, damit nach Filter/Ausblenden immer
+// möglichst viele RELEVANTE Mails übrig bleiben.
+const wichtigeCache = new Map(); // email → {ts,data}
+const WICHTIGE_CACHE_MS = 3 * 60 * 1000;
+function invalidateWichtige(email) { wichtigeCache.delete(email); }
+
 router.get('/wichtige', ...adminGuard, async (req, res) => {
+  const email = req.user.email;
+  const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const cached = wichtigeCache.get(email);
+  if (!refresh && cached && Date.now() - cached.ts < WICHTIGE_CACHE_MS) return res.json(cached.data);
   try {
     const konten = (await listKonten()).filter(k => k.status === 'aktiv');
-    if (!konten.length) return res.json({ konten: 0, mails: [], ausgeblendet: [] });
+    if (!konten.length) { const d = { konten: 0, mails: [], ausgeblendet: [] }; wichtigeCache.set(email, { ts: Date.now(), data: d }); return res.json(d); }
+    const kontoRows = {};
     let mails = [];
     for (const kMeta of konten) {
-      const konto = await ladeKontoRow(kMeta.id);
-      try { mails.push(...await listWichtigeMails(konto, { max: 25 })); }
+      const konto = await ladeKontoRow(kMeta.id); kontoRows[konto.email] = konto;
+      try { mails.push(...await listWichtigeMails(konto, { max: 40 })); }
       catch (e) { console.warn('[gmail/wichtige]', kMeta.email, e.message); }
     }
     mails = await enrichMails(mails);
-    const { data: regeln = [] } = await supabase.from('talentone_gmail_absender_regeln')
-      .select('muster, regel').eq('nutzer', req.user.email);
+    const [{ data: regeln = [] }, { data: hidden = [] }] = await Promise.all([
+      supabase.from('talentone_gmail_absender_regeln').select('muster, regel').eq('nutzer', email),
+      supabase.from('talentone_gmail_ausgeblendet').select('message_id').eq('nutzer', email),
+    ]);
+    const hiddenSet = new Set((hidden || []).map(h => h.message_id));
 
     const sichtbar = [], ausgeblendet = [];
     for (const m of mails) {
+      if (hiddenSet.has(m.id)) continue; // einzeln & dauerhaft ausgeblendet → raus, Platz frei
+      const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, subject: m.subject, date: m.date, ageTage: m.ageTage, important: m.important, link: m.link, kontext: m.kontext };
       const blockR = regeln.find(r => r.regel === 'block' && ruleMatches(r.muster, m.fromEmail));
       const allowR = regeln.find(r => r.regel === 'allow' && ruleMatches(r.muster, m.fromEmail));
-      const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, subject: m.subject, date: m.date, ageTage: m.ageTage, important: m.important, link: m.link, kontext: m.kontext };
       if (blockR) { ausgeblendet.push({ ...basis, grund: 'Blockliste' }); continue; }
+      // Termineinladung — NICHT als Beleg/Verteiler filtern, eigener Typ mit RSVP.
+      if (m.terminKandidat) {
+        let inv = null;
+        try { inv = await getCalendarInvite(kontoRows[m.konto_email], m.id); } catch (e) { /* ics evtl. nicht lesbar */ }
+        sichtbar.push({ ...basis, prio: 0, klasse: 'termin', termin: inv ? { titel: inv.titel, start: inv.start, organizer: inv.organizer, iCalUID: inv.iCalUID, method: inv.method } : { titel: m.subject, start: null, organizer: m.from, iCalUID: null } });
+        continue;
+      }
       if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; } // CRM bleibt unangetastet
-      // Verteiler/Automatik ODER Beleg/Transaktion (nur ohne CRM-Match) → ausgeblendet.
       const v = istVerteiler(m);
       const cls = v.bulk ? v : istBeleg(m);
       if (cls.bulk && !allowR) { ausgeblendet.push({ ...basis, grund: cls.grund }); continue; }
@@ -94,8 +115,46 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
     }
     sichtbar.sort((a, b) => (a.prio - b.prio) || ((Date.parse(b.date) || 0) - (Date.parse(a.date) || 0)));
     ausgeblendet.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-    res.json({ konten: konten.length, mails: sichtbar, ausgeblendet });
+    const data = { konten: konten.length, mails: sichtbar, ausgeblendet };
+    wichtigeCache.set(email, { ts: Date.now(), data });
+    res.json(data);
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+/* ───── Einzelne Mail dauerhaft ausblenden (pro Nutzer+message_id) ───── */
+router.post('/ausblenden', ...adminGuard, async (req, res) => {
+  const message_id = String(req.body?.message_id || '').trim();
+  if (!message_id) return res.status(400).json({ error: 'message_id fehlt.' });
+  const { error } = await supabase.from('talentone_gmail_ausgeblendet')
+    .upsert({ nutzer: req.user.email, message_id }, { onConflict: 'nutzer,message_id' });
+  if (error) return res.status(500).json({ error: error.message });
+  invalidateWichtige(req.user.email);
+  res.json({ ok: true });
+});
+router.delete('/ausblenden/:message_id', ...adminGuard, async (req, res) => {
+  await supabase.from('talentone_gmail_ausgeblendet').delete().eq('nutzer', req.user.email).eq('message_id', req.params.message_id);
+  invalidateWichtige(req.user.email);
+  res.json({ ok: true });
+});
+
+/* ───── Termin-RSVP (Annehmen/Vielleicht/Ablehnen) ───── */
+router.post('/termin/antwort', ...adminGuard, async (req, res) => {
+  const { kontoId, messageId, status } = req.body || {};
+  const map = { annehmen: 'accepted', vielleicht: 'tentative', ablehnen: 'declined', accepted: 'accepted', tentative: 'tentative', declined: 'declined' };
+  const responseStatus = map[status];
+  if (!kontoId || !messageId || !responseStatus) return res.status(400).json({ error: 'kontoId/messageId/status fehlt oder ungültig.' });
+  try {
+    const konto = await ladeKontoRow(kontoId);
+    if (!konto) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+    const inv = await getCalendarInvite(konto, messageId);
+    if (!inv?.iCalUID) return res.status(422).json({ error: 'Keine Termin-Kennung (iCalUID) in der Mail gefunden.' });
+    const r = await respondToEvent(konto, { iCalUID: inv.iCalUID, responseStatus });
+    invalidateWichtige(req.user.email);
+    res.json({ ok: true, responseStatus: r.responseStatus });
+  } catch (e) {
+    const scopeFehlt = e.status === 403 || /insufficient|scope|permission/i.test(e.message || '');
+    res.status(502).json({ error: scopeFehlt ? 'Kalender-Zugriff fehlt — Konto unter /admin/gmail neu verbinden (Scope calendar.events).' : e.message });
+  }
 });
 
 /* ───── Absender-Regeln (block/allow) pro Nutzer ───── */

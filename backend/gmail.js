@@ -16,6 +16,7 @@ export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/calendar.events', // RSVP auf Termineinladungen
   'openid', 'email',
 ].join(' ');
 
@@ -112,8 +113,20 @@ const emailAus = (from) => { const m = String(from).match(/<([^>]+)>/); return (
 // Header, die für die Relevanz-Klassifizierung gebraucht werden.
 const KLASS_HEADERS = ['From', 'Subject', 'Date', 'To', 'List-Unsubscribe', 'List-Id', 'Precedence', 'Auto-Submitted', 'Reply-To'];
 
+// Rekursiv prüfen, ob die MIME-Struktur einen Kalender-Anhang enthält (text/calendar
+// oder .ics) — verfügbar auch in format=metadata (Part-Struktur ohne Body).
+function hatKalenderPart(payload) {
+  if (!payload) return false;
+  const mt = (payload.mimeType || '').toLowerCase();
+  const fn = (payload.filename || '').toLowerCase();
+  if (mt === 'text/calendar' || mt === 'application/ics' || fn.endsWith('.ics')) return true;
+  return (payload.parts || []).some(hatKalenderPart);
+}
+const EINLADUNG_RE = /^\s*(einladung|invitation|updated invitation|aktualisierte einladung|canceled event|abgesagt)\s*:/i;
+const KALENDER_ABSENDER_RE = /(calendar-notification@google\.com|@calendar\.google\.com|@resource\.calendar\.google\.com)/i;
+
 /** Ungelesene INBOX-Mails eines Kontos (Metadaten inkl. Klassifizierungs-Header + labelIds). */
-export async function listWichtigeMails(konto, { max = 25 } = {}) {
+export async function listWichtigeMails(konto, { max = 40 } = {}) {
   const list = await gmailFetch(konto, `/messages?q=${encodeURIComponent('is:unread in:inbox')}&maxResults=${max}`);
   const ids = (list.messages || []).map(m => m.id);
   const out = [];
@@ -132,6 +145,7 @@ export async function listWichtigeMails(konto, { max = 25 } = {}) {
         date: dateStr, ageTage: Math.max(0, Math.floor((Date.now() - ts) / 86400000)),
         important: (msg.labelIds || []).includes('IMPORTANT'),
         labelIds: msg.labelIds || [], headers: map, snippet: msg.snippet || '',
+        terminKandidat: hatKalenderPart(msg.payload) || EINLADUNG_RE.test(hdr(hdrs, 'Subject') || '') || KALENDER_ABSENDER_RE.test(from),
         link: `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`,
       });
     } catch (e) { /* einzelne Mail-Fehler überspringen */ }
@@ -259,6 +273,79 @@ export async function sendReply(konto, { threadId, toEmail, subject, bodyText, i
 export async function createDraftReply(konto, { threadId, toEmail, subject, bodyText, inReplyTo, references }) {
   const raw = buildRaw({ fromEmail: konto.email, toEmail, subject, bodyText, inReplyTo, references });
   return gmailFetch(konto, '/drafts', { method: 'POST', body: JSON.stringify({ message: { raw, threadId } }) });
+}
+
+/* ═══════════════════ Termineinladungen (iCal) + Calendar-RSVP ═══════════════════ */
+const CAL = 'https://www.googleapis.com/calendar/v3';
+const b64dec = (d) => d ? Buffer.from(d.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8') : '';
+
+function findCalendarPart(payload) {
+  if (!payload) return null;
+  const mt = (payload.mimeType || '').toLowerCase();
+  if ((mt === 'text/calendar' || mt === 'application/ics' || (payload.filename || '').toLowerCase().endsWith('.ics')) && payload.body?.data) return payload.body.data;
+  for (const p of payload.parts || []) { const f = findCalendarPart(p); if (f) return f; }
+  return null;
+}
+
+function formatICalDate(raw, params) {
+  if (!raw) return null;
+  try {
+    if (/VALUE=DATE/i.test(params || '') || /^\d{8}$/.test(raw)) {
+      const d = new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T00:00:00`);
+      return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    }
+    const m = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+    if (!m) return raw;
+    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ? 'Z' : ''}`;
+    const d = new Date(iso);
+    return d.toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+  } catch { return raw; }
+}
+
+/** Lädt die .ics einer Mail und extrahiert Termin-Eckdaten. @returns null | {iCalUID,titel,start,organizer,method} */
+export async function getCalendarInvite(konto, messageId) {
+  const msg = await gmailFetch(konto, `/messages/${messageId}?format=full`);
+  const data = findCalendarPart(msg.payload);
+  if (!data) return null;
+  const text = b64dec(data);
+  // Zeilen entfalten (Fortsetzungszeilen beginnen mit Space/Tab).
+  const lines = text.replace(/\r\n[ \t]/g, '').split(/\r?\n/);
+  let method = null, inEvent = false, uid = null, summary = null, dtRaw = null, dtParams = '', organizer = null;
+  for (const line of lines) {
+    const ci = line.indexOf(':'); if (ci < 0) continue;
+    const left = line.slice(0, ci); const val = line.slice(ci + 1);
+    const name = left.split(';')[0].toUpperCase();
+    if (name === 'METHOD') method = val.trim().toUpperCase();
+    else if (name === 'BEGIN' && val.trim().toUpperCase() === 'VEVENT') inEvent = true;
+    else if (inEvent && name === 'UID' && !uid) uid = val.trim();
+    else if (inEvent && name === 'SUMMARY' && !summary) summary = val.replace(/\\,/g, ',').replace(/\\n/gi, ' ').trim();
+    else if (inEvent && name === 'DTSTART' && !dtRaw) { dtRaw = val.trim(); dtParams = left; }
+    else if (inEvent && name === 'ORGANIZER' && !organizer) {
+      const cn = left.match(/CN=([^;:]+)/i); organizer = cn ? cn[1].replace(/"/g, '') : (val.match(/mailto:(.+)/i)?.[1] || null);
+    }
+  }
+  return { iCalUID: uid, titel: summary || '(Termin)', start: formatICalDate(dtRaw, dtParams), organizer, method };
+}
+
+async function calFetch(konto, path, opts = {}) {
+  const token = await getAccessToken(konto);
+  const res = await fetch(`${CAL}${path}`, { ...opts, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
+  if (!res.ok) { const b = await res.text(); const e = new Error(`Calendar ${opts.method || 'GET'} ${path} → ${res.status}: ${b.slice(0, 200)}`); e.status = res.status; throw e; }
+  return res.json();
+}
+
+/** Setzt den eigenen responseStatus (accepted|tentative|declined) für den Termin mit iCalUID. */
+export async function respondToEvent(konto, { iCalUID, responseStatus }) {
+  if (!iCalUID) throw new Error('Keine iCalUID — Termin nicht eindeutig.');
+  const found = await calFetch(konto, `/calendars/primary/events?iCalUID=${encodeURIComponent(iCalUID)}&maxResults=1`);
+  const ev = (found.items || [])[0];
+  if (!ev) throw new Error('Termin nicht im Kalender des Kontos gefunden.');
+  const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+  let self = attendees.find(a => a.self) || attendees.find(a => (a.email || '').toLowerCase() === konto.email.toLowerCase());
+  if (!self) { self = { email: konto.email, self: true }; attendees.push(self); }
+  self.responseStatus = responseStatus;
+  await calFetch(konto, `/calendars/primary/events/${encodeURIComponent(ev.id)}?sendUpdates=none`, { method: 'PATCH', body: JSON.stringify({ attendees }) });
+  return { ok: true, eventId: ev.id, responseStatus };
 }
 
 export { ladeKontoRow };

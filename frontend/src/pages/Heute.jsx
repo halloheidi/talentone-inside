@@ -103,8 +103,8 @@ export default function Heute() {
     finally { setLoading(false); setRefreshing(false); }
   }, [applyData]);
 
-  const loadMails = useCallback(() => {
-    api('/gmail/wichtige').then(setMailsData).catch(e => setMailsData({ error: e.message, mails: [], konten: 0 }));
+  const loadMails = useCallback((refresh = false) => {
+    api(`/gmail/wichtige${refresh ? '?refresh=1' : ''}`).then(setMailsData).catch(e => setMailsData({ error: e.message, mails: [], konten: 0 }));
   }, []);
 
   useEffect(() => {
@@ -279,7 +279,7 @@ export default function Heute() {
             </button>
           ))}
           {data?.cached && <span style={{ fontSize: 11, color: '#9a9994' }}>{data.cache_alter_sekunden}s</span>}
-          <button className="heute-chip" disabled={refreshing} onClick={() => load(true)}>{refreshing ? '…' : '↻'}</button>
+          <button className="heute-chip" disabled={refreshing} onClick={() => { load(true); loadMails(true); }}>{refreshing ? '…' : '↻'}</button>
           <div style={{ position: 'relative' }}>
             <button className="heute-chip" onClick={() => setSettingsOpen(o => !o)}>⚙︎</button>
             {settingsOpen && (
@@ -382,9 +382,14 @@ function MailsBody({ data, onReload }) {
   if (!data.konten) return <div className="heute-empty">Kein Gmail-Konto verbunden — <Link to="/admin/gmail">unter /admin verbinden</Link>.</div>;
   const mails = data.mails || [];
   const ausgeblendet = data.ausgeblendet || [];
+  const reload = () => onReload?.(true);
 
   async function setRegel(muster, regel) {
-    try { await api('/gmail/regeln', { method: 'POST', body: { muster, regel } }); onReload?.(); }
+    try { await api('/gmail/regeln', { method: 'POST', body: { muster, regel } }); reload(); }
+    catch (e) { alert(e.message); }
+  }
+  async function hideMail(message_id) {
+    try { await api('/gmail/ausblenden', { method: 'POST', body: { message_id } }); reload(); }
     catch (e) { alert(e.message); }
   }
 
@@ -394,8 +399,9 @@ function MailsBody({ data, onReload }) {
       {mails.length === 0
         ? <div className="heute-empty">Keine beantwortbaren Mails. 🎉</div>
         : mails.map(m => {
+            if (m.klasse === 'termin') return <TerminRow key={`${m.konto_email}:${m.id}`} mail={m} onHide={() => hideMail(m.id)} onReload={reload} />;
             const auto = m.klasse === 'crm' && autoLeft-- > 0;
-            return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} onBlock={() => setRegel(m.fromEmail, 'block')} />;
+            return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} onBlock={() => setRegel(m.fromEmail, 'block')} onHide={() => hideMail(m.id)} />;
           })}
 
       {ausgeblendet.length > 0 && (
@@ -424,7 +430,7 @@ function KontextChip({ kontext, klasse }) {
   return <span style={{ fontSize: 11, color: '#9a9994' }}>✉︎ persönlich</span>;
 }
 
-function MailRow({ mail, auto, onBlock }) {
+function MailRow({ mail, auto, onBlock, onHide }) {
   const [vorschlag, setVorschlag] = useState('');
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -485,6 +491,7 @@ function MailRow({ mail, auto, onBlock }) {
           : !open ? <>
               <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={request}>✏︎ Antwort vorschlagen</button>
               {onBlock && <button className="heute-row-x" title="Absender nie anzeigen" style={{ fontSize: 11 }} onClick={onBlock}>🔇</button>}
+              {onHide && <button className="heute-row-x" title="Diese Mail ausblenden" onClick={onHide}>✕</button>}
             </>
           : null}
       </div>
@@ -513,6 +520,46 @@ function MailRow({ mail, auto, onBlock }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TerminRow({ mail, onHide, onReload }) {
+  const [busy, setBusy] = useState(false);
+  const [badge, setBadge] = useState(null);
+  const [err, setErr] = useState(null);
+  const t = mail.termin || {};
+  const BADGES = { annehmen: '✓ Zugesagt', vielleicht: '~ Vielleicht', ablehnen: '✗ Abgesagt' };
+  async function respond(status) {
+    setBusy(true); setErr(null);
+    try {
+      await api('/gmail/termin/antwort', { method: 'POST', body: { kontoId: mail.konto_email, messageId: mail.id, status } });
+      setBadge(BADGES[status]);
+      // RSVP erledigt → Mail ausblenden, verschwindet beim nächsten Refresh.
+      try { await api('/gmail/ausblenden', { method: 'POST', body: { message_id: mail.id } }); } catch { /* egal */ }
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ padding: '6px 6px', borderBottom: '1px solid #f4f4f2', background: '#fbfbff' }}>
+      <div className="heute-row" style={{ padding: 0 }}>
+        <span aria-hidden>📅</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <a href={mail.link} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{t.titel || mail.subject}</a>
+          {t.start && <span style={{ color: '#1d4ed8' }}> · {t.start}</span>}
+          {t.organizer && <span style={{ color: '#9a9994' }}> · {String(t.organizer).replace(/<[^>]+>/, '').trim()}</span>}
+        </span>
+        {onHide && <button className="heute-row-x" title="Diese Mail ausblenden" onClick={onHide}>✕</button>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+        {badge ? <span style={{ fontSize: 12, color: '#027a48', fontWeight: 600 }}>{badge} <span style={{ color: '#9a9994', fontWeight: 400 }}>— verschwindet beim nächsten Refresh</span></span>
+          : t.iCalUID ? <>
+              <button className="heute-chip" style={{ background: '#027a48', color: '#fff' }} disabled={busy} onClick={() => respond('annehmen')}>Annehmen</button>
+              <button className="heute-chip" style={{ background: '#b54708', color: '#fff' }} disabled={busy} onClick={() => respond('vielleicht')}>Vielleicht</button>
+              <button className="heute-chip" style={{ background: '#b42318', color: '#fff' }} disabled={busy} onClick={() => respond('ablehnen')}>Ablehnen</button>
+            </>
+          : <span style={{ fontSize: 11, color: '#9a9994' }}>Einladung erkannt (keine RSVP-Kennung)</span>}
+      </div>
+      {err && <div style={{ fontSize: 11, color: '#b42318', marginTop: 3 }}>{err}</div>}
     </div>
   );
 }
