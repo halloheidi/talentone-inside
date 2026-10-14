@@ -6,13 +6,13 @@ import { Router } from 'express';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { requireAuth, requireAdmin } from '../auth.js';
-import { anrede, anredeForm } from '../anrede.js';
+import { anrede, anredeForm, erkenneAnredeAusText } from '../anrede.js';
 import { callClaudeWithRetry } from '../claude.js';
 import {
   buildAuthUrl, exchangeCode, saveKonto, listKonten, deleteKonto, ladeKontoRow,
   listWichtigeMails, getMessageFull, sendReply, createDraftReply, getOAuthConfig,
   istVerteiler, istBeleg, ruleMatches, getCalendarInvite, respondToEvent,
-  maschinellerAbsender, threadUnbeantwortet, getMessageDetail, getAttachment,
+  maschinellerAbsender, threadUnbeantwortet, getMessageDetail, getAttachment, getThreadVerlauf,
 } from '../gmail.js';
 import { enrichMails, kundeAusKontext } from '../mail-context.js';
 
@@ -220,10 +220,23 @@ router.post('/vorschlag', ...adminGuard, async (req, res) => {
     const [withCtx] = await enrichMails([{ fromEmail: msg.fromEmail }]);
     const ctx = withCtx.kontext;
 
-    // Anrede-Form: EINE Quelle anrede()/anredeForm() aus dem Kunden-Kontext.
+    // Anrede-Form (stärkstes Signal zuerst): Umschalter > Mail-Text > Thread (eigene
+    // Antwort) > CRM-anrede_form > Default Sie. Mail schlägt CRM; Akte wird NICHT geändert.
     const kunde = kundeAusKontext(ctx);
-    const gruss = kunde ? anrede(kunde) : (ctx?.typ === 'bewerber' ? `Hallo ${(ctx.name || '').split(' ')[0] || ''}`.trim() : 'Guten Tag');
-    const form = kunde ? anredeForm(kunde) : 'sie';
+    const override = ['du', 'sie'].includes(req.body?.form) ? req.body.form : null;
+    const mailSignal = erkenneAnredeAusText(msg.bodyText);
+    let threadSignal = null;
+    if (!override && !mailSignal) {
+      try {
+        const verlauf = await getThreadVerlauf(konto, msg.threadId);
+        const eigene = [...verlauf].reverse().find(v => (v.from.match(/<([^>]+)>/)?.[1] || v.from || '').toLowerCase().includes(konto.email.toLowerCase()));
+        if (eigene) threadSignal = erkenneAnredeAusText(eigene.snippet);
+      } catch { /* ignore */ }
+    }
+    const crmForm = kunde ? anredeForm(kunde) : null;
+    const form = override || mailSignal || threadSignal || crmForm || 'sie';
+    const anrede_quelle = override ? 'umschalter' : mailSignal ? 'mail' : threadSignal ? 'thread' : crmForm ? 'crm' : 'default';
+    const gruss = baueGruss(form, { fromName: (msg.from || '').replace(/<[^>]+>/, '').replace(/"/g, '').trim(), kunde, ctx });
 
     let ctxText, hinweis = null;
     if (ctx?.typ === 'kunde') {
@@ -249,9 +262,20 @@ Antworte NUR mit dem fertigen Mail-Text (Fließtext, mit der Grußzeile oben).`;
 
     const resp = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 600, messages: [{ role: 'user', content: prompt }] });
     const vorschlag = (resp?.content?.[0]?.text || '').trim();
-    res.json({ vorschlag, anrede_quelle: gruss, kontext: ctx, hinweis });
+    res.json({ vorschlag, form, anrede_quelle, anrede_gruss: gruss, kontext: ctx, hinweis });
   } catch (e) { console.error('[gmail/vorschlag]', e.message); res.status(502).json({ error: e.message }); }
 });
+
+// Grußzeile passend zur ERKANNTEN Form (nicht zur CRM-anrede_form).
+function baueGruss(form, { fromName, kunde, ctx }) {
+  const vorname = (fromName || kunde?.ansprechpartner || ctx?.name || '').trim().split(/\s+/)[0] || '';
+  if (form === 'du') return vorname ? `Hallo ${vorname}` : 'Hallo';
+  // Sie: wenn Titel+Nachname aus CRM bekannt → „Guten Tag Herr/Frau Nachname"
+  const titel = kunde?.anrede_titel === 'frau' ? 'Frau' : kunde?.anrede_titel === 'herr' ? 'Herr' : null;
+  const nach = (kunde?.nachname || '').trim() || (fromName || '').trim().split(/\s+/).slice(1).join(' ');
+  if (titel && nach) return `Guten Tag ${titel} ${nach}`;
+  return (fromName || '').trim() ? `Guten Tag ${fromName.trim()}` : 'Guten Tag';
+}
 
 async function logMail({ konto, msg, typ, result, kontext, von }) {
   try {

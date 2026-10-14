@@ -24,6 +24,8 @@ export default function MailSlideOver({ mail, onClose }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hinweis, setHinweis] = useState(null);
+  const [form, setForm] = useState(null);
+  const [formQuelle, setFormQuelle] = useState(null);
   const [status, setStatus] = useState(null);
   const [countdown, setCountdown] = useState(0);
   const timer = useRef(null);
@@ -37,11 +39,11 @@ export default function MailSlideOver({ mail, onClose }) {
   useEffect(() => { load(false); /* eslint-disable-next-line */ }, [mail.id]);
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
-  async function vorschlagen() {
+  async function vorschlagen(forceForm) {
     setReplyOpen(true); setBusy(true); setHinweis(null);
     try {
-      const r = await api('/gmail/vorschlag', { method: 'POST', body: { kontoId, messageId: mail.id } });
-      setVorschlag(r.vorschlag || ''); setHinweis(r.hinweis || null);
+      const r = await api('/gmail/vorschlag', { method: 'POST', body: { kontoId, messageId: mail.id, ...(forceForm ? { form: forceForm } : {}) } });
+      setVorschlag(r.vorschlag || ''); setHinweis(r.hinweis || null); setForm(r.form || null); setFormQuelle(r.anrede_quelle || null);
     } catch (e) { setHinweis(e.message); } finally { setBusy(false); }
   }
   function startSend() {
@@ -124,10 +126,19 @@ export default function MailSlideOver({ mail, onClose }) {
         <div style={{ borderTop: '1px solid #ececea', padding: 12 }}>
           {status === 'gesendet' ? <div style={{ color: '#027a48', fontSize: 13, fontWeight: 600 }}>✓ Antwort gesendet</div>
             : status === 'draft' ? <div style={{ color: '#1d4ed8', fontSize: 13, fontWeight: 600 }}>✓ Als Gmail-Entwurf abgelegt</div>
-            : !replyOpen ? <button className="btn-primary" onClick={vorschlagen} disabled={!data}>✏︎ Antwort vorschlagen</button>
+            : !replyOpen ? <button className="btn-primary" onClick={() => vorschlagen()} disabled={!data}>✏︎ Antwort vorschlagen</button>
             : (
               <>
                 {hinweis && <div style={{ fontSize: 11, color: '#b54708', marginBottom: 4 }}>Hinweis: {hinweis}</div>}
+                {form && !busy && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, fontSize: 12 }}>
+                    <span style={{ background: form === 'du' ? '#eff6ff' : '#f0fdf4', color: form === 'du' ? '#1d4ed8' : '#027a48', borderRadius: 100, padding: '2px 10px', fontWeight: 600 }}>
+                      Antwort: {form === 'du' ? 'Du' : 'Sie'}
+                    </span>
+                    <span style={{ color: '#9a9994' }}>(erkannt via {formQuelle})</span>
+                    <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={() => vorschlagen(form === 'du' ? 'sie' : 'du')}>↔ in {form === 'du' ? 'Sie' : 'Du'} umstellen</button>
+                  </div>
+                )}
                 {busy && !vorschlag ? <div className="heute-empty">KI formuliert…</div> : (
                   <>
                     <textarea value={vorschlag} onChange={e => setVorschlag(e.target.value)} rows={6} style={{ width: '100%', padding: '8px 10px', border: '1px solid #ececea', borderRadius: 8, fontSize: 13, resize: 'vertical' }} />

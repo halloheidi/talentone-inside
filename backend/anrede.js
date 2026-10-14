@@ -82,6 +82,27 @@ export function stripLeadingGreeting(text) {
   return s.replace(GRUSS_RE, '').replace(/^\s+/, '');
 }
 
+/**
+ * Erkennt regelbasiert, ob ein Mailtext DUZT oder SIEZT. Grußzeile stark gewichtet,
+ * Du-Pronomen klein + Wortgrenze, Sie-Formen großgeschrieben (unterscheidet vom
+ * „sie" = они/sie). @returns 'du' | 'sie' | null (kein klares Signal).
+ */
+export function erkenneAnredeAusText(text) {
+  if (!text) return null;
+  const roh = String(text).slice(0, 2500);
+  const lower = roh.toLowerCase();
+  let du = 0, sie = 0;
+  const ersteZeile = (roh.split(/\r?\n/).find(l => l.trim()) || '').trim().toLowerCase();
+  if (/^(hallo|hi|hey|moin|servus|liebe[rs]?)\b/.test(ersteZeile) && !/sehr geehrte/.test(ersteZeile) && !/^hallo (herr|frau)\b/.test(ersteZeile)) du += 3;
+  if (/^(sehr geehrte|guten (tag|morgen|abend)|hallo (herr|frau))\b/.test(ersteZeile)) sie += 3;
+  du += (lower.match(/\b(du|dich|dir|dein|deine|deinen|deinem|deiner|deines)\b/g) || []).length;
+  sie += (roh.match(/\b(Sie|Ihnen|Ihr|Ihre|Ihren|Ihrem|Ihrer|Ihres)\b/g) || []).length;
+  if (/sehr geehrte/i.test(roh)) sie += 2;
+  if (du > sie) return 'du';
+  if (sie > du) return 'sie';
+  return null;
+}
+
 /** Wählt zwischen zwei Formulierungen: t(kunde, "dein Funnel", "Ihr Funnel"). */
 export function t(kunde, duText, sieText) {
   return anredeForm(kunde) === 'sie' ? sieText : duText;
