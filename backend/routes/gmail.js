@@ -12,6 +12,7 @@ import {
   buildAuthUrl, exchangeCode, saveKonto, listKonten, deleteKonto, ladeKontoRow,
   listWichtigeMails, getMessageFull, sendReply, createDraftReply, getOAuthConfig,
   istVerteiler, istBeleg, ruleMatches, getCalendarInvite, respondToEvent,
+  maschinellerAbsender, threadUnbeantwortet, getMessageDetail, getAttachment,
 } from '../gmail.js';
 import { enrichMails, kundeAusKontext } from '../mail-context.js';
 
@@ -80,13 +81,27 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
     const konten = (await listKonten()).filter(k => k.status === 'aktiv');
     if (!konten.length) { const d = { konten: 0, mails: [], ausgeblendet: [] }; wichtigeCache.set(email, { ts: Date.now(), data: d }); return res.json(d); }
     const kontoRows = {};
-    let mails = [];
+    const byId = new Map();
     for (const kMeta of konten) {
       const konto = await ladeKontoRow(kMeta.id); kontoRows[konto.email] = konto;
-      try { mails.push(...await listWichtigeMails(konto, { max: 40 })); }
-      catch (e) { console.warn('[gmail/wichtige]', kMeta.email, e.message); }
+      try {
+        // Lese-Fenster: ungelesen ODER (gelesen & jünger als 48h) — damit Mails nicht
+        // verschwinden, nur weil sie am Handy angetippt wurden. Unbeantwortet-Check unten.
+        const ung = await listWichtigeMails(konto, { query: 'is:unread in:inbox', max: 40 });
+        const neu = await listWichtigeMails(konto, { query: 'in:inbox newer_than:2d', max: 40 });
+        for (const m of ung) byId.set(`${konto.email}:${m.id}`, m);
+        for (const m of neu) if (!byId.has(`${konto.email}:${m.id}`)) byId.set(`${konto.email}:${m.id}`, m);
+      } catch (e) { console.warn('[gmail/wichtige]', kMeta.email, e.message); }
     }
-    mails = await enrichMails(mails);
+    let mails = [...byId.values()];
+    // Gelesene Mails nur behalten, wenn unbeantwortet (letzte Thread-Nachricht nicht von mir).
+    const geprueft = [];
+    for (const m of mails) {
+      if (m.ungelesen) { geprueft.push(m); continue; }
+      const offen = await threadUnbeantwortet(kontoRows[m.konto_email], m.threadId);
+      if (offen) geprueft.push(m);
+    }
+    mails = await enrichMails(geprueft);
     const [{ data: regeln = [] }, { data: hidden = [] }] = await Promise.all([
       supabase.from('talentone_gmail_absender_regeln').select('muster, regel').eq('nutzer', email),
       supabase.from('talentone_gmail_ausgeblendet').select('message_id').eq('nutzer', email),
@@ -96,7 +111,7 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
     const sichtbar = [], ausgeblendet = [];
     for (const m of mails) {
       if (hiddenSet.has(m.id)) continue; // einzeln & dauerhaft ausgeblendet → raus, Platz frei
-      const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, subject: m.subject, date: m.date, ageTage: m.ageTage, important: m.important, link: m.link, kontext: m.kontext };
+      const basis = { konto_email: m.konto_email, id: m.id, threadId: m.threadId, from: m.from, fromEmail: m.fromEmail, fromName: (m.from || '').replace(/<[^>]+>/, '').replace(/"/g, '').trim() || m.fromEmail, subject: m.subject, snippet: (m.snippet || '').slice(0, 200), date: m.date, ageTage: m.ageTage, ungelesen: m.ungelesen, important: m.important, link: m.link, kontext: m.kontext };
       const blockR = regeln.find(r => r.regel === 'block' && ruleMatches(r.muster, m.fromEmail));
       const allowR = regeln.find(r => r.regel === 'allow' && ruleMatches(r.muster, m.fromEmail));
       if (blockR) { ausgeblendet.push({ ...basis, grund: 'Blockliste' }); continue; }
@@ -117,6 +132,14 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
         // sonst: normal weiterklassifizieren (REPLY/CANCEL/kein Invite)
       }
       if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; } // CRM bleibt unangetastet
+      // GRUNDREGEL: individuell geschriebene Mails echter Personen NIE durch eine
+      // Heuristik filtern (im Zweifel anzeigen). Signal: Gmail-Kategorie PERSONAL ODER
+      // Antwort-Betreff (Re:/AW:/…), aber NICHT automatisiert und KEIN maschineller Absender.
+      const auto = (m.headers['auto-submitted'] || '').toLowerCase();
+      const istAuto = auto && auto !== 'no';
+      const replyPrefix = /^\s*(re|aw|wg|antw|antwort)\s*:/i.test(m.subject || '');
+      const individuell = ((m.labelIds || []).includes('CATEGORY_PERSONAL') || replyPrefix) && !istAuto && !maschinellerAbsender(m.fromEmail);
+      if (individuell) { sichtbar.push({ ...basis, prio: 2, klasse: 'persoenlich', individuell: true }); continue; }
       const v = istVerteiler(m);
       const cls = v.bulk ? v : istBeleg(m);
       if (cls.bulk && !allowR) { ausgeblendet.push({ ...basis, grund: cls.grund }); continue; }
@@ -274,6 +297,35 @@ router.post('/draft', ...adminGuard, async (req, res) => {
     await logMail({ konto, msg, typ: 'draft', result, kontext: withCtx.kontext, von: req.user.email });
     res.json({ ok: true, draft_id: result.id });
   } catch (e) { console.error('[gmail/draft]', e.message); res.status(502).json({ error: e.message }); }
+});
+
+/* ───── Lese-Ansicht: Volltext (sanitized) + Thread + CRM-Kontext ───── */
+router.get('/nachricht', ...adminGuard, async (req, res) => {
+  const { kontoId, messageId } = req.query || {};
+  const bilder = req.query.bilder === '1' || req.query.bilder === 'true';
+  if (!kontoId || !messageId) return res.status(400).json({ error: 'kontoId/messageId fehlt.' });
+  try {
+    const konto = await ladeKontoRow(kontoId);
+    if (!konto) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+    const detail = await getMessageDetail(konto, messageId, { bilder });
+    const [withCtx] = await enrichMails([{ fromEmail: detail.fromEmail }]);
+    res.json({ ...detail, kontext: withCtx.kontext });
+  } catch (e) { console.error('[gmail/nachricht]', e.message); res.status(502).json({ error: e.message }); }
+});
+
+/* ───── Anhang-Download (auth-geschützter Proxy, Muster Bewerber-Anhänge) ───── */
+router.get('/anhang', ...adminGuard, async (req, res) => {
+  const { kontoId, messageId, attachmentId } = req.query || {};
+  const filename = (req.query.filename || 'anhang').toString().replace(/[^\w.\-() ]+/g, '_').slice(0, 120);
+  if (!kontoId || !messageId || !attachmentId) return res.status(400).json({ error: 'Parameter fehlen.' });
+  try {
+    const konto = await ladeKontoRow(kontoId);
+    if (!konto) return res.status(404).json({ error: 'Konto nicht gefunden.' });
+    const buf = await getAttachment(konto, messageId, attachmentId);
+    res.setHeader('Content-Type', (req.query.mimeType || 'application/octet-stream').toString());
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buf);
+  } catch (e) { console.error('[gmail/anhang]', e.message); res.status(502).json({ error: e.message }); }
 });
 
 /* ───── Google-OAuth-Client-Konfig (Admin) — maskiert via /keys-Logik ───── */

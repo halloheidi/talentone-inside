@@ -125,9 +125,9 @@ function hatKalenderPart(payload) {
 const EINLADUNG_RE = /^\s*(einladung|invitation|updated invitation|aktualisierte einladung|canceled event|abgesagt)\s*:/i;
 const KALENDER_ABSENDER_RE = /(calendar-notification@google\.com|@calendar\.google\.com|@resource\.calendar\.google\.com)/i;
 
-/** Ungelesene INBOX-Mails eines Kontos (Metadaten inkl. Klassifizierungs-Header + labelIds). */
-export async function listWichtigeMails(konto, { max = 40 } = {}) {
-  const list = await gmailFetch(konto, `/messages?q=${encodeURIComponent('is:unread in:inbox')}&maxResults=${max}`);
+/** INBOX-Mails eines Kontos (Metadaten inkl. Klassifizierungs-Header + labelIds). */
+export async function listWichtigeMails(konto, { max = 40, query = 'is:unread in:inbox' } = {}) {
+  const list = await gmailFetch(konto, `/messages?q=${encodeURIComponent(query)}&maxResults=${max}`);
   const ids = (list.messages || []).map(m => m.id);
   const out = [];
   const hq = KLASS_HEADERS.map(h => `metadataHeaders=${encodeURIComponent(h)}`).join('&');
@@ -145,6 +145,7 @@ export async function listWichtigeMails(konto, { max = 40 } = {}) {
         date: dateStr, ageTage: Math.max(0, Math.floor((Date.now() - ts) / 86400000)),
         important: (msg.labelIds || []).includes('IMPORTANT'),
         labelIds: msg.labelIds || [], headers: map, snippet: msg.snippet || '',
+        ungelesen: (msg.labelIds || []).includes('UNREAD'),
         terminKandidat: hatKalenderPart(msg.payload) || EINLADUNG_RE.test(hdr(hdrs, 'Subject') || '') || KALENDER_ABSENDER_RE.test(from),
         link: `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`,
       });
@@ -205,6 +206,29 @@ export function istBeleg({ fromEmail = '', subject = '', headers = {}, snippet =
   const geld = /(€|\beur\b|\$|\bchf\b|\bgbp\b)/i.test(snippet) || /\d+[.,]\d{2}\s?(€|eur)/i.test(snippet);
   if (noReply && geld) return { bulk: true, grund };
   return { bulk: false, grund: null };
+}
+
+// Maschineller Absender (Rollen-Local ODER Plattform-/System-Domain) — solche Mails
+// sind NIE „individuell" und dürfen von der Grundregel nicht geschützt werden.
+export function maschinellerAbsender(fromEmail = '') {
+  const local = (fromEmail.split('@')[0] || '').toLowerCase();
+  const domain = (fromEmail.split('@')[1] || '').toLowerCase();
+  if (LOCAL_MUSTER.test(local) || /(no-?reply|newsletter|notification)/i.test(local)) return true;
+  if (SYSTEM_DOMAINS.includes(domain)) return true;
+  if (PLATTFORM_DOMAINS.some(p => domain === p || domain.endsWith('.' + p))) return true;
+  return false;
+}
+
+// Letzte Nachricht im Thread von mir? → beantwortet (dann aus der Kachel raus).
+export async function threadUnbeantwortet(konto, threadId) {
+  try {
+    const t = await gmailFetch(konto, `/threads/${threadId}?format=metadata&metadataHeaders=From`);
+    const msgs = t.messages || [];
+    if (!msgs.length) return true;
+    const last = msgs[msgs.length - 1];
+    const from = emailAus(hdr(last.payload?.headers || [], 'From'));
+    return from !== (konto.email || '').toLowerCase();
+  } catch { return true; } // im Zweifel anzeigen
 }
 
 const ruleMatches = (muster, fromEmail) => {
@@ -352,6 +376,78 @@ export async function respondToEvent(konto, { iCalUID, responseStatus }) {
   self.responseStatus = responseStatus;
   await calFetch(konto, `/calendars/primary/events/${encodeURIComponent(ev.id)}?sendUpdates=none`, { method: 'PATCH', body: JSON.stringify({ attendees }) });
   return { ok: true, eventId: ev.id, responseStatus };
+}
+
+/* ═══════════════════ Lese-Ansicht: Volltext, Sanitizing, Anhänge, Thread ═══════════════════ */
+function extractParts(payload, acc) {
+  if (!payload) return acc;
+  const mt = (payload.mimeType || '').toLowerCase();
+  const fn = payload.filename || '';
+  if (fn && payload.body?.attachmentId) {
+    acc.anhaenge.push({ filename: fn, mimeType: mt, size: payload.body.size || 0, attachmentId: payload.body.attachmentId });
+  } else if (mt === 'text/html' && payload.body?.data && !acc.html) {
+    acc.html = b64dec(payload.body.data);
+  } else if (mt === 'text/plain' && payload.body?.data && !acc.text) {
+    acc.text = b64dec(payload.body.data);
+  }
+  for (const p of payload.parts || []) extractParts(p, acc);
+  return acc;
+}
+
+/**
+ * Konservatives HTML-Sanitizing (ohne Dependency): entfernt Scripts/Styles/iframes/
+ * Event-Handler/javascript:-URLs; externe Bilder werden standardmäßig geblockt
+ * (src → data-blocked-src). Wird zusätzlich im Frontend in einem sandboxed <iframe>
+ * gerendert (kein allow-scripts), also doppelt abgesichert.
+ */
+export function sanitizeMailHtml(html, { bilder = false } = {}) {
+  let s = String(html || '');
+  s = s.replace(/<!--[\s\S]*?-->/g, '');
+  s = s.replace(/<(script|style|iframe|object|embed|noscript|template|head|title)\b[\s\S]*?<\/\1>/gi, '');
+  s = s.replace(/<(link|meta|base)\b[^>]*>/gi, '');
+  s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '').replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '').replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+  s = s.replace(/(href|src|background)\s*=\s*(["']?)\s*javascript:[^"'>\s]*/gi, '$1=$2#');
+  let hatExterneBilder = false;
+  if (!bilder) {
+    s = s.replace(/(<img\b[^>]*?)\ssrc\s*=\s*(["'])(https?:\/\/[^"']+)\2/gi, (_m, pre, q, url) => { hatExterneBilder = true; return `${pre} data-blocked-src=${q}${url}${q}`; });
+    // CSS-Hintergrundbilder entschärfen
+    s = s.replace(/background(-image)?\s*:\s*url\(([^)]*https?:[^)]*)\)/gi, () => { hatExterneBilder = true; return 'background:none'; });
+  }
+  return { html: s, hatExterneBilder };
+}
+
+/** Volltext einer Mail für die Lese-Ansicht. */
+export async function getMessageDetail(konto, id, { bilder = false } = {}) {
+  const msg = await gmailFetch(konto, `/messages/${id}?format=full`);
+  const h = msg.payload?.headers || [];
+  const parts = extractParts(msg.payload, { html: '', text: '', anhaenge: [] });
+  const sani = parts.html ? sanitizeMailHtml(parts.html, { bilder }) : { html: null, hatExterneBilder: false };
+  const thread = await getThreadVerlauf(konto, msg.threadId).catch(() => []);
+  return {
+    id, threadId: msg.threadId,
+    from: hdr(h, 'From'), fromEmail: emailAus(hdr(h, 'From')),
+    subject: hdr(h, 'Subject') || '(kein Betreff)', date: hdr(h, 'Date'),
+    html: sani.html, text: parts.text || null,
+    bilderBlockiert: sani.hatExterneBilder && !bilder,
+    anhaenge: parts.anhaenge.map(a => ({ filename: a.filename, mimeType: a.mimeType, size: a.size, attachmentId: a.attachmentId })),
+    thread,
+  };
+}
+
+/** Letzte 5 Nachrichten des Threads (Verlauf, kompakt). */
+export async function getThreadVerlauf(konto, threadId) {
+  const t = await gmailFetch(konto, `/threads/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=Date`);
+  return (t.messages || []).map(m => {
+    const hh = m.payload?.headers || [];
+    return { id: m.id, from: hdr(hh, 'From'), date: hdr(hh, 'Date'), snippet: m.snippet || '' };
+  }).slice(-5);
+}
+
+/** Anhang-Rohdaten (Buffer) für die auth-geschützte Proxy-Route. */
+export async function getAttachment(konto, messageId, attachmentId) {
+  const att = await gmailFetch(konto, `/messages/${messageId}/attachments/${attachmentId}`);
+  if (!att?.data) throw new Error('Anhang leer.');
+  return Buffer.from(att.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 }
 
 export { ladeKontoRow };

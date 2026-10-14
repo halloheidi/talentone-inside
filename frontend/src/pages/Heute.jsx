@@ -2,7 +2,10 @@ import { useEffect, useState, useCallback, useRef, useLayoutEffect } from 'react
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import PageContainer from '../components/PageContainer.jsx';
+import MailSlideOver from '../components/MailSlideOver.jsx';
 import { getStartView, setStartView } from '../lib/startview.js';
+
+const kontoTag = (email) => (email || '').split('@')[1]?.split('.')[0] || '';
 
 const TILE_DEFS = [
   { id: 'kritisch', title: '🔴 Kritisch' },
@@ -377,6 +380,7 @@ function TodosBody({ todos, showDone, setShowDone, onAdd, onToggle, onDelete }) 
 
 function MailsBody({ data, onReload }) {
   const [showHidden, setShowHidden] = useState(false);
+  const [offen, setOffen] = useState(null); // Mail im Lese-SlideOver
   if (!data) return <div className="heute-empty">Lade Mails…</div>;
   if (data.error) return <div className="heute-empty" style={{ color: '#b42318' }}>{data.error}</div>;
   if (!data.konten) return <div className="heute-empty">Kein Gmail-Konto verbunden — <Link to="/admin/gmail">unter /admin verbinden</Link>.</div>;
@@ -393,15 +397,14 @@ function MailsBody({ data, onReload }) {
     catch (e) { alert(e.message); }
   }
 
-  let autoLeft = 5; // Auto-Vorschlag nur für die Top-5 CRM-Mails (klasse 'crm')
   return (
     <>
+      {offen && <MailSlideOver mail={offen} onClose={() => { setOffen(null); reload(); }} />}
       {mails.length === 0
         ? <div className="heute-empty">Keine beantwortbaren Mails. 🎉</div>
         : mails.map(m => {
-            if (m.klasse === 'termin') return <TerminRow key={`${m.konto_email}:${m.id}`} mail={m} onHide={() => hideMail(m.id)} onReload={reload} />;
-            const auto = m.klasse === 'crm' && autoLeft-- > 0;
-            return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} auto={!!auto} onBlock={() => setRegel(m.fromEmail, 'block')} onHide={() => hideMail(m.id)} />;
+            if (m.klasse === 'termin') return <TerminRow key={`${m.konto_email}:${m.id}`} mail={m} onHide={() => hideMail(m.id)} />;
+            return <MailRow key={`${m.konto_email}:${m.id}`} mail={m} onBlock={() => setRegel(m.fromEmail, 'block')} onHide={() => hideMail(m.id)} onOpen={() => setOffen(m)} />;
           })}
 
       {ausgeblendet.length > 0 && (
@@ -430,96 +433,30 @@ function KontextChip({ kontext, klasse }) {
   return <span style={{ fontSize: 11, color: '#9a9994' }}>✉︎ persönlich</span>;
 }
 
-function MailRow({ mail, auto, onBlock, onHide }) {
-  const [vorschlag, setVorschlag] = useState('');
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [hinweis, setHinweis] = useState(null);
-  const [status, setStatus] = useState(null); // 'gesendet' | 'draft'
-  const [countdown, setCountdown] = useState(0);
-  const timer = useRef(null);
-  const kontoId = mail.konto_email;
-
-  const request = useCallback(async () => {
-    setBusy(true); setOpen(true); setHinweis(null);
-    try {
-      const r = await api('/gmail/vorschlag', { method: 'POST', body: { kontoId, messageId: mail.id } });
-      setVorschlag(r.vorschlag || ''); setHinweis(r.hinweis || null);
-    } catch (e) { setVorschlag(''); setHinweis(e.message); }
-    finally { setBusy(false); }
-  }, [kontoId, mail.id]);
-
-  useEffect(() => { if (auto) request(); }, [auto, request]);
-
-  function startSend() {
-    setCountdown(10);
-    timer.current = setInterval(() => {
-      setCountdown(c => {
-        if (c <= 1) {
-          clearInterval(timer.current); timer.current = null;
-          api('/gmail/senden', { method: 'POST', body: { kontoId, messageId: mail.id, text: vorschlag } })
-            .then(() => { setStatus('gesendet'); setOpen(false); })
-            .catch(e => { setHinweis(e.message); });
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-  }
-  function undo() { if (timer.current) { clearInterval(timer.current); timer.current = null; } setCountdown(0); }
-  async function draft() {
-    setBusy(true);
-    try { await api('/gmail/draft', { method: 'POST', body: { kontoId, messageId: mail.id, text: vorschlag } }); setStatus('draft'); setOpen(false); }
-    catch (e) { setHinweis(e.message); } finally { setBusy(false); }
-  }
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
-
+function MailRow({ mail, onBlock, onHide, onOpen }) {
+  const tag = kontoTag(mail.konto_email);
+  const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
   return (
-    <div style={{ padding: '6px 6px', borderBottom: '1px solid #f4f4f2' }}>
-      <div className="heute-row" style={{ padding: 0 }}>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-          <a href={mail.link} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{mail.subject}</a>
-          <span style={{ color: '#9a9994' }}> — {mail.from?.replace(/<[^>]+>/, '').trim() || mail.fromEmail}</span>
-        </span>
-        <AgeBadge days={mail.ageTage} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 0' }}>
-        <KontextChip kontext={mail.kontext} klasse={mail.klasse} />
-        <span style={{ flex: 1 }} />
-        {status === 'gesendet' ? <span style={{ fontSize: 11, color: '#027a48' }}>✓ gesendet</span>
-          : status === 'draft' ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>✓ als Entwurf abgelegt</span>
-          : !open ? <>
-              <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={request}>✏︎ Antwort vorschlagen</button>
-              {onBlock && <button className="heute-row-x" title="Absender nie anzeigen" style={{ fontSize: 11 }} onClick={onBlock}>🔇</button>}
-              {onHide && <button className="heute-row-x" title="Diese Mail ausblenden" onClick={onHide}>✕</button>}
-            </>
-          : null}
-      </div>
-      {open && status == null && (
-        <div style={{ marginTop: 5 }}>
-          {busy && !vorschlag ? <div className="heute-empty">KI formuliert…</div> : (
-            <>
-              {hinweis && <div style={{ fontSize: 11, color: '#b54708', marginBottom: 3 }}>Hinweis: {hinweis}</div>}
-              <textarea value={vorschlag} onChange={e => setVorschlag(e.target.value)} rows={5}
-                style={{ width: '100%', padding: '7px 9px', border: '1px solid #ececea', borderRadius: 7, fontSize: 12.5, resize: 'vertical' }} />
-              <div style={{ display: 'flex', gap: 6, marginTop: 5, alignItems: 'center' }}>
-                {countdown > 0 ? (
-                  <>
-                    <span style={{ fontSize: 12, color: '#b54708' }}>Senden in {countdown}s…</span>
-                    <button className="heute-chip" style={{ background: '#b42318', color: '#fff' }} onClick={undo}>↩ Rückgängig</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="heute-chip" style={{ background: '#0a0a0a', color: '#fff' }} disabled={busy || !vorschlag.trim()} onClick={startSend}>Senden</button>
-                    <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} disabled={busy || !vorschlag.trim()} onClick={draft}>Als Gmail-Entwurf</button>
-                    <button className="heute-chip" style={{ background: 'none', color: '#999', border: 'none' }} onClick={() => setOpen(false)}>✕</button>
-                  </>
-                )}
-              </div>
-            </>
-          )}
+    <div onClick={onOpen} title="Zum Lesen klicken"
+      style={{ padding: '7px 6px', borderBottom: '1px solid #f4f4f2', cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {mail.ungelesen && <span style={{ color: '#1d4ed8', marginRight: 4 }}>●</span>}
+          <span style={{ fontWeight: 700 }}>{mail.fromName || mail.fromEmail}</span>
+          <span style={{ color: '#9a9994' }}> · {mail.fromEmail}</span>
         </div>
-      )}
+        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mail.subject}</div>
+        {mail.snippet && <div style={{ fontSize: 12, color: '#9a9994', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{mail.snippet}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          <KontextChip kontext={mail.kontext} klasse={mail.klasse} />
+          <span style={{ fontSize: 10, color: '#9a9994', background: '#f0efed', borderRadius: 100, padding: '0 6px' }}>{tag}</span>
+          <AgeBadge days={mail.ageTage} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {onBlock && <button className="heute-row-x" title="Absender nie anzeigen" style={{ fontSize: 11 }} onClick={stop(onBlock)}>🔇</button>}
+        {onHide && <button className="heute-row-x" title="Diese Mail ausblenden" onClick={stop(onHide)}>✕</button>}
+      </div>
     </div>
   );
 }

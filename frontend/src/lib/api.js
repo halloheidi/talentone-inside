@@ -30,6 +30,22 @@ export async function openAnhang(path) {
   }
 }
 
+/**
+ * Lädt eine auth-geschützte Datei (z. B. Gmail-Anhang-Proxy) per Bearer-Token,
+ * als Blob, und stößt den Download an — ein normaler <a href> trägt den JWT nicht.
+ */
+export async function downloadAuthed(path, filename = 'download') {
+  try {
+    const res = await fetch(`${BASE}${path}`, { headers: { ...(await authHeader()) } });
+    if (!res.ok) { alert('Download fehlgeschlagen.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch { alert('Download fehlgeschlagen.'); }
+}
+
 export async function api(path, { method = 'GET', body, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
