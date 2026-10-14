@@ -282,7 +282,7 @@ const b64dec = (d) => d ? Buffer.from(d.replace(/-/g, '+').replace(/_/g, '/'), '
 function findCalendarPart(payload) {
   if (!payload) return null;
   const mt = (payload.mimeType || '').toLowerCase();
-  if ((mt === 'text/calendar' || mt === 'application/ics' || (payload.filename || '').toLowerCase().endsWith('.ics')) && payload.body?.data) return payload.body.data;
+  if ((mt === 'text/calendar' || mt === 'application/ics' || (payload.filename || '').toLowerCase().endsWith('.ics')) && payload.body) return payload;
   for (const p of payload.parts || []) { const f = findCalendarPart(p); if (f) return f; }
   return null;
 }
@@ -305,9 +305,15 @@ function formatICalDate(raw, params) {
 /** Lädt die .ics einer Mail und extrahiert Termin-Eckdaten. @returns null | {iCalUID,titel,start,organizer,method} */
 export async function getCalendarInvite(konto, messageId) {
   const msg = await gmailFetch(konto, `/messages/${messageId}?format=full`);
-  const data = findCalendarPart(msg.payload);
-  if (!data) return null;
-  const text = b64dec(data);
+  const part = findCalendarPart(msg.payload);
+  if (!part) return null;
+  let raw = part.body?.data;
+  if (!raw && part.body?.attachmentId) {
+    // Große .ics liegen als Attachment (nur per attachmentId abrufbar), nicht inline.
+    try { raw = (await gmailFetch(konto, `/messages/${messageId}/attachments/${part.body.attachmentId}`)).data; } catch { /* ignore */ }
+  }
+  if (!raw) return null;
+  const text = b64dec(raw);
   // Zeilen entfalten (Fortsetzungszeilen beginnen mit Space/Tab).
   const lines = text.replace(/\r\n[ \t]/g, '').split(/\r?\n/);
   let method = null, inEvent = false, uid = null, summary = null, dtRaw = null, dtParams = '', organizer = null;

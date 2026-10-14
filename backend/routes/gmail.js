@@ -100,12 +100,21 @@ router.get('/wichtige', ...adminGuard, async (req, res) => {
       const blockR = regeln.find(r => r.regel === 'block' && ruleMatches(r.muster, m.fromEmail));
       const allowR = regeln.find(r => r.regel === 'allow' && ruleMatches(r.muster, m.fromEmail));
       if (blockR) { ausgeblendet.push({ ...basis, grund: 'Blockliste' }); continue; }
-      // Termineinladung — NICHT als Beleg/Verteiler filtern, eigener Typ mit RSVP.
+      // Termineinladung (METHOD:REQUEST) — NICHT als Beleg/Verteiler filtern, eigener Typ
+      // mit RSVP. Antworten/Absagen (REPLY/CANCEL) fallen in die normale Klassifizierung.
       if (m.terminKandidat) {
         let inv = null;
         try { inv = await getCalendarInvite(kontoRows[m.konto_email], m.id); } catch (e) { /* ics evtl. nicht lesbar */ }
-        sichtbar.push({ ...basis, prio: 0, klasse: 'termin', termin: inv ? { titel: inv.titel, start: inv.start, organizer: inv.organizer, iCalUID: inv.iCalUID, method: inv.method } : { titel: m.subject, start: null, organizer: m.from, iCalUID: null } });
-        continue;
+        const einladungBetreff = /^\s*(einladung|invitation|updated invitation|aktualisierte einladung)\s*:/i.test(m.subject || '');
+        if (inv && inv.method === 'REQUEST') {
+          sichtbar.push({ ...basis, prio: 0, klasse: 'termin', termin: { titel: inv.titel, start: inv.start, organizer: inv.organizer, iCalUID: inv.iCalUID, method: inv.method } });
+          continue;
+        }
+        if (!inv && einladungBetreff) { // Einladung ohne lesbare .ics → anzeigen, aber ohne RSVP
+          sichtbar.push({ ...basis, prio: 0, klasse: 'termin', termin: { titel: m.subject, start: null, organizer: m.from, iCalUID: null } });
+          continue;
+        }
+        // sonst: normal weiterklassifizieren (REPLY/CANCEL/kein Invite)
       }
       if (m.kontext) { sichtbar.push({ ...basis, prio: 1, klasse: 'crm' }); continue; } // CRM bleibt unangetastet
       const v = istVerteiler(m);
