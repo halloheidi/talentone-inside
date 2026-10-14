@@ -3,6 +3,7 @@
 // Per-NUTZER-OAuth (nicht Service-Account!). NIEMALS automatischer Versand — nur
 // auf expliziten Klick aus dem Dashboard; jeder Versand wird protokolliert.
 
+import { randomUUID } from 'node:crypto';
 import { supabase } from './supabase.js';
 import { getSecret } from './settings-secrets.js';
 
@@ -456,6 +457,69 @@ export async function getAttachment(konto, messageId, attachmentId) {
   const att = await gmailFetch(konto, `/messages/${messageId}/attachments/${attachmentId}`);
   if (!att?.data) throw new Error('Anhang leer.');
   return Buffer.from(att.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+}
+
+/* ═══════════════════ Scanner-/Weiterleitungs-Helfer (Qonto) ═══════════════════ */
+
+/** Nachrichten-IDs zu einer Query. */
+export async function listMessageIds(konto, query, max = 60) {
+  const r = await gmailFetch(konto, `/messages?q=${encodeURIComponent(query)}&maxResults=${max}`);
+  return (r.messages || []).map(m => m.id);
+}
+
+/** Leichte Scan-Sicht: From/To/Subject/snippet/headers + PDF-Anhänge (filename/attachmentId/size). */
+export async function getMessageForScan(konto, id) {
+  const msg = await gmailFetch(konto, `/messages/${id}?format=full`);
+  const h = msg.payload?.headers || [];
+  const parts = extractParts(msg.payload, { html: '', text: '', anhaenge: [] });
+  const pdfs = parts.anhaenge.filter(a => /\.pdf$/i.test(a.filename) || a.mimeType === 'application/pdf');
+  return {
+    id, threadId: msg.threadId,
+    from: hdr(h, 'From'), fromEmail: emailAus(hdr(h, 'From')),
+    to: hdr(h, 'To'), toDomain: emailAus(hdr(h, 'To')).split('@')[1] || '',
+    subject: hdr(h, 'Subject') || '', snippet: msg.snippet || '',
+    headers: Object.fromEntries(h.map(x => [x.name.toLowerCase(), x.value])),
+    labelIds: msg.labelIds || [], pdfs,
+  };
+}
+
+/** Label-ID sicherstellen (anlegen, falls nicht vorhanden). */
+export async function ensureLabel(konto, name) {
+  const r = await gmailFetch(konto, '/labels');
+  const found = (r.labels || []).find(l => l.name === name);
+  if (found) return found.id;
+  const created = await gmailFetch(konto, '/labels', { method: 'POST', body: JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }) });
+  return created.id;
+}
+
+/** Label an eine Nachricht hängen. */
+export async function addLabel(konto, messageId, labelId) {
+  return gmailFetch(konto, `/messages/${messageId}/modify`, { method: 'POST', body: JSON.stringify({ addLabelIds: [labelId] }) });
+}
+
+/** Rohnachricht (RFC822, base64url) senden. */
+export async function sendRawMail(konto, raw) {
+  return gmailFetch(konto, '/messages/send', { method: 'POST', body: JSON.stringify({ raw }) });
+}
+
+/** Forward-MIME mit PDF-Anhängen bauen (multipart/mixed). attachments: [{filename, contentBase64}]. */
+export function buildForwardRaw({ from, to, subject, text, attachments = [] }) {
+  const boundary = 'b_' + randomUUID().replace(/-/g, '');
+  const betreff = /^(fwd|wg):/i.test(subject || '') ? subject : `Fwd: ${subject || ''}`;
+  const lines = [
+    `From: ${from}`, `To: ${to}`, `Subject: ${betreff}`, 'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`, '',
+    `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit', '', text || '', '',
+  ];
+  for (const a of attachments) {
+    lines.push(`--${boundary}`,
+      `Content-Type: application/pdf; name="${a.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${a.filename}"`, '',
+      (a.contentBase64 || '').replace(/(.{76})/g, '$1\r\n'), '');
+  }
+  lines.push(`--${boundary}--`, '');
+  return b64url(lines.join('\r\n'));
 }
 
 export { ladeKontoRow };

@@ -12,6 +12,8 @@ export const SECRET_KEYS = {
   google_oauth_client_id:   { env: 'GOOGLE_OAUTH_CLIENT_ID',  label: 'Google OAuth Client-ID' },
   google_oauth_client_secret: { env: 'GOOGLE_OAUTH_CLIENT_SECRET', label: 'Google OAuth Client-Secret' },
   google_oauth_redirect:    { env: 'GOOGLE_OAUTH_REDIRECT',   label: 'Google OAuth Redirect-URI' },
+  qonto_inbox_nowagwirth:   { env: 'QONTO_INBOX_NOWAGWIRTH',  label: 'Qonto-Rechnungseingang Nowag & Wirth' },
+  qonto_inbox_halloheidi:   { env: 'QONTO_INBOX_HALLOHEIDI',  label: 'Qonto-Rechnungseingang HalloHeidi' },
 };
 
 const _cache = new Map(); // schluessel → { wert, ts }

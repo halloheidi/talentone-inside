@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { buildHeute } from '../heute.js';
 import { setTaskComplete } from '../close.js';
 import { SECRET_KEYS, setSecret, clearSecret, secretStatus } from '../settings-secrets.js';
+import { qontoUebersicht, zuordnenManuell, runQontoScan, getQontoFlag, setQontoFlag } from '../qonto.js';
 
 const router = Router();
 const CACHE_MS = 5 * 60 * 1000;
@@ -115,6 +116,40 @@ router.post('/close-task/:id/complete', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+/* ───── Qonto-Rechnungsweiterleitung ───── */
+router.get('/qonto', async (req, res) => {
+  try {
+    const ueber = await qontoUebersicht();
+    res.json({ weitergeleitet: ueber.weitergeleitet, manuell: ueber.manuell, aktiv: await getQontoFlag() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/qonto/config', async (req, res) => {
+  res.json({
+    aktiv: await getQontoFlag(),
+    nowagwirth: await secretStatus('qonto_inbox_nowagwirth'),
+    halloheidi: await secretStatus('qonto_inbox_halloheidi'),
+  });
+});
+router.put('/qonto/config', async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (typeof b.nowagwirth === 'string' && b.nowagwirth.trim()) await setSecret('qonto_inbox_nowagwirth', b.nowagwirth.trim(), req.user?.email);
+    if (typeof b.halloheidi === 'string' && b.halloheidi.trim()) await setSecret('qonto_inbox_halloheidi', b.halloheidi.trim(), req.user?.email);
+    if (typeof b.aktiv === 'boolean') await setQontoFlag(b.aktiv, req.user?.email);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/qonto/scan', async (req, res) => {
+  try { res.json(await runQontoScan({ dryRunOverride: req.body?.dry === true ? true : null })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
+});
+router.post('/qonto/zuordnen', async (req, res) => {
+  const { rowId, firma } = req.body || {};
+  if (!rowId || !firma) return res.status(400).json({ error: 'rowId/firma fehlt.' });
+  try { res.json(await zuordnenManuell({ rowId, firma, user: req.user?.email })); }
+  catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 /* ───── Layout-Prefs (Kachel-Reihenfolge + Sichtbarkeit, pro Nutzer) ───── */

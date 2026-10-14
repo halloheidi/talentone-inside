@@ -90,6 +90,7 @@ export default function Heute() {
   const [showDone, setShowDone] = useState(false);
   const [flash, setFlash] = useState(null);
   const [mailsData, setMailsData] = useState(null);
+  const [qontoData, setQontoData] = useState(null);
   const rootRef = useRef(null);
   const tileRefs = useRef({});
   const dragId = useRef(null);
@@ -109,10 +110,14 @@ export default function Heute() {
   const loadMails = useCallback((refresh = false) => {
     api(`/gmail/wichtige${refresh ? '?refresh=1' : ''}`).then(setMailsData).catch(e => setMailsData({ error: e.message, mails: [], konten: 0 }));
   }, []);
+  const loadQonto = useCallback(() => {
+    api('/heute/qonto').then(setQontoData).catch(() => setQontoData(null));
+  }, []);
 
   useEffect(() => {
     load(false);
     loadMails();
+    loadQonto();
     api('/heute/keys').then(r => setKeys(r.keys)).catch(() => {});
     api('/heute/prefs').then(r => {
       const lay = r.layout || {};
@@ -122,7 +127,7 @@ export default function Heute() {
       }
       if (Array.isArray(lay.hidden)) setHidden(lay.hidden.filter(id => DEFAULT_ORDER.includes(id)));
     }).catch(() => {});
-  }, [load, loadMails]);
+  }, [load, loadMails, loadQonto]);
 
   // Feste Höhe (Desktop): Viewport minus Position der Wurzel. Mobile: CSS überschreibt.
   useLayoutEffect(() => {
@@ -204,7 +209,10 @@ export default function Heute() {
     const s = data.sections || {};
     if (id === 'kritisch') {
       const items = [...overdueTodos, ...sichtbar(s.kritisch)];
-      return items.length ? items.map(i => <Row key={i.key} item={i} onHide={i.key.startsWith('todo-') ? null : hideRow} />) : <div className="heute-empty">Nichts brennt. 🎉</div>;
+      return <>
+        <QontoBar data={qontoData} onReload={loadQonto} />
+        {items.length ? items.map(i => <Row key={i.key} item={i} onHide={i.key.startsWith('todo-') ? null : hideRow} />) : <div className="heute-empty">Nichts brennt. 🎉</div>}
+      </>;
     }
     if (id === 'kampagnen' || id === 'bewerber') {
       const all = sichtbar(s[id]); const top = all.slice(0, TOP_N);
@@ -299,6 +307,7 @@ export default function Heute() {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#5a5955', margin: '10px 0 6px' }}>API-Keys</div>
                   {Object.entries(keys).map(([name, st]) => <KeyField key={name} name={name} status={st} onSave={saveKey} onRemove={removeKey} />)}
                 </>}
+                <QontoConfig onChanged={loadQonto} />
               </div>
             )}
           </div>
@@ -497,6 +506,71 @@ function TerminRow({ mail, onHide, onReload }) {
           : <span style={{ fontSize: 11, color: '#9a9994' }}>Einladung erkannt (keine RSVP-Kennung)</span>}
       </div>
       {err && <div style={{ fontSize: 11, color: '#b42318', marginTop: 3 }}>{err}</div>}
+    </div>
+  );
+}
+
+function QontoBar({ data, onReload }) {
+  if (!data) return null;
+  const manuell = data.manuell || [];
+  if (!data.weitergeleitet && !manuell.length) return null;
+  async function zuordnen(rowId, firma) {
+    try { await api('/heute/qonto/zuordnen', { method: 'POST', body: { rowId, firma } }); onReload?.(); }
+    catch (e) { alert(e.message); }
+  }
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 8px', marginBottom: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 600 }}>
+        📄 {data.weitergeleitet} Rechnungen weitergeleitet · {manuell.length} manuell zu prüfen {!data.aktiv && <span style={{ color: '#b54708', fontWeight: 400 }}>(Dry-Run — Weiterleitung aus)</span>}
+      </div>
+      {manuell.map(m => (
+        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 12 }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {m.status === 'mahnung' ? '⚠ ' : ''}{m.absender} — {m.betreff}{m.hinweis ? ` · ${m.hinweis}` : ''}
+          </span>
+          {m.status !== 'mahnung' && <>
+            <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={() => zuordnen(m.id, 'nowagwirth')}>→ N&amp;W</button>
+            <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={() => zuordnen(m.id, 'halloheidi')}>→ HalloHeidi</button>
+          </>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function QontoConfig({ onChanged }) {
+  const [cfg, setCfg] = useState(null);
+  const [nw, setNw] = useState(''); const [hh, setHh] = useState('');
+  const [scan, setScan] = useState(null);
+  useEffect(() => { api('/heute/qonto/config').then(setCfg).catch(() => {}); }, []);
+  async function save(patch) {
+    try { await api('/heute/qonto/config', { method: 'PUT', body: patch }); const c = await api('/heute/qonto/config'); setCfg(c); setNw(''); setHh(''); onChanged?.(); }
+    catch (e) { alert(e.message); }
+  }
+  async function dryRun() {
+    setScan('läuft…');
+    try { const r = await api('/heute/qonto/scan', { method: 'POST', body: { dry: true } }); setScan(`${r.geprueft} geprüft · ${r.manuell} manuell`); onChanged?.(); }
+    catch (e) { setScan(e.message); }
+  }
+  if (!cfg) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#5a5955', margin: '6px 0' }}>Qonto-Rechnungsweiterleitung</div>
+      <div style={{ fontSize: 11.5, marginBottom: 3 }}>N&amp;W: {cfg.nowagwirth?.gesetzt ? `✓ ${cfg.nowagwirth.hinweis}` : '—'}</div>
+      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
+        <input value={nw} onChange={e => setNw(e.target.value)} placeholder="Qonto-Adresse N&W" style={{ flex: 1, padding: '5px 7px', border: '1px solid #ececea', borderRadius: 7, fontSize: 12 }} />
+        <button className="heute-chip" style={{ background: '#0a0a0a', color: '#fff' }} disabled={!nw.trim()} onClick={() => save({ nowagwirth: nw.trim() })}>OK</button>
+      </div>
+      <div style={{ fontSize: 11.5, marginBottom: 3 }}>HalloHeidi: {cfg.halloheidi?.gesetzt ? `✓ ${cfg.halloheidi.hinweis}` : '—'}</div>
+      <div style={{ display: 'flex', gap: 5, marginBottom: 5 }}>
+        <input value={hh} onChange={e => setHh(e.target.value)} placeholder="Qonto-Adresse HalloHeidi" style={{ flex: 1, padding: '5px 7px', border: '1px solid #ececea', borderRadius: 7, fontSize: 12 }} />
+        <button className="heute-chip" style={{ background: '#0a0a0a', color: '#fff' }} disabled={!hh.trim()} onClick={() => save({ halloheidi: hh.trim() })}>OK</button>
+      </div>
+      <label style={{ display: 'flex', gap: 6, fontSize: 12.5, margin: '6px 0', cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!cfg.aktiv} onChange={e => save({ aktiv: e.target.checked })} /> Weiterleitung aktiv (sonst nur Dry-Run)
+      </label>
+      <button className="heute-chip" style={{ background: '#f0efed', color: '#333', border: '1px solid #ececea' }} onClick={dryRun}>Dry-Run jetzt</button>
+      {scan && <span style={{ fontSize: 11, color: '#5a5955', marginLeft: 6 }}>{scan}</span>}
     </div>
   );
 }
