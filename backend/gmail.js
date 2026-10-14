@@ -223,7 +223,8 @@ export function maschinellerAbsender(fromEmail = '') {
 export async function threadUnbeantwortet(konto, threadId) {
   try {
     const t = await gmailFetch(konto, `/threads/${threadId}?format=metadata&metadataHeaders=From`);
-    const msgs = t.messages || [];
+    // ENTWÜRFE zählen NICHT als Antwort (threads.get liefert Drafts als Nachrichten mit).
+    const msgs = (t.messages || []).filter(m => !(m.labelIds || []).includes('DRAFT'));
     if (!msgs.length) return true;
     const last = msgs[msgs.length - 1];
     const from = emailAus(hdr(last.payload?.headers || [], 'From'));
