@@ -13,6 +13,15 @@ import { api } from '../../lib/api.js';
 
 const FORMATE = [{ k: 'quadrat', l: '1:1' }, { k: 'feed', l: '4:5' }, { k: 'story', l: '9:16' }];
 
+// Spruch-Vorschläge: gleiche Engine wie im Alt-Generator ({text, kategorie}).
+const spruchText = s => (typeof s === 'string' ? s : (s?.text || ''));
+const spruchKat = s => (typeof s === 'string' ? '' : (s?.kategorie || ''));
+function groupSprueche(list) {
+  const g = new Map();
+  for (const s of list || []) { const k = spruchKat(s) || 'Vorschläge'; if (!g.has(k)) g.set(k, []); g.get(k).push(s); }
+  return [...g.entries()];
+}
+
 export default function JobCreativesV2() {
   const { job, kunde } = useJob();
   const { isAdmin } = useAuth();
@@ -30,6 +39,10 @@ export default function JobCreativesV2() {
   const [motivHinweis, setMotivHinweis] = useState('');
   const [motivBusy, setMotivBusy] = useState(false);
   const [spruch, setSpruch] = useState('');
+  const [spruchVorschlaege, setSpruchVorschlaege] = useState([]);
+  const [loadingSprueche, setLoadingSprueche] = useState(false);
+  const [verbessertVarianten, setVerbessertVarianten] = useState([]);
+  const [verbessernBusy, setVerbessernBusy] = useState(false);
   const [formate, setFormate] = useState({ quadrat: true, feed: false, story: false });
   const [freisteller, setFreisteller] = useState(true);
 
@@ -54,9 +67,9 @@ export default function JobCreativesV2() {
   const diagnose = useMemo(() => {
     const n = fotos.length;
     const personen = fotos.filter(f => f.hat_person === true).length;
-    if (n === 0) return { badge: 'keine Fotos', farbe: '#991b1b', bg: '#fee2e2', empfehlung: 'ki_motiv', grund: 'Keine Fotos in der Akte — KI-Motiv oder reines Overlay.' };
+    if (n === 0) return { badge: 'keine Fotos', farbe: '#991b1b', bg: '#fee2e2', empfehlung: 'ki_motiv', grund: 'Keine Fotos in der Akte — komplett neues KI-Bild. Tipp: Kundenfotos anfragen (echtes Material wirkt glaubwürdiger).' };
     if (personen > 0) return { badge: 'Material gut', farbe: '#166534', bg: '#dcfce7', empfehlung: 'eigenes_foto', grund: `${personen} Foto(s) mit Personen — echtes Kundenfoto bevorzugen (wirkt am glaubwürdigsten).` };
-    return { badge: 'nur Umgebung', farbe: '#92400e', bg: '#fef3c7', empfehlung: 'ki_motiv', grund: `${n} Foto(s), aber ohne markierte Personen — KI-Motiv oder Umgebung (Szenen-Komposition folgt in V2).` };
+    return { badge: 'nur Umgebung', farbe: '#92400e', bg: '#fef3c7', empfehlung: 'eigenes_foto', grund: `${n} Foto(s), aber ohne markierte Personen — eigenes Foto nutzen und im nächsten Schritt „Szene mit Personen beleben".` };
   }, [fotos]);
 
   // Empfohlenen Pfad vorwählen (frei änderbar)
@@ -71,6 +84,31 @@ export default function JobCreativesV2() {
     catch (e) { setErr(e.body?.error || e.message); }
     finally { setMotivBusy(false); }
   }
+
+  // Sprüche-Vorschläge (gleiche Endpoints wie V1) — beim Betreten von Schritt 3 laden.
+  async function ladeSprueche() {
+    setLoadingSprueche(true); setVerbessertVarianten([]);
+    try {
+      const body = { job_id: job.id };
+      if (bildquelle === 'ki_motiv' && motiv.trim()) body.motiv = motiv.trim();
+      const res = await api('/creatives/spruch-vorschlaege', { method: 'POST', body });
+      setSpruchVorschlaege(res.sprueche || []);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setLoadingSprueche(false); }
+  }
+  async function verbessereDenSpruch() {
+    if (!spruch.trim()) return;
+    setVerbessernBusy(true); setVerbessertVarianten([]);
+    try {
+      const res = await api('/creatives/spruch-verbessern', { method: 'POST', body: { job_id: job.id, spruch: spruch.trim() } });
+      setVerbessertVarianten(res.varianten || []);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setVerbessernBusy(false); }
+  }
+  useEffect(() => {
+    if (step === 3 && spruchVorschlaege.length === 0 && !loadingSprueche) ladeSprueche();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const formatKeys = Object.entries(formate).filter(([, v]) => v).map(([k]) => k);
 
@@ -181,11 +219,16 @@ export default function JobCreativesV2() {
           </div>
           <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '0 0 12px' }}>{diagnose.grund} <em>Empfehlung ist vorgewählt, frei änderbar.</em></p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-            {[{ k: 'eigenes_foto', l: '📷 Eigenes Foto aus Akte' }, { k: 'ki_motiv', l: '✨ KI-Motiv' }, { k: 'ohne_bild', l: '▭ Ohne Bild' }].map(o => (
+            {[
+              { k: 'eigenes_foto', l: '📷 Eigenes Foto aus Akte', sub: 'Echtes Kundenfoto als Basis. Ohne Personen im Foto? Im nächsten Schritt können KI-Personen in die Szene gesetzt werden (Szenen-Komposition).' },
+              { k: 'ki_motiv', l: '✨ Komplett neues KI-Bild', sub: 'Ganze Szene wird generiert — für Kunden ohne brauchbare Fotos.' },
+              { k: 'ohne_bild', l: '▭ Nur Text-Overlay (PNG für Canva)', sub: 'Transparente Text-Ebene zum Drüberlegen in Canva — Foto bleibt lokal, keine KI-Verarbeitung (geeignet bei fehlender KI-Einwilligung).' },
+            ].map(o => (
               <button key={o.k} type="button" onClick={() => { setBildquelle(o.k); setGestaltung(null); }}
-                style={{ flex: '1 1 180px', padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                  border: bildquelle === o.k ? '2px solid #1b3f80' : '1px solid var(--line)', background: bildquelle === o.k ? '#eef3ff' : '#fff', fontWeight: 600 }}>
-                {o.l}{diagnose.empfehlung === o.k ? <span style={{ marginLeft: 6, fontSize: 11, color: '#166534' }}>★ empfohlen</span> : null}
+                style={{ flex: '1 1 220px', padding: '14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left', display: 'flex', flexDirection: 'column',
+                  border: bildquelle === o.k ? '2px solid #1b3f80' : '1px solid var(--line)', background: bildquelle === o.k ? '#eef3ff' : '#fff' }}>
+                <span style={{ fontWeight: 600 }}>{o.l}{diagnose.empfehlung === o.k ? <span style={{ marginLeft: 6, fontSize: 11, color: '#166534' }}>★ empfohlen</span> : null}</span>
+                <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 400, marginTop: 5, lineHeight: 1.4 }}>{o.sub}</span>
               </button>
             ))}
           </div>
@@ -209,6 +252,23 @@ export default function JobCreativesV2() {
       {/* ── Schritt 2: Gestaltung ── */}
       {step === 2 && (
         <div>
+          {bildquelle === 'eigenes_foto' && selFoto && selFoto.hat_person !== true && !fotoKiGesperrt && (
+            <div style={{ border: '1px solid #cdddff', background: '#f3f7ff', borderRadius: 10, padding: 12, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Personenloses Foto erkannt — wie einsetzen?</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setGestaltung('szene')}
+                  style={{ flex: '1 1 240px', textAlign: 'left', padding: '12px 14px', borderRadius: 10, cursor: 'pointer', border: gestaltung === 'szene' ? '2px solid #1b3f80' : '1px solid var(--line)', background: gestaltung === 'szene' ? '#eef3ff' : '#fff' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>🧑‍🤝‍🧑 Szene mit Personen beleben (KI)</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>Generische KI-Personen ins Umgebungsfoto — Kennzeichnung „enthält KI-Personen", Einwilligung erforderlich.</div>
+                </button>
+                <button type="button" onClick={() => setGestaltung('layout_a')}
+                  style={{ flex: '1 1 240px', textAlign: 'left', padding: '12px 14px', borderRadius: 10, cursor: 'pointer', border: gestaltung === 'layout_a' ? '2px solid #1b3f80' : '1px solid var(--line)', background: gestaltung === 'layout_a' ? '#eef3ff' : '#fff' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>📝 Foto pur verwenden</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>Text trägt die Botschaft — deterministische Vorlage, keine KI.</div>
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
             {gestaltungsOpts.map(o => (
               <button key={o.k} type="button" disabled={!o.ok} onClick={() => o.ok && setGestaltung(o.k)}
@@ -248,6 +308,40 @@ export default function JobCreativesV2() {
             <span>Spruch / Hook</span>
             <input type="text" value={spruch} onChange={e => setSpruch(e.target.value)} placeholder="z. B. ZUKUNFT INSTALLIEREN" />
           </label>
+
+          {/* Sprüche-Vorschläge (gleiche Engine wie Alt-Generator) */}
+          <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <strong style={{ fontSize: 13 }}>💡 Spruch-Vorschläge</strong>
+              <button type="button" className="btn-ghost btn-sm" onClick={ladeSprueche} disabled={loadingSprueche}>{loadingSprueche ? 'Lädt…' : '↻ Neu vorschlagen'}</button>
+            </div>
+            {loadingSprueche && spruchVorschlaege.length === 0 && <p className="pane-hint" style={{ margin: 0 }}>Vorschläge werden erstellt…</p>}
+            {spruchVorschlaege.length > 0 && groupSprueche(spruchVorschlaege).map(([kat, items]) => (
+              <div key={kat} style={{ marginBottom: 6 }}>
+                {kat && <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, margin: '4px 0 2px' }}>{kat}</div>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {items.map((s, i) => {
+                    const txt = spruchText(s);
+                    return <button key={i} type="button" onClick={() => setSpruch(txt)}
+                      style={{ fontSize: 12, padding: '5px 10px', borderRadius: 100, cursor: 'pointer', border: spruch === txt ? '2px solid #1b3f80' : '1px solid var(--line)', background: spruch === txt ? '#eef3ff' : '#fff' }}>{txt}</button>;
+                  })}
+                </div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+              <button type="button" className="btn-ghost btn-sm" onClick={verbessereDenSpruch} disabled={verbessernBusy || !spruch.trim()}>{verbessernBusy ? 'Verbessere…' : '✨ Mit KI verbessern'}</button>
+              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Verfeinert den aktuell gewählten Spruch.</span>
+            </div>
+            {verbessertVarianten.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                {verbessertVarianten.map((v, i) => {
+                  const txt = spruchText(v);
+                  return <button key={i} type="button" onClick={() => setSpruch(txt)}
+                    style={{ fontSize: 12, padding: '5px 10px', borderRadius: 100, cursor: 'pointer', border: '1px dashed #1b3f80', background: '#f3f7ff' }}>✨ {txt}</button>;
+                })}
+              </div>
+            )}
+          </div>
           {(gestaltung === 'layout_a' || gestaltung === 'layout_b') && vorlagenInfo.freisteller_verfuegbar && (
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 10 }}>
               <input type="checkbox" checked={freisteller} onChange={e => setFreisteller(e.target.checked)} /> Person freistellen (remove.bg)
@@ -307,15 +401,17 @@ async function patchFoto(id, patch, setFotos) {
 }
 
 function FotoKachel({ foto, selected, onSelect, onFlag }) {
+  const [lowRes, setLowRes] = useState(false);
   const wf = foto.werbefreigabe || 'ungeklaert';
   const wfMeta = { ja: { l: '✓ Werbefreigabe', c: '#166534', b: '#dcfce7' }, nein: { l: '✗ keine Freigabe', c: '#991b1b', b: '#fee2e2' }, ungeklaert: { l: '? Freigabe ungeklärt', c: '#92400e', b: '#fef3c7' } }[wf];
   return (
     <div style={{ border: selected ? '2px solid #1b3f80' : '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
       <button type="button" onClick={onSelect} style={{ display: 'block', width: '100%', border: 'none', padding: 0, cursor: 'pointer', background: 'transparent' }}>
-        <img src={foto.bild_url} alt="" style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
+        <img src={foto.bild_url} alt="" onLoad={e => { const w = e.target.naturalWidth, h = e.target.naturalHeight; if (w && h && Math.min(w, h) < 1200) setLowRes(true); }} style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
       </button>
       <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{ fontSize: 10.5, fontWeight: 700, color: wfMeta.c, background: wfMeta.b, borderRadius: 5, padding: '2px 6px', alignSelf: 'flex-start' }}>{wfMeta.l}</span>
+        {lowRes && <span style={{ fontSize: 10, fontWeight: 600, color: '#92400e', background: '#fef3c7', borderRadius: 5, padding: '2px 6px', alignSelf: 'flex-start', lineHeight: 1.3 }} title="Veredelung (Upscale) folgt">⚠ Niedrige Auflösung — Veredelung (Upscale) folgt; aktuell über Johannes anfragen</span>}
         <select className="cell-input" style={{ fontSize: 11 }} value={wf} onChange={e => onFlag({ werbefreigabe: e.target.value })}>
           <option value="ungeklaert">Freigabe: ungeklärt</option>
           <option value="ja">Freigabe: ja</option>
