@@ -55,6 +55,7 @@ import { startWeeklyFeedbackScheduler } from './weekly-feedback.js';
 import { startUploadBenachrichtigungScheduler } from './upload-benachrichtigung.js';
 import { startBestandskundenScheduler } from './bestandskunden-sync.js';
 import { startQontoScheduler } from './qonto.js';
+import { startSslWatchdogScheduler } from './ssl-watchdog.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -179,5 +180,6 @@ app.listen(PORT, () => {
   startUploadBenachrichtigungScheduler();
   startBestandskundenScheduler();
   startQontoScheduler();
+  startSslWatchdogScheduler();
   ensureBucket('brand-assets', { isPublic: false }).catch(err => console.warn('[storage] bucket create:', err.message));
 });

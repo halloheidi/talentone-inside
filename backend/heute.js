@@ -9,6 +9,7 @@ import { ermittleFaelligeKampagnen } from './campaign-reminder.js';
 import { listOpenTasksSplit, listUsers, getCloseKey } from './close.js';
 import { getInstantlyOverview } from './instantly.js';
 import { callClaudeWithRetry } from './claude.js';
+import { sslProbleme } from './ssl-watchdog.js';
 
 const DAY = 86400000;
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
@@ -339,7 +340,12 @@ Antworte als JSON: {"text": "<3-5 Sätze inkl. 'Heute zuerst: …'>", "top3": ["
 
 /* ═══════════ Haupt-Aggregator ═══════════ */
 export async function buildHeute({ userEmail }) {
-  const [kritischCockpit, zahlung, kampagnen, bewerber, close, instantly] = await Promise.all([
+  const [ssl, kritischCockpit, zahlung, kampagnen, bewerber, close, instantly] = await Promise.all([
+    sslProbleme().then(list => list.map(s => ({
+      key: `kritisch:ssl:${s.host}`, section: 'kritisch', severity: 'kritisch',
+      title: `🔒 SSL-Problem — ${s.host}`, meta: `${s.grund} (geprüft ${s.checked_at ? new Date(s.checked_at).toLocaleString('de-DE') : '—'}) — Webhooks/OAuth/Portal betroffen`,
+      link: null, age_days: 0,
+    }))).catch(() => []),
     collectKritisch().catch(e => { console.warn('[heute] kritisch:', e.message); return []; }),
     collectZahlungsprobleme().catch(e => { console.warn('[heute] zahlung:', e.message); return []; }),
     collectKampagnen().catch(e => { console.warn('[heute] kampagnen:', e.message); return []; }),
@@ -348,9 +354,9 @@ export async function buildHeute({ userEmail }) {
     collectInstantly(),
   ]);
 
-  // Zahlungsproblem-Konten zuerst, dann die Cockpit-Ampeln (Duplikate per key-Set raus).
+  // SSL-/Infrastruktur-Probleme ganz oben, dann Zahlungsprobleme, dann Cockpit-Ampeln.
   const seen = new Set();
-  const kritisch = [...zahlung, ...kritischCockpit].filter(i => !seen.has(i.key) && seen.add(i.key));
+  const kritisch = [...ssl, ...zahlung, ...kritischCockpit].filter(i => !seen.has(i.key) && seen.add(i.key));
   const alleItems = [...kritisch, ...kampagnen, ...bewerber];
   const briefing = await erzeugeBriefing(alleItems, close, instantly);
 
