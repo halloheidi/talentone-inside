@@ -751,4 +751,56 @@ router.delete('/:id/neukunden/vorschlag', async (req, res) => {
   res.json({ ok: true });
 });
 
+/* GET /api/jobs/:id/funnel-stats?range=7|30|all
+   Funnel-Trichter aus talentone_funnel_events + Anfragen (nur Neukundengewinnung sinnvoll).
+   Besucher = eindeutige pageview-Sessions; je Schritt = eindeutige Sessions; Anfragen aus
+   talentone_anfragen im Zeitraum; Conversion + größter Absprung. */
+router.get('/:id/funnel-stats', async (req, res) => {
+  const jobId = req.params.id;
+  const range = ['7', '30', 'all'].includes(req.query.range) ? req.query.range : '30';
+  const since = range === 'all' ? null : new Date(Date.now() - Number(range) * 86400000).toISOString();
+  try {
+    let evq = supabase.from('talentone_funnel_events').select('session_id, event').eq('job_id', jobId);
+    if (since) evq = evq.gte('created_at', since);
+    const { data: events, error } = await evq;
+    if (error) return res.status(500).json({ error: error.message });
+
+    const sessionsPro = {}; // event → Set(session_id)
+    for (const e of events || []) { (sessionsPro[e.event] ||= new Set()).add(e.session_id); }
+    const anzahl = ev => (sessionsPro[ev]?.size || 0);
+
+    let aq = supabase.from('talentone_anfragen').select('id', { count: 'exact', head: true }).eq('job_id', jobId);
+    if (since) aq = aq.gte('created_at', since);
+    const { count: anfragen } = await aq;
+
+    const besucher = anzahl('pageview');
+    const stufen = [
+      { key: 'pageview', label: 'Besucher', sessions: besucher },
+      { key: 'schritt_1', label: 'Schritt 1', sessions: anzahl('schritt_1') },
+      { key: 'schritt_2', label: 'Schritt 2', sessions: anzahl('schritt_2') },
+      { key: 'schritt_3', label: 'Schritt 3', sessions: anzahl('schritt_3') },
+      { key: 'schritt_4', label: 'Schritt 4', sessions: anzahl('schritt_4') },
+      { key: 'schritt_5', label: 'Schritt 5', sessions: anzahl('schritt_5') },
+      { key: 'anfrage', label: 'Anfragen', sessions: anfragen || 0 },
+    ];
+    // Größter Absprung zwischen aufeinanderfolgenden Stufen (nur dort, wo vorher >0).
+    let groesster = null;
+    for (let i = 1; i < stufen.length; i++) {
+      const prev = stufen[i - 1].sessions, cur = stufen[i].sessions;
+      if (prev <= 0) continue;
+      const verlust = prev - cur;
+      const prozent = Math.round((verlust / prev) * 100);
+      if (verlust > 0 && (!groesster || verlust > groesster.verlust)) {
+        groesster = { von: stufen[i - 1].label, nach: stufen[i].label, verlust, prozent };
+      }
+    }
+    res.json({
+      range, besucher, anfragen: anfragen || 0,
+      stufen,
+      conversion_prozent: besucher > 0 ? Math.round(((anfragen || 0) / besucher) * 1000) / 10 : null,
+      groesster_absprung: groesster,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

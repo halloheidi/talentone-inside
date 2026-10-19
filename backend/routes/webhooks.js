@@ -3,7 +3,7 @@
 // damit er den Raw-Body für HMAC-Signatur-Verifikation vor dem globalen
 // express.json() erhält.
 
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { extractStelle } from '../sheets-mapping.js';
 import { extractAnhaenge, spiegeleAnhaenge } from '../anhaenge.js';
@@ -809,5 +809,29 @@ router.post('/ingest', ingestHandler);
 // Perspective/Onepage nicht brechen. Kein Verhaltensunterschied mehr.
 router.post('/perspective', ingestHandler);
 router.post('/leads', ingestHandler);
+
+/* ─────────────── Funnel-Event-Tracking (selbst gehostete Landingpages) ───────────────
+   POST /api/webhooks/funnel-event?job_id=<uuid>
+   Body (JSON, auch als text/plain für navigator.sendBeacon): { session_id, event }
+     event ∈ pageview | schritt_1 … schritt_5
+   Antwortet IMMER sofort 204 — Tracking darf die Seite/das Absenden nie beeinträchtigen.
+   Dedup: nur das erste Vorkommen je (job_id, session_id, event) wird gespeichert. */
+const FUNNEL_EVENTS = new Set(['pageview', 'schritt_1', 'schritt_2', 'schritt_3', 'schritt_4', 'schritt_5']);
+router.post('/funnel-event', express.text({ type: () => true, limit: '2kb' }), (req, res) => {
+  res.sendStatus(204); // sofort, bevor irgendetwas schiefgehen kann
+  (async () => {
+    try {
+      const job_id = (req.query.job_id || '').toString();
+      if (!/^[0-9a-f-]{36}$/i.test(job_id)) return;
+      let body = {};
+      try { body = typeof req.body === 'string' && req.body ? JSON.parse(req.body) : (req.body && typeof req.body === 'object' ? req.body : {}); } catch { return; }
+      const session_id = String(body.session_id || '').trim().slice(0, 80);
+      const event = String(body.event || '').trim();
+      if (!session_id || !FUNNEL_EVENTS.has(event)) return; // Müll/unbekannte Events verwerfen
+      await supabase.from('talentone_funnel_events')
+        .upsert({ job_id, session_id, event }, { onConflict: 'job_id,session_id,event', ignoreDuplicates: true });
+    } catch (e) { console.warn('[funnel-event]', e.message); }
+  })();
+});
 
 export default router;

@@ -950,6 +950,8 @@ function NeukundenProduktTab({ job, kunde, reload }) {
         </label>
       </fieldset>
 
+      <FunnelStats jobId={job.id} />
+
       <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Änderungen werden automatisch gespeichert.</span>
         <button type="button" onClick={handleDelete}
@@ -958,5 +960,61 @@ function NeukundenProduktTab({ job, kunde, reload }) {
         </button>
       </div>
     </form>
+  );
+}
+
+// Funnel-Trichter (nur Neukundengewinnung) — Besucher → Schritte → Anfragen als Balken.
+function FunnelStats({ jobId }) {
+  const [range, setRange] = useState('30');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setData(null); setErr('');
+    api(`/jobs/${jobId}/funnel-stats?range=${range}`).then(d => { if (!cancelled) setData(d); }).catch(e => { if (!cancelled) setErr(e.message); });
+    return () => { cancelled = true; };
+  }, [jobId, range]);
+  const max = data ? Math.max(1, ...data.stufen.map(s => s.sessions)) : 1;
+  return (
+    <fieldset className="formular-section" style={{ marginTop: 14 }}>
+      <legend>Funnel — Besucher bis Anfrage</legend>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {[['7', '7 Tage'], ['30', '30 Tage'], ['all', 'gesamt']].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setRange(k)}
+            style={{ fontSize: 12, padding: '4px 12px', borderRadius: 100, cursor: 'pointer', border: range === k ? '2px solid #1b3f80' : '1px solid var(--line)', background: range === k ? '#eef3ff' : '#fff' }}>{l}</button>
+        ))}
+      </div>
+      {err && <p style={{ fontSize: 12, color: '#c1272d' }}>Konnte Funnel nicht laden: {err}</p>}
+      {!data && !err && <p className="pane-hint" style={{ margin: 0 }}>Lade…</p>}
+      {data && (data.besucher === 0 && data.anfragen === 0 ? (
+        <p className="pane-hint" style={{ margin: 0 }}>Noch keine Tracking-Daten in diesem Zeitraum. (Beacon muss in der Landingpage eingebaut sein.)</p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {data.stufen.map((s, i) => {
+              const prev = i > 0 ? data.stufen[i - 1].sessions : null;
+              const drop = prev && prev > 0 ? Math.round(((prev - s.sessions) / prev) * 100) : null;
+              const istAbsprung = data.groesster_absprung && data.groesster_absprung.nach === s.label;
+              return (
+                <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 92, fontSize: 12, color: 'var(--ink-3)', flexShrink: 0 }}>{s.label}</span>
+                  <div style={{ flex: 1, background: '#f0efea', borderRadius: 5, height: 22, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round((s.sessions / max) * 100)}%`, minWidth: s.sessions > 0 ? 2 : 0, height: '100%', background: s.key === 'anfrage' ? '#166534' : '#1b3f80', borderRadius: 5 }} />
+                    <span style={{ position: 'absolute', left: 8, top: 0, lineHeight: '22px', fontSize: 11.5, fontWeight: 600, color: s.sessions / max > 0.15 ? '#fff' : '#333' }}>{s.sessions}</span>
+                  </div>
+                  <span style={{ width: 70, fontSize: 11, color: istAbsprung ? '#c1272d' : 'var(--ink-3)', flexShrink: 0, textAlign: 'right', fontWeight: istAbsprung ? 700 : 400 }}>
+                    {drop != null ? `−${drop}%` : ''}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12.5, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+            <span>Conversion Besucher → Anfrage: <strong>{data.conversion_prozent != null ? `${data.conversion_prozent}%` : '—'}</strong></span>
+            {data.groesster_absprung && <span>Größter Absprung: <strong style={{ color: '#c1272d' }}>{data.groesster_absprung.von} → {data.groesster_absprung.nach} (−{data.groesster_absprung.prozent}%)</strong></span>}
+          </div>
+        </>
+      ))}
+    </fieldset>
   );
 }
