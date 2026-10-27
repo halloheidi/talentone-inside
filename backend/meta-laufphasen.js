@@ -87,6 +87,8 @@ export async function laufphasenAktualisieren(metaCampaignId) {
   await supabase.from('talentone_meta_laufphasen').delete().eq('meta_campaign_id', metaCampaignId);
   const rows = phasen.map((p, i) => ({
     meta_campaign_id: metaCampaignId,
+    meta_objekt_id: metaCampaignId,   // generalisierter Schlüssel (Ebene kampagne)
+    ebene: 'kampagne',
     phase_start: p.phase_start,
     phase_ende: i === phasen.length - 1 ? null : p.letzter_aktiv_tag,
     quelle: kamp?.laufphasen_manuell ? 'manuell' : 'auto',
@@ -148,4 +150,62 @@ export async function aktuellePhaseInfo(metaCampaignId, zahlungsproblemSeit = nu
     live,
     laufphasen_manuell: !!kamp?.laufphasen_manuell,
   };
+}
+
+/**
+ * Aktive Lauftage einer Anzeigengruppe (= Tage mit Spend > 0 der aktuellen Phase)
+ * aus den Ad-Set-Tages-Insights. Spiegelt aktuellePhaseInfo() für die Adset-Ebene.
+ * @returns {number} aktive Lauftage der aktuellen Phase (0 wenn keine Insights)
+ */
+export async function adsetAktiveLauftage(metaAdsetId) {
+  const { data } = await supabase.from('talentone_meta_adset_insights')
+    .select('datum, spend').eq('meta_adset_id', metaAdsetId).order('datum', { ascending: true });
+  const aktivTage = (data || []).filter(t => Number(t.spend) > 0).map(t => t.datum);
+  if (!aktivTage.length) return 0;
+  const phasen = berechnePhasen(aktivTage);
+  return phasen[phasen.length - 1]?.aktive_lauftage || 0;
+}
+
+/**
+ * Aktive Lauftage EINES JOBS über die ihm zugeordnete Meta-Ebene.
+ *
+ * Quelle der Wahrheit ist jobs.meta_zuordnung {ebene, id}. Ist sie gesetzt, zählt
+ * genau dieses Objekt (Kampagne ODER Anzeigengruppe). Ist sie NICHT gesetzt (z. B. die
+ * 13 historisch mehrdeutigen Jobs mit mehreren Kampagnen), greift der Reverse-FK-
+ * Fallback: Summe über alle NICHT-gemischten Kampagnen mit job_id = jobId, plus alle
+ * Anzeigengruppen mit job_id = jobId. So geht kein bestehendes Verhalten verloren.
+ *
+ * @param {string} jobId
+ * @returns {{ lauftage: number|null, ebene: string|null, quelle: 'zuordnung'|'reverse_fk'|'keine', hinweis: string|null }}
+ */
+export async function aktiveLauftage(jobId) {
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('meta_zuordnung').eq('id', jobId).maybeSingle();
+  const z = job?.meta_zuordnung;
+
+  if (z?.id && z?.ebene === 'anzeigengruppe') {
+    return { lauftage: await adsetAktiveLauftage(z.id), ebene: 'anzeigengruppe', quelle: 'zuordnung', hinweis: null };
+  }
+  if (z?.id && z?.ebene === 'kampagne') {
+    const info = await aktuellePhaseInfo(z.id);
+    return { lauftage: info?.aktive_lauftage ?? 0, ebene: 'kampagne', quelle: 'zuordnung', hinweis: info ? null : 'meta_daten_fehlen' };
+  }
+
+  // Reverse-FK-Fallback (keine explizite Zuordnung)
+  const [{ data: kamp }, { data: adsets }] = await Promise.all([
+    supabase.from('talentone_meta_kampagnen')
+      .select('meta_campaign_id').eq('job_id', jobId).eq('gemischt', false),
+    supabase.from('talentone_meta_adsets')
+      .select('meta_adset_id').eq('job_id', jobId),
+  ]);
+  const hatQuelle = (kamp?.length || 0) + (adsets?.length || 0) > 0;
+  if (!hatQuelle) return { lauftage: null, ebene: null, quelle: 'keine', hinweis: 'keine_meta_verbindung' };
+
+  let summe = 0;
+  for (const c of (kamp || [])) {
+    const info = await aktuellePhaseInfo(c.meta_campaign_id);
+    summe += info?.aktive_lauftage || 0;
+  }
+  for (const a of (adsets || [])) summe += await adsetAktiveLauftage(a.meta_adset_id);
+  return { lauftage: summe, ebene: 'reverse_fk', quelle: 'reverse_fk', hinweis: null };
 }

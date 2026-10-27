@@ -257,6 +257,7 @@ async function upsertAdSet(konto, campaignId, a) {
     name: a.name || null,
     effective_status: a.effective_status || null,
     meta_start_time: a.start_time || null,
+    daily_budget: a.daily_budget != null ? Number(a.daily_budget) / 100 : null, // Meta liefert Minor Units (Cent)
     vorheriger_status: bestehend?.effective_status ?? null,
     zuletzt_gesynct: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -267,7 +268,7 @@ async function upsertAdSet(konto, campaignId, a) {
 // nur für die wenigen als gemischt markierten Kampagnen aufgerufen, spart API-Last).
 async function syncAdSetsEiner(campaignId, konto, token, since, until) {
   const adsets = await graphAll(`${campaignId}/adsets`, {
-    fields: 'id,name,effective_status,start_time', limit: PAGE_LIMIT,
+    fields: 'id,name,effective_status,start_time,daily_budget', limit: PAGE_LIMIT,
   }, token);
   for (const a of adsets) await upsertAdSet(konto, campaignId, a);
   await sleep(300);
@@ -290,6 +291,7 @@ async function syncAdSetsEiner(campaignId, konto, token, since, until) {
       ctr: row.ctr != null ? Number(row.ctr) : null,
       cpm: row.cpm != null ? Number(row.cpm) : null,
       leads: leadsAusActions(row.actions),
+      results: leadsAusActions(row.actions),   // Ergebnisse (= Leads) analog Kampagnen-Insights
       updated_at: new Date().toISOString(),
     }, { onConflict: 'meta_adset_id,datum' });
     n++;

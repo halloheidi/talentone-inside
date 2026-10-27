@@ -13,6 +13,20 @@ const router = Router();
 const normKonto = (id) => { const s = String(id || '').trim(); return s ? (s.startsWith('act_') ? s : `act_${s}`) : null; };
 const STATUS_LABEL = { 1: 'aktiv', 2: 'deaktiviert', 3: 'Zahlung ausstehend', 7: 'ausstehende Prüfung', 8: 'in Prüfung', 9: 'Gnadenfrist', 101: 'geschlossen' };
 
+// jobs.meta_zuordnung = EINE explizite Quelle der Wahrheit je Job {ebene, id}.
+// Beim Zuordnen setzen (überschreibt den Reverse-FK-Fallback), beim Lösen/Umhängen
+// zuerst die exakt passende Zuordnung überall entfernen. jobs hat KEIN updated_at →
+// niemals updated_at auf talentone_jobs schreiben.
+async function clearJobMetaZuordnung(ebene, id) {
+  const { data } = await supabase.from('talentone_jobs').select('id')
+    .eq('meta_zuordnung->>ebene', ebene).eq('meta_zuordnung->>id', String(id));
+  for (const j of (data || [])) await supabase.from('talentone_jobs').update({ meta_zuordnung: null }).eq('id', j.id);
+}
+async function setJobMetaZuordnung(jobId, ebene, id) {
+  await clearJobMetaZuordnung(ebene, id);          // alte/doppelte Zeiger auf dasselbe Objekt lösen
+  if (jobId) await supabase.from('talentone_jobs').update({ meta_zuordnung: { ebene, id: String(id) } }).eq('id', jobId);
+}
+
 // Werbekonto-Namen je konto_id (für lesbare Kampagnen-Listen). act_-normalisiert.
 async function kontoNamen() {
   const { data } = await supabase.from('talentone_meta_konten').select('konto_id, name');
@@ -262,6 +276,9 @@ router.put('/kampagnen/:metaCampaignId/zuordnung', async (req, res) => {
       .update({ projekt_id: projekt_id || null, job_id, kunde_id, updated_at: new Date().toISOString() })
       .eq('meta_campaign_id', req.params.metaCampaignId);
     if (error) return res.status(500).json({ error: error.message });
+    // Explizite Job-Zuordnung (Ebene Kampagne) synchron halten; bei Lösen entfernen.
+    if (job_id) await setJobMetaZuordnung(job_id, 'kampagne', req.params.metaCampaignId);
+    else await clearJobMetaZuordnung('kampagne', req.params.metaCampaignId);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -303,6 +320,8 @@ router.put('/kampagnen/:metaCampaignId/gemischt', async (req, res) => {
     if (gemischt) { patch.projekt_id = null; patch.job_id = null; } // Attribution ab jetzt pro Ad Set
     const { error } = await supabase.from('talentone_meta_kampagnen').update(patch).eq('meta_campaign_id', id);
     if (error) return res.status(500).json({ error: error.message });
+    // Kampagne wird gemischt → Kampagnen-Ebenen-Zuordnung am Job entfernen (Attribution jetzt pro Ad Set).
+    if (gemischt) await clearJobMetaZuordnung('kampagne', id);
     let nachgeladen = null;
     if (gemischt) { try { nachgeladen = await adsetsNachladen(id, { backfill: true }); } catch (e) { nachgeladen = { error: e.message }; } }
     res.json({ ok: true, gemischt, nachgeladen });
@@ -373,6 +392,9 @@ router.put('/adsets/:metaAdsetId/zuordnung', async (req, res) => {
       .update({ projekt_id: projekt_id || null, job_id, kunde_id, updated_at: new Date().toISOString() })
       .eq('meta_adset_id', req.params.metaAdsetId);
     if (error) return res.status(500).json({ error: error.message });
+    // Explizite Job-Zuordnung (Ebene Anzeigengruppe) synchron halten; bei Lösen entfernen.
+    if (job_id) await setJobMetaZuordnung(job_id, 'anzeigengruppe', req.params.metaAdsetId);
+    else await clearJobMetaZuordnung('anzeigengruppe', req.params.metaAdsetId);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
