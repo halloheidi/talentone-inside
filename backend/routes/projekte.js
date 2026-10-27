@@ -7,6 +7,7 @@ import { computeAutoChecklist, mergeChecklist } from '../projekt-sync.js';
 import { TEAM_MEMBERS, findMemberByName } from '../team.js';
 import { sendMentionMail } from '../mail.js';
 import { addNote as closeAddNote } from '../close.js';
+import { laufzeitStatus } from '../laufzeit.js';
 
 const router = Router();
 
@@ -43,6 +44,8 @@ const ALLOWED_FIELDS = [
   'monatsbudget_euro',
   // Migration 072: geplanter Livegang (Soll-Datum fürs Controlling-Cockpit)
   'geplanter_livegang',
+  // Migration 097: Vertragsmodell (A3) — pausen NUR über die dedizierten Endpoints ändern.
+  'vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum',
 ];
 
 function pickFields(body) {
@@ -176,6 +179,55 @@ router.get('/:id', async (req, res) => {
     } catch (err) { console.warn('[projekt-sync]', err.message); }
   }
   res.json({ projekt: data, auto_keys: autoKeys });
+});
+
+/* GET /api/projekte/:id/laufzeit — Vertrags-/Laufzeitstatus (A3) */
+router.get('/:id/laufzeit', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_projekte')
+    .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details')
+    .eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  try {
+    const status = await laufzeitStatus(data);
+    res.json({ projekt: { id: data.id, vertragsmodell: data.vertragsmodell, laufzeit_wert: data.laufzeit_wert, laufzeit_einheit: data.laufzeit_einheit, start_datum: data.start_datum, garantie: data.garantie }, status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/projekte/:id/pausen — neue Pause anlegen
+   body { von, bis?, grund?, quelle? 'nw'|'kunde', bestaetigt? } */
+router.post('/:id/pausen', async (req, res) => {
+  const { von, bis = null, grund = null, quelle = 'nw', bestaetigt = true } = req.body || {};
+  if (!von) return res.status(400).json({ error: 'von (Startdatum) ist Pflicht.' });
+  if (!['nw', 'kunde'].includes(quelle)) return res.status(400).json({ error: 'quelle muss nw oder kunde sein.' });
+  const { data: p, error } = await supabase.from('talentone_projekte').select('pausen').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  const heute = new Date().toISOString().slice(0, 10);
+  const pausen = Array.isArray(p.pausen) ? [...p.pausen] : [];
+  pausen.push({ von, bis: bis || null, grund: grund || null, quelle, beantragt_am: heute, bestaetigt_am: bestaetigt ? heute : null });
+  const { error: uErr } = await supabase.from('talentone_projekte')
+    .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+  if (uErr) return res.status(500).json({ error: uErr.message });
+  res.status(201).json({ pausen });
+});
+
+/* PATCH /api/projekte/:id/pausen/beenden — offene Pause beenden
+   body { bis? default heute, index? default letzte offene } */
+router.patch('/:id/pausen/beenden', async (req, res) => {
+  const bis = req.body?.bis || new Date().toISOString().slice(0, 10);
+  const { data: p, error } = await supabase.from('talentone_projekte').select('pausen').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  const pausen = Array.isArray(p.pausen) ? [...p.pausen] : [];
+  let idx = Number.isInteger(req.body?.index) ? req.body.index : -1;
+  if (idx < 0) { for (let i = pausen.length - 1; i >= 0; i--) if (!pausen[i].bis) { idx = i; break; } }
+  if (idx < 0 || !pausen[idx]) return res.status(400).json({ error: 'Keine offene Pause gefunden.' });
+  pausen[idx] = { ...pausen[idx], bis };
+  const { error: uErr } = await supabase.from('talentone_projekte')
+    .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+  if (uErr) return res.status(500).json({ error: uErr.message });
+  res.json({ pausen });
 });
 
 /* PATCH /api/projekte/:id — inline-Update */

@@ -746,6 +746,107 @@ function ListView({ filtered, onCardClick, updateField, checklistDone, selectedI
 
 /* ═════════════════════ SLIDE-OVER ═════════════════════ */
 
+// A3: Vertrags-/Laufzeit-Block — Modell + Laufzeit + Start + berechneter Status + Pausen.
+const HINWEIS_TEXT = {
+  keine_meta_verbindung: '🔌 Keine Meta-Verbindung — Laufzeit wird nicht gezählt.',
+  meta_daten_fehlen: '⏳ Zuordnung vorhanden, aber noch keine Insights.',
+  kein_vertragsmodell: 'ℹ️ Kein Vertragsmodell gewählt.',
+  kein_start_datum: 'ℹ️ Kein Start-Datum gesetzt — Abo-Laufzeit kann nicht gerechnet werden.',
+  abo_mit_garantie: '⚠️ Abo mit Garantie ist ungewöhnlich — bitte prüfen (blockiert nicht).',
+};
+function VertragSection({ projektId, projekt, patch }) {
+  const [status, setStatus] = useState(null);
+  const [neuePause, setNeuePause] = useState({ von: '', grund: '', quelle: 'nw' });
+  const [busy, setBusy] = useState(false);
+
+  async function ladeStatus() {
+    try { const r = await api(`/projekte/${projektId}/laufzeit`); setStatus(r.status || null); }
+    catch { setStatus(null); }
+  }
+  useEffect(() => { ladeStatus(); /* eslint-disable-next-line */ }, [projektId, projekt.vertragsmodell, projekt.laufzeit_wert, projekt.laufzeit_einheit, projekt.start_datum, projekt.garantie]);
+
+  async function addPause() {
+    if (!neuePause.von) return;
+    setBusy(true);
+    try { await api(`/projekte/${projektId}/pausen`, { method: 'POST', body: neuePause }); setNeuePause({ von: '', grund: '', quelle: 'nw' }); await ladeStatus(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  async function endePause(index) {
+    setBusy(true);
+    try { await api(`/projekte/${projektId}/pausen/beenden`, { method: 'PATCH', body: { index } }); await ladeStatus(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  const einheit = projekt.laufzeit_einheit || (projekt.vertragsmodell === 'abo' ? 'monate' : 'tage');
+  const pausen = status?.pausen || [];
+  const hinweise = status?.hinweise || [];
+
+  return (
+    <section><h3>Vertrag</h3>
+      <div className="slideover-form">
+        <label><span>Vertragsmodell</span>
+          <select className="cell-input" value={projekt.vertragsmodell || ''} onChange={e => patch({ vertragsmodell: e.target.value || null })}>
+            <option value="">—</option>
+            <option value="kampagne">Kampagne (aktive Lauftage)</option>
+            <option value="abo">Abo (Kalender-Monate)</option>
+          </select>
+        </label>
+        <label><span>Laufzeit</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input type="number" min="0" step="1" className="cell-input" style={{ flex: 1 }}
+              value={projekt.laufzeit_wert ?? ''} onChange={e => patch({ laufzeit_wert: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+            <select className="cell-input" style={{ flex: 1 }} value={einheit} onChange={e => patch({ laufzeit_einheit: e.target.value })}>
+              <option value="tage">Tage</option>
+              <option value="monate">Monate</option>
+            </select>
+          </div>
+        </label>
+        <label><span>Start-Datum</span><input type="date" className="cell-input" value={projekt.start_datum || ''} onChange={e => patch({ start_datum: e.target.value || null })} /></label>
+      </div>
+
+      {status && projekt.vertragsmodell && (
+        <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--gray-50)', border: '1px solid var(--line)', borderRadius: 8, fontSize: 12.5 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+            <span><strong>Verbraucht:</strong> {status.verbraucht == null ? '—' : `${status.verbraucht} ${einheit === 'monate' ? 'Mon.' : 'akt. Tage'}`}</span>
+            <span><strong>Soll:</strong> {status.soll == null ? 'offen' : `${status.soll} ${einheit === 'monate' ? 'Mon.' : 'Tage'}`}</span>
+            <span><strong>Rest:</strong> {status.rest == null ? '—' : `${status.rest} ${einheit === 'monate' ? 'Mon.' : 'Tage'}`}</span>
+            {status.ende_voraussichtlich && <span><strong>Vsl. Ende:</strong> {new Date(status.ende_voraussichtlich).toLocaleDateString('de-DE')}</span>}
+            {status.pausen_tage > 0 && <span><strong>Pausen:</strong> {status.pausen_tage} Tage</span>}
+          </div>
+          {hinweise.map(h => (
+            <div key={h} style={{ marginTop: 6, color: h === 'abo_mit_garantie' ? '#b26b00' : (h.startsWith('keine') || h.startsWith('kein_') ? '#b91c1c' : 'var(--ink-3)') }}>
+              {HINWEIS_TEXT[h] || h}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 6 }}>Pausen</div>
+        {pausen.length === 0 && <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Keine Pausen erfasst.</div>}
+        {pausen.map((p, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, padding: '4px 0', borderBottom: '1px solid var(--bg-2)' }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              {new Date(p.von).toLocaleDateString('de-DE')} – {p.bis ? new Date(p.bis).toLocaleDateString('de-DE') : <strong style={{ color: '#b26b00' }}>offen</strong>}
+              {p.grund ? ` · ${p.grund}` : ''} <span style={{ color: 'var(--ink-3)' }}>({p.quelle === 'kunde' ? 'Kunde' : 'N&W'})</span>
+            </span>
+            {!p.bis && <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => endePause(i)}>Pause beenden</button>}
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input type="date" className="cell-input" style={{ width: 150 }} value={neuePause.von} onChange={e => setNeuePause(s => ({ ...s, von: e.target.value }))} />
+          <input type="text" className="cell-input" style={{ flex: 1, minWidth: 120 }} placeholder="Grund (optional)" value={neuePause.grund} onChange={e => setNeuePause(s => ({ ...s, grund: e.target.value }))} />
+          <select className="cell-input" style={{ width: 110 }} value={neuePause.quelle} onChange={e => setNeuePause(s => ({ ...s, quelle: e.target.value }))}>
+            <option value="nw">N&W</option>
+            <option value="kunde">Kunde</option>
+          </select>
+          <button type="button" className="btn-ghost btn-sm" disabled={busy || !neuePause.von} onClick={addPause}>+ Pause</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
   const [loading, setLoading] = useState(true);
   const [projekt, setProjekt] = useState(null);
@@ -942,6 +1043,9 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label className="slideover-full"><span>Standorte</span><DebouncedInput value={projekt.standorte || ''} onSave={patchField('standorte')} /></label>
             </div>
           </section>
+
+          {/* Vertrag (A3) */}
+          <VertragSection projektId={projektId} projekt={projekt} patch={patch} />
 
           {/* Phasen */}
           <section><h3>Phasen</h3>
