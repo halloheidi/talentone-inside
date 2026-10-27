@@ -230,6 +230,22 @@ router.patch('/:id/pausen/beenden', async (req, res) => {
   res.json({ pausen });
 });
 
+/* PATCH /api/projekte/:id/pausen/bestaetigen — unbestätigte (Kunden-)Pause bestätigen (B2) */
+router.patch('/:id/pausen/bestaetigen', async (req, res) => {
+  const { data: p, error } = await supabase.from('talentone_projekte').select('pausen').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!p) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+  const pausen = Array.isArray(p.pausen) ? [...p.pausen] : [];
+  let idx = Number.isInteger(req.body?.index) ? req.body.index : -1;
+  if (idx < 0) { for (let i = pausen.length - 1; i >= 0; i--) if (!pausen[i].bestaetigt_am) { idx = i; break; } }
+  if (idx < 0 || !pausen[idx]) return res.status(400).json({ error: 'Keine unbestätigte Pause gefunden.' });
+  pausen[idx] = { ...pausen[idx], bestaetigt_am: new Date().toISOString().slice(0, 10) };
+  const { error: uErr } = await supabase.from('talentone_projekte')
+    .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
+  if (uErr) return res.status(500).json({ error: uErr.message });
+  res.json({ pausen });
+});
+
 /* PATCH /api/projekte/:id — inline-Update */
 router.patch('/:id', async (req, res) => {
   const patch = pickFields(req.body);

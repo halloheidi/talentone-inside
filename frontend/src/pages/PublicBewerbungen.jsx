@@ -399,6 +399,14 @@ export default function PublicBewerbungen() {
   const [managerOpen, setManagerOpen] = useState(false);
   const [erklaerungOffen, setErklaerungOffen] = useState(true);
 
+  // B2: alte Direktlinks → Portal-Dashboard umleiten (mit ?bewerbung erhalten).
+  useEffect(() => {
+    const pt = data?.kunde?.portal_token;
+    if (!pt) return;
+    const bew = new URLSearchParams(window.location.search).get('bewerbung');
+    window.location.replace(`/portal/${pt}${bew ? `?bewerbung=${bew}` : ''}`);
+  }, [data]);
+
   useEffect(() => {
     let cancel = false;
     setLoading(true);

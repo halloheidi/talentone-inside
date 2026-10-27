@@ -24,6 +24,7 @@ const REGELN = [
   { key: 'wartet_feedback',      icon: '⏳', label: 'Wartet auf Feedback',        color: 'grau',   tab: 'export' },
   { key: 'ueberarbeitung',       icon: '🔄', label: 'Überarbeitung nötig',        color: 'gelb',   tab: 'export' },
   { key: 'bereit_golive',        icon: '🚀', label: 'Bereit für Go-Live',         color: 'farbig', tab: 'export' },
+  { key: 'pause_bestaetigen',    icon: '⏸', label: 'Pause bestätigen',           color: 'gelb',   tab: 'stelle' },
   { key: 'meta_zuordnen',        icon: '🔌', label: 'Meta zuordnen',              color: 'rot',    tab: 'meta' },
   { key: 'live',                 icon: '🟢', label: 'Live',                       color: 'gruen',  tab: 'export' },
   { key: 'update_feedback_offen',icon: '📬', label: 'Update-Feedback offen',      color: 'gelb',   tab: 'export' },
@@ -57,6 +58,11 @@ function berechneSchritt(ctx) {
   // Manuell abgehaktes Tab (tab_status[tab] === true) → zugehöriger Workflow-Schritt
   // wird übersprungen (Schritt wurde ausserhalb des Tools erledigt).
   const tabErledigt = (tab) => tabStatus && typeof tabStatus === 'object' && tabStatus[tab] === true;
+
+  // B2: offener (unbestätigter) Pausen-Antrag des Kunden → Vorrang, muss bestätigt werden.
+  if (Array.isArray(projekt?.pausen) && projekt.pausen.some(p => p && p.quelle === 'kunde' && !p.bestaetigt_am)) {
+    return { ...REGEL_BY_KEY.pause_bestaetigen };
+  }
 
   // ══════════════════════════════════════════════════════════════════════
   // PROJEKT-STATUS HAT VORRANG:
@@ -188,7 +194,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
   const [kundenRes, projekteRes, jobsRes, refbilderRes] = await Promise.all([
     supabase.from('talentone_kunden').select('id, status, agentur, upload_token, logo_url').in('id', ids),
     supabase.from('talentone_projekte')
-      .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at, update_feedback_status, update_feedback_seit')
+      .select('id, kunde_id, status, start_phase1, ende_phase1, projektdauer, created_at, update_feedback_status, update_feedback_seit, pausen')
       .in('kunde_id', ids).order('created_at', { ascending: false }),
     supabase.from('talentone_jobs')
       .select('id, kunde_id, stelle, created_at, tab_status').in('kunde_id', ids)

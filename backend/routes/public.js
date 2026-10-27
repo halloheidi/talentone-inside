@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
+import { laufzeitStatus } from '../laufzeit.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
@@ -1043,7 +1044,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
 
   const { data: kunde } = await supabase
     .from('talentone_kunden')
-    .select('id, firmenname, agentur, logo_url, ansprechpartner, anrede_form, anrede_titel, nachname')
+    .select('id, firmenname, agentur, logo_url, ansprechpartner, anrede_form, anrede_titel, nachname, portal_token')
     .eq('id', job.kunde_id)
     .maybeSingle();
 
@@ -1127,6 +1128,7 @@ router.get('/bewerbungen/:token', async (req, res) => {
       firmenname: kunde.firmenname, agentur: kunde.agentur, logo_url: kunde.logo_url,
       ansprechpartner: kunde.ansprechpartner, anrede_form: kunde.anrede_form,
       anrede_titel: kunde.anrede_titel, nachname: kunde.nachname,
+      portal_token: kunde.portal_token || null,
     } : null,
     bewerbungen: bewerbungen || [],
     feedback,
@@ -1697,7 +1699,7 @@ router.get('/portal/:token', async (req, res) => {
     if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
 
     const { data: jobs = [] } = await supabase.from('talentone_jobs')
-      .select('id, stelle, region, projekttyp, neukunden_daten, pipeline_stufen, anfragen_felder, anfragen_token, bewerbungen_token, created_at, vorqualifizierung, vorqualifizierung_felder, wichtige_kriterien')
+      .select('id, stelle, region, projekttyp, projekt_id, neukunden_daten, pipeline_stufen, anfragen_felder, anfragen_token, bewerbungen_token, created_at, vorqualifizierung, vorqualifizierung_felder, wichtige_kriterien, wichtige_kriterien_struktur')
       .eq('kunde_id', kunde.id)
       .order('created_at', { ascending: true });
 
@@ -1724,13 +1726,16 @@ router.get('/portal/:token', async (req, res) => {
         : { data: [] },
     ]);
 
-    // Vorqualifizierungs-Werte der Bewerbungen (fuer die Vorqual-Spalten im Portal)
+    // Bewerber-Notizen (B3: VOLLSTÄNDIG — Notizen ÜBER den Kandidaten sind für den Kunden
+    // bestimmt). Verboten sind nur Daten über den Kunden selbst (werden hier nie geladen).
     const bewIds = (bewerbungenRes.data || []).map(b => b.id);
     const vorqualWerteByBew = {};
-    const kontaktByBew = {};  // bewerbung_id -> { kontaktversuche, erreicht_am }
+    const kontaktByBew = {};  // bewerbung_id -> { kontaktversuche, erreicht_am } (Abwärtskompat.)
+    const notizByBew = {};    // bewerbung_id -> volle Akte-Notiz
     if (bewIds.length) {
       const { data: notizen = [] } = await supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, vorqualifizierung_werte, anrufversuche').in('bewerbung_id', bewIds);
+        .select('bewerbung_id, status, bewertung, ampel, verfuegbarkeit, gehaltswunsch, naechste_aktion, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, kriterien_check, vorqualifizierung_werte, updated_at')
+        .in('bewerbung_id', bewIds);
       for (const n of notizen) {
         vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
         const av = Array.isArray(n.anrufversuche) ? n.anrufversuche : [];
@@ -1738,6 +1743,34 @@ router.get('/portal/:token', async (req, res) => {
           kontaktversuche: av.filter(a => a?.datum).map(a => ({ datum: a.datum, erreicht: a.ergebnis === 'erreicht' })),
           erreicht_am: av.find(a => a?.datum && a.ergebnis === 'erreicht')?.datum || null,
         };
+        notizByBew[n.bewerbung_id] = {
+          status: n.status || null, bewertung: n.bewertung ?? null, ampel: n.ampel || null,
+          verfuegbarkeit: n.verfuegbarkeit || null, gehaltswunsch: n.gehaltswunsch || null,
+          naechste_aktion: n.naechste_aktion || null, notizen: n.notizen || null,
+          anrufversuche: av, vg_vereinbart_am: n.vg_vereinbart_am || null,
+          eingestellt: n.eingestellt || null, kunde_kontaktiert: !!n.kunde_kontaktiert,
+          kriterien_check: n.kriterien_check || {}, updated_at: n.updated_at || null,
+        };
+      }
+    }
+
+    // B2: Laufzeit je Stelle (portal-sicher — laufzeitStatus enthält KEINE Meta-Kennzahlen).
+    const projektIds = [...new Set(jobs.map(j => j.projekt_id).filter(Boolean))];
+    const laufzeitByProjekt = {};
+    if (projektIds.length) {
+      const { data: projekte = [] } = await supabase.from('talentone_projekte')
+        .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details')
+        .in('id', projektIds);
+      for (const p of (projekte || [])) {
+        try {
+          const s = await laufzeitStatus(p);
+          laufzeitByProjekt[p.id] = {
+            modell: s.modell, einheit: s.einheit, soll: s.soll, verbraucht: s.verbraucht,
+            rest: s.rest, ueberlaufzeit_tage: s.ueberlaufzeit_tage, ende_voraussichtlich: s.ende_voraussichtlich,
+            start_datum: p.start_datum, pausen: s.pausen, pausen_tage: s.pausen_tage,
+            garantie: s.garantie, garantie_details: p.garantie_details || null, hinweise: s.hinweise,
+          };
+        } catch { laufzeitByProjekt[p.id] = null; }
       }
     }
 
@@ -1776,6 +1809,8 @@ router.get('/portal/:token', async (req, res) => {
         bewerbungen_token: j.bewerbungen_token,
         vorqualifizierung: !!j.vorqualifizierung,
         wichtige_kriterien: normalizeKriterien(j.wichtige_kriterien),
+        kriterien_struktur: normalizeKriterienStruktur(j.wichtige_kriterien_struktur ?? j.wichtige_kriterien),
+        laufzeit: j.projekt_id ? (laufzeitByProjekt[j.projekt_id] || null) : null,
         // Befuellte Vorqual-Felder + wichtige Kriterien (immer) — gleiche
         // Spaltenlogik wie in der Public-Bewerberliste.
         vorqual_spalten: kundenVorqualSpalten({
@@ -1810,7 +1845,7 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }) })),
+      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null })),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {
@@ -2154,6 +2189,39 @@ router.delete('/portal/:token/mitarbeiterstimmen/:sid', async (req, res) => {
       .delete().eq('id', req.params.sid).eq('kunde_id', kunde.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* B2: Abo-Pause beantragen (Kunde). Legt Pausen-Eintrag quelle='kunde', bestaetigt_am=null an,
+   schickt interne Mail. Nur bei vertragsmodell='abo'. Bestätigung läuft intern im Vertrag-Block. */
+router.post('/portal/:token/projekt-pause', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    const { job_id, von, bis = null, grund = null } = req.body || {};
+    if (!von) return res.status(400).json({ error: 'Startdatum (von) ist Pflicht.' });
+    const { data: job } = await supabase.from('talentone_jobs').select('id, stelle, kunde_id, projekt_id').eq('id', job_id).maybeSingle();
+    if (!job || job.kunde_id !== kunde.id || !job.projekt_id) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+    const { data: projekt } = await supabase.from('talentone_projekte').select('id, projekt, vertragsmodell, pausen').eq('id', job.projekt_id).maybeSingle();
+    if (!projekt) return res.status(404).json({ error: 'Projekt nicht gefunden.' });
+    if (projekt.vertragsmodell !== 'abo') return res.status(400).json({ error: 'Pause nur bei Abo-Projekten möglich.' });
+    const heute = new Date().toISOString().slice(0, 10);
+    const pausen = Array.isArray(projekt.pausen) ? [...projekt.pausen] : [];
+    pausen.push({ von, bis: bis || null, grund: grund || null, quelle: 'kunde', beantragt_am: heute, bestaetigt_am: null });
+    const { error } = await supabase.from('talentone_projekte').update({ pausen, updated_at: new Date().toISOString() }).eq('id', projekt.id);
+    if (error) return res.status(500).json({ error: error.message });
+    (async () => {
+      try {
+        const { sendTeamAlertMail } = await import('../mail.js');
+        const base = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
+        await sendTeamAlertMail({
+          subject: `⏸ Pause beantragt — ${kunde.firmenname || 'Kunde'}`,
+          headline: 'Pause-Antrag vom Kunden',
+          lead: `${kunde.firmenname || 'Ein Kunde'} beantragt eine Pause für „${projekt.projekt || job.stelle || 'Projekt'}" ab ${von}${bis ? ` bis ${bis}` : ''}${grund ? ` · Grund: ${grund}` : ''}. Bitte im Vertrag-Block des Projekts bestätigen.`,
+          linkUrl: `${base}/projekte`, linkLabel: 'Zum Projekt',
+        });
+      } catch (e) { console.warn('[portal/projekt-pause mail]', e.message); }
+    })();
+    res.status(201).json({ pausen });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

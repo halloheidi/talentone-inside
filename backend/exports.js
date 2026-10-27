@@ -294,9 +294,15 @@ ${antworten.map(a => {
     } catch (err) { console.warn('[bewerbungs-mail] token-nachladen fehlgeschlagen:', err.message); }
   }
   const publicBase = getPublicBaseUrl(kunde?.agentur);
-  const bewerbungenUrl = bewerbungenToken
-    ? `${publicBase}/bewerbungen/${bewerbungenToken}`
-    : null;
+  // B2: Kunden-Mail führt ins Portal-Dashboard mit Hinweis-Karte zur neuen Bewerbung.
+  let portalToken = kunde?.portal_token || null;
+  if (!portalToken && kunde?.id) {
+    try { const { data: kRow } = await supabase.from('talentone_kunden').select('portal_token').eq('id', kunde.id).maybeSingle(); portalToken = kRow?.portal_token || null; }
+    catch (err) { console.warn('[bewerbungs-mail] portal_token-nachladen:', err.message); }
+  }
+  const bewerbungenUrl = portalToken
+    ? `${publicBase}/portal/${portalToken}${bewerbung?.id ? `?bewerbung=${bewerbung.id}` : ''}`
+    : (bewerbungenToken ? `${publicBase}/bewerbungen/${bewerbungenToken}` : null);
 
   // Datei-Anhänge (Lebenslauf o. Ä.) als STABILE Links — NIE eine rohe Signed URL
   // mit Ablauf, sondern der Download-Endpoint mit Portal-Token (frische Signed URL
