@@ -105,14 +105,14 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
       ) : gefiltert.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Keine Bewerbungen in dieser Ansicht.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
               <th style={thStyle}>Name</th>
-              <th style={{ ...thStyle, width: 86 }}>Eingang</th>
-              <th style={{ ...thStyle, width: 120 }}>Status</th>
-              <th style={{ ...thStyle, width: 110 }}>Kriterien</th>
-              <th style={{ ...thStyle, width: 110 }}>Feedback</th>
+              <th style={thStyle}>Eingang</th>
+              <th style={thStyle}>Status</th>
+              <th style={thStyle}>Kriterien</th>
+              <th style={thStyle}>Feedback</th>
             </tr>
           </thead>
           <tbody>
@@ -123,19 +123,19 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
               const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && modus === 'intern' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
               return (
                 <tr key={b.id} style={{ borderBottom: '1px solid #f1f1ee', opacity: b.ko_kriterium ? 0.6 : 1, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
-                  <td style={{ ...tdStyle, overflow: 'hidden' }}>
+                  <td style={tdStyle}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
                       <span style={{ position: 'relative', flexShrink: 0 }}>
                         <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
                         <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
                       </span>
-                      <span style={{ fontWeight: 600, color: '#1b3f80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name || '—'}</span>
+                      <span style={{ fontWeight: 600, color: '#1b3f80' }}>{b.name || '—'}</span>
                       {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
                     </div>
                   </td>
                   <td style={tdStyle}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
                   <td style={tdStyle}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
-                  <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
+                  <td style={{ ...tdStyle, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
                   <td style={tdStyle}>{fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fb] || '#5a5955' }}>{FEEDBACK_LABEL[fb] || fb}</span> : <span style={{ color: '#9a9994' }}>—</span>}</td>
                 </tr>
               );
