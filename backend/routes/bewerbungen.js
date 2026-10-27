@@ -126,6 +126,18 @@ router.patch('/:id/notiz', async (req, res) => {
 // PATCH /api/bewerbungen/:id/zuordnen  body: { job_id }
 // Ordnet eine Bewerbung einer anderen Stelle DES SELBEN KUNDEN zu (Multi-Stellen-
 // Funnel: Mapping danebengegriffen oder Kandidat umentschieden). Setzt zuordnung_unklar zurück.
+// PATCH /api/bewerbungen/:id/feedback — intern den Kundenfeedback-Status setzen (z. B. KO → 'ungeeignet').
+router.patch('/:id/feedback', async (req, res) => {
+  const STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'abgesagt'];
+  const patch = { bewerbung_id: req.params.id, updated_at: new Date().toISOString() };
+  if (req.body?.status !== undefined) patch.status = STATI.includes(req.body.status) ? req.body.status : 'neu';
+  if (req.body?.vorstellungsgespraech_am !== undefined) patch.vorstellungsgespraech_am = req.body.vorstellungsgespraech_am || null;
+  const { data, error } = await supabase.from('talentone_bewerber_kundenfeedback')
+    .upsert(patch, { onConflict: 'bewerbung_id' }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ feedback: data });
+});
+
 // POST /api/bewerbungen/:id/kommentar — interner Kommentar (autor_typ 'nw') in den gemeinsamen Verlauf.
 router.post('/:id/kommentar', async (req, res) => {
   const text = (req.body?.text || '').toString().trim();
@@ -395,6 +407,92 @@ async function loadBewerbungenFuerJob(jobId) {
 
   return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare };
 }
+
+// Serverseitige Bearbeitungs-Ableitung (identisch zur Frontend-Kaskade in BewerberListe).
+function deriveBearbeitung(n, feedbackStatus, hatKommentar) {
+  n = n || {};
+  const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a && a.datum) : [];
+  if (n.eingestellt && n.eingestellt !== 'offen') return 'eingestellt';
+  if (n.vg_vereinbart_am || feedbackStatus === 'vorstellungsgespraech') return 'vg';
+  if (n.kunde_kontaktiert || (feedbackStatus && feedbackStatus !== 'neu')) return 'vorgestellt';
+  if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return 'vorqualifiziert';
+  if (av.length > 0) return 'kontaktversuch';
+  const ch = n.kriterien_check || {};
+  const hatCheck = Object.values(ch).some(v => v === true || v === false);
+  if (n.ampel || (n.notizen && String(n.notizen).trim()) || hatCheck || hatKommentar) return 'in_bearbeitung';
+  return 'neu';
+}
+
+// GET /api/bewerbungen/uebersicht — Kunden-/Stellen-Karten aus Bewerber-Sicht (live/pausiert).
+// Bulk-Queries + In-Memory-Aggregation (kein N+1).
+router.get('/uebersicht', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const PAUSE = new Set(['feedbackschleife', 'hold', 'pausiert']);
+    const [{ data: kunden = [] }, { data: projekte = [] }] = await Promise.all([
+      supabase.from('talentone_kunden').select('id, firmenname, logo_url, agentur').eq('archiviert', false),
+      supabase.from('talentone_projekte').select('id, kunde_id, status'),
+    ]);
+    const projStatus = Object.fromEntries((projekte || []).map(p => [p.id, p.status]));
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('id, kunde_id, stelle, projekt_id, projekttyp');
+    // Nur Recruiting-Stellen, deren Projekt live/pausiert ist.
+    const stellen = (jobs || []).filter(j => j.projekttyp === 'mitarbeitergewinnung' && j.projekt_id
+      && (projStatus[j.projekt_id] === 'live' || PAUSE.has(projStatus[j.projekt_id])));
+    const jobIds = stellen.map(j => j.id);
+    const aggByJob = {};
+    for (const j of stellen) aggByJob[j.id] = { neu: 0, kontaktversuch: 0, in_bearbeitung: 0, vorqualifiziert: 0, vorgestellt: 0, vg: 0, eingestellt: 0, kommentare: 0, kriterien_geaendert: false };
+
+    if (jobIds.length) {
+      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id').in('job_id', jobIds);
+      const bewIds = bew.map(b => b.id);
+      const bewJob = Object.fromEntries(bew.map(b => [b.id, b.job_id]));
+      const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }, { data: logs = [] }] = await Promise.all([
+        bewIds.length ? supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check, updated_at').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
+        bewIds.length ? supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
+        bewIds.length ? supabase.from('talentone_bewerber_kommentare').select('bewerbung_id, autor_typ, created_at').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
+        supabase.from('talentone_kriterien_log').select('job_id, von, created_at').in('job_id', jobIds).eq('von', 'kunde'),
+      ]);
+      const notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
+      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      const kommByBew = {};
+      for (const k of (komm || [])) (kommByBew[k.bewerbung_id] ||= []).push(k);
+      // Letzte Kunden-Kriterienänderung je Job + letzter Recruiter-Check je Job.
+      const letzteKundeLog = {}, letzterCheck = {};
+      for (const l of (logs || [])) { if (!letzteKundeLog[l.job_id] || l.created_at > letzteKundeLog[l.job_id]) letzteKundeLog[l.job_id] = l.created_at; }
+
+      for (const b of bew) {
+        const jid = bewJob[b.id]; const agg = aggByJob[jid]; if (!agg) continue;
+        const n = notizByBew[b.id] || {};
+        const ks = kommByBew[b.id] || [];
+        const letzteKunde = ks.filter(k => k.autor_typ === 'kunde').reduce((m, k) => k.created_at > m ? k.created_at : m, '');
+        const letzteNw = ks.filter(k => k.autor_typ === 'nw').reduce((m, k) => k.created_at > m ? k.created_at : m, '');
+        const recruiterStand = [letzteNw, n.updated_at || ''].reduce((a, c) => c > a ? c : a, '');
+        const offenerKundenkommentar = letzteKunde && letzteKunde > recruiterStand;
+        const key = deriveBearbeitung(n, fbByBew[b.id] || null, ks.length > 0);
+        agg[key]++;
+        if (offenerKundenkommentar) agg.kommentare++;
+        // letzter Check = jüngste Notiz-Bearbeitung mit gesetzten Kriterien-Haken
+        const ch = n.kriterien_check || {};
+        if (Object.values(ch).some(v => v === true || v === false) && n.updated_at && (!letzterCheck[jid] || n.updated_at > letzterCheck[jid])) letzterCheck[jid] = n.updated_at;
+      }
+      for (const jid of jobIds) {
+        if (letzteKundeLog[jid] && (!letzterCheck[jid] || letzteKundeLog[jid] > letzterCheck[jid])) aggByJob[jid].kriterien_geaendert = true;
+      }
+    }
+
+    const kundeById = Object.fromEntries((kunden || []).map(k => [k.id, k]));
+    const byKunde = {};
+    for (const j of stellen) {
+      const k = kundeById[j.kunde_id]; if (!k) continue;
+      (byKunde[k.id] ||= { id: k.id, firmenname: k.firmenname, logo_url: k.logo_url, agentur: k.agentur, stellen: [] })
+        .stellen.push({ job_id: j.id, stelle: j.stelle || 'Unbenannte Stelle', ...aggByJob[j.id] });
+    }
+    const out = Object.values(byKunde);
+    console.log(`[bewerbungen/uebersicht] ${out.length} Kunden / ${stellen.length} Stellen in ${Date.now() - t0} ms`);
+    res.json({ kunden: out });
+  } catch (err) { console.error('[bewerbungen/uebersicht]', err.message); res.status(500).json({ error: err.message }); }
+});
 
 // GET /api/bewerbungen/job/:jobId — komplette Tabellen-Daten für einen Job
 router.get('/job/:jobId', async (req, res) => {

@@ -290,6 +290,13 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
   const editierbar = modus === 'intern' && typeof onPatch === 'function';
   const [kommEntwurf, setKommEntwurf] = useState('');
   const [busy, setBusy] = useState(false);
+  const [anruf, setAnruf] = useState({ datum: new Date().toISOString().slice(0, 10), ergebnis: 'nicht_erreicht', notiz: '' });
+  async function patchIntern(patch) { if (!onPatch) return; try { await onPatch(patch); await onReload?.(); } catch (e) { alert(e.message || 'Speichern fehlgeschlagen.'); } }
+  async function addAnruf() {
+    const av = Array.isArray(n.anrufversuche) ? n.anrufversuche : [];
+    await patchIntern({ anrufversuche: [...av, { datum: anruf.datum || new Date().toISOString().slice(0, 10), ergebnis: anruf.ergebnis, notiz: anruf.notiz }] });
+    setAnruf({ datum: new Date().toISOString().slice(0, 10), ergebnis: 'nicht_erreicht', notiz: '' });
+  }
 
   const row = (label, val) => val ? <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955', minWidth: 130 }}>{label}</span><span style={{ fontWeight: 500 }}>{val}</span></div> : null;
   const checkIcon = v => v === true ? '✓' : v === false ? '✗' : '–';
@@ -349,7 +356,34 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
             )}
           </div>
 
-          {/* Kundenfeedback — im Portal (onFeedback) immer editierbar */}
+          {/* Interne Bearbeitung (nur modus=intern) */}
+          {editierbar && (
+            <div style={{ background: '#fafaf8', border: '1px solid #ececea', borderRadius: 10, padding: 12, marginBottom: 14, display: 'grid', gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#5a5955' }}>Interne Bearbeitung</div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!n.nw_kontaktiert} onChange={e => patchIntern({ nw_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} /> von uns kontaktiert</label>
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!n.kunde_kontaktiert} onChange={e => patchIntern({ kunde_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} /> dem Kunden vorgestellt</label>
+              </div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>VG-Termin <input type="date" value={(n.vg_vereinbart_am || '').slice(0, 10)} onChange={e => patchIntern({ vg_vereinbart_am: e.target.value || null })} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px' }} /></label>
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>Eingestellt <select value={n.eingestellt || 'offen'} onChange={e => patchIntern({ eingestellt: e.target.value })} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px' }}>{['offen', 'ja', 'nein'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 12, color: '#5a5955' }}>Anrufversuch:</strong>
+                <input type="date" value={anruf.datum} onChange={e => setAnruf(a => ({ ...a, datum: e.target.value }))} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px', fontSize: 12 }} />
+                <select value={anruf.ergebnis} onChange={e => setAnruf(a => ({ ...a, ergebnis: e.target.value }))} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}>
+                  <option value="erreicht">erreicht</option><option value="nicht_erreicht">nicht erreicht</option><option value="mailbox">Mailbox</option>
+                </select>
+                <input placeholder="Notiz" value={anruf.notiz} onChange={e => setAnruf(a => ({ ...a, notiz: e.target.value }))} style={{ flex: 1, minWidth: 100, border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px', fontSize: 12 }} />
+                <button onClick={addAnruf} style={{ background: primary, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>+ Eintragen</button>
+              </div>
+            </div>
+          )}
+
+          {/* Kundenfeedback — im Portal (onFeedback) immer editierbar; intern read-only Anzeige */}
+          {!onFeedback && b.feedback?.status && (
+            <div style={{ fontSize: 13, marginBottom: 14 }}><span style={{ color: '#5a5955' }}>Kundenfeedback:</span> <strong style={{ color: FEEDBACK_COLOR[feedbackStatusOf(b)] || '#5a5955' }}>{FEEDBACK_LABEL[feedbackStatusOf(b)]}</strong>{b.feedback.vorstellungsgespraech_am ? ` · VG ${new Date(b.feedback.vorstellungsgespraech_am).toLocaleDateString('de-DE')}` : ''}</div>
+          )}
           {onFeedback && (
             <div style={{ background: '#f7f9ff', border: '1px solid #e3e9ff', borderRadius: 10, padding: 12, marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 8 }}>{t(kunde, 'Dein Feedback', 'Ihr Feedback')}</div>

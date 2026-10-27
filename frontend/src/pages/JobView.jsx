@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 
@@ -435,6 +435,7 @@ function ProjektKommentare({ projekt, team, defaultAutor }) {
 const TABS = [
   { to: 'stelle', label: 'Stelle' },
   { to: 'vertrag', label: 'Vertrag & Status' },
+  { to: 'bewerber', label: 'Bewerber' },
   { to: 'creatives', label: 'Creatives' },
   { to: 'adcopies', label: 'Ad Copies' },
   { to: 'funnel', label: 'Funnel' },
@@ -639,6 +640,10 @@ function ArbeitshinweiseInline({ job, onSaved }) {
 
 export default function JobView() {
   const { kundeId, jobId } = useParams();
+  const [sp] = useSearchParams();
+  const navigate = useNavigate();
+  // Alte Bewerber-Verlinkung (?tab=bewerber) → neuer Bewerber-Tab.
+  useEffect(() => { if (sp.get('tab') === 'bewerber') navigate(`/kunden/${kundeId}/jobs/${jobId}/bewerber`, { replace: true }); }, [sp, kundeId, jobId, navigate]);
   const { me, user, flags } = useAuth();
   // Creative-Wizard V2 (Test): Reiter per Flag. Alt-Reiter „Creatives" wird bei
   // hide_creatives_v1 ausgeblendet (nicht gelöscht — Rückweg bleibt jederzeit).

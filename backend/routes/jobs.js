@@ -913,7 +913,11 @@ router.get('/:id/kriterien', async (req, res) => {
   // Fallback: wenn struktur noch leer, aus dem Alt-Array ableiten (nicht persistieren).
   const quelle = job.wichtige_kriterien_struktur ?? job.wichtige_kriterien;
   const kriterien = normalizeKriterienStruktur(quelle);
-  res.json({ kriterien, erfuellt: kriterienErfuellt(kriterien) });
+  // Jüngste Kunden-Änderung (für „zuletzt vom Kunden geändert am …").
+  const { data: log } = await supabase.from('talentone_kriterien_log')
+    .select('created_at').eq('job_id', req.params.id).eq('von', 'kunde')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  res.json({ kriterien, erfuellt: kriterienErfuellt(kriterien), log: log ? { kunde_am: log.created_at } : null });
 });
 
 // PUT /api/jobs/:id/kriterien — intern (von='nw'); Log in talentone_kriterien_log.
