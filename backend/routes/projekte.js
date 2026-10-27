@@ -237,6 +237,26 @@ router.patch('/:id', async (req, res) => {
     return res.status(400).json({ error: `Status ungültig.` });
   }
   patch.updated_at = new Date().toISOString();
+
+  // B1: Pausen-Automatik bei Statuswechsel. Alt-Status + Pausen vorab laden,
+  // nur wenn sich der Status tatsächlich ändert.
+  if (patch.status) {
+    const { data: alt } = await supabase.from('talentone_projekte')
+      .select('status, pausen').eq('id', req.params.id).maybeSingle();
+    const altStatus = alt?.status || null;
+    if (altStatus !== patch.status) {
+      const heute = new Date().toISOString().slice(0, 10);
+      let pausen = Array.isArray(alt?.pausen) ? [...alt.pausen] : [];
+      if (patch.status === 'pausiert' && altStatus !== 'pausiert') {
+        pausen.push({ von: heute, bis: null, grund: 'Status auf pausiert', quelle: 'nw', beantragt_am: heute, bestaetigt_am: heute });
+        patch.pausen = pausen;
+      } else if (altStatus === 'pausiert' && patch.status !== 'pausiert') {
+        for (let i = pausen.length - 1; i >= 0; i--) if (!pausen[i].bis) { pausen[i] = { ...pausen[i], bis: heute }; break; }
+        patch.pausen = pausen;
+      }
+    }
+  }
+
   const { data, error } = await supabase
     .from('talentone_projekte')
     .update(patch).eq('id', req.params.id).select().single();

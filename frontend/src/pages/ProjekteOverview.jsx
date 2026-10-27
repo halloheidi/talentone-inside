@@ -439,6 +439,9 @@ export default function ProjekteOverview() {
   return (
     <div className="bew-overview proj-overview">
       <PageContainer wide />
+      <div className="alert" style={{ background: '#eef3ff', color: '#1b3f80', marginBottom: 10, fontSize: 13 }}>
+        Neu: Kanban nach Kunde &amp; Projekt in der <Link to="/kunden">Kundenliste</Link>.
+      </div>
       <header className="bew-overview-head">
         <h1>Projekte <span style={{ fontSize: 14, color: 'var(--ink-3)', fontWeight: 500 }}>({filtered.length} von {projekte.length})</span></h1>
         <div className="proj-view-toggle">

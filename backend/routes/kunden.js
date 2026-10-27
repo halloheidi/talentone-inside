@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
+import { laufzeitStatus } from '../laufzeit.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
@@ -295,6 +296,68 @@ router.get('/naechste-schritte', async (req, res) => {
     console.error('[naechste-schritte]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+/* GET /api/kunden/kanban?include_archived=1 — B1: Kunden-Kanban-Daten.
+   Je Kunde: status_gruppe (aktivstes Projekt), Bewerbungen 7T/gesamt, projekte[] mit
+   laufzeit_kurz (serverseitig aus laufzeitStatus, nur live/pausiert) + hinweise[]. */
+router.get('/kanban', async (req, res) => {
+  try {
+    const includeArchived = req.query.include_archived === '1';
+    let kq = supabase.from('talentone_kunden').select('id, firmenname, logo_url, agentur, status, archiviert');
+    if (!includeArchived) kq = kq.eq('archiviert', false);
+    const { data: kunden = [] } = await kq;
+    const ids = (kunden || []).map(k => k.id);
+    if (!ids.length) return res.json({ kunden: [] });
+
+    const { data: vrows = [] } = await supabase.from('talentone_kunden_status_v').select('*').in('kunde_id', ids);
+    const vById = Object.fromEntries((vrows || []).map(v => [v.kunde_id, v]));
+
+    const { data: projekte = [] } = await supabase.from('talentone_projekte')
+      .select('id, kunde_id, status, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie')
+      .in('kunde_id', ids);
+    const laufzeitKurz = {}, hinweise = {};
+    for (const p of (projekte || [])) {
+      const istPauseGruppe = ['feedbackschleife', 'hold', 'pausiert'].includes(p.status);
+      if (p.status !== 'live' && !istPauseGruppe) continue;   // laufzeit_kurz nur wo sinnvoll
+      try {
+        const s = await laufzeitStatus(p);
+        hinweise[p.id] = s.hinweise || [];
+        if (s.soll != null && s.verbraucht != null) {
+          laufzeitKurz[p.id] = s.modell === 'abo' ? `Monat ${Math.round(s.verbraucht)}/${s.soll}` : `Tag ${s.verbraucht}/${s.soll}`;
+        }
+      } catch { /* laufzeit optional */ }
+    }
+
+    const { data: jobs = [] } = await supabase.from('talentone_jobs').select('id, kunde_id').in('kunde_id', ids);
+    const jobKunde = Object.fromEntries((jobs || []).map(j => [j.id, j.kunde_id]));
+    const jobIds = (jobs || []).map(j => j.id);
+    const bew7 = {}, bewGes = {};
+    if (jobIds.length) {
+      const vor7 = new Date(Date.now() - 7 * 86400000).toISOString();
+      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('job_id, created_at').in('job_id', jobIds);
+      for (const b of (bew || [])) {
+        const kId = jobKunde[b.job_id]; if (!kId) continue;
+        bewGes[kId] = (bewGes[kId] || 0) + 1;
+        if (b.created_at >= vor7) bew7[kId] = (bew7[kId] || 0) + 1;
+      }
+    }
+
+    const out = (kunden || []).map(k => {
+      const v = vById[k.id];
+      const projekte_json = (v?.projekte_json || []).map(pj => ({
+        ...pj, laufzeit_kurz: laufzeitKurz[pj.id] || null, hinweise: hinweise[pj.id] || [],
+      }));
+      return {
+        id: k.id, firmenname: k.firmenname, logo_url: k.logo_url, agentur: k.agentur,
+        status: k.status, archiviert: k.archiviert,
+        status_gruppe: v?.status_gruppe || 'vorbereitung',
+        bewerbungen_7t: bew7[k.id] || 0, bewerbungen_gesamt: bewGes[k.id] || 0,
+        projekte: projekte_json,
+      };
+    });
+    res.json({ kunden: out });
+  } catch (err) { console.error('[kunden/kanban]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 /* GET /api/kunden/projekt-uebersicht?ids=a,b,c — pro Kunde: Projekt-Kommentar-Anzahl,
