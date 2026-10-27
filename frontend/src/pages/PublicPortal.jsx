@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
 import KriterienKachel from '../components/KriterienKachel.jsx';
-import { BewerberListe, ampelVerteilung, AMPELN } from '../components/BewerberListe.jsx';
+import { BewerberListe, ampelVerteilung, AMPELN, bearbeitungStatus } from '../components/BewerberListe.jsx';
 import AnfragenKanban from '../components/AnfragenKanban.jsx';
 import { supabase } from '../lib/supabase.js';
 import { t } from '../lib/anrede.js';
@@ -187,8 +187,7 @@ export default function PublicPortal() {
             {portalJobs.map(j => {
               const aktiv = j.id === activeJobId;
               const jbew = (data.bewerbungen || []).filter(b => b.job_id === j.id);
-              const vor7 = Date.now() - 7 * 86400000;
-              const neu = jbew.filter(b => new Date(b.created_at).getTime() >= vor7).length;
+              const neu = jbew.filter(b => bearbeitungStatus(b).key === 'neu').length;
               return (
                 <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8,

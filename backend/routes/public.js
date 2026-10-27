@@ -1735,7 +1735,7 @@ router.get('/portal/:token', async (req, res) => {
     const notizByBew = {};    // bewerbung_id -> volle Akte-Notiz
     if (bewIds.length) {
       const { data: notizen = [] } = await supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, status, bewertung, ampel, verfuegbarkeit, gehaltswunsch, naechste_aktion, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, kriterien_check, vorqualifizierung_werte, updated_at')
+        .select('bewerbung_id, status, bewertung, ampel, verfuegbarkeit, gehaltswunsch, naechste_aktion, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check, vorqualifizierung_werte, updated_at')
         .in('bewerbung_id', bewIds);
       for (const n of notizen) {
         vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
@@ -1749,7 +1749,7 @@ router.get('/portal/:token', async (req, res) => {
           verfuegbarkeit: n.verfuegbarkeit || null, gehaltswunsch: n.gehaltswunsch || null,
           naechste_aktion: n.naechste_aktion || null, notizen: n.notizen || null,
           anrufversuche: av, vg_vereinbart_am: n.vg_vereinbart_am || null,
-          eingestellt: n.eingestellt || null, kunde_kontaktiert: !!n.kunde_kontaktiert,
+          eingestellt: n.eingestellt || null, kunde_kontaktiert: !!n.kunde_kontaktiert, nw_kontaktiert: !!n.nw_kontaktiert,
           kriterien_check: n.kriterien_check || {}, updated_at: n.updated_at || null,
         };
       }

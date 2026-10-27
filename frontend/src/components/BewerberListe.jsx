@@ -37,8 +37,32 @@ const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsges
 const FEEDBACK_COLOR = { interessant: '#1e40af', vorstellungsgespraech: '#5b21b6', eingestellt: '#166534', absage: '#b91c1c', abgesagt: '#b91c1c', ungeeignet: '#b45309' };
 // Normalisiert auf die Filter-/Dropdown-Werte (abgesagt→absage, leer→neu).
 export function feedbackStatusOf(b) { const s = b?.feedback?.status || 'neu'; return s === 'abgesagt' ? 'absage' : s; }
-// Unser interner Bearbeitungsstatus (nicht Kundenfeedback).
-const BEARBEITUNG_LABEL = { neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessant', abgesagt: 'Abgesagt' };
+// Abgeleiteter Bearbeitungsstatus (NICHT bewerber_notizen.status). Erster Treffer gilt.
+export const BEARBEITUNG = [
+  { key: 'neu', label: 'Neu', color: '#6b7280' },
+  { key: 'in_bearbeitung', label: 'In Bearbeitung', color: '#6b7280' },
+  { key: 'kontaktversuch', label: 'Kontaktversuch', color: '#b45309' },
+  { key: 'vorqualifiziert', label: 'Vorqualifiziert', color: '#1e40af' },
+  { key: 'vorgestellt', label: 'Vorgestellt', color: '#5b21b6' },
+  { key: 'vg', label: 'VG vereinbart', color: '#166534' },
+  { key: 'eingestellt', label: 'Eingestellt', color: '#166534' },
+];
+const BEARB_BY_KEY = Object.fromEntries(BEARBEITUNG.map(x => [x.key, x]));
+export function bearbeitungStatus(b) {
+  const n = b?.notiz || {};
+  const fb = b?.feedback?.status || null;
+  const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a?.datum) : [];
+  if (n.eingestellt && n.eingestellt !== 'offen') return { key: 'eingestellt' };
+  if (n.vg_vereinbart_am || fb === 'vorstellungsgespraech') return { key: 'vg' };
+  if (n.kunde_kontaktiert || (fb && fb !== 'neu')) return { key: 'vorgestellt' };
+  if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return { key: 'vorqualifiziert' };
+  if (av.length > 0) return { key: 'kontaktversuch', n: av.length };
+  const check = n.kriterien_check || {};
+  const hatCheck = Object.values(check).some(v => v === true || v === false);
+  if (n.ampel || (n.notizen && String(n.notizen).trim()) || hatCheck || (b?.kommentare || []).length > 0) return { key: 'in_bearbeitung' };
+  return { key: 'neu' };
+}
+export function bearbeitungLabel(b) { const s = bearbeitungStatus(b); return s.key === 'kontaktversuch' ? `Kontaktversuch (${s.n}×)` : BEARB_BY_KEY[s.key].label; }
 
 /* ── Ampel ── */
 export const AMPELN = [
@@ -84,8 +108,8 @@ const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIn
 /* ══════════════════════ Liste ══════════════════════ */
 export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onReload }) {
   const [filter, setFilter] = useState('alle');
-  // Filter-Chips nach Kundenfeedback-Status (dieselben Werte wie das Dropdown).
-  let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => feedbackStatusOf(b) === filter);
+  // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
+  let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => bearbeitungStatus(b).key === filter);
   if (ampelFilter) gefiltert = gefiltert.filter(b => ampelOf(b.notiz) === ampelFilter);
   const akte = bewerbungen.find(b => b.id === akteBewId) || null;
   const kriterienDa = hatKriterien(job.kriterien_struktur);
@@ -114,14 +138,14 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
       <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        {['alle', ...FEEDBACK_OPTIONS.map(o => o.key)].map(f => {
+        {['alle', ...BEARBEITUNG.map(o => o.key)].map(f => {
           const aktiv = filter === f;
           return (
             <button key={f} onClick={() => setFilter(f)} style={{
               fontSize: 12, padding: '4px 11px', borderRadius: 100, cursor: 'pointer',
               border: aktiv ? `1.5px solid ${primary}` : '1px solid #ececea',
               background: aktiv ? primary : '#fff', color: aktiv ? '#fff' : '#0a0a0a', fontWeight: aktiv ? 700 : 500,
-            }}>{f === 'alle' ? 'Alle' : FEEDBACK_LABEL[f]}</button>
+            }}>{f === 'alle' ? 'Alle' : BEARB_BY_KEY[f].label}</button>
           );
         })}
         {ampelFilter && (
@@ -155,7 +179,8 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
             </thead>
             <tbody>
               {gefiltert.map(b => {
-                const bucket = portalStatusBucket(b.notiz);
+                const bst = bearbeitungStatus(b);
+                const bLabel = bearbeitungLabel(b);
                 const amp = ampelOf(b.notiz);
                 const fb = b.feedback?.status || '';
                 const fbSel = feedbackStatusOf(b);
@@ -174,13 +199,9 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                       </div>
                     </td>
                     <td style={tdBase}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
-                    {/* Bearbeitung = unser interner Status (nicht Kundenfeedback) */}
-                    <td style={tdBase} onClick={intern ? stop : undefined}>
-                      {intern
-                        ? <select value={b.notiz?.status || 'neu'} onChange={e => savePatch(b.id, { status: e.target.value })} style={inlineSel}>
-                            {['neu', 'kontaktiert', 'interessiert', 'abgesagt'].map(s => <option key={s} value={s}>{BEARBEITUNG_LABEL[s]}</option>)}
-                          </select>
-                        : <span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BEARBEITUNG_LABEL[b.notiz?.status || 'neu'] || BUCKET_LABEL[bucket]}</span>}
+                    {/* Bearbeitung = abgeleitet (read-only, beide Modi) */}
+                    <td style={tdBase}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: BEARB_BY_KEY[bst.key].color }}>{bLabel}</span>
                     </td>
                     <td style={{ ...tdBase, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
                     {/* Feedback-Status inline (Kunde) */}
@@ -317,7 +338,7 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
             <span style={{ display: 'inline-flex', gap: 7, alignItems: 'center', background: '#fafaf8', borderRadius: 100, padding: '5px 12px' }}>
               <span style={{ width: 11, height: 11, borderRadius: '50%', background: AMPEL_FARBE[amp] }} />
-              <strong style={{ fontSize: 13 }}>{BUCKET_LABEL[portalStatusBucket(n)] || 'Neu'}</strong>
+              <strong style={{ fontSize: 13 }}>{bearbeitungLabel(b)}</strong>
             </span>
             {n.bewertung ? <span style={{ fontSize: 14, color: '#d97706' }}>{'★'.repeat(n.bewertung)}{'☆'.repeat(5 - n.bewertung)}</span> : null}
             {editierbar && (
