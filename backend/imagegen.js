@@ -4,6 +4,7 @@
 //                            Upload nach Supabase Storage (Bucket: talentone-creatives).
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
+import { freigegebeneStimmenText } from './freigegebene-stimmen.js';
 import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
@@ -232,6 +233,11 @@ export async function generateSpruchVorschlaege(job, kunde, opts = {}) {
   const besonderheiten = (job.besonderheiten || '').trim();
 
   const kontextZeile = `Stelle: "${stelle}"${branche ? ` · Branche ${branche}` : ''}${region ? ` · Region ${region}` : ''}${benefits.length ? ` · Benefits: ${benefits.join(', ')}` : ''}${besonderheiten ? ` · Besonderheiten: ${besonderheiten}` : ''}${motiv?.trim() ? ` · Motiv: "${motiv.trim()}"` : ''}`;
+  // B5: optionales, FREIGEGEBENES Testimonial-Material (nie erfinden; Freitext/Wechsel-Schmerz bleibt Default).
+  const stimmenText = await freigegebeneStimmenText(kunde?.id).catch(() => '');
+  const stimmenBlock = stimmenText?.trim()
+    ? `\n\nFREIGEGEBENE MITARBEITERSTIMMEN (echt): ${stimmenText.trim()}\nDu DARFST (musst nicht) EINE davon WÖRTLICH als Zitat-Spruch inkl. Name/Rolle einbauen — erfinde NIE ein Zitat oder eine Person. Sonst bleib bei den Wechsel-Schmerz-Sprüchen.`
+    : '';
 
   // Rohe Sprüche generieren — mit Bild (Vision) oder ohne.
   async function generateRaw(aufgabe) {
@@ -246,7 +252,7 @@ KONTEXT: ${kontextZeile}${kontextNote}
 AUFGABE:
 1. Schau dir das Bild GENAU an: Personen, Tätigkeit, Objekte, Stimmung. Beachte MOTIV-BINDUNG und PRODUKTWERBUNGS-SCHUTZ.
 2. ${aufgabe} — die Sprüche müssen sich anfühlen, als wären sie für GENAU dieses Bild gemacht.
-3. Mindestens einer aus "Bewerbungs-Hürde senken".
+3. Mindestens einer aus "Bewerbungs-Hürde senken".${stimmenBlock}
 
 ${SPRUCH_JSON_HINT}`;
       const data = await callClaudeWithRetry({
@@ -262,7 +268,7 @@ ${SPRUCH_JSON_HINT}`;
 
 KONTEXT: ${kontextZeile}
 
-AUFGABE: ${aufgabe}, GESTREUT über mehrere Wechsel-Schmerz-Kategorien, mindestens einer aus "Bewerbungs-Hürde senken". Jeder Spruch mit dem passenden Kategorie-Label.
+AUFGABE: ${aufgabe}, GESTREUT über mehrere Wechsel-Schmerz-Kategorien, mindestens einer aus "Bewerbungs-Hürde senken". Jeder Spruch mit dem passenden Kategorie-Label.${stimmenBlock}
 
 ${SPRUCH_JSON_HINT}`;
     const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 900, messages: [{ role: 'user', content: prompt }] });

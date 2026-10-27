@@ -3,6 +3,7 @@
 import sharp from 'sharp';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { uploadBuffer, fetchAsBuffer } from './storage.js';
+import { freigegebeneStimmenText } from './freigegebene-stimmen.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
@@ -109,6 +110,8 @@ export async function generateInitialScreenTexts(job, kunde) {
   const benefits = Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [];
   const fdBenefits = (fd.benefits_zusatz || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean);
   const allBenefits = [...new Set([...benefits, ...fdBenefits])];
+  // B5: nur FREIGEGEBENE Mitarbeiterstimmen (freigabe=true) — bevorzugte Quelle fürs Zitat.
+  const stimmenText = await freigegebeneStimmenText(kunde?.id).catch(() => '');
 
   const briefing = `Stelle: ${job.stelle || '-'}
 Firma: ${kunde?.firmenname || '-'}
@@ -120,7 +123,9 @@ Warum arbeiten Mitarbeiter gerne hier: ${fd.mitarbeiter_gerne || '-'}
 Unternehmenskultur: ${fd.unternehmenskultur || '-'}
 Mitarbeiterzahl: ${fd.mitarbeiter_anzahl || '-'}
 Benefits: ${allBenefits.join(', ') || '-'}
-Besonderheiten der Stelle: ${job.besonderheiten || '-'}`;
+Besonderheiten der Stelle: ${job.besonderheiten || '-'}
+Freigegebene Mitarbeiterstimmen (ECHT — für das Zitat bevorzugt WÖRTLICH verwenden):
+${stimmenText || '- keine -'}`;
 
   const prompt = `Du bist Recruiting-Funnel-Designer. Generiere die Texte für eine 3-Screen Funnel-Einleitung (Mobile-First Bewerbungsseite). Sprache: Deutsch, Du-Ansprache, locker, auf Augenhöhe — KEIN HR-Sprech.
 
@@ -140,7 +145,7 @@ OUTPUT: 3 Screen-Inhalte als JSON (KEINE Markdown-Backticks):
   "benefits": {
     "headline": "Das erwartet dich bei uns",
     "body": "1-2 einleitende Sätze, kein Aufzählen — die Liste kommt darunter",
-    "quote": "Optional: ein konkretes Highlight oder Mitarbeiter-Zitat-Stil (1 Satz, gerne mit Anführungszeichen). Wenn kein guter Inhalt, leer.",
+    "quote": "Wenn oben FREIGEGEBENE Mitarbeiterstimmen stehen, verwende EINE davon WÖRTLICH (inkl. Name/Rolle, z. B. 'Zitat' — Name, Rolle) — nichts erfinden. Sonst aus 'Warum arbeiten Mitarbeiter gerne hier' einen Satz ableiten; wenn auch das leer, leer lassen.",
     "next_button": "Und was sind meine Aufgaben? →"
   },
   "tasks": {

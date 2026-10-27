@@ -3,6 +3,7 @@
 
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { SPRUCH_VERBOTE } from './imagegen.js';
+import { freigegebeneStimmenText } from './freigegebene-stimmen.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -191,7 +192,7 @@ Zeile 1: Provokante Frage oder Neugier-Hook + Emoji am Ende (🤔 / 💡 / 🚀 
 👉 CTA (Kauf-Intent): "Jetzt kostenlos anfragen" / "Angebot sichern"`,
 };
 
-function buildPrompt(job, kunde, style, funnelUrl, spruchKontext) {
+function buildPrompt(job, kunde, style, funnelUrl, spruchKontext, stimmenText) {
   // Weiche: für Neukundengewinnung eigenen Prompt-Pfad mit Kauf-CTA.
   if (job?.projekttyp === 'neukundengewinnung') {
     return buildPromptNeukunden(job, kunde, style, funnelUrl);
@@ -215,17 +216,21 @@ In der CTA-Zeile am Ende verwende DIESEN Platzhalter EXAKT (wird später automat
 ${LINK_PLACEHOLDER}
 Beispiel: "👉 Jetzt bewerben: ${LINK_PLACEHOLDER}"`;
 
-  return buildFinalPrompt({ briefing: buildBriefing(job, kunde), linkBlock, spec, kunde, spruchKontext });
+  return buildFinalPrompt({ briefing: buildBriefing(job, kunde), linkBlock, spec, kunde, spruchKontext, stimmenText });
 }
 
-function buildFinalPrompt({ briefing, linkBlock, spec, kunde, spruchKontext }) {
+function buildFinalPrompt({ briefing, linkBlock, spec, kunde, spruchKontext, stimmenText }) {
   const konsistenzBlock = spruchKontext?.trim()
     ? `\nKONSISTENZ ZUM CREATIVE (sehr wichtig): Für dieses Projekt gibt es bereits diese finale(n) Bild-Sprüche/Hooks:\n${spruchKontext.trim()}\nÜberschriften UND Fließtext müssen dieselbe Botschaft/denselben Wechsel-Schmerz weiterführen — kein neues Thema aufmachen.\n`
+    : '';
+  // B5: freigegebene Mitarbeiterstimmen — wörtlich verwendbar, nichts erfinden.
+  const stimmenBlock = stimmenText?.trim()
+    ? `\nFREIGEGEBENE MITARBEITERSTIMMEN (echt, freigegeben): \n${stimmenText.trim()}\nWenn du eine Stimme als Social Proof einbaust, zitiere sie WÖRTLICH mit Name/Rolle — erfinde NIE ein Zitat oder eine Person. Ohne passende Stimme höchstens den Freitext „Warum Mitarbeiter gerne hier arbeiten" sinngemäß, aber ohne erfundene Namensnennung.\n`
     : '';
   return `${briefing}
 
 ${linkBlock}
-${konsistenzBlock}
+${konsistenzBlock}${stimmenBlock}
 AUFGABE
 Schreibe EINE deutsche Recruiting-Ad (Meta). Sie muss beim Scrollen sofort catchen — standalone (auch ohne Bild verständlich), visuell strukturiert mit Emojis und Zeilenumbrüchen. KEIN Fließtext!
 
@@ -394,10 +399,11 @@ Antworte NUR mit JSON, keine Markdown-Backticks:
 // Generiert einen Werbetext zu einem Style. Wirft bei Claude-Fehler.
 export async function generateAdCopy({ job, kunde, style, funnelUrl, spruchKontext }) {
   if (!isValidStyle(style)) throw new Error(`Unbekannter Stil: ${style}`);
+  const stimmenText = await freigegebeneStimmenText(kunde?.id).catch(() => '');
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
     max_tokens: 1800, // mehr Puffer wegen Emojis + Überschriften-Array
-    messages: [{ role: 'user', content: buildPrompt(job, kunde, style, funnelUrl, spruchKontext) }],
+    messages: [{ role: 'user', content: buildPrompt(job, kunde, style, funnelUrl, spruchKontext, stimmenText) }],
   });
   const parsed = parseJsonContent(data);
   let text = (parsed.text || '').trim();

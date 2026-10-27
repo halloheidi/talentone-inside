@@ -1,12 +1,11 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { UNSAFE_NavigationContext } from 'react-router-dom';
+import { UNSAFE_NavigationContext, Link } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
 import StickySaveBar from '../../components/StickySaveBar.jsx';
 import CropModal from '../../components/CropModal.jsx';
-import BewerbungenTable from '../../components/BewerbungenTable.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
 import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
@@ -754,18 +753,14 @@ export default function JobFunnel() {
           Bei Onepage-Extern ausgeblendet; bei Perspective sichtbar (Webhook-Eingang). */}
       {(istPerspective || !(extern && externUrl.trim())) && (
         <fieldset id="bewerbungen" className="formular-section bewerbungen-section bewerbungen-fullwidth" style={{ scrollMarginTop: 80 }}>
-          <legend>Eingegangene Bewerbungen</legend>
+          <legend>Bewerbungen</legend>
           <KriterienPanel job={job} onJobUpdated={() => reload?.()} />
           <BewerbungenLink jobId={job.id} token={job.bewerbungen_token} agentur={kunde?.agentur} />
-          <BewerbungenTable
-            job={job}
-            kunde={kunde}
-            internalSpalten={Array.isArray(job.interne_spalten) ? job.interne_spalten : []}
-            onChangeInternalSpalten={async (next) => {
-              await api(`/jobs/${job.id}`, { method: 'PATCH', body: { interne_spalten: next } });
-              reload?.();
-            }}
-          />
+          <p className="pane-hint" style={{ marginTop: 10 }}>
+            Die eingegangenen Bewerbungen bearbeitest du jetzt im{' '}
+            <Link to={`/kunden/${job.kunde_id}/jobs/${job.id}/bewerber`} style={{ fontWeight: 600 }}>Tab „Bewerber"</Link>
+            {' '}(Kriterien, Vorqualifizierung, Ampel, Verlauf).
+          </p>
         </fieldset>
       )}
 
