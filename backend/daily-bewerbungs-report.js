@@ -215,7 +215,7 @@ async function collectMetaWarnungen() {
     const vMap = await metaVerbindungBatch(live.map(p => p.id));
     for (const p of live) {
       const v = vMap.get(p.id);
-      if (!v) continue;
+      if (!v || v.relevant === false) continue;   // Nicht-Recruiting (Website/Neukunden) nie flaggen
       const eintrag = { kunde: kundeName[p.kunde_id] || p.kunde || 'Unbekannt', projekt: p.projekt || '—' };
       if (!v.verbunden) verbindungsWarnungen.keineVerbindung.push(eintrag);
       else if (!v.aktiv) verbindungsWarnungen.objektPausiert.push(eintrag);

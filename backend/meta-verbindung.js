@@ -14,6 +14,12 @@ import { supabase } from './supabase.js';
 const AKTIV = (s) => /ACTIVE/i.test(s || '');
 function tageSeit(d) { return d ? Math.floor((Date.now() - Date.parse(d)) / 86400000) : null; }
 
+// Nur Projekte mit Paid-Meta-Recruiting sind „meta-relevant". Websites/Karriereseiten
+// (sonstiges/video) und Neukundengewinnung laufen NICHT über Meta-Anzeigen → kein Banner.
+// Spiegelt NICHT_RECRUITING_TYPEN aus routes/webhooks.js (null/mitarbeitergewinnung = Recruiting).
+const NICHT_RECRUITING = new Set(['neukundengewinnung', 'sonstiges', 'video']);
+const istRecruitingTyp = (t) => !NICHT_RECRUITING.has(t || '');
+
 /**
  * @param {string[]} projektIds
  * @returns {Map<string, {verbunden, aktiv, insights_frisch, insights_alter_tage,
@@ -26,10 +32,13 @@ export async function metaVerbindungBatch(projektIds) {
   if (!ids.length) return out;
 
   const { data: jobs = [] } = await supabase.from('talentone_jobs')
-    .select('id, projekt_id, meta_zuordnung').in('projekt_id', ids);
+    .select('id, projekt_id, meta_zuordnung, projekttyp').in('projekt_id', ids);
   const jobsByProjekt = {};
   for (const j of jobs) (jobsByProjekt[j.projekt_id] ||= []).push(j);
   const jobIds = jobs.map(j => j.id);
+  // Meta-relevant = Projekt hat mindestens einen Recruiting-Job (Paid-Meta-Kandidat).
+  const relevant = {};
+  for (const pid of ids) relevant[pid] = (jobsByProjekt[pid] || []).some(j => istRecruitingTyp(j.projekttyp));
 
   // Reverse-FK-Quellen (für Jobs ohne explizite Zuordnung).
   const [{ data: kamps = [] }, { data: adsets = [] }] = await Promise.all([
@@ -77,6 +86,11 @@ export async function metaVerbindungBatch(projektIds) {
   }
 
   for (const pid of ids) {
+    // Nicht meta-relevant (keine Recruiting-Jobs) → nie Banner/Warnung.
+    if (!relevant[pid]) {
+      out.set(pid, { relevant: false, verbunden: false, aktiv: false, insights_frisch: true, insights_alter_tage: null, letzte_insights: null, objekte: [], banner_grund: null });
+      continue;
+    }
     const objekte = [];
     for (const j of (jobsByProjekt[pid] || [])) {
       const z = j.meta_zuordnung;
@@ -97,7 +111,7 @@ export async function metaVerbindungBatch(projektIds) {
     const insights_alter_tage = tageSeit(letzte);
     const insights_frisch = insights_alter_tage != null && insights_alter_tage <= 3;
     const banner_grund = !verbunden ? 'keine_verbindung' : (!aktiv ? 'objekt_pausiert' : null);
-    out.set(pid, { verbunden, aktiv, insights_frisch, insights_alter_tage, letzte_insights: letzte, objekte, banner_grund });
+    out.set(pid, { relevant: true, verbunden, aktiv, insights_frisch, insights_alter_tage, letzte_insights: letzte, objekte, banner_grund });
   }
   return out;
 }
