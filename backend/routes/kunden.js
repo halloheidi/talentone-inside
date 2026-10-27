@@ -322,7 +322,10 @@ router.get('/kanban', async (req, res) => {
       if (p.status !== 'live' && !istPauseGruppe) continue;   // laufzeit_kurz nur wo sinnvoll
       try {
         const s = await laufzeitStatus(p);
-        hinweise[p.id] = s.hinweise || [];
+        // ⚠ nur bei echten Laufzeit-/Meta-Problemen (nicht bei reiner Unkonfiguriertheit
+        // wie kein_vertragsmodell/start_datum_fehlt — Reverse-FK-Fallback bleibt warnungsfrei).
+        const WARN = new Set(['keine_meta_verbindung', 'meta_daten_fehlen', 'ueberlaufzeit']);
+        hinweise[p.id] = (s.hinweise || []).filter(h => WARN.has(h));
         if (s.soll != null && s.verbraucht != null) {
           laufzeitKurz[p.id] = s.modell === 'abo' ? `Monat ${Math.round(s.verbraucht)}/${s.soll}` : `Tag ${s.verbraucht}/${s.soll}`;
         }
