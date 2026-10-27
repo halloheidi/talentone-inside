@@ -121,8 +121,13 @@ export default function PublicPortal() {
   // Portal zeigt nur „echte" Stellen — interne Typen (sonstiges, video) raus.
   const portalJobs = (data?.jobs || []).filter(istPortalJob);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
+  // Default-Tab = Stelle mit der jüngsten Bewerbung (ohne ?bewerbung-Parameter).
   useEffect(() => {
-    if (portalJobs.length && !activeJobId) setActiveJobId(portalJobs[0].id);
+    if (!portalJobs.length || activeJobId) return;
+    const latest = (data?.bewerbungen || [])
+      .filter(b => portalJobs.some(j => j.id === b.job_id))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    setActiveJobId(latest?.job_id || portalJobs[0].id);
   }, [data, activeJobId]); // eslint-disable-line
   // ?bewerbung=<id>: zur richtigen Stelle springen + Akte markieren.
   useEffect(() => {
@@ -176,24 +181,36 @@ export default function PublicPortal() {
       </header>
 
       {portalJobs.length > 1 && (
-        <nav style={{ display: 'flex', gap: 6, padding: '10px 20px', background: '#fff', borderBottom: '1px solid #ececea', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {portalJobs.map(j => {
-            const aktiv = j.id === activeJobId;
-            return (
-              <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
-                background: aktiv ? primary : 'transparent',
-                color: aktiv ? primaryInk : '#0a0a0a',
-                border: aktiv ? 'none' : '1px solid #ececea', padding: '8px 14px', borderRadius: 100, cursor: 'pointer',
-                fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0,
-              }}>
-                {j.projekttyp === 'neukundengewinnung' ? '🎯' : '👥'} {j.stelle || 'Projekt'}
-              </button>
-            );
-          })}
-        </nav>
+        <div style={{ padding: '12px 24px 0', background: '#fff', borderBottom: '1px solid #ececea' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.05, color: '#9a9994', marginBottom: 8 }}>{t(data.kunde, 'Deine Stellen', 'Ihre Stellen')}</div>
+          <nav style={{ display: 'flex', gap: 8, paddingBottom: 12, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            {portalJobs.map(j => {
+              const aktiv = j.id === activeJobId;
+              const jbew = (data.bewerbungen || []).filter(b => b.job_id === j.id);
+              const vor7 = Date.now() - 7 * 86400000;
+              const neu = jbew.filter(b => new Date(b.created_at).getTime() >= vor7).length;
+              return (
+                <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  background: aktiv ? primary : '#fff', color: aktiv ? primaryInk : '#0a0a0a',
+                  border: aktiv ? 'none' : '1px solid #e4e4e1', padding: '9px 16px', borderRadius: 12, cursor: 'pointer',
+                  fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0,
+                  boxShadow: aktiv ? `0 4px 14px ${primary}44` : 'none',
+                }}>
+                  {aktiv && data.kunde?.logo_url
+                    ? <img src={data.kunde.logo_url} alt="" style={{ height: 20, maxWidth: 40, objectFit: 'contain', background: '#fff', borderRadius: 4, padding: '1px 3px' }} />
+                    : <span>{j.projekttyp === 'neukundengewinnung' ? '🎯' : '📋'}</span>}
+                  <span>{j.stelle || 'Stelle'}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: aktiv ? 0.85 : 0.55 }}>· {jbew.length}</span>
+                  {neu > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 100, background: aktiv ? 'rgba(255,255,255,0.25)' : '#eef2ff', color: aktiv ? primaryInk : '#1e40af' }}>{neu} neu</span>}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
       )}
 
-      <main className="pp-main" style={{ width: '100%', maxWidth: 1120, margin: '0 auto', padding: '20px 24px 40px', boxSizing: 'border-box' }}>
+      <main className="pp-main" style={{ width: '100%', padding: '20px 24px 40px', boxSizing: 'border-box' }}>
         {(() => {
           const neu = bewerbungParam ? (data.bewerbungen || []).find(x => x.id === bewerbungParam) : null;
           if (!neu) return null;
@@ -330,6 +347,7 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
   }
   const feedbackFor = (bewId, patch) => api(`/public/portal/${token}/bewerbung/${bewId}/feedback`, { method: 'PATCH', body: JSON.stringify(patch) });
   const kommentarFor = (bewId, text) => api(`/public/portal/${token}/bewerbung/${bewId}/kommentar`, { method: 'POST', body: JSON.stringify({ text }) });
+  const spalteFor = (bewId, spalteId, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/spalte/${spalteId}`, { method: 'PUT', body: JSON.stringify({ wert }) });
   return (
     <section style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {!istNeukunden && (
@@ -366,7 +384,7 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
           />
           <BewerberListe job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} modus="kunde"
             ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte}
-            onFeedback={feedbackFor} onKommentar={kommentarFor} onReload={onReload} />
+            onFeedback={feedbackFor} onKommentar={kommentarFor} onSpalte={spalteFor} onReload={onReload} />
           <MitarbeiterstimmenPortalKachel token={token} kunde={kunde} primary={primary} />
         </>
       )}

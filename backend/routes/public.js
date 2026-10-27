@@ -1765,6 +1765,23 @@ router.get('/portal/:token', async (req, res) => {
       for (const k of (komm || [])) (kommentareByBew[k.bewerbung_id] ||= []).push(k);
     }
 
+    // Custom-Spalten (nur kundensichtbar) + deren Werte — vom Kunden inline pflegbar.
+    const bewerberSpaltenByJob = {}, spaltenWerteByBew = {};
+    {
+      const jobIdList = jobs.map(j => j.id);
+      if (jobIdList.length) {
+        const { data: sp = [] } = await supabase.from('talentone_bewerber_spalten')
+          .select('id, job_id, name, typ, optionen, reihenfolge, sichtbar_fuer')
+          .in('job_id', jobIdList).in('sichtbar_fuer', ['kunde', 'alle']).order('reihenfolge', { ascending: true });
+        for (const s of (sp || [])) (bewerberSpaltenByJob[s.job_id] ||= []).push(s);
+      }
+      if (bewIds.length) {
+        const { data: w = [] } = await supabase.from('talentone_bewerber_spalten_werte')
+          .select('bewerbung_id, spalte_id, wert').in('bewerbung_id', bewIds);
+        for (const x of (w || [])) (spaltenWerteByBew[x.bewerbung_id] ||= {})[x.spalte_id] = x.wert;
+      }
+    }
+
     // B2: Laufzeit je Stelle (portal-sicher — laufzeitStatus enthält KEINE Meta-Kennzahlen).
     const projektIds = [...new Set(jobs.map(j => j.projekt_id).filter(Boolean))];
     const laufzeitByProjekt = {};
@@ -1823,6 +1840,7 @@ router.get('/portal/:token', async (req, res) => {
         wichtige_kriterien: normalizeKriterien(j.wichtige_kriterien),
         kriterien_struktur: normalizeKriterienStruktur(j.wichtige_kriterien_struktur ?? j.wichtige_kriterien),
         laufzeit: j.projekt_id ? (laufzeitByProjekt[j.projekt_id] || null) : null,
+        bewerber_spalten: bewerberSpaltenByJob[j.id] || [],
         // Befuellte Vorqual-Felder + wichtige Kriterien (immer) — gleiche
         // Spaltenlogik wie in der Public-Bewerberliste.
         vorqual_spalten: kundenVorqualSpalten({
@@ -1857,7 +1875,7 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null, feedback: feedbackByBew[b.id] || null, kommentare: kommentareByBew[b.id] || [] })),
+      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null, feedback: feedbackByBew[b.id] || null, kommentare: kommentareByBew[b.id] || [], spalten_werte: spaltenWerteByBew[b.id] || {} })),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {
@@ -2239,6 +2257,22 @@ router.patch('/portal/:token/bewerbung/:bewId/feedback', async (req, res) => {
       })().catch(err => console.warn('[portal-feedback-sofortmail]', err.message));
     }
     res.json({ feedback: { status: data.status || null, vorstellungsgespraech_am: data.vorstellungsgespraech_am || null, updated_at: data.updated_at } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* Custom-Spalten-Wert (nur kundensichtbare Spalten) inline aus der Portal-Liste. */
+router.put('/portal/:token/bewerbung/:bewId/spalte/:spalteId', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    if (!(await bewerbungGehoertKunde(req.params.bewId, kunde.id))) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Portal.' });
+    const { data: sp } = await supabase.from('talentone_bewerber_spalten').select('id, sichtbar_fuer').eq('id', req.params.spalteId).maybeSingle();
+    if (!sp || !['kunde', 'alle'].includes(sp.sichtbar_fuer)) return res.status(403).json({ error: 'Spalte nicht freigegeben.' });
+    const wert = req.body?.wert == null ? null : String(req.body.wert).slice(0, 500);
+    const { data, error } = await supabase.from('talentone_bewerber_spalten_werte')
+      .upsert({ bewerbung_id: req.params.bewId, spalte_id: req.params.spalteId, wert, updated_at: new Date().toISOString() }, { onConflict: 'bewerbung_id,spalte_id' })
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ wert: data });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

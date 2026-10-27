@@ -69,16 +69,35 @@ function initialen(name) {
   if (!parts.length) return '–';
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
-const thStyle = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', whiteSpace: 'nowrap' };
-const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle' };
+// Sticky: Kopfzeile oben, Name-Spalte links. Volle Arbeitsliste scrollt nur im Container.
+const thBase = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', whiteSpace: 'nowrap', background: '#fafaf8', position: 'sticky', top: 0, zIndex: 2, borderBottom: '1px solid #ececea' };
+const thName = { ...thBase, left: 0, zIndex: 3 };
+const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whiteSpace: 'nowrap', borderBottom: '1px solid #f1f1ee' };
+const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onReload }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onReload }) {
   const [filter, setFilter] = useState('alle');
   let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => portalStatusBucket(b.notiz) === filter);
   if (ampelFilter) gefiltert = gefiltert.filter(b => ampelOf(b.notiz) === ampelFilter);
   const akte = bewerbungen.find(b => b.id === akteBewId) || null;
   const kriterienDa = hatKriterien(job.kriterien_struktur);
+  const intern = modus === 'intern';
+
+  // Volle Arbeitsliste: Funnel-Antworten (alle Fragen) + kundensichtbare Custom-Spalten + E-Mail/Telefon.
+  const frageSpalten = [];
+  for (const b of bewerbungen) for (const a of (Array.isArray(b.antworten) ? b.antworten : [])) {
+    const f = (a?.frage_text || '').trim();
+    if (f && !frageSpalten.includes(f)) frageSpalten.push(f);
+  }
+  const antwortFor = (b, frage) => (Array.isArray(b.antworten) ? b.antworten : []).find(a => (a?.frage_text || '').trim() === frage)?.antwort || '';
+  const customSpalten = Array.isArray(job.bewerber_spalten) ? job.bewerber_spalten : [];
+
+  const stop = e => e.stopPropagation();
+  const inlineSel = { fontSize: 12, padding: '3px 6px', border: '1px solid #e0e0dd', borderRadius: 6, background: '#fff', maxWidth: 160 };
+  async function saveFeedback(bewId, patch) { try { await onFeedback?.(bewId, patch); await onReload?.(); } catch (e) { alert(e.message); } }
+  async function savePatch(bewId, patch) { try { await onPatch?.(bewId, patch); await onReload?.(); } catch (e) { alert(e.message); } }
+  async function saveSpalte(bewId, spalteId, wert) { try { await onSpalte?.(bewId, spalteId, wert); await onReload?.(); } catch (e) { alert(e.message); } }
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
@@ -105,43 +124,100 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
       ) : gefiltert.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Keine Bewerbungen in dieser Ansicht.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
-              <th style={thStyle}>Name</th>
-              <th style={thStyle}>Eingang</th>
-              <th style={thStyle}>Status</th>
-              <th style={thStyle}>Kriterien</th>
-              <th style={thStyle}>Feedback</th>
-            </tr>
-          </thead>
-          <tbody>
-            {gefiltert.map(b => {
-              const bucket = portalStatusBucket(b.notiz);
-              const amp = ampelOf(b.notiz);
-              const fb = b.feedback?.status;
-              const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && modus === 'intern' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
-              return (
-                <tr key={b.id} style={{ borderBottom: '1px solid #f1f1ee', opacity: b.ko_kriterium ? 0.6 : 1, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
-                  <td style={tdStyle}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
-                      <span style={{ position: 'relative', flexShrink: 0 }}>
-                        <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
-                        <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
-                      </span>
-                      <span style={{ fontWeight: 600, color: '#1b3f80' }}>{b.name || '—'}</span>
-                      {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
-                    </div>
-                  </td>
-                  <td style={tdStyle}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
-                  <td style={tdStyle}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
-                  <td style={{ ...tdStyle, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
-                  <td style={tdStyle}>{fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fb] || '#5a5955' }}>{FEEDBACK_LABEL[fb] || fb}</span> : <span style={{ color: '#9a9994' }}>—</span>}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div style={{ overflowX: 'auto', maxWidth: '100%', border: '1px solid #f1f1ee', borderRadius: 10 }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: 13, minWidth: '100%' }}>
+            <thead>
+              <tr>
+                <th style={thName}>Name</th>
+                <th style={thBase}>Eingang</th>
+                <th style={thBase}>Status</th>
+                <th style={thBase}>Kriterien</th>
+                <th style={thBase}>Feedback</th>
+                {intern && <th style={thBase}>Ampel</th>}
+                {intern && <th style={thBase}>Bearbeitung</th>}
+                {frageSpalten.map(f => <th key={`fr-${f}`} style={thBase} title={f}>{frageTitel(f).length > 32 ? frageTitel(f).slice(0, 30) + '…' : frageTitel(f)}</th>)}
+                {customSpalten.map(sp => <th key={`cs-${sp.id}`} style={{ ...thBase, background: '#f4f7ff' }}>{sp.name}</th>)}
+                <th style={thBase}>E-Mail</th>
+                <th style={thBase}>Telefon</th>
+                {intern && <th style={thBase}>Notiz</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {gefiltert.map(b => {
+                const bucket = portalStatusBucket(b.notiz);
+                const amp = ampelOf(b.notiz);
+                const fb = b.feedback?.status || '';
+                const fbSel = FEEDBACK_OPTIONS.some(o => o.key === fb) ? fb : '';
+                const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
+                const werte = b.spalten_werte || {};
+                return (
+                  <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
+                    <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ position: 'relative', flexShrink: 0 }}>
+                          <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
+                          <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
+                        </span>
+                        <span style={{ fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</span>
+                        {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
+                      </div>
+                    </td>
+                    <td style={tdBase}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
+                    <td style={tdBase}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
+                    <td style={{ ...tdBase, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
+                    {/* Feedback-Status inline (Kunde) */}
+                    <td style={tdBase} onClick={stop}>
+                      {onFeedback ? (
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <select value={fbSel} onChange={e => saveFeedback(b.id, { status: e.target.value || 'neu' })} style={inlineSel}>
+                            {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                          </select>
+                          <input type="date" value={(b.feedback?.vorstellungsgespraech_am || '').slice(0, 10)} title="VG-Termin"
+                            onChange={e => saveFeedback(b.id, { vorstellungsgespraech_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} />
+                        </div>
+                      ) : (fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fb] || '#5a5955' }}>{FEEDBACK_LABEL[fb] || fb}</span> : <span style={{ color: '#9a9994' }}>—</span>)}
+                    </td>
+                    {intern && (
+                      <td style={tdBase} onClick={stop}>
+                        <select value={amp} onChange={e => savePatch(b.id, { ampel: e.target.value === 'offen' ? null : e.target.value })} style={inlineSel}>
+                          {AMPELN.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+                        </select>
+                      </td>
+                    )}
+                    {intern && (
+                      <td style={tdBase} onClick={stop}>
+                        <select value={b.notiz?.status || 'neu'} onChange={e => savePatch(b.id, { status: e.target.value })} style={inlineSel}>
+                          {['neu', 'kontaktiert', 'interessiert', 'abgesagt'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                    )}
+                    {frageSpalten.map(f => { const v = antwortFor(b, f); return <td key={`fr-${f}`} style={{ ...tdBase, color: v ? undefined : '#9a9994' }}>{v || '—'}</td>; })}
+                    {customSpalten.map(sp => {
+                      const v = werte[sp.id] ?? '';
+                      if (!onSpalte) return <td key={`cs-${sp.id}`} style={{ ...tdBase, background: '#fbfcff' }}>{v || '—'}</td>;
+                      return (
+                        <td key={`cs-${sp.id}`} style={{ ...tdBase, background: '#fbfcff' }} onClick={stop}>
+                          {sp.typ === 'dropdown' && Array.isArray(sp.optionen)
+                            ? <select value={v} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel}><option value="">—</option>{sp.optionen.map(o => <option key={o} value={o}>{o}</option>)}</select>
+                            : sp.typ === 'datum'
+                              ? <input type="date" value={(v || '').slice(0, 10)} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />
+                              : <input defaultValue={v} onBlur={e => e.target.value !== v && saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />}
+                        </td>
+                      );
+                    })}
+                    <td style={tdBase} onClick={stop}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
+                    <td style={tdBase} onClick={stop}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
+                    {intern && (
+                      <td style={tdBase} onClick={stop}>
+                        <input defaultValue={b.notiz?.notizen || ''} placeholder="Notiz…" onBlur={e => (e.target.value || '') !== (b.notiz?.notizen || '') && savePatch(b.id, { notizen: e.target.value || null })} style={{ ...inlineSel, maxWidth: 180 }} />
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} primary={primary} modus={modus}
         onClose={() => onAkte?.(null)}
