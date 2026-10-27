@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import Icon from '../components/Icon.jsx';
 import QuickCreateModal from '../components/QuickCreateModal.jsx';
@@ -76,14 +76,22 @@ function KundeLogo({ k, size = 40 }) {
 }
 
 // Projekt-Chip in der Kundenkarte: Name · Status-Dropdown · Mini-Laufzeit · ⚠
-function ProjektChip({ projekt, onUpdated }) {
-  const hinweise = projekt.hinweise || [];
+// Umbau: Chip = STELLE (nicht Projekt). Status-Dropdown schreibt auf das verknüpfte
+// Projekt der Stelle (synthetisches projekt-Objekt {id: projekt_id, status}).
+function StelleChip({ kundeId, stelle, onUpdated }) {
+  const navigate = useNavigate();
+  const hinweise = stelle.hinweise || [];
+  const synth = stelle.projekt_id ? { id: stelle.projekt_id, status: stelle.status } : null;
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '4px 0', borderTop: '1px solid var(--bg-2, #f0f0ee)' }}
       onClick={e => e.stopPropagation()}>
-      <span style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projekt.projekt || '—'}</span>
-      <ProjektStatusSelect projekt={projekt} onUpdated={onUpdated} compact />
-      {projekt.laufzeit_kurz && <span style={{ fontSize: 11, color: 'var(--ink-3)', background: '#f3f4f6', padding: '1px 6px', borderRadius: 6 }}>{projekt.laufzeit_kurz}</span>}
+      <span onClick={() => navigate(`/kunden/${kundeId}/jobs/${stelle.job_id}`)} title={stelle.stelle}
+        style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', color: '#1b3f80' }}>
+        {stelle.projekttyp === 'neukundengewinnung' ? '🎯 ' : ''}{stelle.stelle}
+      </span>
+      {synth ? <ProjektStatusSelect projekt={synth} onUpdated={onUpdated} compact />
+             : <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>kein Status</span>}
+      {stelle.laufzeit_kurz && <span style={{ fontSize: 11, color: 'var(--ink-3)', background: '#f3f4f6', padding: '1px 6px', borderRadius: 6 }}>{stelle.laufzeit_kurz}</span>}
       {hinweise.length > 0 && <span title={hinweise.join(' · ')} style={{ cursor: 'help' }}>⚠</span>}
     </div>
   );
@@ -121,9 +129,9 @@ function KundenKanban({ kunden, schritteMap, onProjektUpdated }) {
                       </div>
                     </div>
                     {schritteMap[k.id]?.length > 0 && <div style={{ marginTop: 6 }}><NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={2} /></div>}
-                    {k.projekte?.length > 0 && (
+                    {k.stellen?.length > 0 && (
                       <div style={{ marginTop: 6 }}>
-                        {k.projekte.map(p => <ProjektChip key={p.id} projekt={p} onUpdated={onProjektUpdated} />)}
+                        {k.stellen.map(s => <StelleChip key={s.job_id} kundeId={k.id} stelle={s} onUpdated={onProjektUpdated} />)}
                       </div>
                     )}
                   </Link>
@@ -138,21 +146,23 @@ function KundenKanban({ kunden, schritteMap, onProjektUpdated }) {
   );
 }
 
-function ProjektKanban({ projekte, onReload }) {
+// Umbau: Karte = STELLE. Ziehen setzt den Leitstatus des zur Stelle gehörenden Projekts.
+function StellenKanban({ stellen, onReload }) {
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState({ abgeschlossen: true });
-  const [dragId, setDragId] = useState(null);
+  const [dragId, setDragId] = useState(null);   // job_id
   const byGruppe = useMemo(() => {
     const g = { vorbereitung: [], live: [], pausiert: [], abgeschlossen: [] };
-    for (const p of projekte) (g[gruppeVonStatus(p.status)] || g.vorbereitung).push(p);
+    for (const s of stellen) (g[gruppeVonStatus(s.status)] || g.vorbereitung).push(s);
     return g;
-  }, [projekte]);
+  }, [stellen]);
 
   async function drop(col) {
     const id = dragId; setDragId(null);
     if (!id) return;
-    const p = projekte.find(x => x.id === id);
-    if (!p || gruppeVonStatus(p.status) === col) return;
-    try { await api(`/projekte/${id}`, { method: 'PATCH', body: { status: LEITSTATUS[col] } }); onReload?.(); }
+    const s = stellen.find(x => x.job_id === id);
+    if (!s || !s.projekt_id || gruppeVonStatus(s.status) === col) return;
+    try { await api(`/projekte/${s.projekt_id}`, { method: 'PATCH', body: { status: LEITSTATUS[col] } }); onReload?.(); }
     catch (e) { alert(e.message); }
   }
 
@@ -172,15 +182,18 @@ function ProjektKanban({ projekte, onReload }) {
             </div>
             {!zu && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8, minHeight: 40 }}>
-                {items.map(p => {
-                  const meta = STATUS_META[p.status] || {};
+                {items.map(s => {
+                  const meta = STATUS_META[s.status] || {};
                   return (
-                    <div key={p.id} draggable onDragStart={() => setDragId(p.id)} onDragEnd={() => setDragId(null)}
-                      style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 10, cursor: 'grab', opacity: dragId === p.id ? 0.5 : 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>{p.projekt || '—'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{p.kunde || '—'}</div>
-                      <div style={{ marginTop: 6 }}>
-                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 100, background: meta.bg || '#e5e7eb', color: meta.color || '#374151' }}>{meta.emoji || '·'} {meta.label || p.status}</span>
+                    <div key={s.job_id} draggable onDragStart={() => setDragId(s.job_id)} onDragEnd={() => setDragId(null)}
+                      onClick={() => navigate(`/kunden/${s.kunde_id}/jobs/${s.job_id}`)}
+                      style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 10, cursor: 'grab', opacity: dragId === s.job_id ? 0.5 : 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{s.projekttyp === 'neukundengewinnung' ? '🎯 ' : ''}{s.stelle || '—'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{s.kunde_firmenname || '—'}</div>
+                      <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 100, background: meta.bg || '#e5e7eb', color: meta.color || '#374151' }}>{meta.emoji || '·'} {meta.label || s.status || '—'}</span>
+                        {s.laufzeit_kurz && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{s.laufzeit_kurz}</span>}
+                        {s.hinweise?.length > 0 && <span title={s.hinweise.join(' · ')} style={{ cursor: 'help' }}>⚠</span>}
                       </div>
                     </div>
                   );
@@ -197,7 +210,6 @@ function ProjektKanban({ projekte, onReload }) {
 
 export default function KundenList() {
   const [kanbanKunden, setKanbanKunden] = useState([]);
-  const [projekte, setProjekte] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -220,10 +232,8 @@ export default function KundenList() {
     const q = altbestand ? '?include_archived=1' : '';
     Promise.all([
       api(`/kunden/kanban${q}`).then(r => r.kunden || []).catch(() => []),
-      api('/projekte').then(r => r.projekte || []).catch(() => []),
-    ]).then(([kk, pp]) => {
+    ]).then(([kk]) => {
       setKanbanKunden(kk);
-      setProjekte(pp);
       const ids = kk.map(k => k.id).join(',');
       if (ids) {
         api(`/kunden/naechste-schritte?ids=${ids}`).then(r => setSchritteMap(r.schritte || {})).catch(() => setSchritteMap({}));
@@ -243,27 +253,31 @@ export default function KundenList() {
     });
   }, [kanbanKunden, search, agenturFilter, listFilter]);
 
-  const gefilterteProjekte = useMemo(() => {
+  // Umbau: Stellen-Ansicht — flache Liste der Stellen über die gefilterten Kunden.
+  // Alt-Projekte ohne Stelle erscheinen hier bewusst NICHT (nur im Altbestand/Liste).
+  const gefilterteStellen = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return projekte.filter(p => {
-      if (!altbestand && !p.kunde_id) return false;   // Alt-Projekte nur im Altbestand
-      if (agenturFilter && p.agentur !== agenturFilter) return false;
-      if (!q) return true;
-      return [p.projekt, p.kunde].filter(Boolean).join(' ').toLowerCase().includes(q);
-    });
-  }, [projekte, search, agenturFilter, altbestand]);
+    const out = [];
+    for (const k of gefilterteKunden) {
+      for (const s of (k.stellen || [])) {
+        if (q && ![s.stelle, k.firmenname].filter(Boolean).join(' ').toLowerCase().includes(q)) continue;
+        out.push({ ...s, kunde_id: k.id, kunde_firmenname: k.firmenname });
+      }
+    }
+    return out;
+  }, [gefilterteKunden, search]);
 
   return (
     <div>
       <div className="page-head">
         <div>
           <h1 className="page-title">Kunden</h1>
-          <p className="page-sub">Kanban &amp; Liste — nach Kunde oder Projekt.</p>
+          <p className="page-sub">Kanban &amp; Liste — nach Kunde oder Stelle.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="proj-view-toggle">
             <button className={`pub-filter ${mode === 'kunden' ? 'is-active' : ''}`} onClick={() => setModeP('kunden')}>Kunden</button>
-            <button className={`pub-filter ${mode === 'projekte' ? 'is-active' : ''}`} onClick={() => setModeP('projekte')}>Projekte</button>
+            <button className={`pub-filter ${mode === 'projekte' ? 'is-active' : ''}`} onClick={() => setModeP('projekte')}>Stellen</button>
           </div>
           <div className="proj-view-toggle">
             <button className={`pub-filter ${view === 'kanban' ? 'is-active' : ''}`} onClick={() => setViewP('kanban')}>Kanban</button>
@@ -310,9 +324,9 @@ export default function KundenList() {
       {!loading && view === 'kanban' && mode === 'projekte' && (
         <>
           <div className="alert" style={{ background: '#eef3ff', color: '#1b3f80', marginBottom: 10, fontSize: 13 }}>
-            Ziehen ändert den Leitstatus der Zielspalte. Feinstatus &amp; Details weiter unter <Link to="/projekte">Projekte-Board</Link>.
+            Ziehen ändert den Leitstatus der Stelle. Feinstatus &amp; Details im Reiter „Vertrag &amp; Status" der Stelle.
           </div>
-          <ProjektKanban projekte={gefilterteProjekte} onReload={() => load()} />
+          <StellenKanban stellen={gefilterteStellen} onReload={() => load()} />
         </>
       )}
 
@@ -332,7 +346,7 @@ export default function KundenList() {
             </thead>
             <tbody>
               {gefilterteKunden.map(k => {
-                const aktiv = (k.projekte || [])[0];
+                const aktiv = (k.stellen || [])[0];
                 const g = GRUPPEN.find(x => x.key === k.status_gruppe);
                 const feinstatus = aktiv ? (STATUS_META[aktiv.status]?.label || aktiv.status) : '—';
                 return (

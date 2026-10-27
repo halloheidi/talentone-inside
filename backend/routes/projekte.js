@@ -46,6 +46,8 @@ const ALLOWED_FIELDS = [
   'geplanter_livegang',
   // Migration 097: Vertragsmodell (A3) — pausen NUR über die dedizierten Endpoints ändern.
   'vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum',
+  // Migration 046: Werbebudget-Modus (im Vertrag-&-Status-Tab editierbar)
+  'werbebudget_modus', 'tagesbudget_empfehlung',
 ];
 
 function pickFields(body) {

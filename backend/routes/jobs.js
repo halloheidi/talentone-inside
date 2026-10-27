@@ -11,8 +11,46 @@ import { VORQUAL_STANDARD, effektiveVorqualFelder } from '../vorqualifizierung.j
 import { syncKriterienMitFeldern, normalizeKriterien, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
+import { laufzeitStatus } from '../laufzeit.js';
 
 const router = Router();
+
+/* Umbau „Projekt in die Stelle": jede Stelle hat genau ein verknüpftes Projekt.
+   Idempotent: projekt_id gesetzt → laden; sonst bestehendes (kunde_id, stelle) teilen;
+   sonst neu anlegen (status 'vorbereitung', vertragsmodell leer) + verknüpfen. */
+async function ensureProjektFuerJob(job) {
+  if (!job?.kunde_id) return null;
+  if (job.projekt_id) {
+    const { data } = await supabase.from('talentone_projekte').select('*').eq('id', job.projekt_id).maybeSingle();
+    if (data) return data;
+  }
+  const stelle = (job.stelle || '').trim();
+  if (stelle) {
+    const { data: ex } = await supabase.from('talentone_projekte').select('*')
+      .eq('kunde_id', job.kunde_id).eq('projekt', stelle).order('created_at', { ascending: true }).limit(1).maybeSingle();
+    if (ex) { await supabase.from('talentone_jobs').update({ projekt_id: ex.id }).eq('id', job.id); return ex; }
+  }
+  const { data: kunde } = await supabase.from('talentone_kunden')
+    .select('id, firmenname, email, agentur, close_lead_id').eq('id', job.kunde_id).maybeSingle();
+  const finalAgentur = kunde?.agentur === 'nowagwirth' ? 'nowagwirth' : 'talentone';
+  const istNeu = job.projekttyp === 'neukundengewinnung';
+  const { data: created, error } = await supabase.from('talentone_projekte').insert({
+    projekt: stelle || kunde?.firmenname || 'Neue Stelle',
+    kunde: kunde?.firmenname || kunde?.email || null,
+    kunde_id: job.kunde_id,
+    status: 'vorbereitung',
+    agentur: finalAgentur,
+    projektart: istNeu ? 'Neukundengewinnung' : (finalAgentur === 'talentone' ? 'TalentOne - Mitarbeitergewinnung' : 'Mitarbeitergewinnung'),
+    gesuchte_positionen: stelle || null,
+    standorte: job.region || null,
+    email: kunde?.email || null,
+    close_lead_id: kunde?.close_lead_id || null,
+    updated_at: new Date().toISOString(),
+  }).select().single();
+  if (error) { console.warn('[ensureProjektFuerJob]', error.message); return null; }
+  await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
+  return created;
+}
 
 // GET /api/jobs?kunde_id=...
 router.get('/', async (req, res) => {
@@ -33,15 +71,24 @@ router.get('/:id', async (req, res) => {
   if (!data) return res.status(404).json({ error: 'Job nicht gefunden.' });
   // Verknüpftes Projekt (Migration 066) additiv mitliefern — für Werbekosten-Badge,
   // Projekt-Link und Kommentar-Bereich im Job-Detail.
-  let projekt = null, meta = null;
+  let projekt = null, meta = null, laufzeit = null, geteilt_mit = [];
+  // Umbau: fehlt die Projekt-Verknüpfung, sofort nachziehen (jede Stelle hat ein Projekt).
+  if (!data.projekt_id && data.kunde_id) {
+    const p = await ensureProjektFuerJob(data);
+    if (p) data.projekt_id = p.id;
+  }
   if (data.projekt_id) {
     projekt = (await supabase.from('talentone_projekte')
-      .select('id, projekt, gesuchte_positionen, werbekosten, status, kunde_id, pausiert_seit, start_phase1, startdatum_abo, live_termin, monatsbudget_euro, garantie, garantie_details')
-      .eq('id', data.projekt_id).maybeSingle()).data || null;
+      .select('*').eq('id', data.projekt_id).maybeSingle()).data || null;
     // Kompakte Meta-Kennzahlen fürs Job-Kopf (null wenn keine Meta-Verknüpfung → „—").
     try { meta = await metaMetrikenFuerProjekt(data.projekt_id); } catch (e) { console.warn('[jobs] meta-metriken:', e.message); }
+    if (projekt) { try { laufzeit = await laufzeitStatus(projekt); } catch (e) { console.warn('[jobs] laufzeit:', e.message); } }
+    // „Vertrag gilt auch für": andere Stellen, die sich dasselbe Projekt teilen.
+    const { data: andere = [] } = await supabase.from('talentone_jobs')
+      .select('id, stelle').eq('projekt_id', data.projekt_id).neq('id', data.id);
+    geteilt_mit = (andere || []).map(j => ({ id: j.id, stelle: j.stelle || 'Unbenannte Stelle' }));
   }
-  res.json({ job: data, projekt, meta });
+  res.json({ job: data, projekt, meta, laufzeit, geteilt_mit });
 });
 
 /* POST /api/jobs/quick-create
@@ -216,7 +263,11 @@ router.post('/', async (req, res) => {
     .select()
     .single();
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json({ job: data });
+  // Umbau: jede neue Stelle bekommt automatisch ihr Projekt.
+  let projekt = null;
+  try { projekt = await ensureProjektFuerJob(data); if (projekt) data.projekt_id = projekt.id; }
+  catch (e) { console.warn('[jobs POST ensureProjekt]', e.message); }
+  res.status(201).json({ job: data, projekt });
 });
 
 const ALLOWED_JOB_FIELDS = [
@@ -466,6 +517,41 @@ router.post('/:id/create-projekt', async (req, res) => {
 
   await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
   res.status(201).json({ projekt: created, already_existed: false });
+});
+
+/* POST /api/jobs/:id/vertrag-trennen
+   Löst eine Stelle aus einem geteilten Projekt heraus: legt ein EIGENES Projekt an
+   (kopiert Vertrags-/Statusfelder als Startwert) und verknüpft nur diese Stelle damit. */
+router.post('/:id/vertrag-trennen', async (req, res) => {
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id, stelle, region, projekttyp, projekt_id').eq('id', req.params.id).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
+  if (!job.projekt_id) { const p = await ensureProjektFuerJob(job); return res.json({ projekt: p, getrennt: false }); }
+
+  // Teilen überhaupt andere Stellen das Projekt? Sonst gibt es nichts zu trennen.
+  const { count } = await supabase.from('talentone_jobs')
+    .select('id', { count: 'exact', head: true }).eq('projekt_id', job.projekt_id).neq('id', job.id);
+  const { data: alt } = await supabase.from('talentone_projekte').select('*').eq('id', job.projekt_id).maybeSingle();
+  if (!count) return res.json({ projekt: alt, getrennt: false });   // schon exklusiv
+
+  const copy = {};
+  for (const f of ['status', 'vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum',
+    'garantie', 'garantie_details', 'zahlung_aufgeteilt', 'werbebudget_modus', 'tagesbudget_empfehlung',
+    'monatsbudget_euro', 'agentur', 'projektart', 'kunde', 'close_lead_id', 'email', 'kickoff_termin',
+    'geplanter_livegang', 'live_termin', 'start_phase1', 'startdatum_abo']) {
+    if (alt && alt[f] !== undefined) copy[f] = alt[f];
+  }
+  const { data: created, error } = await supabase.from('talentone_projekte').insert({
+    ...copy,
+    projekt: (job.stelle || '').trim() || alt?.projekt || 'Neue Stelle',
+    kunde_id: job.kunde_id,
+    gesuchte_positionen: job.stelle || null,
+    standorte: job.region || null,
+    updated_at: new Date().toISOString(),
+  }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
+  res.status(201).json({ projekt: created, getrennt: true });
 });
 
 /* POST /api/jobs/:id/send-creative-auftrag

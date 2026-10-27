@@ -316,6 +316,7 @@ router.get('/kanban', async (req, res) => {
     const { data: projekte = [] } = await supabase.from('talentone_projekte')
       .select('id, kunde_id, status, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie')
       .in('kunde_id', ids);
+    const projektById = Object.fromEntries((projekte || []).map(p => [p.id, p]));
     const laufzeitKurz = {}, hinweise = {};
     for (const p of (projekte || [])) {
       const istPauseGruppe = ['feedbackschleife', 'hold', 'pausiert'].includes(p.status);
@@ -334,9 +335,21 @@ router.get('/kanban', async (req, res) => {
       } catch { /* laufzeit optional */ }
     }
 
-    const { data: jobs = [] } = await supabase.from('talentone_jobs').select('id, kunde_id').in('kunde_id', ids);
+    const { data: jobs = [] } = await supabase.from('talentone_jobs').select('id, kunde_id, stelle, projekt_id, projekttyp').in('kunde_id', ids);
     const jobKunde = Object.fromEntries((jobs || []).map(j => [j.id, j.kunde_id]));
     const jobIds = (jobs || []).map(j => j.id);
+    // Umbau: Stellen-Chips je Kunde (Status vom verknüpften Projekt der Stelle).
+    const stellenByKunde = {};
+    for (const j of (jobs || [])) {
+      const p = j.projekt_id ? projektById[j.projekt_id] : null;
+      (stellenByKunde[j.kunde_id] ||= []).push({
+        job_id: j.id, stelle: j.stelle || 'Unbenannte Stelle', projekt_id: j.projekt_id || null,
+        projekttyp: j.projekttyp || null,
+        status: p?.status || null,
+        laufzeit_kurz: j.projekt_id ? (laufzeitKurz[j.projekt_id] || null) : null,
+        hinweise: j.projekt_id ? (hinweise[j.projekt_id] || []) : [],
+      });
+    }
     const bew7 = {}, bewGes = {};
     if (jobIds.length) {
       const vor7 = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -359,6 +372,7 @@ router.get('/kanban', async (req, res) => {
         status_gruppe: v?.status_gruppe || 'vorbereitung',
         bewerbungen_7t: bew7[k.id] || 0, bewerbungen_gesamt: bewGes[k.id] || 0,
         projekte: projekte_json,
+        stellen: stellenByKunde[k.id] || [],
       };
     });
     res.json({ kunden: out });

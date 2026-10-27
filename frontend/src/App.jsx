@@ -24,6 +24,7 @@ import LiveKampagnen from './pages/LiveKampagnen.jsx';
 import AnalyseFunnel from './pages/AnalyseFunnel.jsx';
 import JobView from './pages/JobView.jsx';
 import JobStelleninfos from './pages/job/JobStelleninfos.jsx';
+import JobVertragStatus from './pages/job/JobVertragStatus.jsx';
 import JobCreatives from './pages/job/JobCreatives.jsx';
 import JobCreativesV2 from './pages/job/JobCreativesV2.jsx';
 import JobAdCopies from './pages/job/JobAdCopies.jsx';
@@ -90,7 +91,8 @@ export default function App() {
         <Route path="kunden" element={<KundenList />} />
         <Route path="bewerbungen" element={<BewerbungenOverview />} />
         <Route path="zahlungen" element={<ZahlungenOverview />} />
-        <Route path="projekte" element={<ProjekteOverview />} />
+        {/* Umbau: „Projekt" ist aus der Oberfläche verschwunden — Route bleibt als Redirect. */}
+        <Route path="projekte" element={<Navigate to="/kunden" replace />} />
         <Route path="live-kampagnen" element={<LiveKampagnen />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
         <Route path="angebote" element={<OffersList />} />
@@ -108,6 +110,7 @@ export default function App() {
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
           <Route index element={<Navigate to="stelle" replace />} />
           <Route path="stelle" element={<JobStelleninfos />} />
+          <Route path="vertrag" element={<JobVertragStatus />} />
           <Route path="creatives" element={<JobCreatives />} />
           <Route path="creatives-v2" element={<JobCreativesV2 />} />
           <Route path="adcopies" element={<JobAdCopies />} />

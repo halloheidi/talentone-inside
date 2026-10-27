@@ -426,6 +426,7 @@ function ProjektKommentare({ projekt, team, defaultAutor }) {
 
 const TABS = [
   { to: 'stelle', label: 'Stelle' },
+  { to: 'vertrag', label: 'Vertrag & Status' },
   { to: 'creatives', label: 'Creatives' },
   { to: 'adcopies', label: 'Ad Copies' },
   { to: 'funnel', label: 'Funnel' },
@@ -472,13 +473,38 @@ function UebertragenButton({ jobId, onCreated }) {
   );
 }
 
-function StatusBadge({ projekt }) {
+// Vertragsart-Pill: „Kampagne 30 Tage" / „Abo 6 Monate" / „Abo Open End".
+function VertragsartPill({ projekt }) {
+  if (!projekt?.vertragsmodell) return null;
+  const m = projekt.vertragsmodell;
+  let text;
+  if (m === 'abo') {
+    text = projekt.laufzeit_wert == null ? 'Abo Open End' : `Abo ${projekt.laufzeit_wert} ${projekt.laufzeit_einheit === 'tage' ? 'Tage' : 'Monate'}`;
+  } else {
+    text = projekt.laufzeit_wert == null ? 'Kampagne' : `Kampagne ${projekt.laufzeit_wert} ${projekt.laufzeit_einheit === 'monate' ? 'Monate' : 'Tage'}`;
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', padding: '4px 12px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      📄 {text}
+    </span>
+  );
+}
+
+function StatusBadge({ projekt, laufzeit }) {
   if (!projekt) return null;
   const status = projekt.status;
   if (status === 'live') {
     const start = projekt.start_phase1 || projekt.live_seit;
+    // Laufzeit-Info aus laufzeitStatus (Vertragsfenster): Kampagne „Tag X von Y",
+    // Abo fix „Monat X von Y", Abo Open End „X Tage online".
     let tagInfo = '';
-    if (start) {
+    if (laufzeit) {
+      if (laufzeit.modell === 'abo' && laufzeit.soll == null) {
+        if (laufzeit.online_tage != null) tagInfo = ` — ${laufzeit.online_tage} Tage online`;
+      } else if (laufzeit.verbraucht != null && laufzeit.soll != null) {
+        tagInfo = laufzeit.modell === 'abo' ? ` — Monat ${laufzeit.verbraucht} von ${laufzeit.soll}` : ` — Tag ${laufzeit.verbraucht} von ${laufzeit.soll}`;
+      }
+    } else if (start) {
       const t = Math.floor((Date.now() - new Date(start).getTime()) / 86400000);
       tagInfo = ` — Tag ${t} von 30`;
     }
@@ -617,6 +643,8 @@ export default function JobView() {
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);
   const [projekt, setProjekt] = useState(null);
+  const [laufzeit, setLaufzeit] = useState(null);     // laufzeitStatus aus GET /jobs/:id
+  const [geteiltMit, setGeteiltMit] = useState([]);   // andere Stellen am selben Projekt
   const [meta, setMeta] = useState(null); // Meta-Kennzahlen aus GET /jobs/:id
   const [team, setTeam] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -652,7 +680,7 @@ export default function JobView() {
   function reload() {
     loadTabStatus(); // Auto-Erkennung aktualisieren (Creatives/Funnel/Export können sich geändert haben)
     return Promise.all([
-      api(`/jobs/${jobId}`).then(r => { setJob(r.job); setMeta(r.meta || null); if (r.projekt) setProjekt(r.projekt); }),
+      api(`/jobs/${jobId}`).then(r => { setJob(r.job); setMeta(r.meta || null); if (r.projekt) setProjekt(r.projekt); setLaufzeit(r.laufzeit || null); setGeteiltMit(r.geteilt_mit || []); }),
       api(`/kunden/${kundeId}`).then(r => setKunde(r.kunde)),
     ]);
   }
@@ -730,6 +758,8 @@ export default function JobView() {
         // Präzise Verknüpfung: das vom Backend mitgelieferte Projekt (projekt_id-FK).
         // Ist es null, greift unten die kunde-basierte Fallback-Heuristik.
         setProjekt(j.projekt || null);
+        setLaufzeit(j.laufzeit || null);
+        setGeteiltMit(j.geteilt_mit || []);
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -802,7 +832,7 @@ export default function JobView() {
   const hasPending = pendingCreatives > 0 || pendingReels.length > 0;
 
   return (
-    <JobContext.Provider value={{ job, kunde, projekt, reload, startCreatives, startReel, pendingCreatives, pendingReels }}>
+    <JobContext.Provider value={{ job, kunde, projekt, laufzeit, geteiltMit, setProjekt, reload, startCreatives, startReel, pendingCreatives, pendingReels }}>
       <div className="breadcrumb">
         <Link to="/kunden">Kunden</Link>
         <span aria-hidden>›</span>
@@ -855,22 +885,22 @@ export default function JobView() {
           </span>
         )}
         {projekt
-          ? <div style={{ paddingTop: 6 }}><StatusBadge projekt={projekt} /></div>
+          ? (
+            <div style={{ paddingTop: 6, display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Link to="vertrag" style={{ textDecoration: 'none' }} title="Zu Vertrag & Status">
+                <StatusBadge projekt={projekt} laufzeit={laufzeit} />
+              </Link>
+              <VertragsartPill projekt={projekt} />
+            </div>
+          )
           : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
         }
       </div>
 
-      {/* Projekt-Leiste: Werbekosten-Badge, „Zum Projekt", Zuordnungs-Dropdown */}
+      {/* Operative Leiste: Werbekosten-Badge + Monatsbudget (Vertrag/Status → eigener Tab) */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <WerbekostenBadge projekt={projekt} onSaved={setProjekt} />
         {projekt && <MonatsbudgetInput projekt={projekt} meta={meta} onSaved={reload} />}
-        {projekt && (
-          <Link to={`/projekte?highlight=${projekt.id}`} className="btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
-            → Zum Projekt
-          </Link>
-        )}
-        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Projekt:</span>
-        <ProjektZuordnung job={job} projekt={projekt} onRelink={relinkProjekt} />
       </div>
 
       {/* Meta-Kennzahlen kompakt */}
