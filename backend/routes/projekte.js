@@ -98,12 +98,24 @@ router.get('/', async (req, res) => {
     }
   }
 
+  // A2: Meta-Verbindungs-Diagnose für LIVE-Projekte (Banner „keine Meta-Verbindung").
+  let verbindungMap = new Map();
+  try {
+    const liveIds = (data || []).filter(p => p.status === 'live').map(p => p.id);
+    if (liveIds.length) {
+      const { metaVerbindungBatch } = await import('../meta-verbindung.js');
+      verbindungMap = await metaVerbindungBatch(liveIds);
+    }
+  } catch (e) { console.warn('[projekte/meta-verbindung]', e.message); }
+
   const enriched = (data || []).map(p => {
     const offer = p.offer_id ? offerById.get(p.offer_id) : null;
+    const v = verbindungMap.get(p.id) || null;
     return {
       ...p,
       kommentar_count: countMap[p.id] || 0,
       verknuepfte_jobs: jobsByProjekt[p.id] || [],
+      meta_verbindung: v ? { banner_grund: v.banner_grund, verbunden: v.verbunden, aktiv: v.aktiv, insights_alter_tage: v.insights_alter_tage } : null,
       offer_snapshot: offer ? {
         brand:                offer.brand,
         campaign_started_at:  offer.campaign_started_at,

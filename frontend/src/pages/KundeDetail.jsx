@@ -1636,6 +1636,17 @@ function ProjektInfoCards({ projekte, schritteItems = [], kundeId, onUpdated }) 
                 <ItemBadge item={badge} kundeId={kundeId} compact />
               </div>
             )}
+            {p.status === 'live' && p.meta_verbindung?.banner_grund && (
+              <div style={{
+                background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+                borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 600,
+                display: 'flex', gap: 6, alignItems: 'center',
+              }}>
+                🔌 {p.meta_verbindung.banner_grund === 'objekt_pausiert'
+                  ? 'Meta-Kampagne nicht aktiv — Laufzeit wird nicht gezählt'
+                  : 'Keine Meta-Verbindung — Laufzeit wird nicht gezählt'}
+              </div>
+            )}
             {p.projektart && (
               <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{p.projektart}</div>
             )}

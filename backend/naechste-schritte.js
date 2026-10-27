@@ -24,6 +24,7 @@ const REGELN = [
   { key: 'wartet_feedback',      icon: '⏳', label: 'Wartet auf Feedback',        color: 'grau',   tab: 'export' },
   { key: 'ueberarbeitung',       icon: '🔄', label: 'Überarbeitung nötig',        color: 'gelb',   tab: 'export' },
   { key: 'bereit_golive',        icon: '🚀', label: 'Bereit für Go-Live',         color: 'farbig', tab: 'export' },
+  { key: 'meta_zuordnen',        icon: '🔌', label: 'Meta zuordnen',              color: 'rot',    tab: 'meta' },
   { key: 'live',                 icon: '🟢', label: 'Live',                       color: 'gruen',  tab: 'export' },
   { key: 'update_feedback_offen',icon: '📬', label: 'Update-Feedback offen',      color: 'gelb',   tab: 'export' },
   { key: 'update_ueberarbeitung',icon: '🔄', label: 'Update-Überarbeitung',       color: 'gelb',   tab: 'export' },
@@ -50,7 +51,8 @@ function kurznameFor(stelle) {
  */
 function berechneSchritt(ctx) {
   const { kunde, projekt, tabStatus, refbilderCount, hatFotos, hatLogo, fotoLogoWarten,
-          versandTypen, creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum } = ctx;
+          versandTypen, creativesCount, adcopiesCount, funnels, review, letzterEntwurfsversandDatum,
+          metaVerbindung } = ctx;
 
   // Manuell abgehaktes Tab (tab_status[tab] === true) → zugehöriger Workflow-Schritt
   // wird übersprungen (Schritt wurde ausserhalb des Tools erledigt).
@@ -69,6 +71,15 @@ function berechneSchritt(ctx) {
   // arbeiten.
   // ══════════════════════════════════════════════════════════════════════
   if (projekt?.status === 'live') {
+    // A2: Live, aber keine nutzbare Meta-Verbindung (keine Zuordnung/Reverse-FK ODER
+    // zugeordnetes Objekt nicht aktiv) → Laufzeit wird nicht gezählt. Höchste Priorität,
+    // weil die Laufzeit-/Garantie-Rechnung sonst stillsteht.
+    if (metaVerbindung?.banner_grund) {
+      return {
+        ...REGEL_BY_KEY.meta_zuordnen,
+        label: metaVerbindung.banner_grund === 'objekt_pausiert' ? 'Meta nicht aktiv' : 'Meta zuordnen',
+      };
+    }
     // Offenes Kampagnen-Update-Feedback hat Vorrang vor dem reinen Live-Badge —
     // die Farbe (gelb/rot) sorgt dafür, dass die Kundenliste es nach oben sortiert.
     const sub = projekt.update_feedback_status;
@@ -260,6 +271,16 @@ export async function ermittleNaechsteSchritte(kundeIds) {
     if (!reviewTopByJob[r.job_id]) reviewTopByJob[r.job_id] = r;
   }
 
+  // A2: Meta-Verbindungs-Diagnose für die primären LIVE-Projekte (Badge „Meta zuordnen").
+  let verbindungByProjekt = new Map();
+  try {
+    const liveProjektIds = Object.values(primaeresProjektByKunde).filter(p => p?.status === 'live').map(p => p.id);
+    if (liveProjektIds.length) {
+      const { metaVerbindungBatch } = await import('./meta-verbindung.js');
+      verbindungByProjekt = await metaVerbindungBatch(liveProjektIds);
+    }
+  } catch (e) { console.warn('[naechste-schritte/meta-verbindung]', e.message); }
+
   // Bewerbungs-Fallback: wenn Kunde keine Jobs hat aber Projekt existiert
   // (Waisen — sollte nach Backfill nicht mehr passieren, aber sicherheitshalber)
   const out = {};
@@ -302,6 +323,7 @@ export async function ermittleNaechsteSchritte(kundeIds) {
         funnels: funnelsByJob[job.id] || [],
         review: reviewTopByJob[job.id],
         letzterEntwurfsversandDatum: entwurfsversandDatumByJob[job.id] || null,
+        metaVerbindung: projekt?.status === 'live' ? (verbindungByProjekt.get(projekt.id) || null) : null,
       });
       return {
         job_id: job.id,

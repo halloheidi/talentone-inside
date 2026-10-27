@@ -208,8 +208,24 @@ async function collectMetaWarnungen() {
   budgetWarnungen.sort((a, b) => b.prozent - a.prozent);
   garantieHinweise.sort((a, b) => (a.rest ?? 99) - (b.rest ?? 99));
 
+  // A2: Meta-Verbindungs-Wächter — live ohne (aktive) Zuordnung bzw. ohne frische Insights.
+  const verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
+  try {
+    const { metaVerbindungBatch } = await import('./meta-verbindung.js');
+    const vMap = await metaVerbindungBatch(live.map(p => p.id));
+    for (const p of live) {
+      const v = vMap.get(p.id);
+      if (!v) continue;
+      const eintrag = { kunde: kundeName[p.kunde_id] || p.kunde || 'Unbekannt', projekt: p.projekt || '—' };
+      if (!v.verbunden) verbindungsWarnungen.keineVerbindung.push(eintrag);
+      else if (!v.aktiv) verbindungsWarnungen.objektPausiert.push(eintrag);
+      else if (!v.insights_frisch) verbindungsWarnungen.keineInsights.push({ ...eintrag, tage: v.insights_alter_tage });
+    }
+    verbindungsWarnungen.keineInsights.sort((a, b) => (b.tage ?? 0) - (a.tage ?? 0));
+  } catch (e) { console.warn('[daily-bewerbungs-report] meta-verbindung:', e.message); }
+
   const ueberfaelligMeldungen = await collectUeberfaellig();
-  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen };
+  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen, verbindungsWarnungen };
 }
 
 // Überfällige Projekte: geplanter Livegang liegt in der Vergangenheit, aber es gibt keinen
@@ -251,8 +267,27 @@ async function collectUeberfaellig() {
   return meldungen;
 }
 
-function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [] }) {
+function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [], verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] } }) {
   let html = '';
+  const vw = verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
+  const verbRows = [
+    ...vw.keineVerbindung.map(e => ({ ...e, text: 'Keine Meta-Verbindung — Laufzeit wird nicht gezählt', farbe: '#b91c1c' })),
+    ...vw.objektPausiert.map(e => ({ ...e, text: 'Zugeordnete Kampagne/Anzeigengruppe nicht aktiv', farbe: '#b91c1c' })),
+    ...vw.keineInsights.map(e => ({ ...e, text: `Zuordnung vorhanden, aber keine Insights seit ${e.tage ?? '?'} Tagen`, farbe: '#b26b00' })),
+  ];
+  if (verbRows.length) {
+    const rows = verbRows.map(e => `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(e.kunde)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(e.projekt)}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:${e.farbe};font-weight:700;">${escape(e.text)}</td>
+      </tr>`).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b91c1c;">🔌 Meta-Verbindung prüfen (Live-Projekte)</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fdecea;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Projekt</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Befund</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
   if (ueberfaelligMeldungen.length) {
     const rows = ueberfaelligMeldungen.map(u => `<tr style="border-bottom:1px solid #ececea;">
         <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(u.kunde)}</td>
@@ -306,7 +341,7 @@ function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMe
   return html;
 }
 
-function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] }, feedbackGruppen = [] }) {
+function renderMail({ rows, neu24hTotal, datumLabel, metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [], verbindungsWarnungen: { keineVerbindung: [], objektPausiert: [], keineInsights: [] } }, feedbackGruppen = [] }) {
   const anyWarn = rows.some(r => r.warnung);
   const rowsHtml = rows.map(r => `
     <tr style="border-bottom:1px solid #ececea;${r.warnung ? 'background:#fef2f2;' : ''}">
@@ -377,11 +412,13 @@ export async function runDailyBewerbungsReport() {
   const t0 = Date.now();
   try {
     const { rows, neu24hTotal } = await collectRows();
-    let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [] };
+    let metaWarnungen = { budgetWarnungen: [], garantieHinweise: [], ueberfaelligMeldungen: [], verbindungsWarnungen: { keineVerbindung: [], objektPausiert: [], keineInsights: [] } };
     try { metaWarnungen = await collectMetaWarnungen(); } catch (e) { console.warn('[daily-bewerbungs-report] meta-warnungen:', e.message); }
     let feedbackGruppen = [];
     try { feedbackGruppen = await collectKundenFeedbackAenderungen(); } catch (e) { console.warn('[daily-bewerbungs-report] kunden-feedback:', e.message); }
-    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length;
+    const vw = metaWarnungen.verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
+    const verbindungN = vw.keineVerbindung.length + vw.objektPausiert.length + vw.keineInsights.length;
+    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length || verbindungN;
     if (!rows.length && neu24hTotal === 0 && !anyMeta && !feedbackGruppen.length) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
@@ -394,7 +431,8 @@ export async function runDailyBewerbungsReport() {
     const fbEinst = feedbackGruppen.reduce((s, g) => s + (g.counts.eingestellt || 0), 0);
     const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
       + (fbEinst ? ` · ${fbEinst} Einstellung${fbEinst === 1 ? '' : 'en'}🎉` : '')
-      + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '');
+      + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '')
+      + (verbindungN ? ` · ${verbindungN} Meta🔌` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };
     lastRunAt = new Date().toISOString();

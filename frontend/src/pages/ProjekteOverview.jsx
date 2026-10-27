@@ -631,6 +631,12 @@ function KanbanBoard({ filtered, onCardClick, onDragStart, onDragOver, onDrop, c
                     {paymentStatusById[p.kunde_id] === 'blocked' && (
                       <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}>⛔ Kampagne blockiert — Zahlung überfällig</span>
                     )}
+                    {p.status === 'live' && p.meta_verbindung?.banner_grund && (
+                      <span className="kanban-card-status-pill" style={{ background: '#fde0e0', color: '#b91c1c' }}
+                        title="Zum Zuordnen: Job oeffnen, Tab Meta">
+                        🔌 {p.meta_verbindung.banner_grund === 'objekt_pausiert' ? 'Meta nicht aktiv — Laufzeit zählt nicht' : 'Keine Meta-Verbindung — Laufzeit zählt nicht'}
+                      </span>
+                    )}
                     <AuftragBadge offerSnapshot={p.offer_snapshot} />
                     {p.kickoff_termin && (
                       <span className="kanban-card-status-pill" style={{ background: '#dbeafe', color: '#1e40af' }}>
