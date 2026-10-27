@@ -44,7 +44,7 @@ export async function laufzeitStatus(projekt) {
   const garantie = !!projekt?.garantie;
   const hinweise = [];
   const ptage = pausenTage(pausen);
-  const base = { modell, pausen, pausen_tage: ptage, garantie, hinweise, soll: null, verbraucht: null, rest: null, einheit: null, ende_voraussichtlich: null };
+  const base = { modell, pausen, pausen_tage: ptage, garantie, hinweise, soll: null, verbraucht: null, rest: null, ueberlaufzeit_tage: null, einheit: null, ende_voraussichtlich: null };
 
   if (!modell) { hinweise.push('kein_vertragsmodell'); return base; }
 
@@ -53,6 +53,11 @@ export async function laufzeitStatus(projekt) {
     base.einheit = projekt.laufzeit_einheit || 'tage';
     base.soll = projekt.laufzeit_wert ?? null;
 
+    // Vertragsfenster: ab start_datum zählen. Fehlt es → Fallback = aktuelle Laufphase
+    // (all-time-Verhalten), Hinweis 'start_datum_fehlt'.
+    const abDatum = projekt.start_datum || null;
+    if (!abDatum) hinweise.push('start_datum_fehlt');
+
     const { data: jobs = [] } = await supabase.from('talentone_jobs')
       .select('id, projekttyp').eq('projekt_id', projekt.id);
     const recruiting = jobs.filter(j => !NICHT_RECRUITING.has(j.projekttyp || ''));
@@ -60,7 +65,7 @@ export async function laufzeitStatus(projekt) {
 
     let maxLauftage = null, hatVerbindung = false, datenFehlen = false;
     for (const j of recruiting) {
-      const r = await aktiveLauftage(j.id);
+      const r = await aktiveLauftage(j.id, { abDatum });
       if (r.quelle === 'keine') continue;
       hatVerbindung = true;
       if (r.hinweis === 'meta_daten_fehlen') datenFehlen = true;
@@ -70,7 +75,16 @@ export async function laufzeitStatus(projekt) {
     if (datenFehlen && maxLauftage == null) { hinweise.push('meta_daten_fehlen'); return base; }
 
     base.verbraucht = maxLauftage ?? 0;
-    if (base.soll != null) base.rest = base.soll - base.verbraucht;
+    if (base.soll != null) {
+      if (base.verbraucht > base.soll) {
+        // Kulanz-Weiterlauf: nie negativ; Überlaufzeit separat ausweisen.
+        base.rest = 0;
+        base.ueberlaufzeit_tage = base.verbraucht - base.soll;
+        hinweise.push('ueberlaufzeit');
+      } else {
+        base.rest = base.soll - base.verbraucht;
+      }
+    }
     // Ende ist bei Kampagnen aktiv-tag-basiert, kein Kalenderdatum → bewusst null.
     return base;
   }

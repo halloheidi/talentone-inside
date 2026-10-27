@@ -754,6 +754,8 @@ const HINWEIS_TEXT = {
   meta_daten_fehlen: '⏳ Zuordnung vorhanden, aber noch keine Insights.',
   kein_vertragsmodell: 'ℹ️ Kein Vertragsmodell gewählt.',
   kein_start_datum: 'ℹ️ Kein Start-Datum gesetzt — Abo-Laufzeit kann nicht gerechnet werden.',
+  start_datum_fehlt: 'ℹ️ Kein Start-Datum — gezählt wird ab Beginn der jüngsten Laufphase.',
+  ueberlaufzeit: '⏱️ Über der Vertragslaufzeit (Kulanz-Weiterlauf).',
   abo_mit_garantie: '⚠️ Abo mit Garantie ist ungewöhnlich — bitte prüfen (blockiert nicht).',
 };
 function VertragSection({ projektId, projekt, patch }) {
@@ -811,7 +813,7 @@ function VertragSection({ projektId, projekt, patch }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
             <span><strong>Verbraucht:</strong> {status.verbraucht == null ? '—' : `${status.verbraucht} ${einheit === 'monate' ? 'Mon.' : 'akt. Tage'}`}</span>
             <span><strong>Soll:</strong> {status.soll == null ? 'offen' : `${status.soll} ${einheit === 'monate' ? 'Mon.' : 'Tage'}`}</span>
-            <span><strong>Rest:</strong> {status.rest == null ? '—' : `${status.rest} ${einheit === 'monate' ? 'Mon.' : 'Tage'}`}</span>
+            <span><strong>Rest:</strong> {status.rest == null ? '—' : `${status.rest} ${einheit === 'monate' ? 'Mon.' : 'Tage'}`}{status.ueberlaufzeit_tage ? ` (+${status.ueberlaufzeit_tage} über)` : ''}</span>
             {status.ende_voraussichtlich && <span><strong>Vsl. Ende:</strong> {new Date(status.ende_voraussichtlich).toLocaleDateString('de-DE')}</span>}
             {status.pausen_tage > 0 && <span><strong>Pausen:</strong> {status.pausen_tage} Tage</span>}
           </div>

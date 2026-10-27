@@ -157,13 +157,22 @@ export async function aktuellePhaseInfo(metaCampaignId, zahlungsproblemSeit = nu
  * aus den Ad-Set-Tages-Insights. Spiegelt aktuellePhaseInfo() für die Adset-Ebene.
  * @returns {number} aktive Lauftage der aktuellen Phase (0 wenn keine Insights)
  */
-export async function adsetAktiveLauftage(metaAdsetId) {
+export async function adsetAktiveLauftage(metaAdsetId, abDatum = null) {
   const { data } = await supabase.from('talentone_meta_adset_insights')
     .select('datum, spend').eq('meta_adset_id', metaAdsetId).order('datum', { ascending: true });
   const aktivTage = (data || []).filter(t => Number(t.spend) > 0).map(t => t.datum);
   if (!aktivTage.length) return 0;
+  // Vertragsfenster: ab start_datum nur die Tage im Fenster zählen (kein Phasen-Reset).
+  if (abDatum) return aktivTage.filter(d => d >= abDatum).length;
   const phasen = berechnePhasen(aktivTage);
   return phasen[phasen.length - 1]?.aktive_lauftage || 0;
+}
+
+// Aktive Lauftage (Spend > 0) einer Kampagne AB einem Datum (Vertragsfenster).
+async function kampagneAktiveLauftageAbDatum(metaCampaignId, abDatum) {
+  const { data } = await supabase.from('talentone_meta_insights')
+    .select('datum, spend').eq('meta_campaign_id', metaCampaignId).gte('datum', abDatum);
+  return (data || []).filter(t => Number(t.spend) > 0).length;
 }
 
 /**
@@ -175,18 +184,25 @@ export async function adsetAktiveLauftage(metaAdsetId) {
  * Fallback: Summe über alle NICHT-gemischten Kampagnen mit job_id = jobId, plus alle
  * Anzeigengruppen mit job_id = jobId. So geht kein bestehendes Verhalten verloren.
  *
+ * Mit opts.abDatum (= projekte.start_datum) wird bei Kampagnen/Anzeigengruppen NUR das
+ * Vertragsfenster gezählt (Tage mit Spend > 0 ab abDatum). Ohne abDatum bleibt es beim
+ * all-time-Verhalten (aktuelle Phase) — Meilensteine/Controlling nutzen das unverändert.
+ *
  * @param {string} jobId
+ * @param {{abDatum?: string}} opts
  * @returns {{ lauftage: number|null, ebene: string|null, quelle: 'zuordnung'|'reverse_fk'|'keine', hinweis: string|null }}
  */
-export async function aktiveLauftage(jobId) {
+export async function aktiveLauftage(jobId, opts = {}) {
+  const abDatum = opts?.abDatum || null;
   const { data: job } = await supabase.from('talentone_jobs')
     .select('meta_zuordnung').eq('id', jobId).maybeSingle();
   const z = job?.meta_zuordnung;
 
   if (z?.id && z?.ebene === 'anzeigengruppe') {
-    return { lauftage: await adsetAktiveLauftage(z.id), ebene: 'anzeigengruppe', quelle: 'zuordnung', hinweis: null };
+    return { lauftage: await adsetAktiveLauftage(z.id, abDatum), ebene: 'anzeigengruppe', quelle: 'zuordnung', hinweis: null };
   }
   if (z?.id && z?.ebene === 'kampagne') {
+    if (abDatum) return { lauftage: await kampagneAktiveLauftageAbDatum(z.id, abDatum), ebene: 'kampagne', quelle: 'zuordnung', hinweis: null };
     const info = await aktuellePhaseInfo(z.id);
     return { lauftage: info?.aktive_lauftage ?? 0, ebene: 'kampagne', quelle: 'zuordnung', hinweis: info ? null : 'meta_daten_fehlen' };
   }
@@ -203,9 +219,10 @@ export async function aktiveLauftage(jobId) {
 
   let summe = 0;
   for (const c of (kamp || [])) {
+    if (abDatum) { summe += await kampagneAktiveLauftageAbDatum(c.meta_campaign_id, abDatum); continue; }
     const info = await aktuellePhaseInfo(c.meta_campaign_id);
     summe += info?.aktive_lauftage || 0;
   }
-  for (const a of (adsets || [])) summe += await adsetAktiveLauftage(a.meta_adset_id);
+  for (const a of (adsets || [])) summe += await adsetAktiveLauftage(a.meta_adset_id, abDatum);
   return { lauftage: summe, ebene: 'reverse_fk', quelle: 'reverse_fk', hinweis: null };
 }

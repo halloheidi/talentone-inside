@@ -695,6 +695,22 @@ export function startMetaSyncScheduler() {
     const backfill = await braucheBackfill();
     syncMetaKampagnen({ backfill }).catch(err => console.error('[meta-sync]', err.message));
   };
-  setTimeout(() => { check().catch(() => {}); setInterval(() => check().catch(() => {}), CHECK_MS); }, INIT_MS);
-  console.log('[meta-sync] Scheduler aktiv (täglich 05:00 Berlin, dormant ohne Token).');
+  // Selbstheilung: beim Start einmal prüfen, ob die Insights veraltet sind (>2 Tage).
+  // Verhindert lange Lücken, wenn das 05:00-Fenster durch Deploys/Neustarts verpasst wird.
+  const catchUp = async () => {
+    try {
+      if (!(await getMetaToken())) return; // dormant
+      const { data } = await supabase.from('talentone_meta_insights')
+        .select('datum').order('datum', { ascending: false }).limit(1);
+      const letzter = data?.[0]?.datum || null;
+      const grenze = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+      if (!letzter || letzter < grenze) {
+        console.log(`[meta-sync] Catch-up: Insights veraltet (letzter ${letzter || 'nie'}) → Sync startet.`);
+        const backfill = await braucheBackfill();
+        await syncMetaKampagnen({ backfill });
+      }
+    } catch (err) { console.warn('[meta-sync] catch-up:', err.message); }
+  };
+  setTimeout(() => { catchUp().catch(() => {}); check().catch(() => {}); setInterval(() => check().catch(() => {}), CHECK_MS); }, INIT_MS);
+  console.log('[meta-sync] Scheduler aktiv (täglich 05:00 Berlin + Start-Catch-up bei veralteten Insights, dormant ohne Token).');
 }
