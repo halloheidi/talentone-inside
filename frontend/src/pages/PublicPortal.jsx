@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
-import KriterienStrukturEditor from '../components/KriterienStrukturEditor.jsx';
+import KriterienKachel from '../components/KriterienKachel.jsx';
+import { BewerberListe, ampelVerteilung, AMPELN } from '../components/BewerberListe.jsx';
 import AnfragenKanban from '../components/AnfragenKanban.jsx';
 import { supabase } from '../lib/supabase.js';
 import { t } from '../lib/anrede.js';
@@ -142,17 +143,18 @@ export default function PublicPortal() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f6f2', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
-      <header style={{ background: brand.primary, color: '#fff', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
+      <style>{`@media(max-width:640px){.pp-main{padding:16px 16px 40px!important}.pp-header{padding:14px 16px!important}.pp-meta{display:none!important}}`}</style>
+      <header className="pp-header" style={{ background: brand.primary, color: '#fff', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: `3px solid ${primary}` }}>
         {data.kunde?.logo_url && (
-          <img src={data.kunde.logo_url} alt="" height={44} style={{ background: '#fff', borderRadius: 8, padding: '4px 8px' }} />
+          <img src={data.kunde.logo_url} alt="" style={{ height: 52, maxHeight: 52, maxWidth: 160, objectFit: 'contain', background: '#fff', borderRadius: 10, padding: '6px 10px' }} />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, opacity: 0.7 }}>{brand.name}</div>
-          <div style={{ fontSize: 18, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 20, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {data.kunde?.firmenname || t(data.kunde, 'Dein Dashboard', 'Ihr Dashboard')}
           </div>
         </div>
-        <div style={{ fontSize: 12, opacity: 0.75, textAlign: 'right' }}>
+        <div className="pp-meta" style={{ fontSize: 12, opacity: 0.75, textAlign: 'right' }}>
           <div>{t(data.kunde, 'Dein Kampagnen-Dashboard', 'Ihr Kampagnen-Dashboard')}</div>
           <div>Live-Daten · aktualisiert vor wenigen Sekunden</div>
         </div>
@@ -162,21 +164,21 @@ export default function PublicPortal() {
             setData(null); setNeedsLogin(true);
           }}
           style={{ background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
-                   padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                   padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
           title="Abmelden"
         >Abmelden</button>
       </header>
 
       {data.jobs.length > 1 && (
-        <nav style={{ display: 'flex', gap: 4, padding: '10px 20px', background: '#fff', borderBottom: '1px solid #ececea', overflowX: 'auto' }}>
+        <nav style={{ display: 'flex', gap: 6, padding: '10px 20px', background: '#fff', borderBottom: '1px solid #ececea', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {data.jobs.map(j => {
             const aktiv = j.id === activeJobId;
             return (
               <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
                 background: aktiv ? primary : 'transparent',
                 color: aktiv ? primaryInk : '#0a0a0a',
-                border: 'none', padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
-                fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+                border: aktiv ? 'none' : '1px solid #ececea', padding: '8px 14px', borderRadius: 100, cursor: 'pointer',
+                fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0,
               }}>
                 {j.projekttyp === 'neukundengewinnung' ? '🎯' : '👥'} {j.stelle || 'Projekt'}
               </button>
@@ -185,19 +187,19 @@ export default function PublicPortal() {
         </nav>
       )}
 
-      <main style={{ width: '100%', padding: '20px 24px 40px' }}>
+      <main className="pp-main" style={{ width: '100%', maxWidth: 1120, margin: '0 auto', padding: '20px 24px 40px', boxSizing: 'border-box' }}>
         {(() => {
           const neu = bewerbungParam ? (data.bewerbungen || []).find(x => x.id === bewerbungParam) : null;
           if (!neu) return null;
           const njob = data.jobs.find(j => j.id === neu.job_id);
           return (
-            <div style={{ background: '#fff', border: `2px solid ${primary}`, borderRadius: 12, padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 22 }}>📨</span>
+            <div style={{ background: `linear-gradient(100deg, ${primary}, ${primary}cc)`, color: primaryInk, borderRadius: 14, padding: '16px 18px', marginBottom: 18, display: 'flex', gap: 14, alignItems: 'center', boxShadow: `0 6px 20px ${primary}40` }}>
+              <span style={{ fontSize: 26 }}>📨</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: primary }}>Neu eingegangen</div>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{neu.name || 'Neue Bewerbung'} · {njob?.stelle || 'Stelle'}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.06, opacity: 0.85 }}>Neu eingegangen</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{neu.name || 'Neue Bewerbung'} · {njob?.stelle || 'Stelle'}</div>
               </div>
-              <button onClick={() => setAkteBewId(neu.id)} style={{ background: primary, color: primaryInk, border: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Akte öffnen →</button>
+              <button onClick={() => setAkteBewId(neu.id)} style={{ background: primaryInk, color: primary, border: 'none', borderRadius: 100, padding: '9px 18px', cursor: 'pointer', fontWeight: 800, fontSize: 13, flexShrink: 0 }}>Akte öffnen →</button>
             </div>
           );
         })()}
@@ -315,10 +317,16 @@ function PasswortSetzen({ token, einladung, onDone }) {
 
 function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bewerbungen, creatives, adcopies, onReload, akteBewId, onAkte }) {
   const istNeukunden = job.projekttyp === 'neukundengewinnung';
+  const [ampelFilter, setAmpelFilter] = useState(null);
+  async function saveKriterien(wert) {
+    await api(`/public/portal/${token}/job/${job.id}/kriterien-struktur`, { method: 'PUT', body: JSON.stringify({ kriterien: wert }) });
+    onReload?.();
+  }
   return (
     <section style={{ display: 'grid', gap: 20 }}>
       {!istNeukunden && (
-        <PortalKacheln job={job} token={token} kunde={kunde} primary={primary} bewerbungen={bewerbungen} onReload={onReload} />
+        <PortalKacheln job={job} token={token} kunde={kunde} primary={primary} bewerbungen={bewerbungen} onReload={onReload}
+          ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} />
       )}
       {job.funnel_url && (
         <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -341,8 +349,15 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
         />
       ) : (
         <>
-          <KriterienStrukturKachel job={job} token={token} kunde={kunde} primary={primary} primaryInk={primaryInk} onReload={onReload} />
-          <BewerbungenSection job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} primaryInk={primaryInk} akteBewId={akteBewId} onAkte={onAkte} />
+          <KriterienKachel
+            value={job.kriterien_struktur}
+            onSave={saveKriterien}
+            accent={primary}
+            titel={t(kunde, 'Worauf wir für dich achten', 'Worauf wir für Sie achten')}
+            hinweis="Ausschlusskriterien berücksichtigen wir sofort bei der Vorqualifizierung."
+          />
+          <BewerberListe job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} modus="kunde"
+            ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte} />
           <MitarbeiterstimmenPortalKachel token={token} kunde={kunde} primary={primary} />
         </>
       )}
@@ -913,206 +928,6 @@ function PipelineEditor({ job, token, onClose, onSaved }) {
   );
 }
 
-/* ══════════════════════ Bewerbungen (Recruiting) ══════════════════════ */
-
-// B3: Status-Bucket aus den Ist-Werten (Mapping wie intern).
-function portalStatusBucket(notiz) {
-  if (!notiz) return 'neu';
-  if (notiz.status === 'abgesagt') return 'abgesagt';
-  if (notiz.vg_vereinbart_am) return 'vg';
-  if (notiz.kunde_kontaktiert) return 'vorgestellt';
-  if (['kontaktiert', 'interessiert'].includes(notiz.status)) return 'vorqual';
-  return 'neu';
-}
-const BUCKET_LABEL = { neu: 'Neu', vorqual: 'In Vorqualifizierung', vorgestellt: 'Vorgestellt', vg: 'VG vereinbart', abgesagt: 'Abgesagt' };
-const BUCKET_COLOR = { neu: '#6b7280', vorqual: '#1e40af', vorgestellt: '#5b21b6', vg: '#166534', abgesagt: '#b91c1c' };
-function trefferText(struktur, check) {
-  const c = check || {};
-  const z = arr => { const total = (arr || []).length; const ja = (arr || []).filter(i => c[i.id] === true).length; return `${ja}/${total}`; };
-  return `KO ${z(struktur?.ko)} · Muss ${z(struktur?.muss)}`;
-}
-
-function BewerbungenSection({ job, bewerbungen, kunde, akteBewId, onAkte }) {
-  const [filter, setFilter] = useState('alle');
-  const frageSpalten = [];
-  for (const b of bewerbungen) {
-    for (const a of (Array.isArray(b.antworten) ? b.antworten : [])) {
-      const f = (a?.frage_text || '').trim();
-      if (f && !frageSpalten.includes(f)) frageSpalten.push(f);
-    }
-  }
-  const antwortFor = (b, frage) => (Array.isArray(b.antworten) ? b.antworten : []).find(a => (a?.frage_text || '').trim() === frage)?.antwort || '';
-  const kurzDatum = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); } catch { return d; } };
-  const hatKontakt = bewerbungen.some(b => (b.kontaktversuche || []).length);
-  const gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => portalStatusBucket(b.notiz) === filter);
-  const akte = bewerbungen.find(b => b.id === akteBewId) || null;
-  return (
-    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        {['alle', 'neu', 'vorqual', 'vorgestellt', 'vg', 'abgesagt'].map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 100, cursor: 'pointer', border: filter === f ? '2px solid #0a0a0a' : '1px solid #ececea', background: filter === f ? '#0a0a0a' : '#fff', color: filter === f ? '#fff' : '#0a0a0a' }}>
-            {f === 'alle' ? 'Alle' : BUCKET_LABEL[f]}
-          </button>
-        ))}
-      </div>
-      {bewerbungen.length === 0 ? (
-        <p style={{ color: '#9a9994' }}>Noch keine Bewerbungen eingegangen.</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
-                <th style={thStyle}>Datum</th>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Kriterien</th>
-                <th style={thStyle}>E-Mail</th>
-                <th style={thStyle}>Telefon</th>
-                <th style={thStyle}>Quelle</th>
-                {frageSpalten.map(f => <th key={`fr-${f}`} style={{ ...thStyle, whiteSpace: 'nowrap' }} title={f}>{f.length > 32 ? f.slice(0, 30) + '…' : f}</th>)}
-                {hatKontakt && <th style={{ ...thStyle, whiteSpace: 'nowrap' }}>📞 Kontaktversuche</th>}
-                {/* Vorqualifizierung: befüllte Felder + wichtige Kriterien (immer) */}
-                {(job.vorqual_spalten || []).map(sp => (
-                  <th key={`vq-${sp.name}`} style={{ ...thStyle, background: '#f4f7ff', whiteSpace: 'nowrap' }}
-                    title={[
-                      sp.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung',
-                      sp.anforderung ? `Anforderung: ${sp.anforderung}` : null,
-                      sp.pflicht ? 'Pflicht' : null,
-                    ].filter(Boolean).join(' · ')}>
-                    {sp.wichtig ? '⭐ ' : ''}{sp.name}{sp.pflicht ? ' ❗' : ''}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {gefiltert.map(b => {
-                const bucket = portalStatusBucket(b.notiz);
-                return (
-                <tr key={b.id} style={{ borderBottom: '1px solid #ececea', opacity: b.ko_kriterium ? 0.55 : 1, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
-                  <td style={tdStyle}>{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</td>
-                  <td style={tdStyle}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
-                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
-                  <td style={tdStyle} onClick={e => e.stopPropagation()}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
-                  <td style={tdStyle}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
-                  <td style={tdStyle}>{b.quelle || 'funnel'}</td>
-                  {frageSpalten.map(f => { const v = antwortFor(b, f); return <td key={`fr-${f}`} style={{ ...tdStyle, color: v ? undefined : '#9a9994' }}>{v || '—'}</td>; })}
-                  {hatKontakt && (
-                    <td style={tdStyle}>
-                      {(b.kontaktversuche || []).length
-                        ? <span title={b.erreicht_am ? `Erreicht am ${new Date(b.erreicht_am).toLocaleDateString('de-DE')}` : ''}>
-                            {b.kontaktversuche.map((v, i) => `${i ? ' / ' : ''}${kurzDatum(v.datum)}${v.erreicht ? ' ✓' : ''}`).join('')}
-                          </span>
-                        : <span style={{ color: '#9a9994' }}>—</span>}
-                    </td>
-                  )}
-                  {(job.vorqual_spalten || []).map(sp => {
-                    const v = b.vorqualifizierung_werte?.[sp.name];
-                    const hat = v != null && String(v).trim() !== '';
-                    return (
-                      <td key={`vq-${sp.name}`} style={{ ...tdStyle, background: '#fbfcff', color: hat ? undefined : '#9a9994' }}>
-                        {hat ? String(v) : '—'}
-                      </td>
-                    );
-                  })}
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} onClose={() => onAkte?.(null)} />}
-    </div>
-  );
-}
-
-/* B3: Kandidatenakte (Modal) — zeigt volle bewerber_notiz (Notizen ÜBER den Kandidaten,
-   für den Kunden bestimmt) + Kriterien-Checkliste + Funnel-Antworten + Anhänge. */
-function BewerberAkte({ bewerbung: b, job, kunde, onClose }) {
-  const n = b.notiz || {};
-  const struktur = job.kriterien_struktur || { ko: [], muss: [], wunsch: [] };
-  const check = n.kriterien_check || {};
-  const antworten = Array.isArray(b.antworten) ? b.antworten : [];
-  const anhaenge = Array.isArray(b.anhaenge) ? b.anhaenge : [];
-  const ampelFarbe = { gruen: '#16a34a', gelb: '#d97706', rot: '#dc2626' }[n.ampel] || '#9a9994';
-  const row = (label, val) => val ? <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955', minWidth: 130 }}>{label}</span><span style={{ fontWeight: 500 }}>{val}</span></div> : null;
-  const checkIcon = v => v === true ? '✓' : v === false ? '✗' : '–';
-  const checkCol = v => v === true ? '#16a34a' : v === false ? '#dc2626' : '#9a9994';
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '4vh 16px', overflowY: 'auto' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, maxWidth: 720, width: '100%', padding: 22 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{b.name || 'Bewerber:in'}</h2>
-            <div style={{ fontSize: 12, color: '#5a5955' }}>{job.stelle} · Eingang {new Date(b.created_at).toLocaleDateString('de-DE')}</div>
-          </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #ececea', borderRadius: 8, padding: '6px 12px', cursor: 'pointer' }}>Schließen</button>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 16, marginTop: 14 }}>
-          <div>
-            <h3 style={{ fontSize: 14, margin: '0 0 6px' }}>Stammdaten</h3>
-            {row('E-Mail', b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : null)}
-            {row('Telefon', b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : null)}
-            {row('Quelle', b.quelle || 'funnel')}
-            {row('Verfügbarkeit', n.verfuegbarkeit)}
-            {row('Gehaltswunsch', n.gehaltswunsch)}
-            {row('VG-Termin', n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toLocaleDateString('de-DE') : null)}
-            {row('Nächste Aktion', n.naechste_aktion)}
-            {row('Eingestellt', n.eingestellt && n.eingestellt !== 'offen' ? n.eingestellt : null)}
-
-            {antworten.length > 0 && <>
-              <h3 style={{ fontSize: 14, margin: '14px 0 6px' }}>Funnel-Antworten</h3>
-              {antworten.map((a, i) => <div key={i} style={{ fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955' }}>{a.frage_text}:</span> <strong>{a.antwort}{a.ko ? ' ⚠️ (KO)' : ''}</strong></div>)}
-            </>}
-
-            {anhaenge.length > 0 && <>
-              <h3 style={{ fontSize: 14, margin: '14px 0 6px' }}>Anhänge</h3>
-              {anhaenge.map((a, i) => <div key={i} style={{ fontSize: 13 }}><a href={a.download_url || a.url} target="_blank" rel="noreferrer">📎 {a.dateiname || a.name || `Anhang ${i + 1}`}</a></div>)}
-            </>}
-
-            {n.notizen && <>
-              <h3 style={{ fontSize: 14, margin: '14px 0 6px' }}>Notiz</h3>
-              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', background: '#fafaf8', borderRadius: 8, padding: 10 }}>{n.notizen}</div>
-            </>}
-
-            {(n.anrufversuche || []).length > 0 && <>
-              <h3 style={{ fontSize: 14, margin: '14px 0 6px' }}>Kontaktversuche</h3>
-              {n.anrufversuche.filter(a => a?.datum).map((a, i) => (
-                <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>{new Date(a.datum).toLocaleDateString('de-DE')} · {a.ergebnis || '—'}{a.notiz ? ` · ${a.notiz}` : ''}</div>
-              ))}
-            </>}
-          </div>
-
-          <div>
-            <div style={{ background: '#fafaf8', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ width: 12, height: 12, borderRadius: '50%', background: ampelFarbe, display: 'inline-block' }} />
-                <strong style={{ fontSize: 13 }}>{BUCKET_LABEL[portalStatusBucket(n)] || 'Neu'}</strong>
-              </div>
-              {n.bewertung ? <div style={{ fontSize: 13, marginTop: 4 }}>{'★'.repeat(n.bewertung)}{'☆'.repeat(5 - n.bewertung)}</div> : null}
-            </div>
-            <h3 style={{ fontSize: 14, margin: '0 0 6px' }}>Kriterien</h3>
-            {['ko', 'muss', 'wunsch'].map(kat => (struktur[kat] || []).length > 0 && (
-              <div key={kat} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: kat === 'ko' ? '#b91c1c' : kat === 'muss' ? '#92400e' : '#1e40af', textTransform: 'uppercase' }}>{kat}</div>
-                {struktur[kat].map(item => (
-                  <div key={item.id} style={{ fontSize: 12.5, display: 'flex', gap: 6, padding: '1px 0' }}>
-                    <span style={{ color: checkCol(check[item.id]), fontWeight: 700 }}>{checkIcon(check[item.id])}</span>
-                    <span>{item.text}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ══════════════════════ Creatives-Galerie ══════════════════════ */
 
 function CreativesSection({ creatives, token, kunde, onSaved }) {
@@ -1188,35 +1003,51 @@ function CreativesSection({ creatives, token, kunde, onSaved }) {
 function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
   const lz = job.laufzeit;
   const [modal, setModal] = useState(false);
+  const card = { background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' };
   if (!lz) return (
-    <div style={{ background: '#fff', borderRadius: 12, padding: 16 }}>
+    <div style={card}>
       <div style={kLabel}>Laufzeit</div>
       <div style={{ color: '#5a5955', fontSize: 13, marginTop: 6 }}>Laufzeit wird aktualisiert.</div>
     </div>
   );
   const WARN = ['keine_meta_verbindung', 'meta_daten_fehlen', 'start_datum_fehlt'];
-  const wirdAktualisiert = (lz.hinweise || []).some(h => WARN.includes(h)) || lz.verbraucht == null || lz.soll == null;
   const ueberlauf = (lz.hinweise || []).includes('ueberlaufzeit');
+  const openEnd = lz.modell === 'abo' && lz.open_end;
+  // "wird aktualisiert" nur bei echten Problemen; Open End ist ein gültiger Zustand (soll=null).
+  const wirdAktualisiert = (lz.hinweise || []).some(h => WARN.includes(h)) || (!openEnd && (lz.verbraucht == null || lz.soll == null));
   const pct = ueberlauf ? 100 : (lz.soll ? Math.min(100, Math.round((lz.verbraucht / lz.soll) * 100)) : 0);
   const einheitWort = lz.einheit === 'monate' ? 'Monat' : 'Tag';
   const offenePause = (lz.pausen || []).find(p => p.quelle === 'kunde' && !p.bestaetigt_am);
-  const garantieBadge = lz.modell === 'abo' ? 'Abo · monatliche Abrechnung' : (lz.garantie ? 'mit Garantie' : 'ohne Garantie');
+  const barBg = `linear-gradient(90deg, ${primary}, ${primary}bb)`;
   return (
-    <div style={{ background: '#fff', borderRadius: 12, padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+    <div style={card}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <div style={kLabel}>Laufzeit</div>
-        <span style={{ fontSize: 11, fontWeight: 700, color: primary }}>{garantieBadge}</span>
+        {lz.garantie && <span style={{ fontSize: 11, fontWeight: 700, color: '#166534' }}>🛡️ mit Garantie</span>}
       </div>
       {wirdAktualisiert ? (
         <div style={{ color: '#5a5955', fontSize: 13, marginTop: 8 }}>Laufzeit wird aktualisiert.</div>
+      ) : openEnd ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
+            <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{lz.online_tage ?? 0}</span>
+            <span style={{ fontSize: 13, color: '#5a5955' }}>Tage online</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: '#5a5955', marginTop: 8 }}>Monatliche Abrechnung · läuft bis Kündigung</div>
+          {lz.start_datum && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 4 }}>Start: {new Date(lz.start_datum).toLocaleDateString('de-DE')}</div>}
+        </>
       ) : (
         <>
-          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{einheitWort} {lz.verbraucht} von {lz.soll}{ueberlauf ? '' : ''}</div>
-          <div style={{ height: 10, background: '#eee', borderRadius: 100, overflow: 'hidden', marginTop: 8 }}>
-            <div style={{ width: `${pct}%`, height: '100%', background: primary }} />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 4 }}>
+            <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{einheitWort} {lz.verbraucht}</span>
+            <span style={{ fontSize: 13, color: '#5a5955' }}>von {lz.soll}</span>
           </div>
-          {ueberlauf && <div style={{ fontSize: 12, color: '#b26b00', marginTop: 4 }}>Läuft weiter</div>}
-          {lz.start_datum && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 6 }}>Start: {new Date(lz.start_datum).toLocaleDateString('de-DE')}{lz.ende_voraussichtlich ? ` · vsl. Ende: ${new Date(lz.ende_voraussichtlich).toLocaleDateString('de-DE')}` : ''}</div>}
+          <div style={{ height: 10, background: '#eef0f2', borderRadius: 100, overflow: 'hidden', marginTop: 10 }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: barBg, borderRadius: 100, transition: 'width .4s ease' }} />
+          </div>
+          {ueberlauf && <div style={{ fontSize: 12, color: '#b26b00', marginTop: 4, fontWeight: 600 }}>Läuft weiter</div>}
+          {lz.modell === 'abo' && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 6 }}>Monatliche Abrechnung</div>}
+          {lz.start_datum && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 4 }}>Start: {new Date(lz.start_datum).toLocaleDateString('de-DE')}{lz.ende_voraussichtlich ? ` · vsl. Ende: ${new Date(lz.ende_voraussichtlich).toLocaleDateString('de-DE')}` : ''}</div>}
         </>
       )}
       {(lz.pausen || []).length > 0 && (
@@ -1226,8 +1057,8 @@ function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
       )}
       {lz.modell === 'abo' && (
         offenePause
-          ? <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#b26b00' }}>⏸ Pause beantragt — in Prüfung</div>
-          : <button onClick={() => setModal(true)} style={{ marginTop: 10, background: 'transparent', border: `1px solid ${primary}`, color: primary, borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Pause beantragen</button>
+          ? <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: '#b26b00' }}>⏸ Pause beantragt — in Prüfung</div>
+          : <button onClick={() => setModal(true)} style={{ marginTop: 12, background: 'transparent', border: `1.5px solid ${primary}`, color: primary, borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Pause beantragen</button>
       )}
       {modal && <PauseModal job={job} token={token} primary={primary} onClose={() => setModal(false)} onDone={() => { setModal(false); onReload?.(); }} />}
     </div>
@@ -1265,66 +1096,62 @@ function PauseModal({ job, token, primary, onClose, onDone }) {
   );
 }
 
-function BewerbungenKachel({ bewerbungen, kunde, primary }) {
+function BewerbungenKachel({ bewerbungen, kunde, primary, ampelFilter, onAmpelFilter }) {
   const gesamt = bewerbungen.length;
   const vor7 = Date.now() - 7 * 86400000;
   const letzte7 = bewerbungen.filter(b => new Date(b.created_at).getTime() >= vor7).length;
-  // Sparkline: letzte 14 Tage
+  const vert = ampelVerteilung(bewerbungen);
+  // Sparkline (area + line): letzte 14 Tage
   const tage = [];
   for (let i = 13; i >= 0; i--) { const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10); tage.push({ d, n: 0 }); }
   const idx = Object.fromEntries(tage.map((t, i) => [t.d, i]));
   for (const b of bewerbungen) { const d = String(b.created_at).slice(0, 10); if (d in idx) tage[idx[d]].n++; }
   const max = Math.max(1, ...tage.map(t => t.n));
-  const W = 180, H = 36, step = W / (tage.length - 1);
-  const pts = tage.map((t, i) => `${(i * step).toFixed(1)},${(H - (t.n / max) * H).toFixed(1)}`).join(' ');
+  const W = 240, H = 42, step = W / (tage.length - 1);
+  const pts = tage.map((t, i) => `${(i * step).toFixed(1)},${(H - (t.n / max) * (H - 4) - 2).toFixed(1)}`);
+  const line = pts.join(' ');
+  const area = `0,${H} ${line} ${W},${H}`;
+  const gid = `spark-${primary.replace('#', '')}`;
   return (
-    <div style={{ background: '#fff', borderRadius: 12, padding: 16 }}>
+    <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
       <div style={kLabel}>Bewerbungen</div>
-      <div style={{ display: 'flex', gap: 20, alignItems: 'baseline', marginTop: 4 }}>
-        <div><div style={{ fontSize: 26, fontWeight: 800 }}>{gesamt}</div><div style={{ fontSize: 11, color: '#5a5955' }}>gesamt</div></div>
-        <div><div style={{ fontSize: 26, fontWeight: 800 }}>{letzte7}</div><div style={{ fontSize: 11, color: '#5a5955' }}>letzte 7 Tage</div></div>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', marginTop: 6 }}>
+        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{gesamt}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>gesamt</div></div>
+        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{letzte7}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>letzte 7 Tage</div></div>
       </div>
-      <svg width={W} height={H} style={{ marginTop: 8, overflow: 'visible' }}>
-        <polyline points={pts} fill="none" stroke={primary} strokeWidth="2" />
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ marginTop: 10, display: 'block' }}>
+        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={primary} stopOpacity="0.22" /><stop offset="100%" stopColor={primary} stopOpacity="0" />
+        </linearGradient></defs>
+        <polygon points={area} fill={`url(#${gid})`} />
+        <polyline points={line} fill="none" stroke={primary} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       </svg>
-    </div>
-  );
-}
-
-function PortalKacheln({ job, token, kunde, primary, bewerbungen, onReload }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-      <LaufzeitKachel job={job} token={token} kunde={kunde} primary={primary} onReload={onReload} />
-      <BewerbungenKachel bewerbungen={bewerbungen} kunde={kunde} primary={primary} />
-    </div>
-  );
-}
-
-/* B2: Kriterien-Kachel (strukturiert, editierbar) */
-function KriterienStrukturKachel({ job, token, kunde, primary, onReload }) {
-  const [wert, setWert] = useState(job.kriterien_struktur || { ko: [], muss: [], wunsch: [], hinweis_freitext: '' });
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
-  async function speichern() {
-    setBusy(true); setMsg('');
-    try {
-      await api(`/public/portal/${token}/job/${job.id}/kriterien-struktur`, { method: 'PUT', body: JSON.stringify({ kriterien: wert }) });
-      setMsg('Gespeichert.'); onReload?.();
-    } catch (e) { setMsg(e.message); } finally { setBusy(false); }
-  }
-  return (
-    <div style={{ background: '#fff', borderRadius: 12, padding: 18 }}>
-      <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>⭐ {t(kunde, 'Worauf wir für dich achten', 'Worauf wir für Sie achten')}</h2>
-      <p style={{ fontSize: 12.5, color: '#5a5955', margin: '0 0 12px' }}>Ausschlusskriterien berücksichtigen wir sofort bei der Vorqualifizierung.</p>
-      <KriterienStrukturEditor value={wert} onChange={setWert} accent={primary} />
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
-        <button onClick={speichern} disabled={busy} style={{ background: primary, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 700 }}>{busy ? 'Speichere…' : 'Speichern'}</button>
-        {msg && <span style={{ fontSize: 12.5, color: msg === 'Gespeichert.' ? '#166534' : '#b91c1c' }}>{msg}</span>}
+      {/* Ampel-Verteilung — Klick filtert die Liste darunter */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
+        {AMPELN.map(a => {
+          const aktiv = ampelFilter === a.key;
+          return (
+            <button key={a.key} onClick={() => onAmpelFilter?.(aktiv ? null : a.key)} title={`Nach ${a.label} filtern`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 100, cursor: 'pointer',
+                border: aktiv ? `1.5px solid ${a.color}` : '1px solid #ececea', background: aktiv ? `${a.color}18` : '#fff', color: '#0a0a0a' }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: a.color }} />
+              {a.label} <strong>{vert[a.key]}</strong>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+function PortalKacheln({ job, token, kunde, primary, bewerbungen, onReload, ampelFilter, onAmpelFilter }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+      <LaufzeitKachel job={job} token={token} kunde={kunde} primary={primary} onReload={onReload} />
+      <BewerbungenKachel bewerbungen={bewerbungen} kunde={kunde} primary={primary} ampelFilter={ampelFilter} onAmpelFilter={onAmpelFilter} />
+    </div>
+  );
+}
 /* B2: Mitarbeiterstimmen-Kachel (Portal, Quelle kunde, Freigabe Pflicht) */
 function MitarbeiterstimmenPortalKachel({ token, kunde, primary }) {
   const [stimmen, setStimmen] = useState([]);

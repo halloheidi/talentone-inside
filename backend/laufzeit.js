@@ -44,7 +44,7 @@ export async function laufzeitStatus(projekt) {
   const garantie = !!projekt?.garantie;
   const hinweise = [];
   const ptage = pausenTage(pausen);
-  const base = { modell, pausen, pausen_tage: ptage, garantie, hinweise, soll: null, verbraucht: null, rest: null, ueberlaufzeit_tage: null, einheit: null, ende_voraussichtlich: null };
+  const base = { modell, pausen, pausen_tage: ptage, garantie, hinweise, soll: null, verbraucht: null, rest: null, ueberlaufzeit_tage: null, einheit: null, ende_voraussichtlich: null, open_end: false, online_tage: null };
 
   if (!modell) { hinweise.push('kein_vertragsmodell'); return base; }
 
@@ -100,6 +100,8 @@ export async function laufzeitStatus(projekt) {
     const bruttoTage = tageDiff(start, jetzt);
     const nettoTage = Math.max(0, bruttoTage - ptage);
     base.verbraucht = Math.round((nettoTage / TAGE_PRO_MONAT) * 10) / 10;   // Monate (1 Dezimale)
+    base.online_tage = nettoTage;                 // Kalendertage online (minus Pausen)
+    base.open_end = (base.soll == null);          // Abo ohne feste Laufzeit = läuft monatlich bis Kündigung
 
     if (base.soll != null) {
       base.rest = Math.round((base.soll - base.verbraucht) * 10) / 10;

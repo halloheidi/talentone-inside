@@ -326,7 +326,9 @@ router.get('/kanban', async (req, res) => {
         // wie kein_vertragsmodell/start_datum_fehlt — Reverse-FK-Fallback bleibt warnungsfrei).
         const WARN = new Set(['keine_meta_verbindung', 'meta_daten_fehlen', 'ueberlaufzeit']);
         hinweise[p.id] = (s.hinweise || []).filter(h => WARN.has(h));
-        if (s.soll != null && s.verbraucht != null) {
+        if (s.modell === 'abo' && s.open_end && s.verbraucht != null) {
+          laufzeitKurz[p.id] = `Monat ${Math.floor(s.verbraucht) + 1} · Open End`;
+        } else if (s.soll != null && s.verbraucht != null) {
           laufzeitKurz[p.id] = s.modell === 'abo' ? `Monat ${Math.round(s.verbraucht)}/${s.soll}` : `Tag ${s.verbraucht}/${s.soll}`;
         }
       } catch { /* laufzeit optional */ }

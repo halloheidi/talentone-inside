@@ -787,22 +787,34 @@ function VertragSection({ projektId, projekt, patch }) {
   const einheit = projekt.laufzeit_einheit || (projekt.vertragsmodell === 'abo' ? 'monate' : 'tage');
   const pausen = status?.pausen || [];
   const hinweise = status?.hinweise || [];
+  // Open End = Abo ohne feste Laufzeit (laufzeit_wert null). Derivierte Auswahl.
+  const modellSel = projekt.vertragsmodell === 'abo'
+    ? (projekt.laufzeit_wert == null ? 'abo_open' : 'abo')
+    : (projekt.vertragsmodell || '');
+  const openEnd = modellSel === 'abo_open';
+  function setModell(sel) {
+    if (sel === 'abo_open') patch({ vertragsmodell: 'abo', laufzeit_wert: null, laufzeit_einheit: 'monate' });
+    else if (sel === 'abo') patch({ vertragsmodell: 'abo', laufzeit_einheit: projekt.laufzeit_einheit || 'monate' });
+    else patch({ vertragsmodell: sel || null });
+  }
 
   return (
     <section><h3>Vertrag</h3>
       <div className="slideover-form">
         <label><span>Vertragsmodell</span>
-          <select className="cell-input" value={projekt.vertragsmodell || ''} onChange={e => patch({ vertragsmodell: e.target.value || null })}>
+          <select className="cell-input" value={modellSel} onChange={e => setModell(e.target.value)}>
             <option value="">—</option>
             <option value="kampagne">Kampagne (aktive Lauftage)</option>
-            <option value="abo">Abo (Kalender-Monate)</option>
+            <option value="abo">Abo (feste Laufzeit)</option>
+            <option value="abo_open">Abo · Open End (läuft monatlich bis Kündigung)</option>
           </select>
         </label>
         <label><span>Laufzeit</span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input type="number" min="0" step="1" className="cell-input" style={{ flex: 1 }}
-              value={projekt.laufzeit_wert ?? ''} onChange={e => patch({ laufzeit_wert: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
-            <select className="cell-input" style={{ flex: 1 }} value={einheit} onChange={e => patch({ laufzeit_einheit: e.target.value })}>
+          <div style={{ display: 'flex', gap: 6, opacity: openEnd ? 0.45 : 1 }}>
+            <input type="number" min="0" step="1" className="cell-input" style={{ flex: 1 }} disabled={openEnd}
+              placeholder={openEnd ? 'monatlich' : ''}
+              value={openEnd ? '' : (projekt.laufzeit_wert ?? '')} onChange={e => patch({ laufzeit_wert: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+            <select className="cell-input" style={{ flex: 1 }} value={einheit} disabled={openEnd} onChange={e => patch({ laufzeit_einheit: e.target.value })}>
               <option value="tage">Tage</option>
               <option value="monate">Monate</option>
             </select>
