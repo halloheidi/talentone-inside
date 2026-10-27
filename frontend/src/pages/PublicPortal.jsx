@@ -348,6 +348,7 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
   const feedbackFor = (bewId, patch) => api(`/public/portal/${token}/bewerbung/${bewId}/feedback`, { method: 'PATCH', body: JSON.stringify(patch) });
   const kommentarFor = (bewId, text) => api(`/public/portal/${token}/bewerbung/${bewId}/kommentar`, { method: 'POST', body: JSON.stringify({ text }) });
   const spalteFor = (bewId, spalteId, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/spalte/${spalteId}`, { method: 'PUT', body: JSON.stringify({ wert }) });
+  const vorqualFor = (bewId, feld, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/vorqual`, { method: 'PUT', body: JSON.stringify({ feld, wert }) });
   return (
     <section style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {!istNeukunden && (
@@ -384,7 +385,7 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
           />
           <BewerberListe job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} modus="kunde"
             ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte}
-            onFeedback={feedbackFor} onKommentar={kommentarFor} onSpalte={spalteFor} onReload={onReload} />
+            onFeedback={feedbackFor} onKommentar={kommentarFor} onSpalte={spalteFor} onVorqual={vorqualFor} onReload={onReload} />
           <MitarbeiterstimmenPortalKachel token={token} kunde={kunde} primary={primary} />
         </>
       )}
@@ -1027,7 +1028,7 @@ function CreativesSection({ creatives, token, kunde, onSaved }) {
 }
 
 /* ══════════════════════ B2: Dashboard-Kacheln (Laufzeit + Bewerbungen) ══════════════════════ */
-function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
+function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload }) {
   const lz = job.laufzeit;
   const [modal, setModal] = useState(false);
   const card = { background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' };
@@ -1046,11 +1047,15 @@ function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
   const einheitWort = lz.einheit === 'monate' ? 'Monat' : 'Tag';
   const offenePause = (lz.pausen || []).find(p => p.quelle === 'kunde' && !p.bestaetigt_am);
   const barBg = `linear-gradient(90deg, ${primary}, ${primary}bb)`;
+  // Garantie-Zähler: X = garantie_bewerbungen, Y = Bewerbungen seit Start.
+  const garX = lz.garantie ? (lz.garantie_bewerbungen ?? null) : null;
+  const garY = garX != null ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)).length : bewerbungen.length) : null;
+  const garPct = garX ? Math.min(100, Math.round((garY / garX) * 100)) : 0;
   return (
     <div style={card}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <div style={kLabel}>Laufzeit</div>
-        {lz.garantie && <span style={{ fontSize: 11, fontWeight: 700, color: '#166534' }}>🛡️ mit Garantie</span>}
+        {lz.garantie && <span style={{ fontSize: 11, fontWeight: 700, color: '#166534' }}>🛡️ mit Garantie{garX != null ? ` · ${garX} Bewerbungen` : ''}</span>}
       </div>
       {wirdAktualisiert ? (
         <div style={{ color: '#5a5955', fontSize: 13, marginTop: 8 }}>Laufzeit wird aktualisiert.</div>
@@ -1076,6 +1081,14 @@ function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
           {lz.modell === 'abo' && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 6 }}>Monatliche Abrechnung</div>}
           {lz.start_datum && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 4 }}>Start: {new Date(lz.start_datum).toLocaleDateString('de-DE')}{lz.ende_voraussichtlich ? ` · vsl. Ende: ${new Date(lz.ende_voraussichtlich).toLocaleDateString('de-DE')}` : ''}</div>}
         </>
+      )}
+      {garX != null && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 4 }}><strong>{garY}</strong> von {garX} Bewerbungen erreicht</div>
+          <div style={{ height: 8, background: '#eef0f2', borderRadius: 100, overflow: 'hidden' }}>
+            <div style={{ width: `${garPct}%`, height: '100%', background: '#16a34a', borderRadius: 100, transition: 'width .4s ease' }} />
+          </div>
+        </div>
       )}
       {(lz.pausen || []).length > 0 && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#5a5955' }}>
@@ -1174,7 +1187,7 @@ function BewerbungenKachel({ bewerbungen, kunde, primary, ampelFilter, onAmpelFi
 function PortalKacheln({ job, token, kunde, primary, bewerbungen, onReload, ampelFilter, onAmpelFilter }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, alignItems: 'start', minWidth: 0 }}>
-      <LaufzeitKachel job={job} token={token} kunde={kunde} primary={primary} onReload={onReload} />
+      <LaufzeitKachel job={job} token={token} kunde={kunde} primary={primary} bewerbungen={bewerbungen} onReload={onReload} />
       <BewerbungenKachel bewerbungen={bewerbungen} kunde={kunde} primary={primary} ampelFilter={ampelFilter} onAmpelFilter={onAmpelFilter} />
     </div>
   );

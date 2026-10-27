@@ -3,6 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
+import { invalidateKanban } from '../kanban-cache.js';
 import { computeAutoChecklist, mergeChecklist } from '../projekt-sync.js';
 import { TEAM_MEMBERS, findMemberByName } from '../team.js';
 import { sendMentionMail } from '../mail.js';
@@ -48,6 +49,8 @@ const ALLOWED_FIELDS = [
   'vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum',
   // Migration 046: Werbebudget-Modus (im Vertrag-&-Status-Tab editierbar)
   'werbebudget_modus', 'tagesbudget_empfehlung',
+  // Migration 104: Garantie-Ziel in Bewerbungen
+  'garantie_bewerbungen',
 ];
 
 function pickFields(body) {
@@ -211,6 +214,7 @@ router.post('/:id/pausen', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
+  invalidateKanban();
   res.status(201).json({ pausen });
 });
 
@@ -229,6 +233,7 @@ router.patch('/:id/pausen/beenden', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
+  invalidateKanban();
   res.json({ pausen });
 });
 
@@ -245,6 +250,7 @@ router.patch('/:id/pausen/bestaetigen', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
+  invalidateKanban();
   res.json({ pausen });
 });
 
@@ -279,6 +285,7 @@ router.patch('/:id', async (req, res) => {
     .from('talentone_projekte')
     .update(patch).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
+  invalidateKanban();
   res.json({ projekt: data });
 });
 

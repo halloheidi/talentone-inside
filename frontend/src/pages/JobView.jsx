@@ -24,7 +24,7 @@ function DebouncedInput({ value, onSave, placeholder }) {
 
 // Inline editierbare Garantie am Projekt (JobView-Header). Checkbox + Freitext,
 // Auto-Save direkt ans verknüpfte Projekt. Jederzeit manuell änderbar.
-function ProjektGarantieInline({ projekt, onSaved }) {
+function ProjektGarantieInline({ projekt, fortschritt, onSaved }) {
   async function patch(body) {
     try {
       const res = await api(`/projekte/${projekt.id}`, { method: 'PATCH', body });
@@ -32,6 +32,7 @@ function ProjektGarantieInline({ projekt, onSaved }) {
     } catch (err) { console.error('[garantie-patch]', err.message); }
   }
   const aktiv = !!projekt.garantie;
+  const X = projekt.garantie_bewerbungen;
   return (
     <div style={{
       maxWidth: 340, padding: '6px 10px', borderRadius: 8, fontSize: 12,
@@ -41,10 +42,17 @@ function ProjektGarantieInline({ projekt, onSaved }) {
     }}>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
         <input type="checkbox" checked={aktiv} onChange={e => patch({ garantie: e.target.checked })} />
-        🛡️ Garantie
+        🛡️ Garantie{aktiv && X != null ? ` · ${X} Bewerbungen` : ''}
       </label>
+      {aktiv && fortschritt && X != null && (
+        <div style={{ marginTop: 4, fontWeight: 600 }}>{fortschritt.erreicht} von {X} erreicht</div>
+      )}
       {aktiv && (
-        <div style={{ marginTop: 6 }}>
+        <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>Ziel (Bewerbungen):
+            <input type="number" min="0" step="1" defaultValue={X ?? ''} style={{ width: 70 }}
+              onBlur={e => { const v = e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0); if (v !== (X ?? null)) patch({ garantie_bewerbungen: v }); }} />
+          </label>
           <DebouncedInput
             value={projekt.garantie_details || ''}
             placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
@@ -877,7 +885,7 @@ export default function JobView() {
         <div style={{ flex: 1 }}>
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
-        {projekt && <ProjektGarantieInline projekt={projekt} onSaved={setProjekt} />}
+        {projekt && <ProjektGarantieInline projekt={projekt} fortschritt={job.garantie_fortschritt} onSaved={setProjekt} />}
         {projekt?.werbebudget_modus === 'empfehlung' && (
           <span title="Werbebudget nicht über TalentOne abgerechnet — Kunden-Zahlungsmittel im Werbekonto hinterlegen (kein Zahlungslink)."
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>

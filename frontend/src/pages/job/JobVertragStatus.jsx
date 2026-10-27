@@ -166,11 +166,17 @@ export default function JobVertragStatus() {
           </label>
         </div>
         {projekt.garantie && (
-          <label style={{ display: 'block', marginTop: 10 }}><span style={lbl}>Garantie-Details</span>
-            <input className="cell-input" defaultValue={projekt.garantie_details || ''}
-              placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
-              onBlur={e => (e.target.value || '') !== (projekt.garantie_details || '') && patch({ garantie_details: e.target.value || null })} />
-          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 10 }}>
+            <label><span style={lbl}>Garantie: Bewerbungen</span>
+              <input type="number" min="0" step="1" className="cell-input" value={projekt.garantie_bewerbungen ?? ''}
+                placeholder="z. B. 20" onChange={e => patch({ garantie_bewerbungen: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+            </label>
+            <label><span style={lbl}>Garantie-Details (Freitext)</span>
+              <input className="cell-input" defaultValue={projekt.garantie_details || ''}
+                placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
+                onBlur={e => (e.target.value || '') !== (projekt.garantie_details || '') && patch({ garantie_details: e.target.value || null })} />
+            </label>
+          </div>
         )}
 
         {status && projekt.vertragsmodell && (

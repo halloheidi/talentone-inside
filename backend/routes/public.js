@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { laufzeitStatus } from '../laufzeit.js';
+import { invalidateKanban } from '../kanban-cache.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
@@ -1758,10 +1759,10 @@ router.get('/portal/:token', async (req, res) => {
     const feedbackByBew = {}, kommentareByBew = {};
     if (bewIds.length) {
       const [{ data: fbs = [] }, { data: komm = [] }] = await Promise.all([
-        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am, updated_at').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am, vorqual_werte_kunde, updated_at').in('bewerbung_id', bewIds),
         supabase.from('talentone_bewerber_kommentare').select('id, bewerbung_id, autor_typ, autor_name, text, created_at').in('bewerbung_id', bewIds).order('created_at', { ascending: true }),
       ]);
-      for (const f of (fbs || [])) feedbackByBew[f.bewerbung_id] = { status: f.status || null, vorstellungsgespraech_am: f.vorstellungsgespraech_am || null, updated_at: f.updated_at || null };
+      for (const f of (fbs || [])) feedbackByBew[f.bewerbung_id] = { status: f.status || null, vorstellungsgespraech_am: f.vorstellungsgespraech_am || null, vorqual_werte_kunde: f.vorqual_werte_kunde || {}, updated_at: f.updated_at || null };
       for (const k of (komm || [])) (kommentareByBew[k.bewerbung_id] ||= []).push(k);
     }
 
@@ -1787,7 +1788,7 @@ router.get('/portal/:token', async (req, res) => {
     const laufzeitByProjekt = {};
     if (projektIds.length) {
       const { data: projekte = [] } = await supabase.from('talentone_projekte')
-        .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details')
+        .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details, garantie_bewerbungen')
         .in('id', projektIds);
       for (const p of (projekte || [])) {
         try {
@@ -1797,7 +1798,7 @@ router.get('/portal/:token', async (req, res) => {
             rest: s.rest, ueberlaufzeit_tage: s.ueberlaufzeit_tage, ende_voraussichtlich: s.ende_voraussichtlich,
             online_tage: s.online_tage,   // Open-End-Zustand leitet das Portal aus soll==null ab (kein open_end-Feld nach außen)
             start_datum: p.start_datum, pausen: s.pausen, pausen_tage: s.pausen_tage,
-            garantie: s.garantie, garantie_details: p.garantie_details || null, hinweise: s.hinweise,
+            garantie: s.garantie, garantie_details: p.garantie_details || null, garantie_bewerbungen: p.garantie_bewerbungen ?? null, hinweise: s.hinweise,
           };
         } catch { laufzeitByProjekt[p.id] = null; }
       }
@@ -1840,6 +1841,7 @@ router.get('/portal/:token', async (req, res) => {
         wichtige_kriterien: normalizeKriterien(j.wichtige_kriterien),
         kriterien_struktur: normalizeKriterienStruktur(j.wichtige_kriterien_struktur ?? j.wichtige_kriterien),
         laufzeit: j.projekt_id ? (laufzeitByProjekt[j.projekt_id] || null) : null,
+        vorqualifizierung_felder: effektiveVorqualFelder(j),
         bewerber_spalten: bewerberSpaltenByJob[j.id] || [],
         // Befuellte Vorqual-Felder + wichtige Kriterien (immer) — gleiche
         // Spaltenlogik wie in der Public-Bewerberliste.
@@ -2276,6 +2278,24 @@ router.put('/portal/:token/bewerbung/:bewId/spalte/:spalteId', async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* Vom Kunden gepflegter Vorqual-Feldwert (getrennt von den internen Recruiter-Werten). */
+router.put('/portal/:token/bewerbung/:bewId/vorqual', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    if (!(await bewerbungGehoertKunde(req.params.bewId, kunde.id))) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Portal.' });
+    const feld = (req.body?.feld || '').toString().trim();
+    if (!feld) return res.status(400).json({ error: 'feld fehlt.' });
+    const wert = req.body?.wert == null ? '' : String(req.body.wert).slice(0, 500);
+    const { data: cur } = await supabase.from('talentone_bewerber_kundenfeedback').select('vorqual_werte_kunde').eq('bewerbung_id', req.params.bewId).maybeSingle();
+    const werte = { ...(cur?.vorqual_werte_kunde || {}) };
+    if (wert === '') delete werte[feld]; else werte[feld] = wert;
+    const { data, error } = await supabase.from('talentone_bewerber_kundenfeedback')
+      .upsert({ bewerbung_id: req.params.bewId, vorqual_werte_kunde: werte, updated_at: new Date().toISOString() }, { onConflict: 'bewerbung_id' }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ vorqual_werte_kunde: data.vorqual_werte_kunde || {} });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* Neuer Kommentar (Kunde) im gemeinsamen Verlauf einer Bewerbung. */
 router.post('/portal/:token/bewerbung/:bewId/kommentar', async (req, res) => {
   try {
@@ -2308,6 +2328,7 @@ router.post('/portal/:token/projekt-pause', async (req, res) => {
     pausen.push({ von, bis: bis || null, grund: grund || null, quelle: 'kunde', beantragt_am: heute, bestaetigt_am: null });
     const { error } = await supabase.from('talentone_projekte').update({ pausen, updated_at: new Date().toISOString() }).eq('id', projekt.id);
     if (error) return res.status(500).json({ error: error.message });
+    invalidateKanban();
     (async () => {
       try {
         const { sendTeamAlertMail } = await import('../mail.js');

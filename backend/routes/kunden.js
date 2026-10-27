@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { laufzeitStatus } from '../laufzeit.js';
+import { getKanban, setKanban } from '../kanban-cache.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
@@ -304,6 +305,10 @@ router.get('/naechste-schritte', async (req, res) => {
 router.get('/kanban', async (req, res) => {
   try {
     const includeArchived = req.query.include_archived === '1';
+    const cacheKey = includeArchived ? 'all' : 'default';
+    const cached = getKanban(cacheKey);
+    if (cached) { res.set('X-Cache', 'hit'); return res.json(cached); }
+    const t0 = Date.now();
     let kq = supabase.from('talentone_kunden').select('id, firmenname, logo_url, agentur, status, archiviert');
     if (!includeArchived) kq = kq.eq('archiviert', false);
     const { data: kunden = [] } = await kq;
@@ -398,7 +403,11 @@ router.get('/kanban', async (req, res) => {
         stellen: stellenByKunde[k.id] || [],
       };
     });
-    res.json({ kunden: out });
+    const payload = { kunden: out };
+    setKanban(cacheKey, payload);
+    console.log(`[kunden/kanban] ${out.length} Kunden in ${Date.now() - t0} ms berechnet`);
+    res.set('X-Cache', 'miss');
+    res.json(payload);
   } catch (err) { console.error('[kunden/kanban]', err.message); res.status(500).json({ error: err.message }); }
 });
 

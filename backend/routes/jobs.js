@@ -12,6 +12,7 @@ import { syncKriterienMitFeldern, normalizeKriterien, normalizeKriterienStruktur
 import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 import { laufzeitStatus } from '../laufzeit.js';
+import { invalidateKanban } from '../kanban-cache.js';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ async function ensureProjektFuerJob(job) {
   }).select().single();
   if (error) { console.warn('[ensureProjektFuerJob]', error.message); return null; }
   await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
+  invalidateKanban();
   return created;
 }
 
@@ -83,6 +85,15 @@ router.get('/:id', async (req, res) => {
     // Kompakte Meta-Kennzahlen fürs Job-Kopf (null wenn keine Meta-Verknüpfung → „—").
     try { meta = await metaMetrikenFuerProjekt(data.projekt_id); } catch (e) { console.warn('[jobs] meta-metriken:', e.message); }
     if (projekt) { try { laufzeit = await laufzeitStatus(projekt); } catch (e) { console.warn('[jobs] laufzeit:', e.message); } }
+    // Garantie-Fortschritt: Bewerbungen dieser Stelle seit Vertragsstart vs. Ziel.
+    if (projekt?.garantie && projekt.garantie_bewerbungen != null) {
+      try {
+        let bq = supabase.from('talentone_bewerbungen').select('id', { count: 'exact', head: true }).eq('job_id', data.id);
+        if (projekt.start_datum) bq = bq.gte('created_at', projekt.start_datum);
+        const { count } = await bq;
+        data.garantie_fortschritt = { erreicht: count || 0, ziel: projekt.garantie_bewerbungen };
+      } catch (e) { console.warn('[jobs] garantie-fortschritt:', e.message); }
+    }
     // „Vertrag gilt auch für": andere Stellen, die sich dasselbe Projekt teilen.
     const { data: andere = [] } = await supabase.from('talentone_jobs')
       .select('id, stelle').eq('projekt_id', data.projekt_id).neq('id', data.id);
@@ -551,6 +562,7 @@ router.post('/:id/vertrag-trennen', async (req, res) => {
   }).select().single();
   if (error) return res.status(500).json({ error: error.message });
   await supabase.from('talentone_jobs').update({ projekt_id: created.id }).eq('id', job.id);
+  invalidateKanban();
   res.status(201).json({ projekt: created, getrennt: true });
 });
 
