@@ -1767,7 +1767,7 @@ router.get('/portal/:token', async (req, res) => {
           laufzeitByProjekt[p.id] = {
             modell: s.modell, einheit: s.einheit, soll: s.soll, verbraucht: s.verbraucht,
             rest: s.rest, ueberlaufzeit_tage: s.ueberlaufzeit_tage, ende_voraussichtlich: s.ende_voraussichtlich,
-            open_end: s.open_end, online_tage: s.online_tage,
+            online_tage: s.online_tage,   // Open-End-Zustand leitet das Portal aus soll==null ab (kein open_end-Feld nach außen)
             start_datum: p.start_datum, pausen: s.pausen, pausen_tage: s.pausen_tage,
             garantie: s.garantie, garantie_details: p.garantie_details || null, hinweise: s.hinweise,
           };

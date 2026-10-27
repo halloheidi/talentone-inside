@@ -1012,7 +1012,7 @@ function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
   );
   const WARN = ['keine_meta_verbindung', 'meta_daten_fehlen', 'start_datum_fehlt'];
   const ueberlauf = (lz.hinweise || []).includes('ueberlaufzeit');
-  const openEnd = lz.modell === 'abo' && lz.open_end;
+  const openEnd = lz.modell === 'abo' && lz.soll == null;   // ohne feste Laufzeit; nach außen keine Vertragsende-Wortwahl
   // "wird aktualisiert" nur bei echten Problemen; Open End ist ein gültiger Zustand (soll=null).
   const wirdAktualisiert = (lz.hinweise || []).some(h => WARN.includes(h)) || (!openEnd && (lz.verbraucht == null || lz.soll == null));
   const pct = ueberlauf ? 100 : (lz.soll ? Math.min(100, Math.round((lz.verbraucht / lz.soll) * 100)) : 0);
@@ -1033,7 +1033,7 @@ function LaufzeitKachel({ job, token, kunde, primary, onReload }) {
             <span style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{lz.online_tage ?? 0}</span>
             <span style={{ fontSize: 13, color: '#5a5955' }}>Tage online</span>
           </div>
-          <div style={{ fontSize: 12.5, color: '#5a5955', marginTop: 8 }}>Monatliche Abrechnung · läuft bis Kündigung</div>
+          <div style={{ fontSize: 12.5, color: '#5a5955', marginTop: 8 }}>Monatliche Abrechnung</div>
           {lz.start_datum && <div style={{ fontSize: 12, color: '#5a5955', marginTop: 4 }}>Start: {new Date(lz.start_datum).toLocaleDateString('de-DE')}</div>}
         </>
       ) : (
