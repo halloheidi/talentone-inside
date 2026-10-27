@@ -4,7 +4,7 @@ import { supabase } from '../supabase.js';
 import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { laufzeitStatus } from '../laufzeit.js';
-import { getKanban, setKanban } from '../kanban-cache.js';
+import { getKanban, setKanban, getLaufzeit, setLaufzeit } from '../kanban-cache.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
@@ -328,7 +328,8 @@ router.get('/kanban', async (req, res) => {
     const relevanteProjekte = (projekte || []).filter(p => p.status === 'live' || ['feedbackschleife', 'hold', 'pausiert'].includes(p.status));
     await Promise.all(relevanteProjekte.map(async p => {
       try {
-        const s = await laufzeitStatus(p);
+        let s = getLaufzeit(p.id);
+        if (s === undefined) { s = await laufzeitStatus(p); setLaufzeit(p.id, s); }
         hinweise[p.id] = (s.hinweise || []).filter(h => WARN.has(h));
         if (s.modell === 'abo' && s.open_end && s.verbraucht != null) {
           laufzeitKurz[p.id] = `Monat ${Math.floor(s.verbraucht) + 1} · Open End`;

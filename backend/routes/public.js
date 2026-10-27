@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { laufzeitStatus } from '../laufzeit.js';
-import { invalidateKanban } from '../kanban-cache.js';
+import { invalidateKanban, invalidateLaufzeit } from '../kanban-cache.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
@@ -2328,7 +2328,7 @@ router.post('/portal/:token/projekt-pause', async (req, res) => {
     pausen.push({ von, bis: bis || null, grund: grund || null, quelle: 'kunde', beantragt_am: heute, bestaetigt_am: null });
     const { error } = await supabase.from('talentone_projekte').update({ pausen, updated_at: new Date().toISOString() }).eq('id', projekt.id);
     if (error) return res.status(500).json({ error: error.message });
-    invalidateKanban();
+    invalidateKanban(); invalidateLaufzeit(projekt.id);
     (async () => {
       try {
         const { sendTeamAlertMail } = await import('../mail.js');

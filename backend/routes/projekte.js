@@ -3,7 +3,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { invalidateKanban } from '../kanban-cache.js';
+import { invalidateKanban, invalidateLaufzeit } from '../kanban-cache.js';
 import { computeAutoChecklist, mergeChecklist } from '../projekt-sync.js';
 import { TEAM_MEMBERS, findMemberByName } from '../team.js';
 import { sendMentionMail } from '../mail.js';
@@ -214,7 +214,7 @@ router.post('/:id/pausen', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
-  invalidateKanban();
+  invalidateKanban(); invalidateLaufzeit(req.params.id);
   res.status(201).json({ pausen });
 });
 
@@ -233,7 +233,7 @@ router.patch('/:id/pausen/beenden', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
-  invalidateKanban();
+  invalidateKanban(); invalidateLaufzeit(req.params.id);
   res.json({ pausen });
 });
 
@@ -250,7 +250,7 @@ router.patch('/:id/pausen/bestaetigen', async (req, res) => {
   const { error: uErr } = await supabase.from('talentone_projekte')
     .update({ pausen, updated_at: new Date().toISOString() }).eq('id', req.params.id);
   if (uErr) return res.status(500).json({ error: uErr.message });
-  invalidateKanban();
+  invalidateKanban(); invalidateLaufzeit(req.params.id);
   res.json({ pausen });
 });
 
@@ -286,6 +286,8 @@ router.patch('/:id', async (req, res) => {
     .update(patch).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ error: error.message });
   invalidateKanban();
+  // Laufzeit-Cache nur bei laufzeit-relevanten Änderungen leeren (nicht bei reinem Status-Drag).
+  if (['vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum', 'pausen'].some(k => k in patch)) invalidateLaufzeit(req.params.id);
   res.json({ projekt: data });
 });
 
