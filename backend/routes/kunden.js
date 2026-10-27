@@ -323,14 +323,12 @@ router.get('/kanban', async (req, res) => {
       .in('kunde_id', ids);
     const projektById = Object.fromEntries((projekte || []).map(p => [p.id, p]));
     const laufzeitKurz = {}, hinweise = {};
-    for (const p of (projekte || [])) {
-      const istPauseGruppe = ['feedbackschleife', 'hold', 'pausiert'].includes(p.status);
-      if (p.status !== 'live' && !istPauseGruppe) continue;   // laufzeit_kurz nur wo sinnvoll
+    // Nur Live-/Pause-Projekte, und diese PARALLEL (laufzeitStatus macht je Projekt Meta-Queries).
+    const WARN = new Set(['keine_meta_verbindung', 'meta_daten_fehlen', 'ueberlaufzeit']);
+    const relevanteProjekte = (projekte || []).filter(p => p.status === 'live' || ['feedbackschleife', 'hold', 'pausiert'].includes(p.status));
+    await Promise.all(relevanteProjekte.map(async p => {
       try {
         const s = await laufzeitStatus(p);
-        // ⚠ nur bei echten Laufzeit-/Meta-Problemen (nicht bei reiner Unkonfiguriertheit
-        // wie kein_vertragsmodell/start_datum_fehlt — Reverse-FK-Fallback bleibt warnungsfrei).
-        const WARN = new Set(['keine_meta_verbindung', 'meta_daten_fehlen', 'ueberlaufzeit']);
         hinweise[p.id] = (s.hinweise || []).filter(h => WARN.has(h));
         if (s.modell === 'abo' && s.open_end && s.verbraucht != null) {
           laufzeitKurz[p.id] = `Monat ${Math.floor(s.verbraucht) + 1} · Open End`;
@@ -338,7 +336,7 @@ router.get('/kanban', async (req, res) => {
           laufzeitKurz[p.id] = s.modell === 'abo' ? `Monat ${Math.round(s.verbraucht)}/${s.soll}` : `Tag ${s.verbraucht}/${s.soll}`;
         }
       } catch { /* laufzeit optional */ }
-    }
+    }));
 
     const { data: jobs = [] } = await supabase.from('talentone_jobs').select('id, kunde_id, stelle, projekt_id, projekttyp').in('kunde_id', ids);
     const jobKunde = Object.fromEntries((jobs || []).map(j => [j.id, j.kunde_id]));

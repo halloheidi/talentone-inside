@@ -64,8 +64,9 @@ export async function laufzeitStatus(projekt) {
     if (!recruiting.length) { hinweise.push('keine_meta_verbindung'); return base; }
 
     let maxLauftage = null, hatVerbindung = false, datenFehlen = false;
-    for (const j of recruiting) {
-      const r = await aktiveLauftage(j.id, { abDatum });
+    // Parallel statt sequenziell — die Meta-Queries je Job laufen gleichzeitig.
+    const rs = await Promise.all(recruiting.map(j => aktiveLauftage(j.id, { abDatum }).catch(() => ({ quelle: 'keine' }))));
+    for (const r of rs) {
       if (r.quelle === 'keine') continue;
       hatVerbindung = true;
       if (r.hinweis === 'meta_daten_fehlen') datenFehlen = true;
