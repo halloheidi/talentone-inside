@@ -1,14 +1,18 @@
-// Geteilte Bewerber-Liste + Kandidatenakte.
+// Geteilte Bewerber-Liste + Kandidatenakte (Drawer).
 //
 // EINE Komponente, zwei Modi:
-//  - modus='kunde'  → Portal (read-only; zeigt Notizen ÜBER den Kandidaten, keine Kundendaten)
-//  - modus='intern' → /vorqualifizierung (B4): editierbare Kriterien-Checkliste + Ampel via onPatch
+//  - modus='kunde'  → Portal (Notizen ÜBER den Kandidaten sichtbar; Kundenfeedback + Kommentar editierbar)
+//  - modus='intern' → /vorqualifizierung (B4): zusätzlich Kriterien-Checkliste + Ampel via onPatch editierbar
 //
-// Rein additiv: Portal nutzt modus='kunde' ohne onPatch → verhält sich wie bisher (nur Optik-Upgrade).
+// Anzeige in BEIDEN Modi identisch; die Callbacks steuern nur die Editierbarkeit:
+//  onPatch(patch)        → Notiz-/Kriterien-/Ampel-Edit (intern)
+//  onFeedback(patch)     → Kundenfeedback (Status/VG) — im Portal immer vorhanden
+//  onKommentar(text)     → neuer Kommentar in den gemeinsamen Verlauf (beide Modi)
+//  onReload()            → Daten nach einer Mutation neu laden
 import { useState } from 'react';
 import { t } from '../lib/anrede.js';
 
-/* ── Status-Bucket aus den Ist-Werten (Mapping identisch intern/Portal) ── */
+/* ── Status-Bucket (interner Fortschritt) ── */
 export function portalStatusBucket(notiz) {
   if (!notiz) return 'neu';
   if (notiz.status === 'abgesagt') return 'abgesagt';
@@ -20,7 +24,17 @@ export function portalStatusBucket(notiz) {
 export const BUCKET_LABEL = { neu: 'Neu', vorqual: 'In Vorqualifizierung', vorgestellt: 'Vorgestellt', vg: 'VG vereinbart', abgesagt: 'Abgesagt' };
 export const BUCKET_COLOR = { neu: '#6b7280', vorqual: '#1e40af', vorgestellt: '#5b21b6', vg: '#166534', abgesagt: '#b91c1c' };
 
-/* ── Ampel (grün/gelb/rot, ohne Ampel = offen) ── */
+/* ── Kundenfeedback-Status (vom Kunden gepflegt) ── */
+export const FEEDBACK_OPTIONS = [
+  { key: '', label: 'Offen' },
+  { key: 'interessant', label: 'Interessant' },
+  { key: 'vorstellungsgespraech', label: 'VG gewünscht' },
+  { key: 'absage', label: 'Abgesagt' },
+];
+const FEEDBACK_LABEL = { neu: 'Offen', interessant: 'Interessant', vorstellungsgespraech: 'VG gewünscht', eingestellt: 'Eingestellt', ungeeignet: 'Ungeeignet', absage: 'Abgesagt', abgesagt: 'Abgesagt' };
+const FEEDBACK_COLOR = { interessant: '#1e40af', vorstellungsgespraech: '#5b21b6', eingestellt: '#166534', absage: '#b91c1c', abgesagt: '#b91c1c', ungeeignet: '#b45309' };
+
+/* ── Ampel ── */
 export const AMPELN = [
   { key: 'gruen', label: 'Grün', color: '#16a34a' },
   { key: 'gelb',  label: 'Gelb', color: '#d97706' },
@@ -28,50 +42,46 @@ export const AMPELN = [
   { key: 'offen', label: 'Offen', color: '#9a9994' },
 ];
 const AMPEL_FARBE = Object.fromEntries(AMPELN.map(a => [a.key, a.color]));
-export function ampelOf(notiz) {
-  const a = notiz?.ampel;
-  return (a === 'gruen' || a === 'gelb' || a === 'rot') ? a : 'offen';
-}
+export function ampelOf(notiz) { const a = notiz?.ampel; return (a === 'gruen' || a === 'gelb' || a === 'rot') ? a : 'offen'; }
 export function ampelVerteilung(bewerbungen) {
   const c = { gruen: 0, gelb: 0, rot: 0, offen: 0 };
   for (const b of bewerbungen) c[ampelOf(b.notiz)]++;
   return c;
 }
 
+export function hatKriterien(struktur) {
+  return !!struktur && ((struktur.ko || []).length + (struktur.muss || []).length + (struktur.wunsch || []).length) > 0;
+}
 export function trefferText(struktur, check) {
+  // Punkt 4: ohne definierte Kriterien kein „0/0" — einfach „–".
+  if (!struktur || ((struktur.ko || []).length + (struktur.muss || []).length) === 0) return '–';
   const c = check || {};
   const z = arr => { const total = (arr || []).length; const ja = (arr || []).filter(i => c[i.id] === true).length; return `${ja}/${total}`; };
-  return `KO ${z(struktur?.ko)} · Muss ${z(struktur?.muss)}`;
+  return `KO ${z(struktur.ko)} · Muss ${z(struktur.muss)}`;
 }
+
+// Lesbare Funnel-Fragetitel für Stummel aus dem Funnel-Export.
+const FRAGE_TITEL = { 'bei uns erwarten?': 'Was erwartest du von uns?' };
+function frageTitel(txt) { const s = (txt || '').trim(); return FRAGE_TITEL[s.toLowerCase()] || s; }
 
 function initialen(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return '–';
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
-
 const thStyle = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpacing: 0.05, textTransform: 'uppercase', color: '#5a5955', whiteSpace: 'nowrap' };
-const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'top' };
+const tdStyle = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onReload }) {
   const [filter, setFilter] = useState('alle');
-  const frageSpalten = [];
-  for (const b of bewerbungen) {
-    for (const a of (Array.isArray(b.antworten) ? b.antworten : [])) {
-      const f = (a?.frage_text || '').trim();
-      if (f && !frageSpalten.includes(f)) frageSpalten.push(f);
-    }
-  }
-  const antwortFor = (b, frage) => (Array.isArray(b.antworten) ? b.antworten : []).find(a => (a?.frage_text || '').trim() === frage)?.antwort || '';
-  const kurzDatum = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }); } catch { return d; } };
-  const hatKontakt = bewerbungen.some(b => (b.kontaktversuche || []).length);
   let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => portalStatusBucket(b.notiz) === filter);
   if (ampelFilter) gefiltert = gefiltert.filter(b => ampelOf(b.notiz) === ampelFilter);
   const akte = bewerbungen.find(b => b.id === akteBewId) || null;
+  const kriterienDa = hatKriterien(job.kriterien_struktur);
 
   return (
-    <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+    <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
       <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         {['alle', 'neu', 'vorqual', 'vorgestellt', 'vg', 'abgesagt'].map(f => {
@@ -95,77 +105,56 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
       ) : gefiltert.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Keine Bewerbungen in dieser Ansicht.</p>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Datum</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Kriterien</th>
-                <th style={thStyle}>E-Mail</th>
-                <th style={thStyle}>Telefon</th>
-                <th style={thStyle}>Quelle</th>
-                {frageSpalten.map(f => <th key={`fr-${f}`} style={{ ...thStyle }} title={f}>{f.length > 32 ? f.slice(0, 30) + '…' : f}</th>)}
-                {hatKontakt && <th style={thStyle}>📞 Kontaktversuche</th>}
-                {(job.vorqual_spalten || []).map(sp => (
-                  <th key={`vq-${sp.name}`} style={{ ...thStyle, background: '#f4f7ff' }}
-                    title={[sp.wichtig ? 'Wichtiges Prüf-Kriterium' : 'Vorqualifizierung', sp.anforderung ? `Anforderung: ${sp.anforderung}` : null, sp.pflicht ? 'Pflicht' : null].filter(Boolean).join(' · ')}>
-                    {sp.wichtig ? '⭐ ' : ''}{sp.name}{sp.pflicht ? ' ❗' : ''}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {gefiltert.map(b => {
-                const bucket = portalStatusBucket(b.notiz);
-                const amp = ampelOf(b.notiz);
-                return (
-                  <tr key={b.id} style={{ borderBottom: '1px solid #f1f1ee', opacity: b.ko_kriterium ? 0.6 : 1, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
-                    <td style={{ ...tdStyle }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span style={{ position: 'relative', flexShrink: 0 }}>
-                          <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
-                          <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
-                        </span>
-                        <span style={{ fontWeight: 600, color: '#1b3f80' }}>{b.name || '—'}</span>
-                      </div>
-                    </td>
-                    <td style={tdStyle}>{new Date(b.created_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                    <td style={tdStyle}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
-                    <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
-                    <td style={tdStyle} onClick={e => e.stopPropagation()}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
-                    <td style={tdStyle} onClick={e => e.stopPropagation()}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
-                    <td style={tdStyle}>{b.quelle || 'funnel'}</td>
-                    {frageSpalten.map(f => { const v = antwortFor(b, f); return <td key={`fr-${f}`} style={{ ...tdStyle, color: v ? undefined : '#9a9994' }}>{v || '—'}</td>; })}
-                    {hatKontakt && (
-                      <td style={tdStyle}>
-                        {(b.kontaktversuche || []).length
-                          ? <span title={b.erreicht_am ? `Erreicht am ${new Date(b.erreicht_am).toLocaleDateString('de-DE')}` : ''}>
-                              {b.kontaktversuche.map((v, i) => `${i ? ' / ' : ''}${kurzDatum(v.datum)}${v.erreicht ? ' ✓' : ''}`).join('')}
-                            </span>
-                          : <span style={{ color: '#9a9994' }}>—</span>}
-                      </td>
-                    )}
-                    {(job.vorqual_spalten || []).map(sp => {
-                      const v = b.vorqualifizierung_werte?.[sp.name];
-                      const hat = v != null && String(v).trim() !== '';
-                      return <td key={`vq-${sp.name}`} style={{ ...tdStyle, background: '#fbfcff', color: hat ? undefined : '#9a9994' }}>{hat ? String(v) : '—'}</td>;
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+          <thead>
+            <tr style={{ background: '#fafaf8', borderBottom: '1px solid #ececea' }}>
+              <th style={thStyle}>Name</th>
+              <th style={{ ...thStyle, width: 86 }}>Eingang</th>
+              <th style={{ ...thStyle, width: 120 }}>Status</th>
+              <th style={{ ...thStyle, width: 110 }}>Kriterien</th>
+              <th style={{ ...thStyle, width: 110 }}>Feedback</th>
+            </tr>
+          </thead>
+          <tbody>
+            {gefiltert.map(b => {
+              const bucket = portalStatusBucket(b.notiz);
+              const amp = ampelOf(b.notiz);
+              const fb = b.feedback?.status;
+              const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && modus === 'intern' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
+              return (
+                <tr key={b.id} style={{ borderBottom: '1px solid #f1f1ee', opacity: b.ko_kriterium ? 0.6 : 1, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
+                  <td style={{ ...tdStyle, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                      <span style={{ position: 'relative', flexShrink: 0 }}>
+                        <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
+                        <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
+                      </span>
+                      <span style={{ fontWeight: 600, color: '#1b3f80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name || '—'}</span>
+                      {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
+                    </div>
+                  </td>
+                  <td style={tdStyle}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
+                  <td style={tdStyle}><span style={{ fontSize: 11, fontWeight: 700, color: BUCKET_COLOR[bucket] }}>{BUCKET_LABEL[bucket]}</span></td>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
+                  <td style={tdStyle}>{fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fb] || '#5a5955' }}>{FEEDBACK_LABEL[fb] || fb}</span> : <span style={{ color: '#9a9994' }}>—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
-      {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} primary={primary} modus={modus} onClose={() => onAkte?.(null)} onPatch={onPatch} />}
+      {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} primary={primary} modus={modus}
+        onClose={() => onAkte?.(null)}
+        onPatch={onPatch ? (patch) => onPatch(akte.id, patch) : undefined}
+        onFeedback={onFeedback ? (patch) => onFeedback(akte.id, patch) : undefined}
+        onKommentar={onKommentar ? (text) => onKommentar(akte.id, text) : undefined}
+        onReload={onReload} />}
     </div>
   );
 }
 
 /* ══════════════════════ Kandidatenakte (rechts einfahrender Drawer) ══════════════════════ */
-export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', onClose, onPatch }) {
+export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', onClose, onPatch, onFeedback, onKommentar, onReload }) {
   const n = b.notiz || {};
   const struktur = job.kriterien_struktur || { ko: [], muss: [], wunsch: [] };
   const check = n.kriterien_check || {};
@@ -173,12 +162,33 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
   const anhaenge = Array.isArray(b.anhaenge) ? b.anhaenge : [];
   const amp = ampelOf(n);
   const editierbar = modus === 'intern' && typeof onPatch === 'function';
+  const [kommEntwurf, setKommEntwurf] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const row = (label, val) => val ? <div style={{ display: 'flex', gap: 8, fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955', minWidth: 130 }}>{label}</span><span style={{ fontWeight: 500 }}>{val}</span></div> : null;
   const checkIcon = v => v === true ? '✓' : v === false ? '✗' : '–';
   const checkCol = v => v === true ? '#16a34a' : v === false ? '#dc2626' : '#9a9994';
-  // Intern: Checkliste togglen (offen → ✓ → ✗ → offen)
   const nextCheck = v => v === true ? false : v === false ? null : true;
+  const h3 = { fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' };
+
+  async function sendeKommentar() {
+    const text = kommEntwurf.trim();
+    if (!text || !onKommentar) return;
+    setBusy(true);
+    try { await onKommentar(text); setKommEntwurf(''); await onReload?.(); }
+    catch (e) { alert(e.message || 'Kommentar fehlgeschlagen.'); } finally { setBusy(false); }
+  }
+  async function setFeedback(patch) {
+    if (!onFeedback) return;
+    try { await onFeedback(patch); await onReload?.(); } catch (e) { alert(e.message || 'Speichern fehlgeschlagen.'); }
+  }
+
+  // Gemeinsamer Verlauf: Eingang + Anrufversuche + Kommentare, chronologisch.
+  const events = [];
+  if (b.created_at) events.push({ at: b.created_at, rolle: null, autor: null, text: 'Bewerbung eingegangen', typ: 'eingang' });
+  for (const a of (n.anrufversuche || [])) if (a?.datum) events.push({ at: a.datum, rolle: 'nw', autor: 'TalentOne', text: `Anrufversuch — ${a.ergebnis || 'offen'}${a.notiz ? ` · ${a.notiz}` : ''}`, typ: 'anruf' });
+  for (const k of (b.kommentare || [])) events.push({ at: k.created_at, rolle: k.autor_typ, autor: k.autor_name || (k.autor_typ === 'kunde' ? 'Kunde' : 'TalentOne'), text: k.text, typ: 'kommentar' });
+  events.sort((x, y) => new Date(x.at) - new Date(y.at));
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 120, display: 'flex', justifyContent: 'flex-end' }}>
@@ -206,24 +216,45 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
             </span>
             {n.bewertung ? <span style={{ fontSize: 14, color: '#d97706' }}>{'★'.repeat(n.bewertung)}{'☆'.repeat(5 - n.bewertung)}</span> : null}
             {editierbar && (
-              <select value={amp} onChange={e => onPatch({ ampel: e.target.value === 'offen' ? null : e.target.value })}
+              <select value={amp} onChange={e => setFeedbackSafe(onPatch, { ampel: e.target.value === 'offen' ? null : e.target.value }, onReload)}
                 style={{ marginLeft: 'auto', border: '1px solid #ececea', borderRadius: 8, padding: '5px 8px', fontSize: 12 }}>
                 {AMPELN.map(a => <option key={a.key} value={a.key}>Ampel: {a.label}</option>)}
               </select>
             )}
           </div>
 
-          <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '0 0 6px' }}>Stammdaten</h3>
+          {/* Kundenfeedback — im Portal (onFeedback) immer editierbar */}
+          {onFeedback && (
+            <div style={{ background: '#f7f9ff', border: '1px solid #e3e9ff', borderRadius: 10, padding: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#1e40af', marginBottom: 8 }}>{t(kunde, 'Dein Feedback', 'Ihr Feedback')}</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}>Status
+                  <select value={b.feedback?.status && FEEDBACK_OPTIONS.some(o => o.key === b.feedback.status) ? b.feedback.status : ''}
+                    onChange={e => setFeedback({ status: e.target.value || 'neu' })}
+                    style={{ border: '1px solid #ccd3e6', borderRadius: 8, padding: '5px 8px', fontSize: 12 }}>
+                    {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}>VG-Termin
+                  <input type="date" value={(b.feedback?.vorstellungsgespraech_am || '').slice(0, 10)}
+                    onChange={e => setFeedback({ vorstellungsgespraech_am: e.target.value || null })}
+                    style={{ border: '1px solid #ccd3e6', borderRadius: 8, padding: '4px 8px', fontSize: 12 }} />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <h3 style={{ ...h3, marginTop: 0 }}>Stammdaten</h3>
           {row('E-Mail', b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : null)}
           {row('Telefon', b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : null)}
           {row('Quelle', b.quelle || 'funnel')}
           {row('Verfügbarkeit', n.verfuegbarkeit)}
           {row('Gehaltswunsch', n.gehaltswunsch)}
-          {row('VG-Termin', n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toLocaleDateString('de-DE') : null)}
+          {row('VG-Termin (intern)', n.vg_vereinbart_am ? new Date(n.vg_vereinbart_am).toLocaleDateString('de-DE') : null)}
           {row('Nächste Aktion', n.naechste_aktion)}
           {row('Eingestellt', n.eingestellt && n.eingestellt !== 'offen' ? n.eingestellt : null)}
 
-          <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' }}>Kriterien</h3>
+          <h3 style={h3}>Kriterien</h3>
           {['ko', 'muss', 'wunsch'].every(k => (struktur[k] || []).length === 0)
             ? <p style={{ fontSize: 12.5, color: '#9a9994', margin: 0 }}>Keine Kriterien hinterlegt.</p>
             : ['ko', 'muss', 'wunsch'].map(kat => (struktur[kat] || []).length > 0 && (
@@ -231,14 +262,9 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
                   <div style={{ fontSize: 11, fontWeight: 700, color: kat === 'ko' ? '#b91c1c' : kat === 'muss' ? '#92400e' : '#1e40af', textTransform: 'uppercase' }}>{kat === 'ko' ? 'Ausschluss (KO)' : kat === 'muss' ? 'Muss' : 'Wunsch'}</div>
                   {struktur[kat].map(item => {
                     const v = check[item.id];
-                    const inner = (
-                      <>
-                        <span style={{ color: checkCol(v), fontWeight: 700, width: 14, textAlign: 'center' }}>{checkIcon(v)}</span>
-                        <span>{item.text}</span>
-                      </>
-                    );
+                    const inner = (<><span style={{ color: checkCol(v), fontWeight: 700, width: 14, textAlign: 'center' }}>{checkIcon(v)}</span><span>{item.text}</span></>);
                     return editierbar
-                      ? <button key={item.id} onClick={() => onPatch({ kriterien_check: { ...check, [item.id]: nextCheck(v) } })}
+                      ? <button key={item.id} onClick={() => setFeedbackSafe(onPatch, { kriterien_check: { ...check, [item.id]: nextCheck(v) } }, onReload)}
                           style={{ display: 'flex', gap: 6, padding: '3px 2px', fontSize: 12.5, background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%' }}>{inner}</button>
                       : <div key={item.id} style={{ fontSize: 12.5, display: 'flex', gap: 6, padding: '1px 0' }}>{inner}</div>;
                   })}
@@ -246,28 +272,56 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
               ))}
 
           {antworten.length > 0 && <>
-            <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' }}>Funnel-Antworten</h3>
-            {antworten.map((a, i) => <div key={i} style={{ fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955' }}>{a.frage_text}:</span> <strong>{a.antwort}{a.ko ? ' ⚠️ (KO)' : ''}</strong></div>)}
+            <h3 style={h3}>Funnel-Antworten</h3>
+            {antworten.map((a, i) => <div key={i} style={{ fontSize: 13, padding: '3px 0' }}><span style={{ color: '#5a5955' }}>{frageTitel(a.frage_text)}:</span> <strong>{a.antwort}{a.ko ? ' ⚠️ (KO)' : ''}</strong></div>)}
           </>}
 
           {anhaenge.length > 0 && <>
-            <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' }}>Anhänge</h3>
+            <h3 style={h3}>Anhänge</h3>
             {anhaenge.map((a, i) => <div key={i} style={{ fontSize: 13 }}><a href={a.download_url || a.url} target="_blank" rel="noreferrer">📎 {a.dateiname || a.name || `Anhang ${i + 1}`}</a></div>)}
           </>}
 
           {n.notizen && <>
-            <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' }}>Notiz</h3>
+            <h3 style={h3}>Interne Notiz</h3>
             <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', background: '#fafaf8', borderRadius: 8, padding: 10 }}>{n.notizen}</div>
           </>}
 
-          {(n.anrufversuche || []).length > 0 && <>
-            <h3 style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.04, color: '#5a5955', margin: '18px 0 6px' }}>Kontaktversuche</h3>
-            {n.anrufversuche.filter(a => a?.datum).map((a, i) => (
-              <div key={i} style={{ fontSize: 13, padding: '2px 0' }}>{new Date(a.datum).toLocaleDateString('de-DE')} · {a.ergebnis || '—'}{a.notiz ? ` · ${a.notiz}` : ''}</div>
-            ))}
-          </>}
+          {/* Gemeinsamer Verlauf (beide Modi) */}
+          <h3 style={h3}>Verlauf</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {events.length === 0 && <p style={{ fontSize: 12.5, color: '#9a9994', margin: 0 }}>Noch keine Ereignisse.</p>}
+            {events.map((e, i) => {
+              const kunde_ev = e.rolle === 'kunde';
+              return (
+                <div key={i} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: e.typ === 'kommentar' ? (kunde_ev ? '#1e40af' : '#6b7280') : '#d4d4d0' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: '#9a9994' }}>
+                      {new Date(e.at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                      {e.autor && <> · <strong style={{ color: kunde_ev ? '#1e40af' : '#5a5955' }}>{e.autor}</strong> ({kunde_ev ? 'Kunde' : 'TalentOne'})</>}
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{e.text}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {onKommentar && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <textarea rows={2} value={kommEntwurf} onChange={e => setKommEntwurf(e.target.value)} placeholder="Kommentar schreiben…"
+                style={{ flex: 1, border: '1px solid #ececea', borderRadius: 8, padding: '8px 10px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} />
+              <button onClick={sendeKommentar} disabled={busy || !kommEntwurf.trim()}
+                style={{ background: primary, color: '#fff', border: 'none', borderRadius: 8, padding: '0 16px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Senden</button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+// Intern-Edit (onPatch) + Reload in einem.
+async function setFeedbackSafe(onPatch, patch, onReload) {
+  if (!onPatch) return;
+  try { await onPatch(patch); await onReload?.(); } catch (e) { alert(e.message || 'Speichern fehlgeschlagen.'); }
 }

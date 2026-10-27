@@ -1754,6 +1754,17 @@ router.get('/portal/:token', async (req, res) => {
       }
     }
 
+    // Kundenfeedback (Status/VG) + gemeinsamer Kommentar-Verlauf je Bewerbung.
+    const feedbackByBew = {}, kommentareByBew = {};
+    if (bewIds.length) {
+      const [{ data: fbs = [] }, { data: komm = [] }] = await Promise.all([
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am, updated_at').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kommentare').select('id, bewerbung_id, autor_typ, autor_name, text, created_at').in('bewerbung_id', bewIds).order('created_at', { ascending: true }),
+      ]);
+      for (const f of (fbs || [])) feedbackByBew[f.bewerbung_id] = { status: f.status || null, vorstellungsgespraech_am: f.vorstellungsgespraech_am || null, updated_at: f.updated_at || null };
+      for (const k of (komm || [])) (kommentareByBew[k.bewerbung_id] ||= []).push(k);
+    }
+
     // B2: Laufzeit je Stelle (portal-sicher — laufzeitStatus enthält KEINE Meta-Kennzahlen).
     const projektIds = [...new Set(jobs.map(j => j.projekt_id).filter(Boolean))];
     const laufzeitByProjekt = {};
@@ -1846,7 +1857,7 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null })),
+      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null, feedback: feedbackByBew[b.id] || null, kommentare: kommentareByBew[b.id] || [] })),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {
@@ -2190,6 +2201,59 @@ router.delete('/portal/:token/mitarbeiterstimmen/:sid', async (req, res) => {
       .delete().eq('id', req.params.sid).eq('kunde_id', kunde.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Prüft, dass eine Bewerbung zu einer Stelle dieses Kunden gehört.
+async function bewerbungGehoertKunde(bewId, kundeId) {
+  const { data: b } = await supabase.from('talentone_bewerbungen').select('id, job_id').eq('id', bewId).maybeSingle();
+  if (!b) return false;
+  const { data: j } = await supabase.from('talentone_jobs').select('id, kunde_id').eq('id', b.job_id).maybeSingle();
+  return !!j && j.kunde_id === kundeId;
+}
+
+/* Kundenfeedback (Status/VG-Termin) aus der Portal-Akte (modus=kunde). Immer editierbar. */
+router.patch('/portal/:token/bewerbung/:bewId/feedback', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    if (!(await bewerbungGehoertKunde(req.params.bewId, kunde.id))) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Portal.' });
+    const { data: vorher } = await supabase.from('talentone_bewerber_kundenfeedback')
+      .select('status, vorstellungsgespraech_am').eq('bewerbung_id', req.params.bewId).maybeSingle();
+    const patch = { bewerbung_id: req.params.bewId, updated_at: new Date().toISOString() };
+    const body = req.body || {};
+    if (body.status !== undefined) patch.status = FEEDBACK_STATI.includes(body.status) ? body.status : 'neu';
+    if (body.vorstellungsgespraech_am !== undefined) patch.vorstellungsgespraech_am = body.vorstellungsgespraech_am || null;
+    const { data, error } = await supabase.from('talentone_bewerber_kundenfeedback')
+      .upsert(patch, { onConflict: 'bewerbung_id' }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Sofort-Mail wie beim Alt-Endpoint: nur bei „eingestellt" (neu) oder neuem VG-Termin.
+    const wurdeEingestellt = patch.status === 'eingestellt' && vorher?.status !== 'eingestellt';
+    const neuerVgTermin = patch.vorstellungsgespraech_am != null && patch.vorstellungsgespraech_am !== (vorher?.vorstellungsgespraech_am || null);
+    if (wurdeEingestellt || neuerVgTermin) {
+      (async () => {
+        const { data: b } = await supabase.from('talentone_bewerbungen').select('name, job_id').eq('id', req.params.bewId).maybeSingle();
+        const { data: jobFull } = b?.job_id ? await supabase.from('talentone_jobs').select('id, stelle, kunde_id').eq('id', b.job_id).maybeSingle() : { data: null };
+        if (wurdeEingestellt) await sendeKundenFeedbackSofort({ art: 'eingestellt', kunde, job: jobFull, bewerberName: b?.name });
+        if (neuerVgTermin) await sendeKundenFeedbackSofort({ art: 'vg', kunde, job: jobFull, bewerberName: b?.name, termin: patch.vorstellungsgespraech_am });
+      })().catch(err => console.warn('[portal-feedback-sofortmail]', err.message));
+    }
+    res.json({ feedback: { status: data.status || null, vorstellungsgespraech_am: data.vorstellungsgespraech_am || null, updated_at: data.updated_at } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* Neuer Kommentar (Kunde) im gemeinsamen Verlauf einer Bewerbung. */
+router.post('/portal/:token/bewerbung/:bewId/kommentar', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    if (!(await bewerbungGehoertKunde(req.params.bewId, kunde.id))) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Portal.' });
+    const text = (req.body?.text || '').toString().trim();
+    if (!text) return res.status(400).json({ error: 'Kommentar leer.' });
+    const autorName = kunde.ansprechpartner || kunde.firmenname || 'Kunde';
+    const { data, error } = await supabase.from('talentone_bewerber_kommentare')
+      .insert({ bewerbung_id: req.params.bewId, autor_typ: 'kunde', autor_name: autorName, text }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json({ kommentar: data });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

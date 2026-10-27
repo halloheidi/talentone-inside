@@ -10,6 +10,10 @@ import { t } from '../lib/anrede.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
+// Recruiting-/Lead-Stellen fürs Portal; interne Hilfs-Typen (sonstiges, video) nicht zeigen.
+const NICHT_PORTAL_TYP = new Set(['sonstiges', 'video']);
+function istPortalJob(j) { return !NICHT_PORTAL_TYP.has(j?.projekttyp || ''); }
+
 // Wenn ein interner Mitarbeiter das Portal oeffnet, ist er in Supabase eingeloggt.
 // Wir schicken den Access-Token als Bearer mit, damit das Backend den Kunden-Login
 // ueberspringen kann. Wichtig: fuer echte externe Kunden ist keine Session da.
@@ -114,10 +118,12 @@ export default function PublicPortal() {
     }
   }
 
+  // Portal zeigt nur „echte" Stellen — interne Typen (sonstiges, video) raus.
+  const portalJobs = (data?.jobs || []).filter(istPortalJob);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
   useEffect(() => {
-    if (data?.jobs?.length && !activeJobId) setActiveJobId(data.jobs[0].id);
-  }, [data, activeJobId]);
+    if (portalJobs.length && !activeJobId) setActiveJobId(portalJobs[0].id);
+  }, [data, activeJobId]); // eslint-disable-line
   // ?bewerbung=<id>: zur richtigen Stelle springen + Akte markieren.
   useEffect(() => {
     if (!data || !bewerbungParam) return;
@@ -139,7 +145,7 @@ export default function PublicPortal() {
   const primary = data.kunde?.farben?.primaer || brand.accent;
   const primaryInk = brand.accentInk;
 
-  const activeJob = data.jobs.find(j => j.id === activeJobId) || data.jobs[0];
+  const activeJob = portalJobs.find(j => j.id === activeJobId) || portalJobs[0];
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f6f2', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
@@ -169,9 +175,9 @@ export default function PublicPortal() {
         >Abmelden</button>
       </header>
 
-      {data.jobs.length > 1 && (
+      {portalJobs.length > 1 && (
         <nav style={{ display: 'flex', gap: 6, padding: '10px 20px', background: '#fff', borderBottom: '1px solid #ececea', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          {data.jobs.map(j => {
+          {portalJobs.map(j => {
             const aktiv = j.id === activeJobId;
             return (
               <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
@@ -322,8 +328,10 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
     await api(`/public/portal/${token}/job/${job.id}/kriterien-struktur`, { method: 'PUT', body: JSON.stringify({ kriterien: wert }) });
     onReload?.();
   }
+  const feedbackFor = (bewId, patch) => api(`/public/portal/${token}/bewerbung/${bewId}/feedback`, { method: 'PATCH', body: JSON.stringify(patch) });
+  const kommentarFor = (bewId, text) => api(`/public/portal/${token}/bewerbung/${bewId}/kommentar`, { method: 'POST', body: JSON.stringify({ text }) });
   return (
-    <section style={{ display: 'grid', gap: 20 }}>
+    <section style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {!istNeukunden && (
         <PortalKacheln job={job} token={token} kunde={kunde} primary={primary} bewerbungen={bewerbungen} onReload={onReload}
           ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} />
@@ -357,7 +365,8 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
             hinweis="Ausschlusskriterien berücksichtigen wir sofort bei der Vorqualifizierung."
           />
           <BewerberListe job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} modus="kunde"
-            ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte} />
+            ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte}
+            onFeedback={feedbackFor} onKommentar={kommentarFor} onReload={onReload} />
           <MitarbeiterstimmenPortalKachel token={token} kunde={kunde} primary={primary} />
         </>
       )}
@@ -1146,7 +1155,7 @@ function BewerbungenKachel({ bewerbungen, kunde, primary, ampelFilter, onAmpelFi
 
 function PortalKacheln({ job, token, kunde, primary, bewerbungen, onReload, ampelFilter, onAmpelFilter }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, alignItems: 'start', minWidth: 0 }}>
       <LaufzeitKachel job={job} token={token} kunde={kunde} primary={primary} onReload={onReload} />
       <BewerbungenKachel bewerbungen={bewerbungen} kunde={kunde} primary={primary} ampelFilter={ampelFilter} onAmpelFilter={onAmpelFilter} />
     </div>

@@ -351,15 +351,38 @@ router.get('/kanban', async (req, res) => {
       });
     }
     const bew7 = {}, bewGes = {};
+    const jobsMitNeuemKommentar = new Set();   // job_id → Marker „Neuer Kommentar vom Kunden"
     if (jobIds.length) {
       const vor7 = new Date(Date.now() - 7 * 86400000).toISOString();
-      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('job_id, created_at').in('job_id', jobIds);
+      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id, created_at').in('job_id', jobIds);
+      const bewToJob = {};
       for (const b of (bew || [])) {
+        bewToJob[b.id] = b.job_id;
         const kId = jobKunde[b.job_id]; if (!kId) continue;
         bewGes[kId] = (bewGes[kId] || 0) + 1;
         if (b.created_at >= vor7) bew7[kId] = (bew7[kId] || 0) + 1;
       }
+      const bewIds = Object.keys(bewToJob);
+      if (bewIds.length) {
+        // „Neuer Kommentar vom Kunden" = jüngster Kunden-Kommentar neuer als die letzte
+        // Recruiter-Bearbeitung (notizen.updated_at) der Bewerbung.
+        const [{ data: komm = [] }, { data: notz = [] }] = await Promise.all([
+          supabase.from('talentone_bewerber_kommentare').select('bewerbung_id, created_at').eq('autor_typ', 'kunde').in('bewerbung_id', bewIds),
+          supabase.from('talentone_bewerber_notizen').select('bewerbung_id, updated_at').in('bewerbung_id', bewIds),
+        ]);
+        const notizStand = Object.fromEntries((notz || []).map(n => [n.bewerbung_id, n.updated_at]));
+        const letzteKunde = {};
+        for (const k of (komm || [])) {
+          if (!letzteKunde[k.bewerbung_id] || k.created_at > letzteKunde[k.bewerbung_id]) letzteKunde[k.bewerbung_id] = k.created_at;
+        }
+        for (const [bewId, ts] of Object.entries(letzteKunde)) {
+          const stand = notizStand[bewId] || '1970-01-01';
+          if (ts > stand && bewToJob[bewId]) jobsMitNeuemKommentar.add(bewToJob[bewId]);
+        }
+      }
     }
+
+    for (const list of Object.values(stellenByKunde)) for (const s of list) s.neuer_kundenkommentar = jobsMitNeuemKommentar.has(s.job_id);
 
     const out = (kunden || []).map(k => {
       const v = vById[k.id];

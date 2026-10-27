@@ -126,6 +126,17 @@ router.patch('/:id/notiz', async (req, res) => {
 // PATCH /api/bewerbungen/:id/zuordnen  body: { job_id }
 // Ordnet eine Bewerbung einer anderen Stelle DES SELBEN KUNDEN zu (Multi-Stellen-
 // Funnel: Mapping danebengegriffen oder Kandidat umentschieden). Setzt zuordnung_unklar zurück.
+// POST /api/bewerbungen/:id/kommentar — interner Kommentar (autor_typ 'nw') in den gemeinsamen Verlauf.
+router.post('/:id/kommentar', async (req, res) => {
+  const text = (req.body?.text || '').toString().trim();
+  if (!text) return res.status(400).json({ error: 'Kommentar leer.' });
+  const autorName = (req.body?.autor || '').toString().trim() || 'TalentOne';
+  const { data, error } = await supabase.from('talentone_bewerber_kommentare')
+    .insert({ bewerbung_id: req.params.id, autor_typ: 'nw', autor_name: autorName, text }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ kommentar: data });
+});
+
 router.patch('/:id/zuordnen', async (req, res) => {
   const zielJobId = req.body?.job_id;
   if (!zielJobId) return res.status(400).json({ error: 'job_id ist Pflicht.' });
@@ -355,16 +366,19 @@ async function loadBewerbungenFuerJob(jobId) {
   // Child-Tabellen gechunked laden, siehe `fetchChildrenByBewerbungIds` oben.
   // Ein einzelner Job hat selten >100 Bewerbungen — der Chunking-Overhead ist dann
   // null, aber die Code-Pfade bleiben identisch zur globalen Overview.
-  const [notizenRows, feedbackRows, werteRows] = await Promise.all([
+  const [notizenRows, feedbackRows, werteRows, kommentarRows] = await Promise.all([
     fetchChildrenByBewerbungIds('talentone_bewerber_notizen', ids),
     fetchChildrenByBewerbungIds('talentone_bewerber_kundenfeedback', ids),
     fetchChildrenByBewerbungIds('talentone_bewerber_spalten_werte', ids),
+    fetchChildrenByBewerbungIds('talentone_bewerber_kommentare', ids),
   ]);
 
   const notizen = {};
   for (const n of notizenRows) notizen[n.bewerbung_id] = n;
   const feedback = {};
   for (const f of feedbackRows) feedback[f.bewerbung_id] = f;
+  const kommentare = {};
+  for (const k of (kommentarRows || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))) (kommentare[k.bewerbung_id] ||= []).push(k);
   const werte = {};
   for (const w of werteRows) {
     if (!werte[w.bewerbung_id]) werte[w.bewerbung_id] = {};
@@ -379,7 +393,7 @@ async function loadBewerbungenFuerJob(jobId) {
   // KO-Markierung der Antworten im Frontend (per-Antwort-KO wird NICHT gespeichert).
   const funnels = await ladeFunnels(bewerbungen);
 
-  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels };
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare };
 }
 
 // GET /api/bewerbungen/job/:jobId — komplette Tabellen-Daten für einen Job
