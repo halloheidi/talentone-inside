@@ -8,6 +8,7 @@ import StickySaveBar from '../../components/StickySaveBar.jsx';
 import CropModal from '../../components/CropModal.jsx';
 import BewerbungenTable from '../../components/BewerbungenTable.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
+import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
 
 const TYPE_META = {
@@ -551,6 +552,7 @@ export default function JobFunnel() {
             </div>
           )}
           <MultiStellenMapping kunde={kunde} />
+          <MitarbeiterStimmenVorschlag kundeId={kunde?.id} />
 
           {istPerspective && (
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>

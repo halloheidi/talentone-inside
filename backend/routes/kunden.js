@@ -1415,4 +1415,72 @@ router.patch('/:id/portal-zugang', async (req, res) => {
   res.json({ kunde: data });
 });
 
+/* ═══════════════ A5: Mitarbeiterstimmen (Testimonials) ═══════════════
+   Nur freigabe=true darf in Funnel/Creatives verwendet werden (Provider: freigegebene-stimmen.js). */
+const STIMME_FELDER = ['name', 'rolle', 'dabei_seit', 'zitat', 'foto_url', 'freigabe', 'quelle', 'reihenfolge'];
+function pickStimme(body) {
+  const out = {};
+  for (const k of STIMME_FELDER) {
+    if (body[k] === undefined) continue;
+    if (k === 'freigabe') out[k] = !!body[k];
+    else if (k === 'reihenfolge') out[k] = Number.isFinite(Number(body[k])) ? Number(body[k]) : 0;
+    else out[k] = body[k] === '' ? null : body[k];
+  }
+  return out;
+}
+
+// GET /api/kunden/:id/mitarbeiterstimmen?nur_freigegeben=1
+router.get('/:id/mitarbeiterstimmen', async (req, res) => {
+  let q = supabase.from('talentone_mitarbeiterstimmen').select('*')
+    .eq('kunde_id', req.params.id).order('reihenfolge', { ascending: true }).order('created_at', { ascending: true });
+  if (req.query.nur_freigegeben === '1' || req.query.nur_freigegeben === 'true') q = q.eq('freigabe', true);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ stimmen: data || [] });
+});
+
+// POST /api/kunden/:id/mitarbeiterstimmen — intern (quelle default 'nw')
+router.post('/:id/mitarbeiterstimmen', async (req, res) => {
+  const patch = pickStimme(req.body || {});
+  if (patch.quelle && !['kunde', 'pdf', 'nw'].includes(patch.quelle)) return res.status(400).json({ error: 'quelle ungültig.' });
+  const { data, error } = await supabase.from('talentone_mitarbeiterstimmen')
+    .insert({ kunde_id: req.params.id, quelle: patch.quelle || 'nw', ...patch, updated_at: new Date().toISOString() })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json({ stimme: data });
+});
+
+// PATCH /api/kunden/mitarbeiterstimmen/:sid
+router.patch('/mitarbeiterstimmen/:sid', async (req, res) => {
+  const patch = pickStimme(req.body || {});
+  if (patch.quelle && !['kunde', 'pdf', 'nw'].includes(patch.quelle)) return res.status(400).json({ error: 'quelle ungültig.' });
+  const { data, error } = await supabase.from('talentone_mitarbeiterstimmen')
+    .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', req.params.sid).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ stimme: data });
+});
+
+// DELETE /api/kunden/mitarbeiterstimmen/:sid
+router.delete('/mitarbeiterstimmen/:sid', async (req, res) => {
+  const { error } = await supabase.from('talentone_mitarbeiterstimmen').delete().eq('id', req.params.sid);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// POST /api/kunden/:id/mitarbeiterstimmen/:sid/foto body: { fileData (base64), fileName?, contentType? }
+router.post('/:id/mitarbeiterstimmen/:sid/foto', async (req, res) => {
+  const { fileData, fileName = 'foto.jpg' } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
+  try {
+    const norm = await normalizeImageForStorage(decodeBase64File(fileData), { kind: 'foto', label: fileName });
+    const stem = safeFilenameStem(fileName);
+    const path = `${req.params.id}/stimmen/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer: norm.buffer, contentType: norm.contentType });
+    const { data, error } = await supabase.from('talentone_mitarbeiterstimmen')
+      .update({ foto_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', req.params.sid).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ stimme: data });
+  } catch (err) { res.status(400).json({ error: err.userMessage || err.message }); }
+});
+
 export default router;

@@ -2093,4 +2093,68 @@ router.put('/portal/:token/job/:jobId/kriterien-struktur', async (req, res) => {
   }
 });
 
+/* ═══════════════ A5: Mitarbeiterstimmen über das Portal (Kunde) ═══════════════
+   quelle='kunde'. Freigabe-Haken steuert die Verwendbarkeit in Funnel/Creatives. */
+const PORTAL_STIMME_FELDER = ['name', 'rolle', 'dabei_seit', 'zitat', 'foto_url', 'freigabe', 'reihenfolge'];
+function pickPortalStimme(body) {
+  const out = {};
+  for (const k of PORTAL_STIMME_FELDER) {
+    if (body[k] === undefined) continue;
+    if (k === 'freigabe') out[k] = !!body[k];
+    else if (k === 'reihenfolge') out[k] = Number.isFinite(Number(body[k])) ? Number(body[k]) : 0;
+    else out[k] = body[k] === '' ? null : body[k];
+  }
+  return out;
+}
+async function portalGate(req, res) {
+  const kunde = await loadKundeByPortalToken(req.params.token);
+  if (!kunde) { res.status(404).json({ error: 'Link ungültig oder abgelaufen.' }); return null; }
+  const gate = await requirePortalAccess(kunde, req);
+  if (!gate.ok) { res.status(401).json({ error: gate.error, mode: 'account' }); return null; }
+  return kunde;
+}
+
+router.get('/portal/:token/mitarbeiterstimmen', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    const { data, error } = await supabase.from('talentone_mitarbeiterstimmen').select('*')
+      .eq('kunde_id', kunde.id).order('reihenfolge', { ascending: true }).order('created_at', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ stimmen: data || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/portal/:token/mitarbeiterstimmen', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    const patch = pickPortalStimme(req.body || {});
+    const { data, error } = await supabase.from('talentone_mitarbeiterstimmen')
+      .insert({ kunde_id: kunde.id, quelle: 'kunde', ...patch, updated_at: new Date().toISOString() }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json({ stimme: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/portal/:token/mitarbeiterstimmen/:sid', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    const patch = pickPortalStimme(req.body || {});
+    const { data, error } = await supabase.from('talentone_mitarbeiterstimmen')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', req.params.sid).eq('kunde_id', kunde.id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ stimme: data });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/portal/:token/mitarbeiterstimmen/:sid', async (req, res) => {
+  try {
+    const kunde = await portalGate(req, res); if (!kunde) return;
+    const { error } = await supabase.from('talentone_mitarbeiterstimmen')
+      .delete().eq('id', req.params.sid).eq('kunde_id', kunde.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

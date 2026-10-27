@@ -332,6 +332,11 @@ export default function JobCreativesV2() {
               <button type="button" className="btn-ghost btn-sm" onClick={verbessereDenSpruch} disabled={verbessernBusy || !spruch.trim()}>{verbessernBusy ? 'Verbessere…' : '✨ Mit KI verbessern'}</button>
               <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Verfeinert den aktuell gewählten Spruch.</span>
             </div>
+          </div>
+
+          {/* A5: Freigegebene Mitarbeiterstimmen als Hook übernehmbar */}
+          <div style={{ marginBottom: 12 }}>
+            <MitarbeiterStimmenVorschlag kundeId={kunde?.id} onInsert={s => s.zitat && setSpruch(s.zitat)} />
             {verbessertVarianten.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                 {verbessertVarianten.map((v, i) => {

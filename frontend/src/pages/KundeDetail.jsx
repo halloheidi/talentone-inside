@@ -8,6 +8,7 @@ import Modal from '../components/Modal.jsx';
 import Lightbox from '../components/Lightbox.jsx';
 import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import ProjektStatusSelect from '../components/ProjektStatusSelect.jsx';
+import MitarbeiterStimmenManager from '../components/MitarbeiterStimmen.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
@@ -1053,6 +1054,7 @@ export default function KundeDetail() {
 
       <ProjektStatusRow projekte={projekte} onUpdated={onProjektUpdated} />
       <ProjektInfoCards projekte={projekte} schritteItems={schritteItems} kundeId={kundeId} onUpdated={onProjektUpdated} />
+      <MitarbeiterStimmenManager kundeId={kundeId} />
 
       <div className="section-head">
         <div>
