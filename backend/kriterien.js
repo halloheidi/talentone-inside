@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 // "Worauf achten wir?" — wichtige Kriterien pro Stelle.
 //
 // KERN-INVARIANTE: Jedes Kriterium referenziert GENAU EIN Vorqual-Feld.
@@ -120,4 +122,74 @@ export function kundenVorqualSpalten({ felder = [], werte = [], kriterien = [] }
     if (hatWert(name)) spalten.push({ name, wichtig: false, anforderung: null, pflicht: false });
   }
   return spalten;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   A4: Strukturierte Kriterien — EIGENE Spalte talentone_jobs.wichtige_kriterien_struktur.
+   Bewusst getrennt von der Alt-Form oben (wichtige_kriterien, Vorqual-Feld-Invariante).
+   Kanonische Form: { ko:[{id,text,aktiv}], muss:[...], wunsch:[...], hinweis_freitext,
+     zuletzt_geaendert_von:'nw'|'kunde', zuletzt_geaendert_am }
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function _normItem(x) {
+  if (x == null) return null;
+  if (typeof x === 'string') { const t = x.trim(); return t ? { id: randomUUID(), text: t, aktiv: true } : null; }
+  const text = (x.text ?? '').toString().trim();
+  if (!text) return null;
+  return { id: (x.id || randomUUID()).toString(), text, aktiv: x.aktiv === false ? false : true };
+}
+function _normListe(arr) { return Array.isArray(arr) ? arr.map(_normItem).filter(Boolean) : []; }
+
+// Alt-Array [{kriterium,anforderung,pflicht}] → strukturiert (Fallback, falls struktur fehlt).
+function _ausLegacyArray(arr) {
+  const muss = [], wunsch = [];
+  for (const e of arr) {
+    const text = [e?.kriterium, e?.anforderung].map(s => (s ?? '').toString().trim()).filter(Boolean).join(' — ');
+    if (!text) continue;
+    (e?.pflicht === true ? muss : wunsch).push({ id: randomUUID(), text, aktiv: true });
+  }
+  return { ko: [], muss, wunsch };
+}
+
+/** Beliebigen Rohwert in die kanonische strukturierte Form bringen. */
+export function normalizeKriterienStruktur(raw) {
+  let ko = [], muss = [], wunsch = [], hinweis_freitext = '', von = null, am = null;
+  if (Array.isArray(raw)) {
+    const c = _ausLegacyArray(raw); ko = c.ko; muss = c.muss; wunsch = c.wunsch;
+  } else if (raw && typeof raw === 'object') {
+    ko = _normListe(raw.ko); muss = _normListe(raw.muss); wunsch = _normListe(raw.wunsch);
+    hinweis_freitext = (raw.hinweis_freitext ?? '').toString();
+    von = raw.zuletzt_geaendert_von ?? null; am = raw.zuletzt_geaendert_am ?? null;
+  }
+  return { ko, muss, wunsch, hinweis_freitext, zuletzt_geaendert_von: von, zuletzt_geaendert_am: am };
+}
+
+/** Onboarding-Pflicht erfüllt: mindestens 1 KO ODER 1 Muss (aktiv). */
+export function kriterienErfuellt(struktur) {
+  const n = (arr) => (arr || []).filter(i => i.aktiv !== false).length;
+  return n(struktur?.ko) + n(struktur?.muss) >= 1;
+}
+
+/** Kompakter Diff fürs Log (je Kategorie Anzahl + hinzu/entfernt-Texte). */
+export function diffKriterienStruktur(alt, neu) {
+  const a = normalizeKriterienStruktur(alt), b = normalizeKriterienStruktur(neu);
+  const diff = {};
+  if ((a.hinweis_freitext || '') !== (b.hinweis_freitext || '')) diff.hinweis_geaendert = true;
+  for (const kat of ['ko', 'muss', 'wunsch']) {
+    const altT = new Set(a[kat].map(i => i.text)), neuT = new Set(b[kat].map(i => i.text));
+    const hinzu = b[kat].filter(i => !altT.has(i.text)).map(i => i.text);
+    const entfernt = a[kat].filter(i => !neuT.has(i.text)).map(i => i.text);
+    if (hinzu.length || entfernt.length || a[kat].length !== b[kat].length) {
+      diff[kat] = { vorher: a[kat].length, nachher: b[kat].length, hinzu, entfernt };
+    }
+  }
+  return diff;
+}
+
+/** Eingehende (Teil-)Kriterien kanonisieren + Metadaten setzen. */
+export function prepareKriterienStrukturWrite(body, von) {
+  const n = normalizeKriterienStruktur(body);
+  n.zuletzt_geaendert_von = von === 'kunde' ? 'kunde' : 'nw';
+  n.zuletzt_geaendert_am = new Date().toISOString();
+  return n;
 }

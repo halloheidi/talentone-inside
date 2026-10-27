@@ -8,7 +8,7 @@ import { notifyKunde } from '../close.js';
 import { randomUUID } from 'node:crypto';
 import { getPublicBaseUrl } from '../branding.js';
 import { VORQUAL_STANDARD, effektiveVorqualFelder } from '../vorqualifizierung.js';
-import { syncKriterienMitFeldern, normalizeKriterien } from '../kriterien.js';
+import { syncKriterienMitFeldern, normalizeKriterien, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 
@@ -801,6 +801,38 @@ router.get('/:id/funnel-stats', async (req, res) => {
       groesster_absprung: groesster,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ═══════════ A4: Strukturierte Kriterien (ko/muss/wunsch) — eigene Spalte ═══════════
+   Getrennt vom Alt-Array-Editor (wichtige_kriterien, Vorqual-Feld-Invariante). */
+
+// GET /api/jobs/:id/kriterien — strukturierte Kriterien + Onboarding-Erfüllt-Flag.
+router.get('/:id/kriterien', async (req, res) => {
+  const { data: job, error } = await supabase.from('talentone_jobs')
+    .select('id, wichtige_kriterien_struktur, wichtige_kriterien').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+  // Fallback: wenn struktur noch leer, aus dem Alt-Array ableiten (nicht persistieren).
+  const quelle = job.wichtige_kriterien_struktur ?? job.wichtige_kriterien;
+  const kriterien = normalizeKriterienStruktur(quelle);
+  res.json({ kriterien, erfuellt: kriterienErfuellt(kriterien) });
+});
+
+// PUT /api/jobs/:id/kriterien — intern (von='nw'); Log in talentone_kriterien_log.
+router.put('/:id/kriterien', async (req, res) => {
+  const { data: job, error } = await supabase.from('talentone_jobs')
+    .select('id, wichtige_kriterien_struktur').eq('id', req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+  const neu = prepareKriterienStrukturWrite(req.body?.kriterien ?? req.body, 'nw');
+  const diff = diffKriterienStruktur(job.wichtige_kriterien_struktur, neu);
+  const { error: uErr } = await supabase.from('talentone_jobs')
+    .update({ wichtige_kriterien_struktur: neu }).eq('id', job.id);
+  if (uErr) return res.status(500).json({ error: uErr.message });
+  if (Object.keys(diff).length) {
+    await supabase.from('talentone_kriterien_log').insert({ job_id: job.id, von: 'nw', diff });
+  }
+  res.json({ kriterien: neu, erfuellt: kriterienErfuellt(neu) });
 });
 
 export default router;

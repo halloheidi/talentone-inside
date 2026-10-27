@@ -48,6 +48,7 @@ const KANBAN_COLUMNS = [
 // - CHECK_KEYS_FOTO greift nur wenn fotograf_noetig=true (nur N&W möglich).
 const CHECK_KEYS_BASE = [
   'formular_verschickt', 'formular_erhalten', 'onboarding_formular',
+  'kriterien_definiert',
   'fotos_erhalten', 'creatives_erstellt', 'adcopies_geschrieben',
   'entwuerfe_verschickt', 'go_vom_kunden', 'bewerberliste_erstellt',
   'avv_unterzeichnet', 'geschenk_verschickt',
@@ -80,6 +81,7 @@ const CHECK_LABELS = {
   fotos_fertig: 'Fotos fertig',
   formular_erhalten: 'Formular erhalten',
   onboarding_formular: 'Onboarding-Formular',
+  kriterien_definiert: 'Kriterien definiert (je Stelle)',
   creatives_erstellt: 'Creatives erstellt',
   adcopies_geschrieben: 'Ad-Copies geschrieben',
   url_bestellt: 'URL bestellt',

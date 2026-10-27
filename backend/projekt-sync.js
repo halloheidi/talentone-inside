@@ -2,11 +2,13 @@
 // Versand, Review, Formular, Fotos) zurück in die Projekt-Checkliste.
 
 import { supabase } from './supabase.js';
+import { normalizeKriterienStruktur, kriterienErfuellt } from './kriterien.js';
 
 const SYNC_KEYS = [
   'creatives_erstellt', 'adcopies_geschrieben', 'bewerberliste_erstellt',
   'url_connected', 'entwuerfe_verschickt', 'go_vom_kunden',
   'formular_erhalten', 'onboarding_formular', 'fotos_erhalten',
+  'kriterien_definiert',   // A4: je Stelle ≥1 KO oder Muss
 ];
 
 /**
@@ -20,9 +22,14 @@ export async function computeAutoChecklist(kundeId) {
 
   // Alle Jobs des Kunden — alle Sub-Tabellen joinen wir manuell
   const { data: jobs } = await supabase
-    .from('talentone_jobs').select('id, formdata_komplett').eq('kunde_id', kundeId);
+    .from('talentone_jobs').select('id, formdata_komplett, wichtige_kriterien_struktur, wichtige_kriterien').eq('kunde_id', kundeId);
   if (!jobs || !jobs.length) return out;
   const jobIds = jobs.map(j => j.id);
+
+  // A4: Kriterien je Stelle definiert? Pflicht erfüllt = JEDE Stelle hat ≥1 KO/Muss.
+  if (jobs.every(j => kriterienErfuellt(normalizeKriterienStruktur(j.wichtige_kriterien_struktur ?? j.wichtige_kriterien)))) {
+    out.kriterien_definiert = true;
+  }
 
   // Formular ausgefüllt → kunde-status oder formdata_komplett vorhanden
   const { data: kunde } = await supabase

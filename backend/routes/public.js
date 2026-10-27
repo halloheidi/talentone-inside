@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
-import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern } from '../kriterien.js';
+import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
@@ -2047,6 +2047,48 @@ router.patch('/portal/:token/job/:jobId/kriterien', async (req, res) => {
     res.json({ kriterien: updated.wichtige_kriterien, felder: updated.vorqualifizierung_felder });
   } catch (err) {
     console.error('[portal/kriterien]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* A4: Strukturierte Kriterien (ko/muss/wunsch) über das Portal (Kunde).
+   Eigene Spalte wichtige_kriterien_struktur; Änderung landet in talentone_kriterien_log
+   mit von='kunde'. Berührt NICHT den Alt-Array-Editor oben. */
+router.get('/portal/:token/job/:jobId/kriterien-struktur', async (req, res) => {
+  try {
+    const kunde = await loadKundeByPortalToken(req.params.token);
+    if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+    const gate = await requirePortalAccess(kunde, req);
+    if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, kunde_id, wichtige_kriterien_struktur, wichtige_kriterien').eq('id', req.params.jobId).maybeSingle();
+    if (!job || job.kunde_id !== kunde.id) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+    const kriterien = normalizeKriterienStruktur(job.wichtige_kriterien_struktur ?? job.wichtige_kriterien);
+    res.json({ kriterien, erfuellt: kriterienErfuellt(kriterien) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/portal/:token/job/:jobId/kriterien-struktur', async (req, res) => {
+  try {
+    const kunde = await loadKundeByPortalToken(req.params.token);
+    if (!kunde) return res.status(404).json({ error: 'Link ungültig oder abgelaufen.' });
+    const gate = await requirePortalAccess(kunde, req);
+    if (!gate.ok) return res.status(401).json({ error: gate.error, mode: 'account' });
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, stelle, kunde_id, wichtige_kriterien_struktur').eq('id', req.params.jobId).maybeSingle();
+    if (!job || job.kunde_id !== kunde.id) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+
+    const neu = prepareKriterienStrukturWrite(req.body?.kriterien ?? req.body, 'kunde');
+    const diff = diffKriterienStruktur(job.wichtige_kriterien_struktur, neu);
+    const { error } = await supabase.from('talentone_jobs')
+      .update({ wichtige_kriterien_struktur: neu }).eq('id', job.id);
+    if (error) return res.status(500).json({ error: error.message });
+    if (Object.keys(diff).length) {
+      await supabase.from('talentone_kriterien_log').insert({ job_id: job.id, von: 'kunde', diff });
+    }
+    res.json({ kriterien: neu, erfuellt: kriterienErfuellt(neu) });
+  } catch (err) {
+    console.error('[portal/kriterien-struktur]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

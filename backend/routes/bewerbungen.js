@@ -82,6 +82,11 @@ router.patch('/:id/notiz', async (req, res) => {
     patch.vorqualifizierung_werte = (body.vorqualifizierung_werte && typeof body.vorqualifizierung_werte === 'object')
       ? body.vorqualifizierung_werte : {};
   }
+  // A4: Abhak-Status je Kriterium {<kriterium_id>: true|false|null}
+  if (body.kriterien_check !== undefined) {
+    patch.kriterien_check = (body.kriterien_check && typeof body.kriterien_check === 'object' && !Array.isArray(body.kriterien_check))
+      ? body.kriterien_check : {};
+  }
   if (body.anrufversuche !== undefined) {
     patch.anrufversuche = sanitizeAnrufversuche(body.anrufversuche);
   }
