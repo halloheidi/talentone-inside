@@ -6,6 +6,7 @@ import QuickCreateModal from '../components/QuickCreateModal.jsx';
 import NaechsterSchrittStapel from '../components/NaechsterSchrittBadge.jsx';
 import AvvAnfrageModal from '../components/AvvAnfrageModal.jsx';
 import ProjektStatusSelect, { STATUS_META } from '../components/ProjektStatusSelect.jsx';
+import PageContainer from '../components/PageContainer.jsx';
 
 const VIEW_KEY = 'kundenList.view';     // 'kanban' | 'liste'
 const MODE_KEY = 'kundenList.mode';     // 'kunden' | 'projekte'
@@ -269,6 +270,7 @@ export default function KundenList() {
 
   return (
     <div>
+      <PageContainer wide />
       <div className="page-head">
         <div>
           <h1 className="page-title">Kunden</h1>

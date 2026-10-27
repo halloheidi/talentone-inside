@@ -278,7 +278,7 @@ export default function JobStelleninfos() {
   const hasAnalyse = analyse && (typeof analyse === 'object') && Object.keys(analyse).length > 0;
 
   return (
-    <form onSubmit={e => e.preventDefault()} className="stelle-form">
+    <form onSubmit={e => e.preventDefault()} className="stelle-form" style={{ maxWidth: 900 }}>
       {/* Warnung: Daten wurden nach der Creative-Erstellung geändert */}
       {job?.daten_geaendert_nach_creatives_at && (
         <div style={{

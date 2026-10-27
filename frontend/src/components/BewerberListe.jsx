@@ -116,6 +116,22 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   const intern = modus === 'intern';
   const vorqualFelder = Array.isArray(job.vorqualifizierung_felder) ? job.vorqualifizierung_felder.filter(f => f && f.name) : [];
 
+  // Dubletten an dieser Stelle: gleiche E-Mail ODER Telefon mehrfach (keine Zusammenführung).
+  const normMail = s => (s || '').trim().toLowerCase();
+  const normTel = s => (s || '').replace(/[\s/()-]/g, '');
+  const byEmail = {}, byTel = {};
+  for (const b of bewerbungen) {
+    const e = normMail(b.email); if (e) (byEmail[e] ||= []).push(b);
+    const tl = normTel(b.telefon); if (tl) (byTel[tl] ||= []).push(b);
+  }
+  function dubletten(b) {
+    const g = new Map();
+    const e = normMail(b.email), tl = normTel(b.telefon);
+    for (const x of (e ? byEmail[e] : [])) g.set(x.id, x);
+    for (const x of (tl ? byTel[tl] : [])) g.set(x.id, x);
+    return [...g.values()];
+  }
+
   // Volle Arbeitsliste: Funnel-Antworten (alle Fragen) + kundensichtbare Custom-Spalten + E-Mail/Telefon.
   const frageSpalten = [];
   for (const b of bewerbungen) for (const a of (Array.isArray(b.antworten) ? b.antworten : [])) {
@@ -136,7 +152,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {t(kunde, 'Deine', 'Ihre')} Bewerbungen ({bewerbungen.length})</h2>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {intern ? 'Bewerbungen' : `${t(kunde, 'Deine', 'Ihre')} Bewerbungen`} ({bewerbungen.length})</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         {['alle', ...BEARBEITUNG.map(o => o.key)].map(f => {
           const aktiv = filter === f;
@@ -186,6 +202,8 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 const fbSel = feedbackStatusOf(b);
                 const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
                 const werte = b.spalten_werte || {};
+                const dubs = dubletten(b);
+                const dubTitle = dubs.length > 1 ? `${dubs.length}× gleiche E-Mail/Telefon · weitere Eingänge: ${dubs.filter(x => x.id !== b.id).map(x => new Date(x.created_at).toLocaleDateString('de-DE')).join(', ')}` : '';
                 return (
                   <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
                     <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
@@ -195,6 +213,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                           <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
                         </span>
                         <span style={{ fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</span>
+                        {dubs.length > 1 && <span title={dubTitle} style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', borderRadius: 100, padding: '1px 6px', cursor: 'help' }}>{dubs.length}×</span>}
                         {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
                       </div>
                     </td>

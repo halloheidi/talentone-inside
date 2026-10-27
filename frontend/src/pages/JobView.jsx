@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Link, NavLink, Outlet, useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import PageContainer from '../components/PageContainer.jsx';
 
 const JobContext = createContext(null);
 export function useJob() { return useContext(JobContext); }
@@ -846,6 +847,7 @@ export default function JobView() {
 
   return (
     <JobContext.Provider value={{ job, kunde, projekt, laufzeit, geteiltMit, setProjekt, reload, startCreatives, startReel, pendingCreatives, pendingReels }}>
+      <PageContainer wide />
       <div className="breadcrumb">
         <Link to="/kunden">Kunden</Link>
         <span aria-hidden>›</span>

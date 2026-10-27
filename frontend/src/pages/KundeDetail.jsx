@@ -10,6 +10,7 @@ import MultiPhotoUpload from '../components/MultiPhotoUpload.jsx';
 import ProjektStatusSelect from '../components/ProjektStatusSelect.jsx';
 import MitarbeiterStimmenManager from '../components/MitarbeiterStimmen.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
+import PageContainer from '../components/PageContainer.jsx';
 import CloseLeadWarnung from '../components/CloseLeadWarnung.jsx';
 import TerminEinladungModal from '../components/TerminEinladungModal.jsx';
 import StandaloneAdBudgetModal from '../components/StandaloneAdBudgetModal.jsx';
@@ -531,6 +532,7 @@ export default function KundeDetail() {
 
   return (
     <div>
+      <PageContainer wide />
       <div className="breadcrumb">
         <Link to="/kunden">Kunden</Link>
         <span aria-hidden>›</span>

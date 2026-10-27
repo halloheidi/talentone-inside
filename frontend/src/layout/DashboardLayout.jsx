@@ -115,9 +115,9 @@ function KundeNav({ kundeId }) {
         <Icon name="users" size={16} />
         <span className="ctx-kunde-name">{kunde?.firmenname || 'Kunde'}</span>
       </NavLink>
-      <div className="ctx-section">Projekte</div>
+      <div className="ctx-section">Stellen</div>
       <div className="ctx-list">
-        {jobs.length === 0 && <div className="ctx-empty">Noch keine Projekte.</div>}
+        {jobs.length === 0 && <div className="ctx-empty">Noch keine Stellen.</div>}
         {jobs.map(j => (
           <NavLink
             key={j.id}
