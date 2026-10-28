@@ -5,7 +5,8 @@ import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { laufzeitStatus } from '../laufzeit.js';
 import { getKanban, setKanban, getLaufzeit, setLaufzeit } from '../kanban-cache.js';
-import { personenGruppen } from '../dubletten.js';
+import { personenGruppen, anzahlPersonen } from '../dubletten.js';
+import { deriveBearbeitung, BEARB_RANK } from '../bewerber-bearbeitung.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
@@ -418,6 +419,96 @@ router.get('/kanban', async (req, res) => {
     res.set('X-Cache', 'miss');
     res.json(payload);
   } catch (err) { console.error('[kunden/kanban]', err.message); res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/kunden/:id/stellen — Teil-2-Kundenseite: pro Stelle (= 1 Projekt) die
+   Karten-Kerndaten (Status, Laufzeit-Kurztext, Garantie-Fortschritt im neuen Typ-Modell)
+   + „Neu"-Zähler = eindeutige Personen mit weitester Stufe 'neu' (gleiche Ableitung wie
+   die Stellen-Bereichs-Sidebar). Reine Leseaggregation, rein additiv. */
+router.get('/:id/stellen', async (req, res) => {
+  try {
+    const kundeId = req.params.id;
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('id, stelle, projekt_id, projekttyp, region, gehalt, created_at')
+      .eq('kunde_id', kundeId).order('created_at', { ascending: false });
+    if (!jobs.length) return res.json({ stellen: [] });
+
+    const projektIds = [...new Set(jobs.map(j => j.projekt_id).filter(Boolean))];
+    const projektById = {};
+    if (projektIds.length) {
+      const { data: projekte = [] } = await supabase.from('talentone_projekte')
+        .select('id, status, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, live_termin, garantie, garantie_art, garantie_ziel, garantie_position, garantie_pruefen')
+        .in('id', projektIds);
+      for (const p of (projekte || [])) projektById[p.id] = p;
+    }
+
+    // Laufzeit-Kurztext nur für live/pausierte Projekte (parallel — laufzeitStatus macht Meta-Queries).
+    const laufzeitKurz = {};
+    const relevante = Object.values(projektById).filter(p => p.status === 'live' || ['feedbackschleife', 'hold', 'pausiert'].includes(p.status));
+    await Promise.all(relevante.map(async p => {
+      try {
+        let s = getLaufzeit(p.id);
+        if (s === undefined) { s = await laufzeitStatus(p); setLaufzeit(p.id, s); }
+        if (s.modell === 'abo' && s.open_end && s.verbraucht != null) laufzeitKurz[p.id] = `Monat ${Math.floor(s.verbraucht) + 1} · Open End`;
+        else if (s.soll != null && s.verbraucht != null) laufzeitKurz[p.id] = s.modell === 'abo' ? `Monat ${Math.round(s.verbraucht)}/${s.soll}` : `Tag ${s.verbraucht}/${s.soll}`;
+      } catch { /* laufzeit optional */ }
+    }));
+
+    // Bewerbungen aller Stellen in einem Rutsch; dann je Stelle Personen-Dedupe + Ableitung.
+    const jobIds = jobs.map(j => j.id);
+    const { data: bew = [] } = await supabase.from('talentone_bewerbungen')
+      .select('id, job_id, email, telefon, created_at').in('job_id', jobIds);
+    const bewByJob = {};
+    for (const b of (bew || [])) (bewByJob[b.job_id] ||= []).push(b);
+    const bewIds = (bew || []).map(b => b.id);
+    let notizByBew = {}, fbByBew = {}, hatKomm = new Set();
+    const eingestelltSet = new Set();
+    if (bewIds.length) {
+      const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }] = await Promise.all([
+        supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kommentare').select('bewerbung_id').in('bewerbung_id', bewIds),
+      ]);
+      notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
+      fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      hatKomm = new Set((komm || []).map(k => k.bewerbung_id));
+      for (const n of (notizen || [])) if (n.eingestellt === 'ja') eingestelltSet.add(n.bewerbung_id);
+      for (const [bid, st] of Object.entries(fbByBew)) if (st === 'eingestellt') eingestelltSet.add(bid);
+    }
+    const keyVon = b => deriveBearbeitung(notizByBew[b.id] || {}, fbByBew[b.id] || null, hatKomm.has(b.id));
+
+    const stellen = jobs.map(j => {
+      const p = j.projekt_id ? projektById[j.projekt_id] : null;
+      const rows = bewByJob[j.id] || [];
+      let bewerberNeu = 0;
+      for (const gruppe of personenGruppen(rows)) {
+        const rang = Math.max(...gruppe.map(b => BEARB_RANK[keyVon(b)] ?? 0));
+        if (rang === BEARB_RANK.neu) bewerberNeu += 1;
+      }
+      // Garantie-Fortschritt je Typ (Legacy-Fallback garantie=true ohne Typ → einstellung).
+      let garantie = null;
+      const gArt = p?.garantie_art || (p?.garantie ? 'einstellung' : null);
+      if (gArt) {
+        const ziel = p.garantie_ziel ?? (gArt === 'einstellung' ? 1 : null);
+        const seitStart = p.start_datum ? rows.filter(b => b.created_at >= p.start_datum) : rows;
+        const erreicht = gArt === 'einstellung'
+          ? anzahlPersonen(seitStart.filter(b => eingestelltSet.has(b.id)))
+          : anzahlPersonen(seitStart);
+        garantie = { art: gArt, ziel, erreicht, pruefen: !!p.garantie_pruefen || (!!p.garantie && !p.garantie_art) };
+      }
+      return {
+        job_id: j.id, stelle: j.stelle || 'Unbenannte Stelle', projekt_id: j.projekt_id || null,
+        projekttyp: j.projekttyp || null, region: j.region || null, gehalt: j.gehalt || null,
+        created_at: j.created_at,
+        status: p?.status || null,
+        live_termin: p?.live_termin || null,
+        laufzeit_kurz: j.projekt_id ? (laufzeitKurz[j.projekt_id] || null) : null,
+        bewerber_neu: bewerberNeu,
+        garantie,
+      };
+    });
+    res.json({ stellen });
+  } catch (err) { console.error('[kunden/stellen]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 /* GET /api/kunden/projekt-uebersicht?ids=a,b,c — pro Kunde: Projekt-Kommentar-Anzahl,

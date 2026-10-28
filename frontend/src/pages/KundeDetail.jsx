@@ -114,6 +114,10 @@ export default function KundeDetail() {
   const [activity, setActivity] = useState([]);
   const [projekte, setProjekte] = useState([]);
   const [schritteItems, setSchritteItems] = useState([]);
+  // Teil-2-Umbau: Stellen-Karten (Status/Laufzeit/Garantie/Neu je Stelle) + Markenauftritt-Block
+  const [stellen, setStellen] = useState([]);
+  const [stimmenCount, setStimmenCount] = useState(0);
+  const [userMarkenToggle, setUserMarkenToggle] = useState(null); // null = folgt Vollständigkeit
   const [sendOfferPreview, setSendOfferPreview] = useState(null);
   const [sendOrderPreview, setSendOrderPreview] = useState(null);
   const [billingOffer, setBillingOffer] = useState(null);
@@ -301,6 +305,11 @@ export default function KundeDetail() {
       .then(r => setSchritteItems((r.schritte || {})[kundeId] || []))
       .catch(() => setSchritteItems([]));
   }
+  function loadStellen() {
+    api(`/kunden/${kundeId}/stellen`)
+      .then(res => setStellen(res.stellen || []))
+      .catch(() => setStellen([]));
+  }
 
   async function syncInvoicesNow() {
     setInvoicesSyncing(true);
@@ -461,7 +470,7 @@ export default function KundeDetail() {
     }
   }
 
-  useEffect(() => { load(); loadInvoices(); loadOffers(); loadActivity(); loadProjekte(); }, [kundeId]);
+  useEffect(() => { load(); loadInvoices(); loadOffers(); loadActivity(); loadProjekte(); loadStellen(); }, [kundeId]);
 
   useEffect(() => {
     api(`/kunden/${kundeId}/referenzbilder`)
@@ -529,6 +538,10 @@ export default function KundeDetail() {
   if (loading) return <div className="card empty">Lade…</div>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!kunde) return <div className="card empty"><h2>Kunde nicht gefunden</h2></div>;
+
+  // Markenauftritt: standardmäßig zu, offen wenn unvollständig — bis der Nutzer selbst togglet.
+  const markenVollstaendig = !!kunde.farben?.primaer && referenzbilder.length > 0 && dokumente.length > 0 && stimmenCount > 0;
+  const markenOffen = userMarkenToggle === null ? !markenVollstaendig : userMarkenToggle;
 
   return (
     <div>
@@ -606,6 +619,18 @@ export default function KundeDetail() {
             <>
               <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span>{kunde.firmenname || '—'}</span>
+                {(() => {
+                  const kst = kunde.status === 'aktiv'
+                    ? { label: 'Aktiv', bg: '#dcfce7', color: '#166534' }
+                    : { label: 'Wartend', bg: '#fef3c7', color: '#92400e' };
+                  return (
+                    <span title="Kundenstatus" style={{
+                      display: 'inline-flex', alignItems: 'center',
+                      background: kst.bg, color: kst.color,
+                      padding: '3px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600,
+                    }}>{kst.label}</span>
+                  );
+                })()}
                 {(() => {
                   const formularJob = jobs.find(j => j.eingabe_methode === 'formular');
                   if (!formularJob) return null;
@@ -842,271 +867,7 @@ export default function KundeDetail() {
         </div>
       </div>
 
-      <div className="farben-card">
-        <div className="farben-head">
-          <div>
-            <div className="form-section-title" style={{ marginBottom: 4 }}>Markenfarben</div>
-            <div className="motiv-sub">Werden im Creative-Prompt für Text, Tags und Akzente verwendet.</div>
-          </div>
-          {farbenDirty && (
-            <button className="btn-primary btn-sm" onClick={saveFarben} disabled={farbenBusy}>
-              {farbenBusy ? 'Speichere…' : 'Speichern'}
-            </button>
-          )}
-          {farbenMsg && <span className="form-msg">{farbenMsg}</span>}
-        </div>
-
-        {/* Quellen-Sektion */}
-        <div className="farb-quellen">
-          <div className="farb-quelle">
-            <div className="farb-quelle-label">Aus Logo</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                className="btn-ghost btn-sm"
-                onClick={extractFromLogo}
-                disabled={!kunde.logo_url || extractBusy === 'logo'}
-                title={kunde.logo_url ? '' : 'Kein Logo hinterlegt'}
-              >
-                {extractBusy === 'logo' ? 'Ermittle…' : '3 Farben schätzen'}
-              </button>
-              <button
-                className="btn-ghost btn-sm"
-                onClick={ladePalette}
-                disabled={!(kunde.logo_transparent_url || kunde.logo_url) || paletteBusy}
-                title="Exakte dominante Farben aus dem Logo (mit Flächenanteil)"
-              >
-                {paletteBusy ? 'Analysiere…' : '🎯 Farben exakt aus Logo ziehen'}
-              </button>
-            </div>
-            {palette && palette.length > 0 && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-                {palette.map((c, i) => (
-                  <button key={i} type="button" onClick={() => paletteInSlot(c.hex)}
-                    title="In nächste freie Farbe übernehmen"
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: '1px solid var(--line,#ddd)', borderRadius: 8, padding: '4px 8px', background: '#fff' }}>
-                    <span className="swatch-box" style={{ background: c.hex, width: 22, height: 22 }} />
-                    <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.hex}</span>
-                    <span style={{ fontSize: 11, color: 'var(--ink-4,#999)' }}>{c.anteil}%</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="farb-quelle">
-            <div className="farb-quelle-label">Aus Karriereseite / Homepage</div>
-            <div className="farb-quelle-row">
-              <input
-                type="url"
-                className="farbe-hex"
-                placeholder="https://…"
-                value={websiteUrl}
-                onChange={e => { setWebsiteUrl(e.target.value); setWebsiteUrlDirty(true); }}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="btn-ghost btn-sm"
-                onClick={extractFromUrl}
-                disabled={!websiteUrl.trim() || extractBusy === 'url'}
-              >
-                {extractBusy === 'url' ? 'Scrape…' : 'Aus URL ermitteln'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {extractError && <div className="alert alert-error" style={{ marginTop: 12 }}>{extractError}</div>}
-
-        {/* Vorschau aus Quelle */}
-        {farbenPreview && (
-          <div className="farb-preview">
-            <div className="farb-preview-head">
-              <strong>Vorschlag aus {farbenPreview.source === 'logo' ? 'Logo' : 'Website'}:</strong>
-              <div className="farb-preview-actions">
-                <button className="btn-ghost btn-sm" onClick={() => setFarbenPreview(null)}>Verwerfen</button>
-                <button className="btn-primary btn-sm" onClick={applyPreview}>Übernehmen</button>
-              </div>
-            </div>
-            <div className="farb-preview-swatches">
-              {['primaer', 'sekundaer', 'akzent'].map(k => (
-                <div key={k} className="farb-preview-swatch">
-                  <span className="swatch-box" style={{ background: farbenPreview.farben[k] || 'transparent' }} />
-                  <span className="swatch-hex">{farbenPreview.farben[k] || '–'}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="farben-grid" style={{ marginTop: 14 }}>
-          {[
-            { key: 'primaer',   label: 'Primär' },
-            { key: 'sekundaer', label: 'Sekundär' },
-            { key: 'akzent',    label: 'Akzent' },
-          ].map(({ key, label }) => (
-            <div className="farbe-pick" key={key}>
-              <span className="farbe-label">{label}</span>
-              <div className="farbe-row">
-                <input
-                  type="color"
-                  value={/^#[0-9a-f]{6}$/i.test(farben[key]) ? farben[key] : '#cccccc'}
-                  onChange={e => updateFarbe(key, e.target.value)}
-                  aria-label={`${label} Farbe`}
-                />
-                <input
-                  type="text"
-                  className="farbe-hex"
-                  placeholder="#rrggbb"
-                  value={farben[key]}
-                  onChange={e => updateFarbe(key, e.target.value)}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-        {!kunde.farben?.primaer && !farbenDirty && (
-          <div className="farben-hint">
-            Noch keine Farben hinterlegt — entweder oben aus Logo oder Website ermitteln, oder manuell unten eintragen.
-          </div>
-        )}
-
-        {/* Verifizierung + strikter CI-Modus */}
-        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line,#ececea)' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-            <input type="checkbox" checked={!!kunde.farben_verifiziert} onChange={e => toggleFlag('farben_verifiziert', e.target.checked)} />
-            Palette geprüft {kunde.farben_verifiziert && <span style={{ color: '#15803d', fontWeight: 700 }}>✓ verifiziert</span>}
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
-            title="Text-/Grafikelemente in Markenfarbe werden exakt per Overlay gerendert (nie der KI überlassen); KI malt ein neutrales Motiv.">
-            <input type="checkbox" checked={!!kunde.ci_farben_strikt} onChange={e => toggleFlag('ci_farben_strikt', e.target.checked)} />
-            🎯 Strikte CI-Farben (exakt, kein KI-Approximieren)
-          </label>
-        </div>
-      </div>
-
-      <div className="ref-strip" id="referenzbilder">
-        <div className="ref-strip-title">
-          {referenzbilder.length > 0
-            ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)</>
-            : <>Noch keine Referenzbilder hinterlegt.</>}
-        </div>
-        <div className="ref-strip-grid">
-          {referenzbilder.slice(0, 12).map((r, i) => (
-            <div key={r.id} className="ref-strip-thumb" title={r.beschreibung || r.typ}>
-              <button
-                type="button"
-                onClick={() => setRefLightboxIndex(i)}
-                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', height: '100%' }}
-                title="Klick für Groß-Ansicht"
-              >
-                <img src={r.bild_url} alt="" />
-              </button>
-              {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
-              <button
-                type="button"
-                className="ref-strip-del"
-                title="Löschen"
-                onClick={async () => {
-                  if (!confirm('Bild wirklich löschen?')) return;
-                  try {
-                    await api(`/kunden/referenzbilder/${r.id}`, { method: 'DELETE' });
-                    setReferenzbilder(prev => prev.filter(x => x.id !== r.id));
-                  } catch (err) { alert(err.message); }
-                }}
-              >×</button>
-            </div>
-          ))}
-          <MultiPhotoUpload
-            kundeId={kundeId}
-            onUploaded={(rb) => setReferenzbilder(prev => [rb, ...prev])}
-            dropZoneClassName="ref-strip-upload"
-            trigger={<span>+ Foto(s)<br/><small>Drag &amp; Drop</small></span>}
-          />
-        </div>
-      </div>
-
-      <div className="ref-strip" id="dokumente">
-        <div className="ref-strip-title">
-          Dokumente (Formulare/Unterlagen){dokumente.length ? `: ${dokumente.length}` : ' — noch keine'}
-          <label className="btn-ghost btn-sm" style={{ marginLeft: 10, cursor: dokBusy ? 'wait' : 'pointer' }}>
-            {dokBusy ? 'Lädt…' : '+ Dokument (PDF/DOCX)'}
-            <input type="file" accept=".pdf,.docx" style={{ display: 'none' }} disabled={dokBusy}
-              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; uploadDokument(f); }} />
-          </label>
-        </div>
-        {dokMsg && <div style={{ fontSize: 13, color: '#1b3f80', margin: '4px 0 8px' }}>{dokMsg}</div>}
-        {dokumente.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {dokumente.map(dok => (
-              <div key={dok.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 10px' }}>
-                <span style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13 }}>
-                  📄 <a href={dok.datei_url} target="_blank" rel="noreferrer">{dok.dateiname || 'Dokument'}</a>
-                  <span style={{ color: 'var(--ink-3)', fontSize: 11 }}> · {new Date(dok.created_at).toLocaleDateString('de-DE')}{dok.uploaded_via === 'kunde' ? ' · vom Kunden' : ''}</span>
-                </span>
-                <button type="button" className="btn-ghost btn-sm" disabled={auswertenBusy === dok.id || !dok.job_id}
-                  title={dok.job_id ? 'Formular auswerten → Daten-Vorschlag für den Neukunden-Tab' : 'Keinem Neukunden-Projekt zugeordnet'}
-                  onClick={() => auswertenDokument(dok)}>
-                  {auswertenBusy === dok.id ? 'Werte aus…' : '🔎 Auswerten'}
-                </button>
-                <button type="button" className="btn-ghost btn-sm" title="Löschen" onClick={() => deleteDokument(dok)}>×</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <ProjektStatusRow projekte={projekte} onUpdated={onProjektUpdated} />
-      <ProjektInfoCards projekte={projekte} schritteItems={schritteItems} kundeId={kundeId} onUpdated={onProjektUpdated} />
-      <MitarbeiterStimmenManager kundeId={kundeId} />
-
-      <div className="section-head">
-        <div>
-          <h2 className="section-title">Projekte</h2>
-          <p className="section-sub">Stellen / Kampagnen für diesen Kunden.</p>
-        </div>
-        <button className="btn-primary" onClick={() => setShowCreate(true)}>
-          <Icon name="plus" /> Neues Projekt
-        </button>
-      </div>
-
-      {jobs.length === 0 ? (
-        <div className="card empty">
-          <h2>Noch keine Projekte</h2>
-          <p>Lege das erste Projekt für {kunde.firmenname} an.</p>
-        </div>
-      ) : (
-        <div className="grid-cards">
-          {jobs.map(j => (
-            <div key={j.id} style={{ position: 'relative' }}>
-              <Link to={`/kunden/${kundeId}/jobs/${j.id}`} className="job-card">
-                <div className="job-card-name">{j.stelle || 'Unbenanntes Projekt'}</div>
-                <div className="job-card-meta">
-                  {j.region && <span>{j.region}</span>}
-                  {j.gehalt && <span>{j.gehalt}</span>}
-                </div>
-                <div className="job-card-foot">
-                  Angelegt {new Date(j.created_at).toLocaleDateString('de-DE')}
-                </div>
-              </Link>
-              <button
-                title="Projekt löschen"
-                onClick={async (e) => {
-                  e.preventDefault(); e.stopPropagation();
-                  if (!confirm(`Projekt "${j.stelle || 'Unbenannt'}" wirklich löschen?\n\nZugehörige Creatives, Ad Copies, Funnel und Bewerbungen werden mitgelöscht. Der Projekt-Eintrag in der Projektübersicht wird ebenfalls entfernt.`)) return;
-                  try {
-                    await api(`/jobs/${j.id}`, { method: 'DELETE' });
-                    load();
-                  } catch (err) { alert('Löschen fehlgeschlagen: ' + err.message); }
-                }}
-                style={{
-                  position: 'absolute', top: 8, right: 8, width: 26, height: 26,
-                  borderRadius: 6, border: '1px solid #ececea', background: '#fff',
-                  color: '#c1272d', fontSize: 15, lineHeight: 1, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}>×</button>
-            </div>
-          ))}
-        </div>
-      )}
+      <StellenCards stellen={stellen} kundeId={kundeId} onNewStelle={() => setShowCreate(true)} />
 
       {verwaisteAngebote.length > 0 && (
         <div className="card" style={{ borderColor: '#f59e0b', background: '#fffbeb', marginBottom: 12 }}>
@@ -1178,6 +939,230 @@ export default function KundeDetail() {
         onCreateAdBudget={() => setShowAdBudgetModal(true)}
         onSendInvoice={inv => setSendInvoiceModal(inv)}
       />
+
+      <MarkenauftrittBlock
+        offen={markenOffen}
+        onToggle={() => setUserMarkenToggle(!markenOffen)}
+        akzent={kunde.farben?.primaer}
+        farbenGesetzt={!!kunde.farben?.primaer}
+        nFotos={referenzbilder.length}
+        nDok={dokumente.length}
+        nStimmen={stimmenCount}
+      >
+        <div className="farben-card">
+          <div className="farben-head">
+            <div>
+              <div className="form-section-title" style={{ marginBottom: 4 }}>Markenfarben</div>
+              <div className="motiv-sub">Werden im Creative-Prompt für Text, Tags und Akzente verwendet.</div>
+            </div>
+            {farbenDirty && (
+              <button className="btn-primary btn-sm" onClick={saveFarben} disabled={farbenBusy}>
+                {farbenBusy ? 'Speichere…' : 'Speichern'}
+              </button>
+            )}
+            {farbenMsg && <span className="form-msg">{farbenMsg}</span>}
+          </div>
+
+          {/* Quellen-Sektion */}
+          <div className="farb-quellen">
+            <div className="farb-quelle">
+              <div className="farb-quelle-label">Aus Logo</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={extractFromLogo}
+                  disabled={!kunde.logo_url || extractBusy === 'logo'}
+                  title={kunde.logo_url ? '' : 'Kein Logo hinterlegt'}
+                >
+                  {extractBusy === 'logo' ? 'Ermittle…' : '3 Farben schätzen'}
+                </button>
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={ladePalette}
+                  disabled={!(kunde.logo_transparent_url || kunde.logo_url) || paletteBusy}
+                  title="Exakte dominante Farben aus dem Logo (mit Flächenanteil)"
+                >
+                  {paletteBusy ? 'Analysiere…' : '🎯 Farben exakt aus Logo ziehen'}
+                </button>
+              </div>
+              {palette && palette.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                  {palette.map((c, i) => (
+                    <button key={i} type="button" onClick={() => paletteInSlot(c.hex)}
+                      title="In nächste freie Farbe übernehmen"
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', border: '1px solid var(--line,#ddd)', borderRadius: 8, padding: '4px 8px', background: '#fff' }}>
+                      <span className="swatch-box" style={{ background: c.hex, width: 22, height: 22 }} />
+                      <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.hex}</span>
+                      <span style={{ fontSize: 11, color: 'var(--ink-4,#999)' }}>{c.anteil}%</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="farb-quelle">
+              <div className="farb-quelle-label">Aus Karriereseite / Homepage</div>
+              <div className="farb-quelle-row">
+                <input
+                  type="url"
+                  className="farbe-hex"
+                  placeholder="https://…"
+                  value={websiteUrl}
+                  onChange={e => { setWebsiteUrl(e.target.value); setWebsiteUrlDirty(true); }}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  className="btn-ghost btn-sm"
+                  onClick={extractFromUrl}
+                  disabled={!websiteUrl.trim() || extractBusy === 'url'}
+                >
+                  {extractBusy === 'url' ? 'Scrape…' : 'Aus URL ermitteln'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {extractError && <div className="alert alert-error" style={{ marginTop: 12 }}>{extractError}</div>}
+
+          {/* Vorschau aus Quelle */}
+          {farbenPreview && (
+            <div className="farb-preview">
+              <div className="farb-preview-head">
+                <strong>Vorschlag aus {farbenPreview.source === 'logo' ? 'Logo' : 'Website'}:</strong>
+                <div className="farb-preview-actions">
+                  <button className="btn-ghost btn-sm" onClick={() => setFarbenPreview(null)}>Verwerfen</button>
+                  <button className="btn-primary btn-sm" onClick={applyPreview}>Übernehmen</button>
+                </div>
+              </div>
+              <div className="farb-preview-swatches">
+                {['primaer', 'sekundaer', 'akzent'].map(k => (
+                  <div key={k} className="farb-preview-swatch">
+                    <span className="swatch-box" style={{ background: farbenPreview.farben[k] || 'transparent' }} />
+                    <span className="swatch-hex">{farbenPreview.farben[k] || '–'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="farben-grid" style={{ marginTop: 14 }}>
+            {[
+              { key: 'primaer',   label: 'Primär' },
+              { key: 'sekundaer', label: 'Sekundär' },
+              { key: 'akzent',    label: 'Akzent' },
+            ].map(({ key, label }) => (
+              <div className="farbe-pick" key={key}>
+                <span className="farbe-label">{label}</span>
+                <div className="farbe-row">
+                  <input
+                    type="color"
+                    value={/^#[0-9a-f]{6}$/i.test(farben[key]) ? farben[key] : '#cccccc'}
+                    onChange={e => updateFarbe(key, e.target.value)}
+                    aria-label={`${label} Farbe`}
+                  />
+                  <input
+                    type="text"
+                    className="farbe-hex"
+                    placeholder="#rrggbb"
+                    value={farben[key]}
+                    onChange={e => updateFarbe(key, e.target.value)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          {!kunde.farben?.primaer && !farbenDirty && (
+            <div className="farben-hint">
+              Noch keine Farben hinterlegt — entweder oben aus Logo oder Website ermitteln, oder manuell unten eintragen.
+            </div>
+          )}
+
+          {/* Verifizierung + strikter CI-Modus */}
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line,#ececea)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!kunde.farben_verifiziert} onChange={e => toggleFlag('farben_verifiziert', e.target.checked)} />
+              Palette geprüft {kunde.farben_verifiziert && <span style={{ color: '#15803d', fontWeight: 700 }}>✓ verifiziert</span>}
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
+              title="Text-/Grafikelemente in Markenfarbe werden exakt per Overlay gerendert (nie der KI überlassen); KI malt ein neutrales Motiv.">
+              <input type="checkbox" checked={!!kunde.ci_farben_strikt} onChange={e => toggleFlag('ci_farben_strikt', e.target.checked)} />
+              🎯 Strikte CI-Farben (exakt, kein KI-Approximieren)
+            </label>
+          </div>
+        </div>
+
+        <div className="ref-strip" id="referenzbilder">
+          <div className="ref-strip-title">
+            {referenzbilder.length > 0
+              ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)</>
+              : <>Noch keine Referenzbilder hinterlegt.</>}
+          </div>
+          <div className="ref-strip-grid">
+            {referenzbilder.slice(0, 12).map((r, i) => (
+              <div key={r.id} className="ref-strip-thumb" title={r.beschreibung || r.typ}>
+                <button
+                  type="button"
+                  onClick={() => setRefLightboxIndex(i)}
+                  style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'zoom-in', width: '100%', height: '100%' }}
+                  title="Klick für Groß-Ansicht"
+                >
+                  <img src={r.bild_url} alt="" />
+                </button>
+                {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
+                <button
+                  type="button"
+                  className="ref-strip-del"
+                  title="Löschen"
+                  onClick={async () => {
+                    if (!confirm('Bild wirklich löschen?')) return;
+                    try {
+                      await api(`/kunden/referenzbilder/${r.id}`, { method: 'DELETE' });
+                      setReferenzbilder(prev => prev.filter(x => x.id !== r.id));
+                    } catch (err) { alert(err.message); }
+                  }}
+                >×</button>
+              </div>
+            ))}
+            <MultiPhotoUpload
+              kundeId={kundeId}
+              onUploaded={(rb) => setReferenzbilder(prev => [rb, ...prev])}
+              dropZoneClassName="ref-strip-upload"
+              trigger={<span>+ Foto(s)<br/><small>Drag &amp; Drop</small></span>}
+            />
+          </div>
+        </div>
+
+        <div className="ref-strip" id="dokumente">
+          <div className="ref-strip-title">
+            Dokumente (Formulare/Unterlagen){dokumente.length ? `: ${dokumente.length}` : ' — noch keine'}
+            <label className="btn-ghost btn-sm" style={{ marginLeft: 10, cursor: dokBusy ? 'wait' : 'pointer' }}>
+              {dokBusy ? 'Lädt…' : '+ Dokument (PDF/DOCX)'}
+              <input type="file" accept=".pdf,.docx" style={{ display: 'none' }} disabled={dokBusy}
+                onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; uploadDokument(f); }} />
+            </label>
+          </div>
+          {dokMsg && <div style={{ fontSize: 13, color: '#1b3f80', margin: '4px 0 8px' }}>{dokMsg}</div>}
+          {dokumente.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {dokumente.map(dok => (
+                <div key={dok.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', border: '1px solid var(--line)', borderRadius: 8, padding: '6px 10px' }}>
+                  <span style={{ flex: '1 1 200px', minWidth: 0, fontSize: 13 }}>
+                    📄 <a href={dok.datei_url} target="_blank" rel="noreferrer">{dok.dateiname || 'Dokument'}</a>
+                    <span style={{ color: 'var(--ink-3)', fontSize: 11 }}> · {new Date(dok.created_at).toLocaleDateString('de-DE')}{dok.uploaded_via === 'kunde' ? ' · vom Kunden' : ''}</span>
+                  </span>
+                  <button type="button" className="btn-ghost btn-sm" disabled={auswertenBusy === dok.id || !dok.job_id}
+                    title={dok.job_id ? 'Formular auswerten → Daten-Vorschlag für den Neukunden-Tab' : 'Keinem Neukunden-Projekt zugeordnet'}
+                    onClick={() => auswertenDokument(dok)}>
+                    {auswertenBusy === dok.id ? 'Werte aus…' : '🔎 Auswerten'}
+                  </button>
+                  <button type="button" className="btn-ghost btn-sm" title="Löschen" onClick={() => deleteDokument(dok)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <MitarbeiterStimmenManager kundeId={kundeId} onCount={setStimmenCount} />
+      </MarkenauftrittBlock>
 
       <ActivitySection activity={activity} />
 
@@ -1285,7 +1270,7 @@ export default function KundeDetail() {
       <NewProjectModal
         open={showCreate}
         kunde={kunde}
-        onClose={() => setShowCreate(false)}
+        onClose={() => { setShowCreate(false); loadStellen(); }}
       />
 
       <TerminEinladungModal
@@ -1607,6 +1592,107 @@ const PROJEKT_STATUS_META = {
   hold:              { emoji: '🟨', label: 'Hold',              bg: '#fef3c7', color: '#92400e' },
   abgeschlossen:     { emoji: '🏁', label: 'Abgeschlossen',     bg: '#d1fae5', color: '#065f46' },
 };
+
+/* ═══════════ Stellen-Karten (Teil-2-Umbau) ═══════════
+   Je Stelle eine Karte: Status, Laufzeit, Garantie-Fortschritt und „Neu"-Zähler
+   (eindeutige Personen, wie die Stellen-Sidebar). Ersetzt den alten „Projekte"-Block
+   inkl. ProjektStatusRow/ProjektInfoCards. Daten aus GET /api/kunden/:id/stellen. */
+function StellenCards({ stellen, kundeId, onNewStelle }) {
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <h2 className="section-title">Stellen</h2>
+          <p className="section-sub">Status, Laufzeit, Garantie und neue Bewerber je Stelle auf einen Blick.</p>
+        </div>
+        <button className="btn-primary" onClick={onNewStelle}>
+          <Icon name="plus" /> Neue Stelle
+        </button>
+      </div>
+
+      {stellen.length === 0 ? (
+        <div className="card empty">
+          <h2>Noch keine Stellen</h2>
+          <p>Lege über „Neue Stelle" die erste Stelle für diesen Kunden an.</p>
+        </div>
+      ) : (
+        <div className="stellen-grid">
+          {stellen.map(s => {
+            const st = PROJEKT_STATUS_META[s.status] || null;
+            const gar = s.garantie;
+            return (
+              <Link key={s.job_id} to={`/kunden/${kundeId}/jobs/${s.job_id}`} className="stelle-card">
+                <div className="stelle-card-head">
+                  <strong className="stelle-card-title">{s.stelle}</strong>
+                  {st && (
+                    <span className="stelle-card-status" style={{ background: st.bg, color: st.color }}>
+                      {st.emoji} {st.label}
+                    </span>
+                  )}
+                </div>
+                {(s.region || s.gehalt) && (
+                  <div className="stelle-card-sub">{[s.region, s.gehalt].filter(Boolean).join(' · ')}</div>
+                )}
+                <div className="stelle-card-chips">
+                  {s.laufzeit_kurz && <span className="stelle-chip">⏱ {s.laufzeit_kurz}</span>}
+                  {gar ? (
+                    <span className="stelle-chip stelle-chip-gar"
+                      title={gar.art === 'einstellung' ? 'Einstellungsgarantie' : 'Bewerbungsgarantie'}>
+                      🛡️ {gar.erreicht}{gar.ziel ? `/${gar.ziel}` : ''} {gar.art === 'einstellung' ? 'eingestellt' : 'Bew.'}{gar.pruefen ? ' ⚠️' : ''}
+                    </span>
+                  ) : null}
+                  {s.live_termin && (
+                    <span className="stelle-chip">🕐 {new Date(s.live_termin).toLocaleDateString('de-DE')}</span>
+                  )}
+                </div>
+                <div className="stelle-card-foot">
+                  <div className="stelle-kpi">
+                    <span className="stelle-kpi-num">{s.bewerber_neu}</span>
+                    <span className="stelle-kpi-label">Neu</span>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ═══════════ Markenauftritt (Teil-2-Umbau) ═══════════
+   EIN aufklappbarer Block mit Markenfarben, Referenzbildern, Dokumenten und
+   Mitarbeiterstimmen. Standardmäßig zu, offen wenn unvollständig. Kundenfarbe als
+   Akzent im Kopf; Vollständigkeits-Punkte im Titel. */
+function MarkenauftrittBlock({ offen, onToggle, akzent, farbenGesetzt, nFotos, nDok, nStimmen, children }) {
+  const akzentFarbe = /^#[0-9a-f]{6}$/i.test(akzent || '') ? akzent : '#d4d4d0';
+  const punkt = (ok, text) => (
+    <span style={{ color: ok ? '#166534' : 'var(--ink-3)', whiteSpace: 'nowrap' }}>
+      {ok ? '✓' : '○'} {text}
+    </span>
+  );
+  return (
+    <div className="marken-block" style={{ marginTop: 18, border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+      <button type="button" onClick={onToggle} className="marken-head"
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+          background: 'var(--gray-50,#fafaf8)', border: 'none', borderLeft: `5px solid ${akzentFarbe}`,
+          cursor: 'pointer', textAlign: 'left',
+        }}>
+        <span style={{ fontSize: 18, transform: offen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', color: 'var(--ink-3)' }}>▸</span>
+        <strong style={{ fontSize: 15 }}>Markenauftritt</strong>
+        <span style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, marginLeft: 8 }}>
+          {punkt(farbenGesetzt, farbenGesetzt ? 'Farben' : 'Farben')}
+          {punkt(nFotos > 0, `${nFotos} Fotos`)}
+          {punkt(nDok > 0, `${nDok} Dokumente`)}
+          {punkt(nStimmen > 0, `${nStimmen} Stimmen`)}
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-3)' }}>{offen ? 'Einklappen' : 'Aufklappen'}</span>
+      </button>
+      {offen && <div style={{ padding: '16px' }}>{children}</div>}
+    </div>
+  );
+}
 
 // Kompakte Karten mit den Kern-Vertragsdaten pro Projekt — direkt sichtbar
 // unterhalb der Status-Chip-Row, damit man beim Öffnen des Kunden sofort

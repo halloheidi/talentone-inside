@@ -6,14 +6,18 @@ import { api } from '../lib/api.js';
 // Nutzung in Funnel/Creatives.
 const LEER = { name: '', rolle: '', dabei_seit: '', zitat: '', quelle: 'nw', freigabe: false, reihenfolge: 0 };
 
-export default function MitarbeiterStimmenManager({ kundeId }) {
+export default function MitarbeiterStimmenManager({ kundeId, onCount }) {
   const [stimmen, setStimmen] = useState([]);
   const [neu, setNeu] = useState(LEER);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
   async function load() {
-    try { const r = await api(`/kunden/${kundeId}/mitarbeiterstimmen`); setStimmen(r.stimmen || []); }
+    try {
+      const r = await api(`/kunden/${kundeId}/mitarbeiterstimmen`);
+      setStimmen(r.stimmen || []);
+      onCount?.((r.stimmen || []).length);
+    }
     catch (e) { setMsg(e.message); }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [kundeId]);
