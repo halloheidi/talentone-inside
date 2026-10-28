@@ -49,9 +49,12 @@ const ALLOWED_FIELDS = [
   'vertragsmodell', 'laufzeit_wert', 'laufzeit_einheit', 'start_datum',
   // Migration 046: Werbebudget-Modus (im Vertrag-&-Status-Tab editierbar)
   'werbebudget_modus', 'tagesbudget_empfehlung',
-  // Migration 104: Garantie-Ziel in Bewerbungen
-  'garantie_bewerbungen',
+  // Migration 105: Garantie als Typ (garantie_art) + Ziel + Position.
+  // 'garantie' (bool) wird aus garantie_art abgeleitet (siehe PATCH), bleibt aber beschreibbar
+  // für Alt-/Controlling-Pfade. 'garantie_details' bleibt die Meta-Frist-Quelle (unangetastet).
+  'garantie_art', 'garantie_ziel', 'garantie_position', 'garantie_pruefen',
 ];
+const GARANTIE_ARTEN = ['einstellung', 'bewerbungen'];
 
 function pickFields(body) {
   const out = {};
@@ -259,6 +262,17 @@ router.patch('/:id', async (req, res) => {
   const patch = pickFields(req.body);
   if (patch.status && !PROJEKTE_STATI.includes(patch.status)) {
     return res.status(400).json({ error: `Status ungültig.` });
+  }
+  // Garantie-Typ: garantie (bool) wird aus garantie_art abgeleitet, Prüf-Marker fällt weg,
+  // bei „keine Garantie" werden Ziel/Position geleert; Einstellung bekommt Default-Ziel 1.
+  if ('garantie_art' in patch) {
+    const art = patch.garantie_art || null;
+    if (art !== null && !GARANTIE_ARTEN.includes(art)) return res.status(400).json({ error: 'garantie_art ungültig.' });
+    patch.garantie_art = art;
+    patch.garantie = art !== null;
+    patch.garantie_pruefen = false;
+    if (art === null) { patch.garantie_ziel = null; patch.garantie_position = null; }
+    else if (art === 'einstellung' && (patch.garantie_ziel == null)) patch.garantie_ziel = 1;
   }
   patch.updated_at = new Date().toISOString();
 

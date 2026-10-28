@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useParams, useSearchParams, useNavigate } from '
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import PageContainer from '../components/PageContainer.jsx';
+import { effektiveGarantie, garantieBadge } from '../lib/garantie.js';
 
 const JobContext = createContext(null);
 export function useJob() { return useContext(JobContext); }
@@ -23,44 +24,27 @@ function DebouncedInput({ value, onSave, placeholder }) {
   return <input className="cell-input" type="text" value={local} placeholder={placeholder} onChange={onChange} onBlur={flush} />;
 }
 
-// Inline editierbare Garantie am Projekt (JobView-Header). Checkbox + Freitext,
-// Auto-Save direkt ans verknüpfte Projekt. Jederzeit manuell änderbar.
-function ProjektGarantieInline({ projekt, fortschritt, onSaved }) {
-  async function patch(body) {
-    try {
-      const res = await api(`/projekte/${projekt.id}`, { method: 'PATCH', body });
-      onSaved?.(res.projekt);
-    } catch (err) { console.error('[garantie-patch]', err.message); }
-  }
-  const aktiv = !!projekt.garantie;
-  const X = projekt.garantie_bewerbungen;
+// Garantie-Badge am Projekt (JobView-Header) — reine Anzeige. Gepflegt wird der Typ
+// jetzt im Tab „Vertrag & Status". Einstellung → „· Y von X eingestellt",
+// Bewerbungen → „· Y von X Bewerbungen" (eindeutige Personen seit Start).
+function ProjektGarantieInline({ projekt, fortschritt }) {
+  const eff = effektiveGarantie(projekt);
+  if (!eff) return null;
+  const erreicht = fortschritt?.erreicht ?? 0;
+  const ziel = fortschritt?.ziel ?? eff.ziel;
   return (
     <div style={{
       maxWidth: 340, padding: '6px 10px', borderRadius: 8, fontSize: 12,
-      background: aktiv ? '#dcfce7' : '#f3f4f6',
-      border: `1px solid ${aktiv ? '#86efac' : '#e5e7eb'}`,
-      color: aktiv ? '#166534' : '#6b7280',
+      background: '#dcfce7', border: '1px solid #86efac', color: '#166534',
     }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600 }}>
-        <input type="checkbox" checked={aktiv} onChange={e => patch({ garantie: e.target.checked })} />
-        🛡️ Garantie{aktiv && X != null ? ` · ${X} Bewerbungen` : ''}
-      </label>
-      {aktiv && fortschritt && X != null && (
-        <div style={{ marginTop: 4, fontWeight: 600 }}>{fortschritt.erreicht} von {X} erreicht{fortschritt.eingaenge != null && fortschritt.eingaenge !== fortschritt.erreicht && <span style={{ fontWeight: 400, color: '#6b7280' }}> · {fortschritt.eingaenge} Eingänge</span>}</div>
+      <div style={{ fontWeight: 700 }}>{garantieBadge(eff.art, erreicht, ziel)}</div>
+      {eff.art === 'einstellung' && eff.position && (
+        <div style={{ marginTop: 2, fontWeight: 400 }}>Position: {eff.position}</div>
       )}
-      {aktiv && (
-        <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>Ziel (Bewerbungen):
-            <input type="number" min="0" step="1" defaultValue={X ?? ''} style={{ width: 70 }}
-              onBlur={e => { const v = e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0); if (v !== (X ?? null)) patch({ garantie_bewerbungen: v }); }} />
-          </label>
-          <DebouncedInput
-            value={projekt.garantie_details || ''}
-            placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
-            onSave={val => patch({ garantie_details: val || null })}
-          />
-        </div>
+      {eff.art === 'bewerbungen' && fortschritt?.eingaenge != null && fortschritt.eingaenge !== erreicht && (
+        <div style={{ marginTop: 2, fontWeight: 400, color: '#3f6212' }}>{fortschritt.eingaenge} Eingänge</div>
       )}
+      {eff.pruefen && <div style={{ marginTop: 3, fontWeight: 700, color: '#92400e' }}>⚠️ Garantie prüfen</div>}
     </div>
   );
 }
@@ -892,7 +876,7 @@ export default function JobView() {
         <div style={{ flex: 1 }}>
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
         </div>
-        {projekt && <ProjektGarantieInline projekt={projekt} fortschritt={job.garantie_fortschritt} onSaved={setProjekt} />}
+        {projekt && <ProjektGarantieInline projekt={projekt} fortschritt={job.garantie_fortschritt} />}
         {projekt?.werbebudget_modus === 'empfehlung' && (
           <span title="Werbebudget nicht über TalentOne abgerechnet — Kunden-Zahlungsmittel im Werbekonto hinterlegen (kein Zahlungslink)."
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>

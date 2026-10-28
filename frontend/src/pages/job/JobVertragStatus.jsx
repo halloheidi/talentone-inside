@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
+import { GARANTIE_ARTEN, effektiveGarantie } from '../../lib/garantie.js';
 
 // „Vertrag & Status" — alle Projekt-/Vertragsdaten der Stelle an einem Ort.
 // Schreibt direkt auf das verknüpfte talentone_projekte. „Projekt" taucht als
@@ -40,6 +41,7 @@ export default function JobVertragStatus() {
   useEffect(() => { ladeStatus(); }, [ladeStatus, projekt?.vertragsmodell, projekt?.laufzeit_wert, projekt?.start_datum]);
 
   if (!projekt) return <div className="card empty">Diese Stelle hat noch kein Projekt — bitte Seite neu laden.</div>;
+  const eff = effektiveGarantie(projekt);
 
   async function patch(body) {
     try {
@@ -157,24 +159,37 @@ export default function JobVertragStatus() {
             <input type="number" min="0" step="1" className="cell-input" value={projekt.monatsbudget_euro ?? ''} onChange={field('monatsbudget_euro')} />
           </label>
         </div>
-        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 12 }}>
-          <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-            <input type="checkbox" checked={!!projekt.garantie} onChange={field('garantie')} /> 🛡️ Garantie
+        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
+          <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+            <span>🛡️ Garantie</span>
+            <select className="cell-input" value={eff?.art || ''}
+              onChange={e => patch({ garantie_art: e.target.value || null })} style={{ minWidth: 190 }}>
+              {GARANTIE_ARTEN.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+            </select>
           </label>
           <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
             <input type="checkbox" checked={!!projekt.zahlung_aufgeteilt} onChange={field('zahlung_aufgeteilt')} /> Zahlung aufgeteilt
           </label>
+          {eff?.pruefen && <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 100, padding: '2px 10px' }}>⚠️ Garantie prüfen</span>}
         </div>
-        {projekt.garantie && (
+        {eff?.art === 'einstellung' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 10 }}>
-            <label><span style={lbl}>Garantie: Bewerbungen</span>
-              <input type="number" min="0" step="1" className="cell-input" value={projekt.garantie_bewerbungen ?? ''}
-                placeholder="z. B. 20" onChange={e => patch({ garantie_bewerbungen: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+            <label><span style={lbl}>Ziel: Einstellungen</span>
+              <input type="number" min="1" step="1" className="cell-input" value={projekt.garantie_ziel ?? 1}
+                onChange={e => patch({ garantie_ziel: e.target.value.trim() === '' ? 1 : Math.max(1, parseInt(e.target.value, 10) || 1) })} />
             </label>
-            <label><span style={lbl}>Garantie-Details (Freitext)</span>
-              <input className="cell-input" defaultValue={projekt.garantie_details || ''}
-                placeholder="Was ist garantiert? z. B. Erfolgsgarantie 30 Tage …"
-                onBlur={e => (e.target.value || '') !== (projekt.garantie_details || '') && patch({ garantie_details: e.target.value || null })} />
+            <label><span style={lbl}>Für welche Position (Freitext)</span>
+              <input className="cell-input" defaultValue={projekt.garantie_position || ''}
+                placeholder="z. B. Monteur Badsanierung"
+                onBlur={e => (e.target.value || '') !== (projekt.garantie_position || '') && patch({ garantie_position: e.target.value || null })} />
+            </label>
+          </div>
+        )}
+        {eff?.art === 'bewerbungen' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 10 }}>
+            <label><span style={lbl}>Ziel: Bewerbungen (eindeutige Personen)</span>
+              <input type="number" min="0" step="1" className="cell-input" value={projekt.garantie_ziel ?? ''}
+                placeholder="z. B. 40" onChange={e => patch({ garantie_ziel: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
             </label>
           </div>
         )}

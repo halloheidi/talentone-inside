@@ -87,13 +87,30 @@ router.get('/:id', async (req, res) => {
     try { meta = await metaMetrikenFuerProjekt(data.projekt_id); } catch (e) { console.warn('[jobs] meta-metriken:', e.message); }
     if (projekt) { try { laufzeit = await laufzeitStatus(projekt); } catch (e) { console.warn('[jobs] laufzeit:', e.message); } }
     // Garantie-Fortschritt: Bewerbungen dieser Stelle seit Vertragsstart vs. Ziel.
-    if (projekt?.garantie && projekt.garantie_bewerbungen != null) {
+    // Garantie-Fortschritt je Typ. Effektive Art inkl. Legacy-Fallback (garantie=true ohne Typ
+    // → einstellung, Prüf-Marker). Erreicht = eindeutige PERSONEN seit Vertragsstart.
+    const gArt = projekt?.garantie_art || (projekt?.garantie ? 'einstellung' : null);
+    if (gArt) {
       try {
-        // Erreicht = eindeutige Personen (Dedupe je Stelle), nicht Roh-Eingänge.
-        let bq = supabase.from('talentone_bewerbungen').select('id, job_id, email, telefon').eq('job_id', data.id);
-        if (projekt.start_datum) bq = bq.gte('created_at', projekt.start_datum);
-        const { data: rows = [] } = await bq;
-        data.garantie_fortschritt = { erreicht: anzahlPersonen(rows || []), eingaenge: (rows || []).length, ziel: projekt.garantie_bewerbungen };
+        const ziel = projekt.garantie_ziel ?? (gArt === 'einstellung' ? 1 : null);
+        const pruefen = !!projekt.garantie_pruefen || (!!projekt.garantie && !projekt.garantie_art);
+        const { data: brows = [] } = await supabase.from('talentone_bewerbungen')
+          .select('id, job_id, email, telefon, created_at').eq('job_id', data.id);
+        const seitStart = (projekt.start_datum)
+          ? brows.filter(b => b.created_at >= projekt.start_datum) : brows;
+        let rows = seitStart;
+        if (gArt === 'einstellung') {
+          // Nur Kandidaten mit eingestellt='ja'.
+          const ids = seitStart.map(b => b.id);
+          let eingestellt = new Set();
+          if (ids.length) {
+            const { data: nz = [] } = await supabase.from('talentone_bewerber_notizen')
+              .select('bewerbung_id, eingestellt').in('bewerbung_id', ids).eq('eingestellt', 'ja');
+            eingestellt = new Set((nz || []).map(n => n.bewerbung_id));
+          }
+          rows = seitStart.filter(b => eingestellt.has(b.id));
+        }
+        data.garantie_fortschritt = { art: gArt, erreicht: anzahlPersonen(rows), eingaenge: rows.length, ziel, pruefen };
       } catch (e) { console.warn('[jobs] garantie-fortschritt:', e.message); }
     }
     // „Vertrag gilt auch für": andere Stellen, die sich dasselbe Projekt teilen.

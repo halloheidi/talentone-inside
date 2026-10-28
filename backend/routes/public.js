@@ -1788,7 +1788,7 @@ router.get('/portal/:token', async (req, res) => {
     const laufzeitByProjekt = {};
     if (projektIds.length) {
       const { data: projekte = [] } = await supabase.from('talentone_projekte')
-        .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details, garantie_bewerbungen')
+        .select('id, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, pausen, garantie, garantie_details, garantie_art, garantie_ziel, garantie_position, garantie_pruefen')
         .in('id', projektIds);
       for (const p of (projekte || [])) {
         try {
@@ -1798,7 +1798,11 @@ router.get('/portal/:token', async (req, res) => {
             rest: s.rest, ueberlaufzeit_tage: s.ueberlaufzeit_tage, ende_voraussichtlich: s.ende_voraussichtlich,
             online_tage: s.online_tage,   // Open-End-Zustand leitet das Portal aus soll==null ab (kein open_end-Feld nach außen)
             start_datum: p.start_datum, pausen: s.pausen, pausen_tage: s.pausen_tage,
-            garantie: s.garantie, garantie_details: p.garantie_details || null, garantie_bewerbungen: p.garantie_bewerbungen ?? null, hinweise: s.hinweise,
+            garantie: s.garantie, garantie_details: p.garantie_details || null,
+            garantie_art: p.garantie_art || (p.garantie ? 'einstellung' : null),
+            garantie_ziel: p.garantie_ziel ?? null,
+            garantie_pruefen: !!p.garantie_pruefen || (!!p.garantie && !p.garantie_art),
+            hinweise: s.hinweise,
           };
         } catch { laufzeitByProjekt[p.id] = null; }
       }

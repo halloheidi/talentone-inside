@@ -1053,17 +1053,23 @@ function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload
   const einheitWort = lz.einheit === 'monate' ? 'Monat' : 'Tag';
   const offenePause = (lz.pausen || []).find(p => p.quelle === 'kunde' && !p.bestaetigt_am);
   const barBg = `linear-gradient(90deg, ${primary}, ${primary}bb)`;
-  // Garantie-Zähler: X = garantie_bewerbungen, Y = eindeutige Personen seit Start.
-  const garX = lz.garantie ? (lz.garantie_bewerbungen ?? null) : null;
-  const garSeitStart = garX != null ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)) : bewerbungen) : [];
-  const garY = garX != null ? anzahlPersonen(garSeitStart) : null;
-  const garEingaenge = garSeitStart.length;
+  // Garantie je Typ. Einstellung → Zähler = Kandidaten mit eingestellt='ja'; Bewerbungen →
+  // eindeutige Personen. Jeweils seit start_datum. X = Ziel.
+  const gArt = lz.garantie_art || (lz.garantie ? 'einstellung' : null);
+  const garX = gArt ? (lz.garantie_ziel ?? (gArt === 'einstellung' ? 1 : null)) : null;
+  const garSeitStart = gArt ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)) : bewerbungen) : [];
+  const garRows = gArt === 'einstellung' ? garSeitStart.filter(b => b.notiz?.eingestellt === 'ja') : garSeitStart;
+  const garY = gArt ? anzahlPersonen(garRows) : null;
+  const garEingaenge = garRows.length;
   const garPct = garX ? Math.min(100, Math.round((garY / garX) * 100)) : 0;
+  const garBadge = gArt === 'einstellung'
+    ? `🛡️ Einstellungsgarantie${garX != null ? ` · ${garY} von ${garX} eingestellt` : ''}`
+    : gArt === 'bewerbungen' ? `🛡️ Garantie${garX != null ? ` · ${garY} von ${garX} Bewerbungen` : ''}` : '';
   return (
     <div style={card}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <div style={kLabel}>Laufzeit</div>
-        {lz.garantie && <span style={{ fontSize: 11, fontWeight: 700, color: '#166534' }}>🛡️ mit Garantie{garX != null ? ` · ${garX} Bewerbungen` : ''}</span>}
+        {gArt && <span style={{ fontSize: 11, fontWeight: 700, color: '#166534' }}>{garBadge}</span>}
       </div>
       {wirdAktualisiert ? (
         <div style={{ color: '#5a5955', fontSize: 13, marginTop: 8 }}>Laufzeit wird aktualisiert.</div>
@@ -1092,7 +1098,7 @@ function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload
       )}
       {garX != null && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 4 }}><strong>{garY}</strong> von {garX} Bewerbungen erreicht{garEingaenge !== garY && <span style={{ color: '#9a9994' }}> · {garEingaenge} Eingänge</span>}</div>
+          <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 4 }}><strong>{garY}</strong> von {garX} {gArt === 'einstellung' ? 'eingestellt' : 'Bewerbungen erreicht'}{gArt === 'bewerbungen' && garEingaenge !== garY && <span style={{ color: '#9a9994' }}> · {garEingaenge} Eingänge</span>}</div>
           <div style={{ height: 8, background: '#eef0f2', borderRadius: 100, overflow: 'hidden' }}>
             <div style={{ width: `${garPct}%`, height: '100%', background: '#16a34a', borderRadius: 100, transition: 'width .4s ease' }} />
           </div>
