@@ -1223,6 +1223,17 @@ router.put('/bewerbungen/:token/:bewId/spalten/:spalteId', async (req, res) => {
   res.json({ wert: data });
 });
 
+// Portal-Übergang nach „eingestellt" → intern eingestellt='ja' mitschreiben (für den
+// Einstellungsgarantie-Zähler und die Bearbeitungs-Ableitung). Partielles Upsert: andere
+// Notiz-Felder bleiben unberührt. Umgekehrt NICHT: internes eingestellt='ja' fasst das
+// Kundenfeedback nie an. Best-effort, blockiert die Antwort nie.
+async function spiegelEingestelltAusPortal(bewId) {
+  try {
+    await supabase.from('talentone_bewerber_notizen')
+      .upsert({ bewerbung_id: bewId, eingestellt: 'ja', updated_at: new Date().toISOString() }, { onConflict: 'bewerbung_id' });
+  } catch (e) { console.warn('[portal-eingestellt-spiegel]', e.message); }
+}
+
 // PATCH /api/public/bewerbungen/:token/:bewId  body: { status?, vorstellungsgespraech_am?, notizen? }
 router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
   const { data: job } = await supabase
@@ -1284,6 +1295,7 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
   const wurdeEingestellt = patch.status === 'eingestellt' && vorher?.status !== 'eingestellt';
   const neuerVgTermin = patch.vorstellungsgespraech_am != null
     && patch.vorstellungsgespraech_am !== (vorher?.vorstellungsgespraech_am || null);
+  if (wurdeEingestellt) spiegelEingestelltAusPortal(bew.id);
   if (wurdeEingestellt || neuerVgTermin) {
     (async () => {
       const { data: jobFull } = await supabase.from('talentone_jobs').select('id, stelle, kunde_id').eq('id', job.id).maybeSingle();
@@ -2254,6 +2266,7 @@ router.patch('/portal/:token/bewerbung/:bewId/feedback', async (req, res) => {
     // Sofort-Mail wie beim Alt-Endpoint: nur bei „eingestellt" (neu) oder neuem VG-Termin.
     const wurdeEingestellt = patch.status === 'eingestellt' && vorher?.status !== 'eingestellt';
     const neuerVgTermin = patch.vorstellungsgespraech_am != null && patch.vorstellungsgespraech_am !== (vorher?.vorstellungsgespraech_am || null);
+    if (wurdeEingestellt) spiegelEingestelltAusPortal(req.params.bewId);
     if (wurdeEingestellt || neuerVgTermin) {
       (async () => {
         const { data: b } = await supabase.from('talentone_bewerbungen').select('name, job_id').eq('id', req.params.bewId).maybeSingle();

@@ -416,7 +416,8 @@ async function loadBewerbungenFuerJob(jobId) {
 function deriveBearbeitung(n, feedbackStatus, hatKommentar) {
   n = n || {};
   const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a && a.datum) : [];
-  if (n.eingestellt && n.eingestellt !== 'offen') return 'eingestellt';
+  // Eingestellt = intern eingestellt='ja' ODER Kundenfeedback-Status 'eingestellt' (gleiche Bedingung wie der Garantie-Zähler).
+  if (n.eingestellt === 'ja' || feedbackStatus === 'eingestellt') return 'eingestellt';
   if (n.vg_vereinbart_am || feedbackStatus === 'vorstellungsgespraech') return 'vg';
   if (n.kunde_kontaktiert || (feedbackStatus && feedbackStatus !== 'neu')) return 'vorgestellt';
   if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return 'vorqualifiziert';

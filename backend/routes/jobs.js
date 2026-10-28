@@ -100,13 +100,18 @@ router.get('/:id', async (req, res) => {
           ? brows.filter(b => b.created_at >= projekt.start_datum) : brows;
         let rows = seitStart;
         if (gArt === 'einstellung') {
-          // Nur Kandidaten mit eingestellt='ja'.
+          // Eingestellt = intern eingestellt='ja' ODER Kundenfeedback-Status 'eingestellt' (je Person einmal).
           const ids = seitStart.map(b => b.id);
-          let eingestellt = new Set();
+          const eingestellt = new Set();
           if (ids.length) {
-            const { data: nz = [] } = await supabase.from('talentone_bewerber_notizen')
-              .select('bewerbung_id, eingestellt').in('bewerbung_id', ids).eq('eingestellt', 'ja');
-            eingestellt = new Set((nz || []).map(n => n.bewerbung_id));
+            const [{ data: nz = [] }, { data: fb = [] }] = await Promise.all([
+              supabase.from('talentone_bewerber_notizen')
+                .select('bewerbung_id').in('bewerbung_id', ids).eq('eingestellt', 'ja'),
+              supabase.from('talentone_bewerber_kundenfeedback')
+                .select('bewerbung_id').in('bewerbung_id', ids).eq('status', 'eingestellt'),
+            ]);
+            for (const n of (nz || [])) eingestellt.add(n.bewerbung_id);
+            for (const f of (fb || [])) eingestellt.add(f.bewerbung_id);
           }
           rows = seitStart.filter(b => eingestellt.has(b.id));
         }

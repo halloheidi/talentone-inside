@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
 import KriterienKachel from '../components/KriterienKachel.jsx';
-import { BewerberListe, ampelVerteilung, AMPELN, bearbeitungStatus } from '../components/BewerberListe.jsx';
+import { BewerberListe, ampelVerteilung, AMPELN, bearbeitungStatus, istEingestellt } from '../components/BewerberListe.jsx';
 import { personenGruppen, anzahlPersonen } from '../lib/dubletten.js';
 import AnfragenKanban from '../components/AnfragenKanban.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -1053,12 +1053,12 @@ function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload
   const einheitWort = lz.einheit === 'monate' ? 'Monat' : 'Tag';
   const offenePause = (lz.pausen || []).find(p => p.quelle === 'kunde' && !p.bestaetigt_am);
   const barBg = `linear-gradient(90deg, ${primary}, ${primary}bb)`;
-  // Garantie je Typ. Einstellung → Zähler = Kandidaten mit eingestellt='ja'; Bewerbungen →
+  // Garantie je Typ. Einstellung → Zähler = Kandidaten „eingestellt" (intern 'ja' ODER Kundenfeedback 'eingestellt'); Bewerbungen →
   // eindeutige Personen. Jeweils seit start_datum. X = Ziel.
   const gArt = lz.garantie_art || (lz.garantie ? 'einstellung' : null);
   const garX = gArt ? (lz.garantie_ziel ?? (gArt === 'einstellung' ? 1 : null)) : null;
   const garSeitStart = gArt ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)) : bewerbungen) : [];
-  const garRows = gArt === 'einstellung' ? garSeitStart.filter(b => b.notiz?.eingestellt === 'ja') : garSeitStart;
+  const garRows = gArt === 'einstellung' ? garSeitStart.filter(istEingestellt) : garSeitStart;
   const garY = gArt ? anzahlPersonen(garRows) : null;
   const garEingaenge = garRows.length;
   const garPct = garX ? Math.min(100, Math.round((garY / garX) * 100)) : 0;

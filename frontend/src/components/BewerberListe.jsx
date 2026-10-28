@@ -49,11 +49,16 @@ export const BEARBEITUNG = [
   { key: 'eingestellt', label: 'Eingestellt', color: '#166534' },
 ];
 const BEARB_BY_KEY = Object.fromEntries(BEARBEITUNG.map(x => [x.key, x]));
+// Einheitliche Bedingung „eingestellt": intern eingestellt='ja' ODER Kundenfeedback-Status 'eingestellt'.
+// Gleiche Bedingung wie der Einstellungsgarantie-Zähler (Backend jobs.js / Portal LaufzeitKachel).
+export function istEingestellt(b) {
+  return b?.notiz?.eingestellt === 'ja' || (b?.feedback?.status || null) === 'eingestellt';
+}
 export function bearbeitungStatus(b) {
   const n = b?.notiz || {};
   const fb = b?.feedback?.status || null;
   const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a?.datum) : [];
-  if (n.eingestellt && n.eingestellt !== 'offen') return { key: 'eingestellt' };
+  if (istEingestellt(b)) return { key: 'eingestellt' };
   if (n.vg_vereinbart_am || fb === 'vorstellungsgespraech') return { key: 'vg' };
   if (n.kunde_kontaktiert || (fb && fb !== 'neu')) return { key: 'vorgestellt' };
   if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return { key: 'vorqualifiziert' };
