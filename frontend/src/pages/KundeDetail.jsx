@@ -1637,8 +1637,12 @@ function StellenCards({ stellen, kundeId, onNewStelle }) {
                   {s.laufzeit_kurz && <span className="stelle-chip">⏱ {s.laufzeit_kurz}</span>}
                   {gar ? (
                     <span className="stelle-chip stelle-chip-gar"
-                      title={gar.art === 'einstellung' ? 'Einstellungsgarantie' : 'Bewerbungsgarantie'}>
-                      🛡️ {gar.erreicht}{gar.ziel ? `/${gar.ziel}` : ''} {gar.art === 'einstellung' ? 'eingestellt' : 'Bew.'}{gar.pruefen ? ' ⚠️' : ''}
+                      title={`${gar.art === 'einstellung' ? 'Einstellungsgarantie' : 'Bewerbungsgarantie'}${gar.eingaenge != null && gar.eingaenge !== gar.erreicht ? ` · ${gar.eingaenge} Eingänge (${gar.erreicht} eindeutige Personen)` : ''}`}>
+                      🛡️ {gar.erreicht}{gar.ziel ? `/${gar.ziel}` : ''} {gar.art === 'einstellung' ? 'eingestellt' : 'Bew.'}
+                      {gar.art === 'bewerbungen' && gar.eingaenge != null && gar.eingaenge !== gar.erreicht && (
+                        <span style={{ color: '#9a9994', fontWeight: 400 }}> ({gar.eingaenge})</span>
+                      )}
+                      {gar.pruefen ? ' ⚠️' : ''}
                     </span>
                   ) : null}
                   {s.live_termin && (

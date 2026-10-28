@@ -491,10 +491,10 @@ router.get('/:id/stellen', async (req, res) => {
       if (gArt) {
         const ziel = p.garantie_ziel ?? (gArt === 'einstellung' ? 1 : null);
         const seitStart = p.start_datum ? rows.filter(b => b.created_at >= p.start_datum) : rows;
-        const erreicht = gArt === 'einstellung'
-          ? anzahlPersonen(seitStart.filter(b => eingestelltSet.has(b.id)))
-          : anzahlPersonen(seitStart);
-        garantie = { art: gArt, ziel, erreicht, pruefen: !!p.garantie_pruefen || (!!p.garantie && !p.garantie_art) };
+        // Garantierelevante Zeilen: bei Einstellung nur eingestellte Eingänge, sonst alle seit Start.
+        // erreicht = eindeutige Personen (anzahlPersonen), eingaenge = Roh-Eingänge für „(N Eingänge)".
+        const garRows = gArt === 'einstellung' ? seitStart.filter(b => eingestelltSet.has(b.id)) : seitStart;
+        garantie = { art: gArt, ziel, erreicht: anzahlPersonen(garRows), eingaenge: garRows.length, pruefen: !!p.garantie_pruefen || (!!p.garantie && !p.garantie_art) };
       }
       return {
         job_id: j.id, stelle: j.stelle || 'Unbenannte Stelle', projekt_id: j.projekt_id || null,
