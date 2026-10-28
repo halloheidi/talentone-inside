@@ -126,7 +126,7 @@ function KundenKanban({ kunden, schritteMap, onProjektUpdated }) {
                       <KundeLogo k={k} size={36} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.firmenname || '—'}</div>
-                        <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>👥 {k.bewerbungen_7t} / 7T · {k.bewerbungen_gesamt} gesamt</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-3)' }} title={k.bewerbungen_gesamt_eingaenge != null && k.bewerbungen_gesamt_eingaenge !== k.bewerbungen_gesamt ? `${k.bewerbungen_gesamt_eingaenge} Eingänge gesamt` : undefined}>👥 {k.bewerbungen_7t} / 7T · {k.bewerbungen_gesamt} Personen{k.bewerbungen_gesamt_eingaenge != null && k.bewerbungen_gesamt_eingaenge !== k.bewerbungen_gesamt ? ` (${k.bewerbungen_gesamt_eingaenge})` : ''}</div>
                       </div>
                     </div>
                     {schritteMap[k.id]?.length > 0 && <div style={{ marginTop: 6 }}><NaechsterSchrittStapel items={schritteMap[k.id]} kundeId={k.id} max={2} /></div>}

@@ -5,6 +5,7 @@ import { extractFromUrl, extractFromFile, toKunde, toJob } from '../extractor.js
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
 import { laufzeitStatus } from '../laufzeit.js';
 import { getKanban, setKanban, getLaufzeit, setLaufzeit } from '../kanban-cache.js';
+import { personenGruppen } from '../dubletten.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { sendUploadAnfrage, sendFormularEinladung, sendAvvAnfrage } from '../mail.js';
 import { notifyKunde } from '../close.js';
@@ -354,17 +355,25 @@ router.get('/kanban', async (req, res) => {
         hinweise: j.projekt_id ? (hinweise[j.projekt_id] || []) : [],
       });
     }
-    const bew7 = {}, bewGes = {};
+    const bew7 = {}, bewGes = {}, bew7Eing = {}, bewGesEing = {};
     const jobsMitNeuemKommentar = new Set();   // job_id → Marker „Neuer Kommentar vom Kunden"
     if (jobIds.length) {
       const vor7 = new Date(Date.now() - 7 * 86400000).toISOString();
-      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id, created_at').in('job_id', jobIds);
+      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id, created_at, email, telefon').in('job_id', jobIds);
       const bewToJob = {};
+      const bewByKunde = {};   // kunde_id → Zeilen (für Personen-Dedupe je Stelle)
       for (const b of (bew || [])) {
         bewToJob[b.id] = b.job_id;
         const kId = jobKunde[b.job_id]; if (!kId) continue;
-        bewGes[kId] = (bewGes[kId] || 0) + 1;
-        if (b.created_at >= vor7) bew7[kId] = (bew7[kId] || 0) + 1;
+        (bewByKunde[kId] ||= []).push(b);
+      }
+      // Zähler = eindeutige Personen (Dedupe je Stelle), zusätzlich Roh-Eingänge für „(N Eingänge)".
+      for (const [kId, rows] of Object.entries(bewByKunde)) {
+        const gruppen = personenGruppen(rows);
+        bewGes[kId] = gruppen.length;
+        bew7[kId] = gruppen.filter(g => g.some(r => r.created_at >= vor7)).length;
+        bewGesEing[kId] = rows.length;
+        bew7Eing[kId] = rows.filter(r => r.created_at >= vor7).length;
       }
       const bewIds = Object.keys(bewToJob);
       if (bewIds.length) {
@@ -398,6 +407,7 @@ router.get('/kanban', async (req, res) => {
         status: k.status, archiviert: k.archiviert,
         status_gruppe: v?.status_gruppe || 'vorbereitung',
         bewerbungen_7t: bew7[k.id] || 0, bewerbungen_gesamt: bewGes[k.id] || 0,
+        bewerbungen_7t_eingaenge: bew7Eing[k.id] || 0, bewerbungen_gesamt_eingaenge: bewGesEing[k.id] || 0,
         projekte: projekte_json,
         stellen: stellenByKunde[k.id] || [],
       };

@@ -11,6 +11,7 @@
 //  onReload()            → Daten nach einer Mutation neu laden
 import { useState } from 'react';
 import { t } from '../lib/anrede.js';
+import { personenGruppen } from '../lib/dubletten.js';
 
 /* ── Status-Bucket (interner Fortschritt) ── */
 export function portalStatusBucket(notiz) {
@@ -64,6 +65,20 @@ export function bearbeitungStatus(b) {
 }
 export function bearbeitungLabel(b) { const s = bearbeitungStatus(b); return s.key === 'kontaktversuch' ? `Kontaktversuch (${s.n}×)` : BEARB_BY_KEY[s.key].label; }
 
+// Kurzlabel für den Status eines (früheren) Eingangs: Kundenfeedback falls gesetzt, sonst Bearbeitung.
+export function eingangStatusLabel(b) {
+  const fb = b?.feedback?.status;
+  if (fb && fb !== 'neu') return FEEDBACK_LABEL[feedbackStatusOf(b)] || fb;
+  return bearbeitungLabel(b);
+}
+// „02.10. (Absage), 30.09. (Ungeeignet)" — die übergebenen (anderen) Eingänge derselben Person.
+export function fruehereEingaengeText(others) {
+  return (others || [])
+    .slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .map(x => `${new Date(x.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} (${eingangStatusLabel(x)})`)
+    .join(', ');
+}
+
 /* ── Ampel ── */
 export const AMPELN = [
   { key: 'gruen', label: 'Grün', color: '#16a34a' },
@@ -116,21 +131,12 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   const intern = modus === 'intern';
   const vorqualFelder = Array.isArray(job.vorqualifizierung_felder) ? job.vorqualifizierung_felder.filter(f => f && f.name) : [];
 
-  // Dubletten an dieser Stelle: gleiche E-Mail ODER Telefon mehrfach (keine Zusammenführung).
-  const normMail = s => (s || '').trim().toLowerCase();
-  const normTel = s => (s || '').replace(/[\s/()-]/g, '');
-  const byEmail = {}, byTel = {};
-  for (const b of bewerbungen) {
-    const e = normMail(b.email); if (e) (byEmail[e] ||= []).push(b);
-    const tl = normTel(b.telefon); if (tl) (byTel[tl] ||= []).push(b);
-  }
-  function dubletten(b) {
-    const g = new Map();
-    const e = normMail(b.email), tl = normTel(b.telefon);
-    for (const x of (e ? byEmail[e] : [])) g.set(x.id, x);
-    for (const x of (tl ? byTel[tl] : [])) g.set(x.id, x);
-    return [...g.values()];
-  }
+  // Dubletten an dieser Stelle: gleiche Person (E-Mail ODER Telefon) — keine Zusammenführung.
+  // Jede Bewerbung kennt ihre Personengruppe; gezählt werden eindeutige Personen.
+  const gruppeVon = new Map();
+  for (const g of personenGruppen(bewerbungen)) for (const r of g) gruppeVon.set(r.id, g);
+  const dubletten = b => gruppeVon.get(b.id) || [b];
+  const personenGesamt = new Set([...gruppeVon.values()]).size || bewerbungen.length;
 
   // Volle Arbeitsliste: Funnel-Antworten (alle Fragen) + kundensichtbare Custom-Spalten + E-Mail/Telefon.
   const frageSpalten = [];
@@ -152,7 +158,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
-      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {intern ? 'Bewerbungen' : `${t(kunde, 'Deine', 'Ihre')} Bewerbungen`} ({bewerbungen.length})</h2>
+      <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {intern ? 'Bewerbungen' : `${t(kunde, 'Deine', 'Ihre')} Bewerbungen`} ({personenGesamt}{personenGesamt !== bewerbungen.length && <span style={{ fontSize: 13, fontWeight: 400, color: '#9a9994' }}> · {bewerbungen.length} Eingänge</span>})</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         {['alle', ...BEARBEITUNG.map(o => o.key)].map(f => {
           const aktiv = filter === f;
@@ -203,7 +209,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
                 const werte = b.spalten_werte || {};
                 const dubs = dubletten(b);
-                const dubTitle = dubs.length > 1 ? `${dubs.length}× gleiche E-Mail/Telefon · weitere Eingänge: ${dubs.filter(x => x.id !== b.id).map(x => new Date(x.created_at).toLocaleDateString('de-DE')).join(', ')}` : '';
+                const dubTitle = dubs.length > 1 ? `${dubs.length}× dieselbe Person (gleiche E-Mail/Telefon) · frühere Eingänge: ${fruehereEingaengeText(dubs.filter(x => x.id !== b.id))}` : '';
                 return (
                   <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
                     <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
@@ -289,6 +295,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
         </div>
       )}
       {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} primary={primary} modus={modus}
+        fruehere={dubletten(akte).filter(x => x.id !== akte.id)}
         onClose={() => onAkte?.(null)}
         onPatch={onPatch ? (patch) => onPatch(akte.id, patch) : undefined}
         onFeedback={onFeedback ? (patch) => onFeedback(akte.id, patch) : undefined}
@@ -299,7 +306,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
 }
 
 /* ══════════════════════ Kandidatenakte (rechts einfahrender Drawer) ══════════════════════ */
-export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', onClose, onPatch, onFeedback, onKommentar, onReload }) {
+export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onReload }) {
   const n = b.notiz || {};
   const struktur = job.kriterien_struktur || { ko: [], muss: [], wunsch: [] };
   const check = n.kriterien_check || {};
@@ -361,6 +368,11 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
         </div>
 
         <div style={{ padding: 20 }}>
+          {fruehere.length > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px', marginBottom: 16, fontSize: 12.5, color: '#92400e' }}>
+              <strong>⚠️ {fruehere.length + 1}× dieselbe Person</strong> (gleiche E-Mail/Telefon an dieser Stelle). Frühere Eingänge: {fruehereEingaengeText(fruehere)}.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
             <span style={{ display: 'inline-flex', gap: 7, alignItems: 'center', background: '#fafaf8', borderRadius: 100, padding: '5px 12px' }}>
               <span style={{ width: 11, height: 11, borderRadius: '50%', background: AMPEL_FARBE[amp] }} />

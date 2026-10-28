@@ -4,6 +4,7 @@ import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
 import KriterienKachel from '../components/KriterienKachel.jsx';
 import { BewerberListe, ampelVerteilung, AMPELN, bearbeitungStatus } from '../components/BewerberListe.jsx';
+import { personenGruppen, anzahlPersonen } from '../lib/dubletten.js';
 import AnfragenKanban from '../components/AnfragenKanban.jsx';
 import { supabase } from '../lib/supabase.js';
 import { t } from '../lib/anrede.js';
@@ -187,7 +188,13 @@ export default function PublicPortal() {
             {portalJobs.map(j => {
               const aktiv = j.id === activeJobId;
               const jbew = (data.bewerbungen || []).filter(b => b.job_id === j.id);
-              const neu = jbew.filter(b => bearbeitungStatus(b).key === 'neu').length;
+              // Zähler = eindeutige Personen; „neu" = Personen, deren jüngster Eingang „neu" ist.
+              const jgruppen = personenGruppen(jbew);
+              const personen = jgruppen.length;
+              const neu = jgruppen.filter(g => {
+                const letzter = g.reduce((m, r) => new Date(r.created_at) > new Date(m.created_at) ? r : m, g[0]);
+                return bearbeitungStatus(letzter).key === 'neu';
+              }).length;
               return (
                 <button key={j.id} onClick={() => setActiveJobId(j.id)} style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -200,7 +207,7 @@ export default function PublicPortal() {
                     ? <img src={data.kunde.logo_url} alt="" style={{ height: 20, maxWidth: 40, objectFit: 'contain', background: '#fff', borderRadius: 4, padding: '1px 3px' }} />
                     : <span>{j.projekttyp === 'neukundengewinnung' ? '🎯' : '📋'}</span>}
                   <span>{j.stelle || 'Stelle'}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, opacity: aktiv ? 0.85 : 0.55 }}>· {jbew.length}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: aktiv ? 0.85 : 0.55 }} title={personen !== jbew.length ? `${jbew.length} Eingänge` : undefined}>· {personen}</span>
                   {neu > 0 && <span style={{ fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 100, background: aktiv ? 'rgba(255,255,255,0.25)' : '#eef2ff', color: aktiv ? primaryInk : '#1e40af' }}>{neu} neu</span>}
                 </button>
               );
@@ -1046,9 +1053,11 @@ function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload
   const einheitWort = lz.einheit === 'monate' ? 'Monat' : 'Tag';
   const offenePause = (lz.pausen || []).find(p => p.quelle === 'kunde' && !p.bestaetigt_am);
   const barBg = `linear-gradient(90deg, ${primary}, ${primary}bb)`;
-  // Garantie-Zähler: X = garantie_bewerbungen, Y = Bewerbungen seit Start.
+  // Garantie-Zähler: X = garantie_bewerbungen, Y = eindeutige Personen seit Start.
   const garX = lz.garantie ? (lz.garantie_bewerbungen ?? null) : null;
-  const garY = garX != null ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)).length : bewerbungen.length) : null;
+  const garSeitStart = garX != null ? (lz.start_datum ? bewerbungen.filter(b => new Date(b.created_at) >= new Date(lz.start_datum)) : bewerbungen) : [];
+  const garY = garX != null ? anzahlPersonen(garSeitStart) : null;
+  const garEingaenge = garSeitStart.length;
   const garPct = garX ? Math.min(100, Math.round((garY / garX) * 100)) : 0;
   return (
     <div style={card}>
@@ -1083,7 +1092,7 @@ function LaufzeitKachel({ job, token, kunde, primary, bewerbungen = [], onReload
       )}
       {garX != null && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 4 }}><strong>{garY}</strong> von {garX} Bewerbungen erreicht</div>
+          <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 4 }}><strong>{garY}</strong> von {garX} Bewerbungen erreicht{garEingaenge !== garY && <span style={{ color: '#9a9994' }}> · {garEingaenge} Eingänge</span>}</div>
           <div style={{ height: 8, background: '#eef0f2', borderRadius: 100, overflow: 'hidden' }}>
             <div style={{ width: `${garPct}%`, height: '100%', background: '#16a34a', borderRadius: 100, transition: 'width .4s ease' }} />
           </div>
@@ -1136,9 +1145,13 @@ function PauseModal({ job, token, primary, onClose, onDone }) {
 }
 
 function BewerbungenKachel({ bewerbungen, kunde, primary, ampelFilter, onAmpelFilter }) {
-  const gesamt = bewerbungen.length;
+  // Eindeutige Personen (gleiche E-Mail/Telefon = eine Person); „(N Eingänge)" wenn abweichend.
+  const gruppen = personenGruppen(bewerbungen);
+  const gesamt = gruppen.length;
+  const eingaengeGesamt = bewerbungen.length;
   const vor7 = Date.now() - 7 * 86400000;
-  const letzte7 = bewerbungen.filter(b => new Date(b.created_at).getTime() >= vor7).length;
+  const letzte7 = gruppen.filter(g => g.some(b => new Date(b.created_at).getTime() >= vor7)).length;
+  const eingaenge7 = bewerbungen.filter(b => new Date(b.created_at).getTime() >= vor7).length;
   const vert = ampelVerteilung(bewerbungen);
   // Sparkline (area + line): letzte 14 Tage
   const tage = [];
@@ -1155,8 +1168,8 @@ function BewerbungenKachel({ bewerbungen, kunde, primary, ampelFilter, onAmpelFi
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
       <div style={kLabel}>Bewerbungen</div>
       <div style={{ display: 'flex', gap: 24, alignItems: 'baseline', marginTop: 6 }}>
-        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{gesamt}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>gesamt</div></div>
-        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{letzte7}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>letzte 7 Tage</div></div>
+        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{gesamt}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>gesamt{eingaengeGesamt !== gesamt && <span style={{ color: '#9a9994' }}> · {eingaengeGesamt} Eingänge</span>}</div></div>
+        <div><div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1 }}>{letzte7}</div><div style={{ fontSize: 11, color: '#5a5955', marginTop: 3 }}>letzte 7 Tage{eingaenge7 !== letzte7 && <span style={{ color: '#9a9994' }}> · {eingaenge7} Eingänge</span>}</div></div>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ marginTop: 10, display: 'block' }}>
         <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">

@@ -46,7 +46,7 @@ function ProjektGarantieInline({ projekt, fortschritt, onSaved }) {
         🛡️ Garantie{aktiv && X != null ? ` · ${X} Bewerbungen` : ''}
       </label>
       {aktiv && fortschritt && X != null && (
-        <div style={{ marginTop: 4, fontWeight: 600 }}>{fortschritt.erreicht} von {X} erreicht</div>
+        <div style={{ marginTop: 4, fontWeight: 600 }}>{fortschritt.erreicht} von {X} erreicht{fortschritt.eingaenge != null && fortschritt.eingaenge !== fortschritt.erreicht && <span style={{ fontWeight: 400, color: '#6b7280' }}> · {fortschritt.eingaenge} Eingänge</span>}</div>
       )}
       {aktiv && (
         <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>

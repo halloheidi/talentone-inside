@@ -13,6 +13,7 @@ import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 import { laufzeitStatus } from '../laufzeit.js';
 import { invalidateKanban } from '../kanban-cache.js';
+import { anzahlPersonen } from '../dubletten.js';
 
 const router = Router();
 
@@ -88,10 +89,11 @@ router.get('/:id', async (req, res) => {
     // Garantie-Fortschritt: Bewerbungen dieser Stelle seit Vertragsstart vs. Ziel.
     if (projekt?.garantie && projekt.garantie_bewerbungen != null) {
       try {
-        let bq = supabase.from('talentone_bewerbungen').select('id', { count: 'exact', head: true }).eq('job_id', data.id);
+        // Erreicht = eindeutige Personen (Dedupe je Stelle), nicht Roh-Eingänge.
+        let bq = supabase.from('talentone_bewerbungen').select('id, job_id, email, telefon').eq('job_id', data.id);
         if (projekt.start_datum) bq = bq.gte('created_at', projekt.start_datum);
-        const { count } = await bq;
-        data.garantie_fortschritt = { erreicht: count || 0, ziel: projekt.garantie_bewerbungen };
+        const { data: rows = [] } = await bq;
+        data.garantie_fortschritt = { erreicht: anzahlPersonen(rows || []), eingaenge: (rows || []).length, ziel: projekt.garantie_bewerbungen };
       } catch (e) { console.warn('[jobs] garantie-fortschritt:', e.message); }
     }
     // „Vertrag gilt auch für": andere Stellen, die sich dasselbe Projekt teilen.

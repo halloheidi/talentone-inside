@@ -65,6 +65,11 @@ export default function BewerbungenOverview() {
                     style={{ textAlign: 'left', background: '#fafaf8', border: '1px solid #eceae6', borderRadius: 8, padding: '8px 10px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13, flex: 1, minWidth: 0 }}>{s.stelle}</span>
+                      {s.personen != null && (
+                        <span style={{ fontSize: 12, color: '#5a5955', whiteSpace: 'nowrap' }} title={s.eingaenge !== s.personen ? `${s.eingaenge} Eingänge` : undefined}>
+                          {s.personen} {s.personen === 1 ? 'Person' : 'Personen'}{s.eingaenge !== s.personen && <span style={{ color: '#b8b8b4' }}> ({s.eingaenge})</span>}
+                        </span>
+                      )}
                       {s.kommentare > 0 && <span title="Offene Kundenkommentare" style={{ fontSize: 12 }}>💬 {s.kommentare}</span>}
                       {s.kriterien_geaendert && <span title="Kriterien geändert — neu prüfen" style={{ fontSize: 12 }}>⚠</span>}
                     </div>

@@ -6,8 +6,12 @@ import { supabase } from '../supabase.js';
 import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
+import { personenGruppen } from '../dubletten.js';
 
 const router = Router();
+
+// Rang der abgeleiteten Bearbeitungsstufen (für Dubletten: die weiteste Stufe der Person gilt).
+const BEARB_RANK = { neu: 0, in_bearbeitung: 1, kontaktversuch: 2, vorqualifiziert: 3, vorgestellt: 4, vg: 5, eingestellt: 6 };
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -441,10 +445,10 @@ router.get('/uebersicht', async (req, res) => {
       && (projStatus[j.projekt_id] === 'live' || PAUSE.has(projStatus[j.projekt_id])));
     const jobIds = stellen.map(j => j.id);
     const aggByJob = {};
-    for (const j of stellen) aggByJob[j.id] = { neu: 0, kontaktversuch: 0, in_bearbeitung: 0, vorqualifiziert: 0, vorgestellt: 0, vg: 0, eingestellt: 0, kommentare: 0, kriterien_geaendert: false };
+    for (const j of stellen) aggByJob[j.id] = { neu: 0, kontaktversuch: 0, in_bearbeitung: 0, vorqualifiziert: 0, vorgestellt: 0, vg: 0, eingestellt: 0, kommentare: 0, personen: 0, eingaenge: 0, kriterien_geaendert: false };
 
     if (jobIds.length) {
-      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id').in('job_id', jobIds);
+      const { data: bew = [] } = await supabase.from('talentone_bewerbungen').select('id, job_id, email, telefon, created_at').in('job_id', jobIds);
       const bewIds = bew.map(b => b.id);
       const bewJob = Object.fromEntries(bew.map(b => [b.id, b.job_id]));
       const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }, { data: logs = [] }] = await Promise.all([
@@ -461,20 +465,32 @@ router.get('/uebersicht', async (req, res) => {
       const letzteKundeLog = {}, letzterCheck = {};
       for (const l of (logs || [])) { if (!letzteKundeLog[l.job_id] || l.created_at > letzteKundeLog[l.job_id]) letzteKundeLog[l.job_id] = l.created_at; }
 
+      // Pro Eingang: abgeleitete Stufe + offener Kundenkommentar (für die Personen-Aggregation).
+      const bewMeta = {};
       for (const b of bew) {
-        const jid = bewJob[b.id]; const agg = aggByJob[jid]; if (!agg) continue;
+        const jid = bewJob[b.id]; if (!aggByJob[jid]) continue;
         const n = notizByBew[b.id] || {};
         const ks = kommByBew[b.id] || [];
         const letzteKunde = ks.filter(k => k.autor_typ === 'kunde').reduce((m, k) => k.created_at > m ? k.created_at : m, '');
         const letzteNw = ks.filter(k => k.autor_typ === 'nw').reduce((m, k) => k.created_at > m ? k.created_at : m, '');
         const recruiterStand = [letzteNw, n.updated_at || ''].reduce((a, c) => c > a ? c : a, '');
-        const offenerKundenkommentar = letzteKunde && letzteKunde > recruiterStand;
-        const key = deriveBearbeitung(n, fbByBew[b.id] || null, ks.length > 0);
-        agg[key]++;
-        if (offenerKundenkommentar) agg.kommentare++;
+        const offen = !!(letzteKunde && letzteKunde > recruiterStand);
+        bewMeta[b.id] = { key: deriveBearbeitung(n, fbByBew[b.id] || null, ks.length > 0), offen };
         // letzter Check = jüngste Notiz-Bearbeitung mit gesetzten Kriterien-Haken
         const ch = n.kriterien_check || {};
         if (Object.values(ch).some(v => v === true || v === false) && n.updated_at && (!letzterCheck[jid] || n.updated_at > letzterCheck[jid])) letzterCheck[jid] = n.updated_at;
+      }
+      // Zähler = eindeutige Personen je Stelle: die weiteste Stufe der Person gilt,
+      // ein offener Kundenkommentar zählt einmal pro Person.
+      for (const gruppe of personenGruppen(bew)) {
+        const jid = gruppe[0].job_id; const agg = aggByJob[jid]; if (!agg) continue;
+        const metas = gruppe.map(r => bewMeta[r.id]).filter(Boolean);
+        if (!metas.length) continue;
+        const key = metas.reduce((best, m) => (BEARB_RANK[m.key] ?? -1) > (BEARB_RANK[best] ?? -1) ? m.key : best, 'neu');
+        agg[key]++;
+        agg.personen++;
+        agg.eingaenge += gruppe.length;
+        if (metas.some(m => m.offen)) agg.kommentare++;
       }
       for (const jid of jobIds) {
         if (letzteKundeLog[jid] && (!letzterCheck[jid] || letzteKundeLog[jid] > letzterCheck[jid])) aggByJob[jid].kriterien_geaendert = true;
