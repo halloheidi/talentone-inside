@@ -20,6 +20,7 @@ import KundeDetail from './pages/KundeDetail.jsx';
 import BewerbungenOverview from './pages/BewerbungenOverview.jsx';
 import ZahlungenOverview from './pages/ZahlungenOverview.jsx';
 import ProjekteOverview from './pages/ProjekteOverview.jsx';
+import Altprojekte from './pages/Altprojekte.jsx';
 import LiveKampagnen from './pages/LiveKampagnen.jsx';
 import AnalyseFunnel from './pages/AnalyseFunnel.jsx';
 import JobView from './pages/JobView.jsx';
@@ -94,6 +95,8 @@ export default function App() {
         <Route path="zahlungen" element={<ZahlungenOverview />} />
         {/* Umbau: „Projekt" ist aus der Oberfläche verschwunden — Route bleibt als Redirect. */}
         <Route path="projekte" element={<Navigate to="/kunden" replace />} />
+        {/* Altprojekte: read-only Airtable-Altbestand ohne verknüpfte Stelle. */}
+        <Route path="altprojekte" element={<Altprojekte />} />
         <Route path="live-kampagnen" element={<LiveKampagnen />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
         <Route path="angebote" element={<OffersList />} />

@@ -141,6 +141,27 @@ router.get('/', async (req, res) => {
   res.json({ projekte: enriched });
 });
 
+/* GET /api/projekte/altbestand?q= — Airtable-Altbestand: NUR Projekte ohne verknüpfte
+   Stelle (kunde_id NULL ODER kein talentone_jobs-Eintrag mit diesem projekt_id).
+   Read-only; dient der Historie. Muss VOR '/:id' stehen. */
+router.get('/altbestand', async (req, res) => {
+  try {
+    const { data: projekte = [] } = await supabase.from('talentone_projekte')
+      .select('id, projekt, kunde, kunde_id, status, projektart, projektdauer, startdatum_abo, enddatum_abo, start_datum, notizen, created_at')
+      .order('created_at', { ascending: false });
+    const { data: jobs = [] } = await supabase.from('talentone_jobs')
+      .select('projekt_id').not('projekt_id', 'is', null);
+    const mitStelle = new Set((jobs || []).map(j => j.projekt_id));
+    let alt = (projekte || []).filter(p => !p.kunde_id || !mitStelle.has(p.id));
+    const q = (req.query.q || '').toString().trim().toLowerCase();
+    if (q) {
+      alt = alt.filter(p => [p.projekt, p.kunde, p.status, p.projektart, p.notizen]
+        .some(f => (f || '').toString().toLowerCase().includes(q)));
+    }
+    res.json({ projekte: alt });
+  } catch (err) { console.error('[projekte/altbestand]', err.message); res.status(500).json({ error: err.message }); }
+});
+
 /* POST /api/projekte — neues Projekt */
 router.post('/', async (req, res) => {
   const patch = pickFields(req.body);
