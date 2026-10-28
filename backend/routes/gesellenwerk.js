@@ -3,11 +3,8 @@
 // Listet Vormerkungen, leitet Gewerk (Stelle) und Wohnort (Funnel-Antwort) beim Lesen ab.
 
 import { Router } from 'express';
-import { randomUUID } from 'crypto';
 import { supabase } from '../supabase.js';
-import { gewerkAusStelle, wohnortAusAntworten } from '../gesellenwerk.js';
-import { sendGesellenwerkOptin } from '../mail.js';
-import { getPublicBaseUrl } from '../branding.js';
+import { gewerkAusStelle, wohnortAusAntworten, gwMailReady, versendeOptinMail } from '../gesellenwerk.js';
 
 const router = Router();
 
@@ -64,7 +61,7 @@ router.get('/', async (req, res) => {
   try {
     const list = await ladeVormerkungen();
     const gewerke = [...new Set(list.map(v => v.gewerk).filter(g => g && g !== '–'))].sort();
-    res.json({ vormerkungen: list, gewerke });
+    res.json({ vormerkungen: list, gewerke, mail_ready: gwMailReady() });
   } catch (err) { console.error('[gesellenwerk/list]', err.message); res.status(500).json({ error: err.message }); }
 });
 
@@ -129,23 +126,9 @@ router.patch('/:id/notiz', async (req, res) => {
 // ändern sich erst beim Klick auf den Bestätigungslink (Public-Route).
 router.post('/:id/optin-mail', async (req, res) => {
   try {
-    const { data: vm } = await supabase.from('talentone_gesellenwerk_vormerkungen')
-      .select('id, bewerbung_id, optin_token').eq('id', req.params.id).maybeSingle();
-    if (!vm) return res.status(404).json({ error: 'Vormerkung nicht gefunden.' });
-    const { data: bew } = await supabase.from('talentone_bewerbungen')
-      .select('name, email').eq('id', vm.bewerbung_id).maybeSingle();
-    if (!bew?.email) return res.status(400).json({ error: 'Kein E-Mail-Kontakt für diesen Kandidaten hinterlegt.' });
-
-    const token = vm.optin_token || randomUUID();
-    const jetzt = new Date().toISOString();
-    const optinUrl = `${getPublicBaseUrl()}/gw-optin/${token}`;
-    await sendGesellenwerkOptin({ to: bew.email, name: bew.name || '', optinUrl });
-
-    const { data, error } = await supabase.from('talentone_gesellenwerk_vormerkungen')
-      .update({ optin_token: token, optin_gesendet_am: jetzt, updated_at: jetzt })
-      .eq('id', req.params.id).select().single();
-    if (error) throw new Error(error.message);
-    res.json({ vormerkung: data });
+    if (!gwMailReady()) return res.status(409).json({ error: 'Absender-Domain (gesellenwerk.de) noch nicht verifiziert.' });
+    const row = await versendeOptinMail(req.params.id);
+    res.json({ vormerkung: row });
   } catch (err) { console.error('[gesellenwerk/optin-mail]', err.message); res.status(500).json({ error: err.message }); }
 });
 

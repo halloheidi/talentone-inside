@@ -69,6 +69,7 @@ export default function JobBewerber() {
   const onKommentar = useCallback((bewId, text) => api(`/bewerbungen/${bewId}/kommentar`, { method: 'POST', body: { text, autor: autorName } }), [autorName]);
   // Gesellenwerk-Vormerkung (nur intern): Grund/Notiz + Telefon-Einwilligung.
   const onGesellenwerk = useCallback((bewId, body) => api(`/bewerbungen/${bewId}/gesellenwerk`, { method: 'POST', body }), []);
+  const onGesellenwerkOptin = useCallback((bewId) => api(`/bewerbungen/${bewId}/gesellenwerk/optin-mail`, { method: 'POST' }), []);
   const onSpalte = useCallback((bewId, spalteId, wert) => api(`/bewerbungen/${bewId}/spalten/${spalteId}`, { method: 'PUT', body: { wert } }), []);
   // Intern geschriebene Vorqual-Werte (nicht die Kundenwerte): in notiz.vorqualifizierung_werte mergen.
   const onVorqual = useCallback(async (bewId, feld, wert) => {
@@ -97,7 +98,7 @@ export default function JobBewerber() {
         job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
         akteBewId={akteBewId} onAkte={setAkteBewId}
         onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual}
-        onGesellenwerk={onGesellenwerk}
+        onGesellenwerk={onGesellenwerk} onGesellenwerkOptin={onGesellenwerkOptin} gwMailReady={!!data.gw_mail_ready}
         onReload={load}
       />
     </div>

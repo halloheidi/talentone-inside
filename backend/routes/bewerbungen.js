@@ -8,7 +8,7 @@ import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { personenGruppen } from '../dubletten.js';
 import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
-import { vormerkenAusAbsage, vormerkungDerPerson } from '../gesellenwerk.js';
+import { vormerkenAusAbsage, vormerkungDerPerson, gwMailReady, versendeOptinMail } from '../gesellenwerk.js';
 
 const router = Router();
 
@@ -188,6 +188,21 @@ router.post('/:id/gesellenwerk', async (req, res) => {
     }
     res.json({ vormerkung: row });
   } catch (err) { console.error('[bewerbungen/gesellenwerk]', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/bewerbungen/:id/gesellenwerk/optin-mail — Opt-in-Mail aus der Kandidatenakte.
+// Löst die (je Person einmalige) Vormerkung auf und versendet. Gated über GW_MAIL_READY.
+router.post('/:id/gesellenwerk/optin-mail', async (req, res) => {
+  try {
+    if (!gwMailReady()) return res.status(409).json({ error: 'Absender-Domain (gesellenwerk.de) noch nicht verifiziert.' });
+    const { data: bew } = await supabase.from('talentone_bewerbungen')
+      .select('id, job_id').eq('id', req.params.id).maybeSingle();
+    if (!bew) return res.status(404).json({ error: 'Bewerbung nicht gefunden.' });
+    const vm = await vormerkungDerPerson(req.params.id, bew.job_id);
+    if (!vm) return res.status(400).json({ error: 'Kandidat ist noch nicht für Gesellenwerk vorgemerkt.' });
+    const row = await versendeOptinMail(vm.id);
+    res.json({ vormerkung: row });
+  } catch (err) { console.error('[bewerbungen/gesellenwerk/optin-mail]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/bewerbungen/:id/kommentar — interner Kommentar (autor_typ 'nw') in den gemeinsamen Verlauf.
@@ -470,7 +485,7 @@ async function loadBewerbungenFuerJob(jobId) {
     }
   }
 
-  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare, gesellenwerk };
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare, gesellenwerk, gw_mail_ready: gwMailReady() };
 }
 
 // GET /api/bewerbungen/uebersicht — Kunden-/Stellen-Karten aus Bewerber-Sicht (live/pausiert).

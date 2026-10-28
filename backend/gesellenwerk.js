@@ -4,13 +4,20 @@
 // beim Lesen aus Stelle/Funnel-Antworten abgeleitet, nie kopiert.
 // Rein additiv — niemals über Portal/Token-Zugänge erreichbar.
 
+import { randomUUID } from 'crypto';
 import { supabase } from './supabase.js';
 import { personenGruppen } from './dubletten.js';
 import { normalizeKriterienStruktur } from './kriterien.js';
+import { sendGesellenwerkOptin } from './mail.js';
+import { getPublicBaseUrl } from './branding.js';
 
 export const GW_STATI = ['vorgeschlagen', 'vorgemerkt', 'uebertragen', 'zurueckgezogen'];
 export const GW_QUELLEN = ['manuell', 'kundenabsage'];
 export const GW_EINWILLIGUNG_ART = ['telefon', 'optin_mail'];
+
+// Opt-in-Mails dürfen erst raus, wenn gesellenwerk.de in Resend verifiziert ist.
+// Kill-Switch via env GW_MAIL_READY (Default false). Vormerken/Automatik laufen unabhängig.
+export const gwMailReady = () => process.env.GW_MAIL_READY === 'true';
 
 // Kundenfeedback-Status, die eine Absage/Nichteignung bedeuten → Automatik-Auslöser.
 const ABSAGE_STATI = new Set(['absage', 'ungeeignet', 'abgesagt']);
@@ -101,4 +108,29 @@ export async function vormerkenAusAbsage(bewerbungId, { status, kommentar } = {}
   } catch (e) {
     console.warn('[gesellenwerk/auto]', e.message);
   }
+}
+
+/**
+ * Opt-in-Mail für eine Vormerkung versenden. Setzt optin_token (einmalig, 30 Tage)
+ * + optin_gesendet_am. Status/Einwilligung ändern sich erst beim Klick (Public-Route).
+ * Wirft bei fehlender E-Mail. Der Aufrufer prüft zuvor gwMailReady().
+ */
+export async function versendeOptinMail(vormerkungId) {
+  const { data: vm } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+    .select('id, bewerbung_id, optin_token').eq('id', vormerkungId).maybeSingle();
+  if (!vm) throw new Error('Vormerkung nicht gefunden.');
+  const { data: bew } = await supabase.from('talentone_bewerbungen')
+    .select('name, email').eq('id', vm.bewerbung_id).maybeSingle();
+  if (!bew?.email) throw new Error('Kein E-Mail-Kontakt für diesen Kandidaten hinterlegt.');
+
+  const token = vm.optin_token || randomUUID();
+  const jetzt = new Date().toISOString();
+  const optinUrl = `${getPublicBaseUrl()}/gw-optin/${token}`;
+  await sendGesellenwerkOptin({ to: bew.email, name: bew.name || '', optinUrl });
+
+  const { data, error } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+    .update({ optin_token: token, optin_gesendet_am: jetzt, updated_at: jetzt })
+    .eq('id', vormerkungId).select().single();
+  if (error) throw new Error(error.message);
+  return data;
 }

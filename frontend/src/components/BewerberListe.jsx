@@ -185,7 +185,7 @@ const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whi
 const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onGesellenwerk, onReload }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
   const [filter, setFilter] = useState('alle');
   const [gwDialogBewId, setGwDialogBewId] = useState(null);
   // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
@@ -380,6 +380,8 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
         onFeedback={onFeedback ? (patch) => onFeedback(akte.id, patch) : undefined}
         onKommentar={onKommentar ? (text) => onKommentar(akte.id, text) : undefined}
         onGesellenwerk={intern && onGesellenwerk ? () => setGwDialogBewId(akte.id) : undefined}
+        onGesellenwerkOptin={intern && onGesellenwerkOptin ? () => onGesellenwerkOptin(akte.id) : undefined}
+        gwMailReady={gwMailReady}
         onReload={onReload} />}
       {gwDialogBewId && onGesellenwerk && (
         <GwDialog bewerbung={bewerbungen.find(x => x.id === gwDialogBewId) || null}
@@ -391,9 +393,17 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
 }
 
 /* ══════════════════════ Kandidatenakte (rechts einfahrender Drawer) ══════════════════════ */
-export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onGesellenwerk, onReload }) {
+export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
   const n = b.notiz || {};
   const intern = modus === 'intern';
+  const [gwBusy, setGwBusy] = useState(false);
+  async function sendeOptin() {
+    if (!onGesellenwerkOptin) return;
+    setGwBusy(true);
+    try { await onGesellenwerkOptin(); await onReload?.(); alert('Opt-in-Mail wurde versendet.'); }
+    catch (e) { alert(e.message || 'Versand fehlgeschlagen.'); }
+    finally { setGwBusy(false); }
+  }
   const struktur = job.kriterien_struktur || { ko: [], muss: [], wunsch: [] };
   const check = n.kriterien_check || {};
   const antworten = Array.isArray(b.antworten) ? b.antworten : [];
@@ -466,6 +476,13 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
                 style={{ fontSize: 12, fontWeight: 700, padding: '5px 11px', borderRadius: 8, border: '1px solid #e0e0dd', background: '#fff', cursor: 'pointer' }}>
                 {b.gesellenwerk ? 'Gesellenwerk bearbeiten' : 'Für Gesellenwerk vormerken'}
               </button>
+              {b.gesellenwerk && !b.gesellenwerk.einwilligung && onGesellenwerkOptin && (
+                <button onClick={sendeOptin} disabled={!gwMailReady || gwBusy}
+                  title={gwMailReady ? 'Opt-in-Mail an den Kandidaten senden' : 'Absender-Domain noch nicht verifiziert'}
+                  style={{ fontSize: 12, fontWeight: 700, padding: '5px 11px', borderRadius: 8, border: '1px solid #e0e0dd', background: '#fff', color: '#0a0a0a', cursor: (!gwMailReady || gwBusy) ? 'not-allowed' : 'pointer', opacity: (!gwMailReady || gwBusy) ? 0.5 : 1 }}>
+                  {gwBusy ? 'Sendet…' : 'Opt-in-Mail senden'}
+                </button>
+              )}
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>

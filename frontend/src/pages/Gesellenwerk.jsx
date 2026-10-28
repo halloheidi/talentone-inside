@@ -23,6 +23,7 @@ function einwilligungText(v) {
 export default function Gesellenwerk() {
   const [list, setList] = useState([]);
   const [gewerke, setGewerke] = useState([]);
+  const [mailReady, setMailReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('vorgeschlagen');
@@ -36,6 +37,7 @@ export default function Gesellenwerk() {
       const r = await api('/gesellenwerk');
       setList(r.vormerkungen || []);
       setGewerke(r.gewerke || []);
+      setMailReady(!!r.mail_ready);
       setError('');
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -85,6 +87,12 @@ export default function Gesellenwerk() {
           ↓ CSV-Export
         </button>
       </div>
+
+      {!loading && !mailReady && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 12.5, color: '#92400e' }}>
+          Opt-in-Mails sind noch pausiert: Die Absender-Domain gesellenwerk.de ist in Resend noch nicht verifiziert (<code>GW_MAIL_READY=false</code>). Vormerken läuft normal.
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -153,7 +161,11 @@ export default function Gesellenwerk() {
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                           {v.status === 'vorgeschlagen' && <button disabled={disabled} onClick={() => vormerken(v)} style={btn('#0a0a0a', '#fff')}>Vormerken</button>}
-                          {(v.status === 'vorgeschlagen' || v.status === 'vorgemerkt') && !v.einwilligung && <button disabled={disabled} onClick={() => optinMail(v)} style={btn('#fff', '#0a0a0a')}>Opt-in-Mail</button>}
+                          {(v.status === 'vorgeschlagen' || v.status === 'vorgemerkt') && !v.einwilligung && (
+                            <button disabled={disabled || !mailReady} onClick={() => optinMail(v)}
+                              title={mailReady ? 'Opt-in-Mail an den Kandidaten senden' : 'Absender-Domain noch nicht verifiziert'}
+                              style={{ ...btn('#fff', '#0a0a0a'), opacity: (disabled || !mailReady) ? 0.45 : 1, cursor: (disabled || !mailReady) ? 'not-allowed' : 'pointer' }}>Opt-in-Mail</button>
+                          )}
                           <button disabled={disabled} onClick={() => notizBearbeiten(v)} style={btn('#fff', '#0a0a0a')}>Notiz</button>
                           {v.status !== 'zurueckgezogen' && <button disabled={disabled} onClick={() => zurueckziehen(v)} style={btn('#fff', '#b91c1c')}>Zurückziehen</button>}
                         </div>
