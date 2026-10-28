@@ -1974,3 +1974,55 @@ export async function sendKriterienGeaendertNotiz({ kunde, job, vorher = [], nac
     html, text,
   });
 }
+
+/* ════════════════════ Gesellenwerk-Opt-in (Etappe 3) ════════════════════ */
+// Opt-in-Mail an einen vorgemerkten Kandidaten. Absender „Gesellenwerk".
+// From ist env-gesteuert (GW_MAIL_FROM); Default nutzt die verifizierte
+// talent-one.de-Domain mit Anzeigename „Gesellenwerk", damit die Mail sicher
+// zustellt. Später per GW_MAIL_FROM='Gesellenwerk <…@gesellenwerk.de>' umstellbar.
+export async function sendGesellenwerkOptin({ to, name, optinUrl }) {
+  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
+  const from = process.env.GW_MAIL_FROM || 'Gesellenwerk <noreply@talent-one.de>';
+  const replyTo = process.env.GW_MAIL_REPLYTO || undefined;
+  const vorname = String(name || '').trim().split(/\s+/)[0] || '';
+  const anredeZeile = vorname ? `Hallo ${escape(vorname)},` : 'Hallo,';
+
+  const content = `
+    <tr><td style="padding:28px 32px 8px;">
+      <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">Gesellenwerk · Handwerks-Jobportal</p>
+      <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;margin:0 0 12px;color:#0a0a0a;">Dürfen wir dich vormerken?</h1>
+      <p style="font-size:14px;line-height:1.6;color:#5a5955;margin:0 0 12px;">${anredeZeile}</p>
+      <p style="font-size:14px;line-height:1.6;color:#5a5955;margin:0 0 12px;">über Gesellenwerk vermitteln wir Fachkräfte im Handwerk an passende Betriebe. Wir würden dich gerne in unseren Pool aufnehmen und uns bei dir melden, sobald ein Betrieb in deiner Region eine passende Stelle hat.</p>
+      <p style="font-size:14px;line-height:1.6;color:#5a5955;margin:0 0 20px;">Bitte bestätige kurz, dass wir dich kontaktieren dürfen:</p>
+    </td></tr>
+    <tr><td style="padding:0 32px 8px;">
+      <a href="${escape(optinUrl)}" style="display:inline-block;background:#0a0a0a;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 30px;border-radius:100px;letter-spacing:0.02em;">→ Ja, vormerken</a>
+    </td></tr>
+    <tr><td style="padding:18px 32px 24px;">
+      <p style="font-size:12px;line-height:1.6;color:#9a9994;margin:0;">Der Link ist 30 Tage gültig. Es entstehen dir keine Kosten und keine Verpflichtung. Wenn du nicht reagierst, nehmen wir dich nicht auf. Deine Daten verwenden wir ausschließlich zur Vermittlung passender Stellen; du kannst der Vormerkung jederzeit widersprechen.</p>
+    </td></tr>`;
+
+  const html = `<!doctype html><html lang="de"><body style="margin:0;padding:0;background:#f0efed;font-family:-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#0a0a0a;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0efed;padding:32px 0;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;max-width:600px;width:100%;">
+      <tr><td style="background:#0a0a0a;padding:22px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:800;letter-spacing:-0.01em;">Gesellen<span style="color:#d4ff00;">werk</span></span></td></tr>
+      ${content}
+      <tr><td style="padding:14px 32px;background:#fafaf8;text-align:center;border-top:1px solid #ececea;">
+        <p style="font-size:11px;color:#9a9994;margin:0;">Gesellenwerk · <a href="https://gesellenwerk.de" style="color:#5a5955;text-decoration:none;border-bottom:1px dotted #c0bfba;">gesellenwerk.de</a></p>
+      </td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+
+  const text = `${vorname ? `Hallo ${vorname},` : 'Hallo,'}\n\nüber Gesellenwerk vermitteln wir Fachkräfte im Handwerk an passende Betriebe. Wir würden dich gerne in unseren Pool aufnehmen und uns melden, sobald ein Betrieb in deiner Region eine passende Stelle hat.\n\nBitte bestätige, dass wir dich vormerken dürfen:\n${optinUrl}\n\nDer Link ist 30 Tage gültig. Es entstehen dir keine Kosten und keine Verpflichtung. Du kannst der Vormerkung jederzeit widersprechen.\n\nViele Grüße\nDein Gesellenwerk-Team`;
+
+  const response = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    body: JSON.stringify({ from, to: Array.isArray(to) ? to : [to], reply_to: replyTo, subject: 'Gesellenwerk — dürfen wir dich vormerken?', html, text }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Resend ${response.status}: ${body.slice(0, 300)}`);
+  }
+  return await response.json();
+}

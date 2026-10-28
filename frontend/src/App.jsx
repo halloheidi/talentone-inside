@@ -14,6 +14,7 @@ import PublicAnfragen from './pages/PublicAnfragen.jsx';
 import PublicPortal from './pages/PublicPortal.jsx';
 import PublicAvv from './pages/PublicAvv.jsx';
 import PublicFeedback from './pages/PublicFeedback.jsx';
+import GwOptin from './pages/GwOptin.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
 import KundenList from './pages/KundenList.jsx';
 import KundeDetail from './pages/KundeDetail.jsx';
@@ -21,6 +22,7 @@ import BewerbungenOverview from './pages/BewerbungenOverview.jsx';
 import ZahlungenOverview from './pages/ZahlungenOverview.jsx';
 import ProjekteOverview from './pages/ProjekteOverview.jsx';
 import Altprojekte from './pages/Altprojekte.jsx';
+import Gesellenwerk from './pages/Gesellenwerk.jsx';
 import LiveKampagnen from './pages/LiveKampagnen.jsx';
 import AnalyseFunnel from './pages/AnalyseFunnel.jsx';
 import JobView from './pages/JobView.jsx';
@@ -80,6 +82,7 @@ export default function App() {
       <Route path="/anfragen/:token" element={<PublicAnfragen />} />
       <Route path="/portal/:token" element={<PublicPortal />} />
       <Route path="/avv/:token" element={<PublicAvv />} />
+      <Route path="/gw-optin/:token" element={<GwOptin />} />
       <Route
         path="/"
         element={
@@ -97,6 +100,7 @@ export default function App() {
         <Route path="projekte" element={<Navigate to="/kunden" replace />} />
         {/* Altprojekte: read-only Airtable-Altbestand ohne verknüpfte Stelle. */}
         <Route path="altprojekte" element={<Altprojekte />} />
+        <Route path="gesellenwerk" element={<Gesellenwerk />} />
         <Route path="live-kampagnen" element={<LiveKampagnen />} />
         <Route path="analyse-funnel" element={<AnalyseFunnel />} />
         <Route path="angebote" element={<OffersList />} />

@@ -44,6 +44,10 @@ function GlobalNav({ isAdmin }) {
         <Icon name="users" />
         <span>Altprojekte</span>
       </NavLink>
+      <NavLink to="/gesellenwerk" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+        <Icon name="users" />
+        <span>🔨 Gesellenwerk-Pool</span>
+      </NavLink>
       {isAdmin && (
         <>
           <div className="nav-section">Admin</div>

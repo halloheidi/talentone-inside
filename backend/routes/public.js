@@ -29,6 +29,7 @@ import { getPersonalizedAvvPdf } from '../avv-pdf.js';
 const router = Router();
 
 import { getPublicBaseUrl } from '../branding.js';
+import { vormerkenAusAbsage } from '../gesellenwerk.js';
 
 const MITARBEITER_MAIL = process.env.MITARBEITER_MAIL || 'info@nowagwirth.de';
 
@@ -1284,6 +1285,9 @@ router.patch('/bewerbungen/:token/:bewId', async (req, res) => {
     .select().single();
   if (error) return res.status(500).json({ error: error.message });
 
+  // Automatik: bei Absage/Nichteignung ggf. für den Gesellenwerk-Pool vorschlagen (best-effort).
+  if (patch.status) vormerkenAusAbsage(bew.id, { status: patch.status, kommentar: patch.notizen || null });
+
   // Interne Transparenz: Projekt-Kommentar (kein Mail-Spam). Best-effort.
   if (changes.length) {
     logKundenBewerberAenderung({ jobId: job.id, kundeId: job.kunde_id, bewId: bew.id, changes })
@@ -2263,6 +2267,9 @@ router.patch('/portal/:token/bewerbung/:bewId/feedback', async (req, res) => {
       .upsert(patch, { onConflict: 'bewerbung_id' }).select().single();
     if (error) return res.status(500).json({ error: error.message });
 
+    // Automatik: bei Absage/Nichteignung ggf. für den Gesellenwerk-Pool vorschlagen (best-effort).
+    if (patch.status) vormerkenAusAbsage(req.params.bewId, { status: patch.status, kommentar: null });
+
     // Sofort-Mail wie beim Alt-Endpoint: nur bei „eingestellt" (neu) oder neuem VG-Termin.
     const wurdeEingestellt = patch.status === 'eingestellt' && vorher?.status !== 'eingestellt';
     const neuerVgTermin = patch.vorstellungsgespraech_am != null && patch.vorstellungsgespraech_am !== (vorher?.vorstellungsgespraech_am || null);
@@ -2359,6 +2366,54 @@ router.post('/portal/:token/projekt-pause', async (req, res) => {
       } catch (e) { console.warn('[portal/projekt-pause mail]', e.message); }
     })();
     res.status(201).json({ pausen });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ════════════════════ Gesellenwerk-Opt-in (Etappe 3, public) ════════════════════ */
+// Kandidat bestätigt die Vormerkung für den Gesellenwerk-Pool. Token einmalig, 30 Tage
+// gültig (ab optin_gesendet_am). KEIN Login, KEIN Portal-Bezug. Kennt keine Kundendaten.
+const GW_OPTIN_GUELTIG_MS = 30 * 86400000;
+async function ladeGwOptin(token) {
+  if (!token) return null;
+  const { data: vm } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+    .select('id, status, einwilligung, optin_gesendet_am, bewerbung_id').eq('optin_token', token).maybeSingle();
+  if (!vm) return null;
+  const abgelaufen = vm.optin_gesendet_am
+    ? (Date.now() - new Date(vm.optin_gesendet_am).getTime()) > GW_OPTIN_GUELTIG_MS : false;
+  const { data: bew } = await supabase.from('talentone_bewerbungen')
+    .select('name').eq('id', vm.bewerbung_id).maybeSingle();
+  const vorname = String(bew?.name || '').trim().split(/\s+/)[0] || '';
+  return { vm, abgelaufen, vorname };
+}
+
+// GET /api/public/gw-optin/:token — Info für die Bestätigungsseite.
+router.get('/gw-optin/:token', async (req, res) => {
+  try {
+    const d = await ladeGwOptin(req.params.token);
+    if (!d) return res.status(404).json({ error: 'Link ungültig.' });
+    res.json({
+      ok: true,
+      vorname: d.vorname,
+      abgelaufen: d.abgelaufen,
+      bereits_bestaetigt: !!d.vm.einwilligung,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/public/gw-optin/:token/bestaetigen — Einwilligung erteilen.
+router.post('/gw-optin/:token/bestaetigen', async (req, res) => {
+  try {
+    const d = await ladeGwOptin(req.params.token);
+    if (!d) return res.status(404).json({ error: 'Link ungültig.' });
+    if (d.abgelaufen) return res.status(410).json({ error: 'Dieser Link ist abgelaufen.' });
+    if (d.vm.einwilligung) return res.json({ ok: true, bereits_bestaetigt: true });
+    const jetzt = new Date().toISOString();
+    const patch = { einwilligung: true, einwilligung_art: 'optin_mail', einwilligung_am: jetzt, updated_at: jetzt };
+    // vorgeschlagen → vorgemerkt (bereits vorgemerkte bleiben vorgemerkt).
+    if (d.vm.status === 'vorgeschlagen') patch.status = 'vorgemerkt';
+    const { error } = await supabase.from('talentone_gesellenwerk_vormerkungen').update(patch).eq('id', d.vm.id);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

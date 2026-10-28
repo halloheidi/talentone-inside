@@ -8,6 +8,7 @@ import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { personenGruppen } from '../dubletten.js';
 import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
+import { vormerkenAusAbsage, vormerkungDerPerson } from '../gesellenwerk.js';
 
 const router = Router();
 
@@ -137,7 +138,56 @@ router.patch('/:id/feedback', async (req, res) => {
   const { data, error } = await supabase.from('talentone_bewerber_kundenfeedback')
     .upsert(patch, { onConflict: 'bewerbung_id' }).select().single();
   if (error) return res.status(500).json({ error: error.message });
+  // Automatik: bei Absage/Nichteignung ggf. für den Gesellenwerk-Pool vorschlagen (best-effort).
+  if (patch.status) vormerkenAusAbsage(req.params.id, { status: patch.status, kommentar: null });
   res.json({ feedback: data });
+});
+
+// POST /api/bewerbungen/:id/gesellenwerk — Kandidat (manuell) für Gesellenwerk vormerken.
+// NUR intern (Router hinter requireAuth). Vormerkung gilt je Person: existiert für die
+// Person schon ein Eintrag (z. B. 'vorgeschlagen' aus Kundenabsage), wird dieser hochgestuft.
+// body: { notiz?, einwilligung_telefon?: boolean }
+router.post('/:id/gesellenwerk', async (req, res) => {
+  try {
+    const bewId = req.params.id;
+    const { data: bew } = await supabase.from('talentone_bewerbungen')
+      .select('id, job_id').eq('id', bewId).maybeSingle();
+    if (!bew) return res.status(404).json({ error: 'Bewerbung nicht gefunden.' });
+    const notiz = (req.body?.notiz ?? '').toString().trim() || null;
+    const telefon = req.body?.einwilligung_telefon === true;
+    const von = req.user?.email || null;
+    const jetzt = new Date().toISOString();
+    const vorhanden = await vormerkungDerPerson(bewId, bew.job_id);
+
+    const felder = {
+      status: 'vorgemerkt',
+      vorgemerkt_am: jetzt,
+      vorgemerkt_von: von,
+      updated_at: jetzt,
+    };
+    if (notiz !== null) felder.notiz = notiz;
+    if (telefon) {
+      felder.einwilligung = true;
+      felder.einwilligung_art = 'telefon';
+      felder.einwilligung_am = jetzt;
+      felder.einwilligung_von = von;
+    }
+
+    let row;
+    if (vorhanden) {
+      const { data, error } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+        .update(felder).eq('id', vorhanden.id).select().single();
+      if (error) throw new Error(error.message);
+      row = data;
+    } else {
+      const { data, error } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+        .insert({ bewerbung_id: bewId, quelle: 'manuell', einwilligung: false, ...felder })
+        .select().single();
+      if (error) throw new Error(error.message);
+      row = data;
+    }
+    res.json({ vormerkung: row });
+  } catch (err) { console.error('[bewerbungen/gesellenwerk]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/bewerbungen/:id/kommentar — interner Kommentar (autor_typ 'nw') in den gemeinsamen Verlauf.
@@ -407,7 +457,20 @@ async function loadBewerbungenFuerJob(jobId) {
   // KO-Markierung der Antworten im Frontend (per-Antwort-KO wird NICHT gespeichert).
   const funnels = await ladeFunnels(bewerbungen);
 
-  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare };
+  // Gesellenwerk-Vormerkung (nur intern): je Person einmal gespeichert, auf alle
+  // Eingänge der Person gespiegelt, damit der Badge an jeder Zeile erscheint.
+  const { data: gwRows = [] } = await supabase.from('talentone_gesellenwerk_vormerkungen')
+    .select('bewerbung_id, status, einwilligung, einwilligung_art').in('bewerbung_id', ids);
+  const gesellenwerk = {};
+  if ((gwRows || []).length) {
+    const byBew = Object.fromEntries(gwRows.map(g => [g.bewerbung_id, g]));
+    for (const gruppe of personenGruppen(bewerbungen)) {
+      const treffer = gruppe.map(r => byBew[r.id]).find(Boolean);
+      if (treffer) for (const r of gruppe) gesellenwerk[r.id] = { status: treffer.status, einwilligung: treffer.einwilligung, einwilligung_art: treffer.einwilligung_art };
+    }
+  }
+
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare, gesellenwerk };
 }
 
 // GET /api/bewerbungen/uebersicht — Kunden-/Stellen-Karten aus Bewerber-Sicht (live/pausiert).

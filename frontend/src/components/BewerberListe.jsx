@@ -84,6 +84,65 @@ export function fruehereEingaengeText(others) {
     .join(', ');
 }
 
+/* ── Gesellenwerk-Badge (NUR intern): GW · vorgeschlagen / vorgemerkt ✓ / … ── */
+const GW_BADGE_STATUS = {
+  vorgeschlagen: { label: 'GW · vorgeschlagen', color: '#92400e', bg: '#fef3c7' },
+  uebertragen: { label: 'GW · übertragen', color: '#1e40af', bg: '#dbeafe' },
+  zurueckgezogen: { label: 'GW · zurückgezogen', color: '#6b7280', bg: '#f3f4f6' },
+};
+export function gwBadgeInfo(gw) {
+  if (!gw) return null;
+  if (gw.status === 'vorgemerkt') {
+    return gw.einwilligung
+      ? { label: 'GW · vorgemerkt ✓', color: '#166534', bg: '#dcfce7' }
+      : { label: 'GW · vorgemerkt (ohne Einwilligung)', color: '#92400e', bg: '#fef3c7' };
+  }
+  return GW_BADGE_STATUS[gw.status] || null;
+}
+function GwBadge({ gw, compact }) {
+  const info = gwBadgeInfo(gw);
+  if (!info) return null;
+  return <span title={info.label} style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, background: info.bg, color: info.color, borderRadius: 100, padding: '1px 6px', whiteSpace: 'nowrap' }}>{compact ? 'GW' : info.label}</span>;
+}
+
+// Standardsatz für die Telefon-Einwilligung (wortgleich in Dialog + neben der Checkbox).
+const GW_EINWILLIGUNG_SATZ = 'Darf ich Sie vormerken, damit wir uns melden, wenn andere Betriebe in Ihrer Region passende Stellen haben?';
+
+/* Dialog „Für Gesellenwerk vormerken" — Grund/Notiz + Telefon-Einwilligung. */
+function GwDialog({ bewerbung, onClose, onSubmit }) {
+  const [notiz, setNotiz] = useState('');
+  const [telefon, setTelefon] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const vorhanden = bewerbung?.gesellenwerk || null;
+  async function submit() {
+    setBusy(true);
+    try { await onSubmit({ notiz: notiz.trim() || null, einwilligung_telefon: telefon }); onClose(); }
+    catch (e) { alert(e.message); setBusy(false); }
+  }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: '100%', padding: 22, boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>Für Gesellenwerk vormerken</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: '#5a5955' }}>{bewerbung?.name || 'Kandidat'}{vorhanden ? ' · bereits im Pool, wird aktualisiert' : ''}</p>
+        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Grund / Notiz</label>
+        <textarea value={notiz} onChange={e => setNotiz(e.target.value)} rows={3} placeholder="Warum passt die Person grundsätzlich? (optional)"
+          style={{ width: '100%', boxSizing: 'border-box', padding: 10, border: '1px solid #e0e0dd', borderRadius: 8, fontSize: 13, resize: 'vertical' }} />
+        <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 14, cursor: 'pointer' }}>
+          <input type="checkbox" checked={telefon} onChange={e => setTelefon(e.target.checked)} style={{ marginTop: 3 }} />
+          <span style={{ fontSize: 13 }}>
+            <strong>Einwilligung am Telefon eingeholt</strong>
+            <span style={{ display: 'block', fontSize: 12, color: '#5a5955', marginTop: 2, fontStyle: 'italic' }}>„{GW_EINWILLIGUNG_SATZ}"</span>
+          </span>
+        </label>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button onClick={onClose} disabled={busy} style={{ padding: '8px 14px', border: '1px solid #ececea', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 13 }}>Abbrechen</button>
+          <button onClick={submit} disabled={busy} style={{ padding: '8px 16px', border: 'none', borderRadius: 8, background: '#0a0a0a', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{busy ? 'Speichert…' : 'Vormerken'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Ampel ── */
 export const AMPELN = [
   { key: 'gruen', label: 'Grün', color: '#16a34a' },
@@ -126,8 +185,9 @@ const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whi
 const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onReload }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onGesellenwerk, onReload }) {
   const [filter, setFilter] = useState('alle');
+  const [gwDialogBewId, setGwDialogBewId] = useState(null);
   // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
   let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => bearbeitungStatus(b).key === filter);
   if (ampelFilter) gefiltert = gefiltert.filter(b => ampelOf(b.notiz) === ampelFilter);
@@ -158,6 +218,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   async function savePatch(bewId, patch) { try { await onPatch?.(bewId, patch); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveSpalte(bewId, spalteId, wert) { try { await onSpalte?.(bewId, spalteId, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveVorqual(bewId, feld, wert) { try { await onVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
+  async function saveGesellenwerk(bewId, body) { await onGesellenwerk?.(bewId, body); await onReload?.(); }
   // Effektiver Vorqual-Wert: Kundenwert (überschreibt) sonst interner Recruiter-Wert.
   const vorqualWert = (b, name) => (b.feedback?.vorqual_werte_kunde?.[name] ?? b.vorqualifizierung_werte?.[name] ?? '');
 
@@ -202,6 +263,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 <th style={thBase}>E-Mail</th>
                 <th style={thBase}>Telefon</th>
                 {intern && <th style={thBase}>Notiz</th>}
+                {intern && onGesellenwerk && <th style={thBase}>Gesellenwerk</th>}
               </tr>
             </thead>
             <tbody>
@@ -226,6 +288,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                         <span style={{ fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</span>
                         {dubs.length > 1 && <span title={dubTitle} style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', borderRadius: 100, padding: '1px 6px', cursor: 'help' }}>{dubs.length}×</span>}
                         {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
+                        {intern && b.gesellenwerk && <GwBadge gw={b.gesellenwerk} compact />}
                       </div>
                     </td>
                     <td style={tdBase}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
@@ -292,6 +355,17 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                         <input defaultValue={b.notiz?.notizen || ''} placeholder="Notiz…" onBlur={e => (e.target.value || '') !== (b.notiz?.notizen || '') && savePatch(b.id, { notizen: e.target.value || null })} style={{ ...inlineSel, maxWidth: 180 }} />
                       </td>
                     )}
+                    {intern && onGesellenwerk && (
+                      <td style={tdBase} onClick={stop}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          {b.gesellenwerk && <GwBadge gw={b.gesellenwerk} />}
+                          <button onClick={() => setGwDialogBewId(b.id)} title="Für Gesellenwerk vormerken"
+                            style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, border: '1px solid #e0e0dd', background: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            {b.gesellenwerk ? 'Bearbeiten' : '+ Vormerken'}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -305,14 +379,21 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
         onPatch={onPatch ? (patch) => onPatch(akte.id, patch) : undefined}
         onFeedback={onFeedback ? (patch) => onFeedback(akte.id, patch) : undefined}
         onKommentar={onKommentar ? (text) => onKommentar(akte.id, text) : undefined}
+        onGesellenwerk={intern && onGesellenwerk ? () => setGwDialogBewId(akte.id) : undefined}
         onReload={onReload} />}
+      {gwDialogBewId && onGesellenwerk && (
+        <GwDialog bewerbung={bewerbungen.find(x => x.id === gwDialogBewId) || null}
+          onClose={() => setGwDialogBewId(null)}
+          onSubmit={(body) => saveGesellenwerk(gwDialogBewId, body)} />
+      )}
     </div>
   );
 }
 
 /* ══════════════════════ Kandidatenakte (rechts einfahrender Drawer) ══════════════════════ */
-export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onReload }) {
+export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onGesellenwerk, onReload }) {
   const n = b.notiz || {};
+  const intern = modus === 'intern';
   const struktur = job.kriterien_struktur || { ko: [], muss: [], wunsch: [] };
   const check = n.kriterien_check || {};
   const antworten = Array.isArray(b.antworten) ? b.antworten : [];
@@ -376,6 +457,15 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
           {fruehere.length > 0 && (
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 12px', marginBottom: 16, fontSize: 12.5, color: '#92400e' }}>
               <strong>⚠️ {fruehere.length + 1}× dieselbe Person</strong> (gleiche E-Mail/Telefon an dieser Stelle). Frühere Eingänge: {fruehereEingaengeText(fruehere)}.
+            </div>
+          )}
+          {intern && onGesellenwerk && (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+              {b.gesellenwerk ? <GwBadge gw={b.gesellenwerk} /> : <span style={{ fontSize: 12, color: '#9a9994' }}>Nicht im Gesellenwerk-Pool</span>}
+              <button onClick={() => onGesellenwerk()} title="Für Gesellenwerk vormerken"
+                style={{ fontSize: 12, fontWeight: 700, padding: '5px 11px', borderRadius: 8, border: '1px solid #e0e0dd', background: '#fff', cursor: 'pointer' }}>
+                {b.gesellenwerk ? 'Gesellenwerk bearbeiten' : 'Für Gesellenwerk vormerken'}
+              </button>
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>

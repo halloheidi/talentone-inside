@@ -15,6 +15,7 @@ import publicRouter from './routes/public.js';
 import webhooksRouter from './routes/webhooks.js';
 import anhaengeRouter from './routes/anhaenge.js';
 import bewerbungenRouter from './routes/bewerbungen.js';
+import gesellenwerkRouter from './routes/gesellenwerk.js';
 import zahlungenRouter from './routes/zahlungen.js';
 import zahlungenWebhookRouter from './routes/zahlungen-webhook.js';
 import eigeneLeadsRouter from './routes/eigene-leads.js';
@@ -108,6 +109,7 @@ app.use('/api/adcopies', requireAuth, adcopiesRouter);
 app.use('/api/funnels', requireAuth, funnelsRouter);
 app.use('/api/perspective', requireAuth, perspectiveRouter);
 app.use('/api/bewerbungen', requireAuth, bewerbungenRouter);
+app.use('/api/gesellenwerk', requireAuth, gesellenwerkRouter);
 // PayPal Webhook — KEIN Auth (PayPal ruft direkt auf, Signatur-Verifikation im Handler).
 // Muss VOR dem auth-geschützten zahlungenRouter mit gleicher Basis-URL gemountet werden.
 app.use('/api/zahlungen/webhook', zahlungenWebhookRouter);

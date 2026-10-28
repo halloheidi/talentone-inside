@@ -34,7 +34,7 @@ export default function JobBewerber() {
   // Bewerbungen in die von BewerberListe erwartete Form bringen.
   const bewerbungen = useMemo(() => {
     if (!data) return [];
-    const { bewerbungen: bs = [], notizen = {}, feedback = {}, werte = {}, kommentare = {} } = data;
+    const { bewerbungen: bs = [], notizen = {}, feedback = {}, werte = {}, kommentare = {}, gesellenwerk = {} } = data;
     return bs.map(b => ({
       ...b,
       notiz: notizen[b.id] || null,
@@ -42,6 +42,7 @@ export default function JobBewerber() {
       kommentare: kommentare[b.id] || [],
       vorqualifizierung_werte: notizen[b.id]?.vorqualifizierung_werte || {},
       spalten_werte: werte[b.id] || {},
+      gesellenwerk: gesellenwerk[b.id] || null,
     }));
   }, [data]);
 
@@ -66,6 +67,8 @@ export default function JobBewerber() {
     }
   }, [koIds]);
   const onKommentar = useCallback((bewId, text) => api(`/bewerbungen/${bewId}/kommentar`, { method: 'POST', body: { text, autor: autorName } }), [autorName]);
+  // Gesellenwerk-Vormerkung (nur intern): Grund/Notiz + Telefon-Einwilligung.
+  const onGesellenwerk = useCallback((bewId, body) => api(`/bewerbungen/${bewId}/gesellenwerk`, { method: 'POST', body }), []);
   const onSpalte = useCallback((bewId, spalteId, wert) => api(`/bewerbungen/${bewId}/spalten/${spalteId}`, { method: 'PUT', body: { wert } }), []);
   // Intern geschriebene Vorqual-Werte (nicht die Kundenwerte): in notiz.vorqualifizierung_werte mergen.
   const onVorqual = useCallback(async (bewId, feld, wert) => {
@@ -94,6 +97,7 @@ export default function JobBewerber() {
         job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
         akteBewId={akteBewId} onAkte={setAkteBewId}
         onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual}
+        onGesellenwerk={onGesellenwerk}
         onReload={load}
       />
     </div>
