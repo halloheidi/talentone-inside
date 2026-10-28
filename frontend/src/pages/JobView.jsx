@@ -428,6 +428,12 @@ const TABS = [
   { to: 'meta', label: 'Meta' },
 ];
 
+// Icons für die eingeklappte Stellen-Sidebar (<1100px nur Icon + Tooltip).
+const JOB_NAV_ICON = {
+  stelle: '📋', vertrag: '🤝', bewerber: '👥', creatives: '🎨',
+  'creatives-v2': '🎨', adcopies: '✍️', funnel: '🧭', export: '🚀', meta: '📣',
+};
+
 const STATUS_LABELS = {
   vorbereitung: 'Vorbereitung',
   kickoff_vereinbart: 'Kick-Off vereinbart',
@@ -840,15 +846,6 @@ export default function JobView() {
         <span>{job.stelle || 'Projekt'}</span>
       </div>
 
-      <div className="page-head">
-        <div>
-          <h1 className="page-title">{job.stelle || 'Unbenanntes Projekt'}</h1>
-          <p className="page-sub">
-            {[job.region, job.gehalt].filter(Boolean).join(' · ') || 'Noch keine Details hinterlegt.'}
-          </p>
-        </div>
-      </div>
-
       {/* Formular-Ausgefüllt-Hinweis — dezenter grüner Info-Banner wenn der
           Kunde den Job über das öffentliche Formular submitted hat. Zeitpunkt
           ist job.created_at (Insert erfolgt exakt beim submit). */}
@@ -871,30 +868,66 @@ export default function JobView() {
         </div>
       )}
 
-      {/* Arbeitshinweis + Status-Badge über allen Tabs */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
-        <div style={{ flex: 1 }}>
+      {/* Stellen-Layout: schmale Bereichs-Sidebar links (Kopf + Navigation),
+          Inhalt rechts in voller Restbreite. Unter ~1100px klappt die Sidebar
+          zu einer Icon-Leiste mit Tooltips (CSS). */}
+      <div className="job-layout">
+        <aside className="job-nav">
+          <div className="job-nav-head">
+            <div className="job-nav-title" title={job.stelle || 'Unbenanntes Projekt'}>{job.stelle || 'Unbenanntes Projekt'}</div>
+            {(job.region || job.gehalt) && (
+              <div className="job-nav-sub">{[job.region, job.gehalt].filter(Boolean).join(' · ')}</div>
+            )}
+            {projekt ? (
+              <div className="job-nav-badges">
+                <Link to="vertrag" style={{ textDecoration: 'none' }} title="Zu Vertrag & Status">
+                  <StatusBadge projekt={projekt} laufzeit={laufzeit} />
+                </Link>
+                <VertragsartPill projekt={projekt} />
+                {projekt.werbebudget_modus === 'empfehlung' && (
+                  <span title="Werbebudget nicht über TalentOne abgerechnet — Kunden-Zahlungsmittel im Werbekonto hinterlegen (kein Zahlungslink)."
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600 }}>
+                    💰 Budget: {projekt.tagesbudget_empfehlung ? `${projekt.tagesbudget_empfehlung} €/Tag, ` : ''}Kunde zahlt direkt
+                  </span>
+                )}
+                <ProjektGarantieInline projekt={projekt} fortschritt={job.garantie_fortschritt} />
+              </div>
+            ) : (
+              <div className="job-nav-badges"><UebertragenButton jobId={jobId} onCreated={setProjekt} /></div>
+            )}
+          </div>
+          <nav className="job-nav-list">
+            {sichtbareTabs.map(t => {
+              const done = tabStatus?.effective?.[t.to] === true;
+              const manuell = typeof tabStatus?.manual?.[t.to] === 'boolean';
+              const neu = t.to === 'bewerber' ? (tabStatus?.bewerber_neu || 0) : 0;
+              return (
+                <NavLink key={t.to} to={t.to} title={t.label}
+                  className={({ isActive }) => `job-nav-item ${isActive ? 'is-active' : ''}`}>
+                  <span className="job-nav-ico" aria-hidden>{JOB_NAV_ICON[t.to] || '•'}</span>
+                  <span className="job-nav-label">{t.label}</span>
+                  {neu > 0 && <span className="job-nav-neu" title={`${neu} neue Bewerber`}>{neu}</span>}
+                  {tabStatus && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className={`job-nav-dot ${done ? 'is-done' : ''} ${manuell ? 'is-manual' : ''}`}
+                      title={done
+                        ? `Erledigt${manuell ? ' (manuell)' : ' (automatisch erkannt)'} — Klick zum Zurücksetzen`
+                        : 'Als erledigt markieren'}
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); } }}
+                    >{done ? '✓' : '○'}</span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </nav>
+        </aside>
+
+        <div className="job-main">
+          {/* Arbeitshinweis — tab-übergreifend */}
           <ArbeitshinweiseInline job={job} onSaved={(updated) => setJob(updated)} />
-        </div>
-        {projekt && <ProjektGarantieInline projekt={projekt} fortschritt={job.garantie_fortschritt} />}
-        {projekt?.werbebudget_modus === 'empfehlung' && (
-          <span title="Werbebudget nicht über TalentOne abgerechnet — Kunden-Zahlungsmittel im Werbekonto hinterlegen (kein Zahlungslink)."
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0f9ff', color: '#075985', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: 100, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-            💰 Budget: {projekt.tagesbudget_empfehlung ? `${projekt.tagesbudget_empfehlung} €/Tag, ` : ''}Kunde zahlt direkt
-          </span>
-        )}
-        {projekt
-          ? (
-            <div style={{ paddingTop: 6, display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Link to="vertrag" style={{ textDecoration: 'none' }} title="Zu Vertrag & Status">
-                <StatusBadge projekt={projekt} laufzeit={laufzeit} />
-              </Link>
-              <VertragsartPill projekt={projekt} />
-            </div>
-          )
-          : <UebertragenButton jobId={jobId} onCreated={setProjekt} />
-        }
-      </div>
 
       {/* Operative Leiste: Werbekosten-Badge + Monatsbudget (Vertrag/Status → eigener Tab) */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -967,32 +1000,10 @@ export default function JobView() {
         </div>
       )}
 
-      <div className="tabs">
-        {sichtbareTabs.map(t => {
-          const done = tabStatus?.effective?.[t.to] === true;
-          const manuell = typeof tabStatus?.manual?.[t.to] === 'boolean';
-          return (
-            <NavLink key={t.to} to={t.to} className={({ isActive }) => `tab ${isActive ? 'is-active' : ''}`}>
-              {t.label}
-              {tabStatus && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className={`tab-check ${done ? 'is-done' : ''} ${manuell ? 'is-manual' : ''}`}
-                  title={done
-                    ? `Erledigt${manuell ? ' (manuell)' : ' (automatisch erkannt)'} — Klick zum Zurücksetzen`
-                    : 'Als erledigt markieren'}
-                  onClick={e => { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); }}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleTab(t.to); } }}
-                >{done ? '✓' : '○'}</span>
-              )}
-            </NavLink>
-          );
-        })}
-      </div>
-
-      <div className="tab-content">
-        <Outlet />
+          <div className="tab-content">
+            <Outlet />
+          </div>
+        </div>
       </div>
     </JobContext.Provider>
   );

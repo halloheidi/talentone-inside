@@ -7,11 +7,9 @@ import { callClaudeWithRetry, parseJsonContent } from '../claude.js';
 import { VORQUAL_STANDARD } from '../vorqualifizierung.js';
 import { attachStableAnhaenge } from '../anhaenge.js';
 import { personenGruppen } from '../dubletten.js';
+import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
 
 const router = Router();
-
-// Rang der abgeleiteten Bearbeitungsstufen (für Dubletten: die weiteste Stufe der Person gilt).
-const BEARB_RANK = { neu: 0, in_bearbeitung: 1, kontaktversuch: 2, vorqualifiziert: 3, vorgestellt: 4, vg: 5, eingestellt: 6 };
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -410,22 +408,6 @@ async function loadBewerbungenFuerJob(jobId) {
   const funnels = await ladeFunnels(bewerbungen);
 
   return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare };
-}
-
-// Serverseitige Bearbeitungs-Ableitung (identisch zur Frontend-Kaskade in BewerberListe).
-function deriveBearbeitung(n, feedbackStatus, hatKommentar) {
-  n = n || {};
-  const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a && a.datum) : [];
-  // Eingestellt = intern eingestellt='ja' ODER Kundenfeedback-Status 'eingestellt' (gleiche Bedingung wie der Garantie-Zähler).
-  if (n.eingestellt === 'ja' || feedbackStatus === 'eingestellt') return 'eingestellt';
-  if (n.vg_vereinbart_am || feedbackStatus === 'vorstellungsgespraech') return 'vg';
-  if (n.kunde_kontaktiert || (feedbackStatus && feedbackStatus !== 'neu')) return 'vorgestellt';
-  if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return 'vorqualifiziert';
-  if (av.length > 0) return 'kontaktversuch';
-  const ch = n.kriterien_check || {};
-  const hatCheck = Object.values(ch).some(v => v === true || v === false);
-  if (n.ampel || (n.notizen && String(n.notizen).trim()) || hatCheck || hatKommentar) return 'in_bearbeitung';
-  return 'neu';
 }
 
 // GET /api/bewerbungen/uebersicht — Kunden-/Stellen-Karten aus Bewerber-Sicht (live/pausiert).

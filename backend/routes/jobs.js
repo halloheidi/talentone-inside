@@ -13,7 +13,8 @@ import { computeAutoTabStatus, effectiveTabStatus } from '../tab-status.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 import { laufzeitStatus } from '../laufzeit.js';
 import { invalidateKanban } from '../kanban-cache.js';
-import { anzahlPersonen } from '../dubletten.js';
+import { anzahlPersonen, personenGruppen } from '../dubletten.js';
+import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
 
 const router = Router();
 
@@ -392,7 +393,32 @@ router.get('/:id/tab-status', async (req, res) => {
     hatEntwurfsversand,
   });
   const manual = job.tab_status && typeof job.tab_status === 'object' ? job.tab_status : {};
-  res.json({ auto, manual, effective: effectiveTabStatus(auto, manual) });
+
+  // „Neu"-Zähler für den Bewerber-Bereich: eindeutige Personen, deren weiteste
+  // Bearbeitungsstufe noch 'neu' ist (gleiche Ableitung wie die Bewerberliste).
+  let bewerberNeu = 0;
+  try {
+    const { data: bew = [] } = await supabase.from('talentone_bewerbungen')
+      .select('id, job_id, email, telefon').eq('job_id', jobId);
+    const bewIds = bew.map(b => b.id);
+    if (bewIds.length) {
+      const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }] = await Promise.all([
+        supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kommentare').select('bewerbung_id').in('bewerbung_id', bewIds),
+      ]);
+      const notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
+      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      const hatKomm = new Set((komm || []).map(k => k.bewerbung_id));
+      const keyVon = b => deriveBearbeitung(notizByBew[b.id] || {}, fbByBew[b.id] || null, hatKomm.has(b.id));
+      for (const gruppe of personenGruppen(bew)) {
+        const rang = Math.max(...gruppe.map(b => BEARB_RANK[keyVon(b)] ?? 0));
+        if (rang === BEARB_RANK.neu) bewerberNeu += 1;
+      }
+    }
+  } catch (e) { console.warn('[jobs] bewerber-neu:', e.message); }
+
+  res.json({ auto, manual, effective: effectiveTabStatus(auto, manual), bewerber_neu: bewerberNeu });
 });
 
 router.delete('/:id', async (req, res) => {
