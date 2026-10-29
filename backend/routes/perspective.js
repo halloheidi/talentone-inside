@@ -59,7 +59,7 @@ router.post('/create', async (req, res) => {
     // 2. Referenzbilder + fertige Creatives einsammeln (letzte 6, nicht-archivierte)
     const [{ data: refs = [] }, { data: creatives = [] }] = await Promise.all([
       supabase.from('talentone_referenzbilder').select('bild_url')
-        .eq('kunde_id', kunde.id).limit(6),
+        .eq('kunde_id', kunde.id).neq('kunde_freigabe', 'nein').limit(6),  // gesperrte Fotos nie an KI
       supabase.from('talentone_creatives').select('bild_url')
         .eq('job_id', job.id).neq('archiviert', true).eq('typ', 'bild').limit(6),
     ]);

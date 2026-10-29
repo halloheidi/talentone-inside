@@ -12,6 +12,7 @@ import TextPositionModal from '../../components/TextPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 import CreativeEditModal from '../../components/CreativeEditModal.jsx';
 import LayoutVorlageModal from '../../components/LayoutVorlageModal.jsx';
+import { FreigabeBadge, istGesperrt } from '../../components/FreigabeBadge.jsx';
 
 // Mini-Schema-Thumbnails der deterministischen Layout-Vorlagen (rein CSS, kein Asset).
 const LAYOUT_VORLAGEN_META = [
@@ -62,6 +63,7 @@ export default function JobCreatives() {
 
   // Personen-Referenzen (gemeinsame Liste für beide Modi)
   const [personen, setPersonen] = useState([]);
+  const [gesperrteZeigen, setGesperrteZeigen] = useState(false); // vom Kunden gesperrte Fotos einblenden
   const [personId, setPersonId] = useState(null);     // ausgewählte Person (Modus KI)
   const [fotoId, setFotoId] = useState(null);         // ausgewähltes Hintergrund-Foto (Modus Foto)
   const [verbessernFoto, setVerbessernFoto] = useState(null); // r-Objekt für Modal
@@ -394,6 +396,10 @@ export default function JobCreatives() {
   const aktivesBildUrl = aktivesBildId
     ? (personen.find(p => p.id === aktivesBildId)?.bild_url || null)
     : null;
+
+  // Vom Kunden gesperrte Fotos ('nein') im Picker standardmäßig ausblenden.
+  const gesperrteAnzahl = personen.filter(istGesperrt).length;
+  const sichtbarePersonen = gesperrteZeigen ? personen : personen.filter(p => !istGesperrt(p));
 
   useEffect(() => {
     // Beim ersten Mount für diesen Job Text-basierte Sprüche vorladen (ohne Bild)
@@ -924,6 +930,12 @@ export default function JobCreatives() {
             ? 'Foto auswählen: dient als abgedunkelter Hintergrund und (mit Freisteller) als freigestellte Person in der Vorlage.'
             : 'Die vom Kunden hochgeladenen Fotos. Im Overlay-Modus legst du das transparente Overlay in Canva über eines dieser Fotos.'}
         </p>
+        {gesperrteAnzahl > 0 && (
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ink-3)', margin: '0 0 12px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={gesperrteZeigen} onChange={e => setGesperrteZeigen(e.target.checked)} />
+            {gesperrteAnzahl} vom Kunden gesperrte{gesperrteAnzahl === 1 ? 's' : ''} Foto{gesperrteAnzahl === 1 ? '' : 's'} anzeigen
+          </label>
+        )}
 
         <div className="ref-grid">
           {mode === 'ki' && (
@@ -935,18 +947,21 @@ export default function JobCreatives() {
               <span>Ohne Person<br/><small>(KI generiert)</small></span>
             </button>
           )}
-          {personen.map((r, i) => {
+          {sichtbarePersonen.map((r, i) => {
             const selected = mode !== 'overlay' && aktiveAuswahlId === r.id;
             const istVerbessert = !!r.verbessert_von;
+            const gesperrt = istGesperrt(r);
             return (
               <button
                 key={r.id}
                 type="button"
                 className={`ref-card has-img ${selected ? 'is-active' : ''}`}
-                onClick={() => mode === 'overlay' ? setRefLightboxIndex(i) : (mode === 'ki' ? setPersonId(r.id) : setFotoId(r.id))}
-                title={r.beschreibung || 'Person'}
+                style={gesperrt ? { opacity: 0.6 } : undefined}
+                onClick={() => (mode === 'overlay' || gesperrt) ? setRefLightboxIndex(i) : (mode === 'ki' ? setPersonId(r.id) : setFotoId(r.id))}
+                title={gesperrt ? (r.kunde_kommentar ? `Vom Kunden gesperrt: ${r.kunde_kommentar}` : 'Vom Kunden gesperrt') : (r.beschreibung || 'Person')}
               >
                 <img src={r.bild_url} alt="" />
+                <FreigabeBadge r={r} />
                 <button
                   type="button"
                   className="ref-zoom"
@@ -964,7 +979,7 @@ export default function JobCreatives() {
                   title="Löschen"
                   onClick={e => { e.stopPropagation(); deletePerson(r.id); }}
                 >×</button>
-                {!istVerbessert && !kunde?.keine_ki_bilder && (
+                {!istVerbessert && !kunde?.keine_ki_bilder && !gesperrt && (
                   <button
                     type="button"
                     title="Foto mit KI verbessern (Qualität, Setting, Hintergrund, Perspektive)"
@@ -1469,10 +1484,10 @@ export default function JobCreatives() {
           />
         )}
 
-        {refLightboxIndex !== null && personen.length > 0 && (
+        {refLightboxIndex !== null && sichtbarePersonen.length > 0 && (
           <Lightbox
-            items={personen}
-            index={Math.max(0, Math.min(refLightboxIndex, personen.length - 1))}
+            items={sichtbarePersonen}
+            index={Math.max(0, Math.min(refLightboxIndex, sichtbarePersonen.length - 1))}
             onClose={() => setRefLightboxIndex(null)}
             onNavigate={setRefLightboxIndex}
             filenameFor={r => `referenzbild-${(r.beschreibung || r.id).toString().replace(/[^\w-]+/g, '-').slice(0, 40)}.png`}

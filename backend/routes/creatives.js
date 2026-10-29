@@ -313,7 +313,8 @@ router.post('/spruch-vorschlaege', async (req, res) => {
     let resolvedBildUrl = bild_url || null;
     if (!resolvedBildUrl && referenzbild_id) {
       const { data: ref } = await supabase
-        .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id).maybeSingle();
+        .from('talentone_referenzbilder').select('bild_url').eq('id', referenzbild_id)
+        .neq('kunde_freigabe', 'nein').maybeSingle();  // vom Kunden gesperrte Fotos nie an KI
       resolvedBildUrl = ref?.bild_url || null;
     }
 
@@ -386,7 +387,10 @@ router.post('/generate', async (req, res) => {
   const refRowId = mode === 'foto' ? foto_id : personenfoto_id;
   if (refRowId) {
     const { data: ref } = await supabase
-      .from('talentone_referenzbilder').select('bild_url, beschreibung').eq('id', refRowId).maybeSingle();
+      .from('talentone_referenzbilder').select('bild_url, beschreibung, kunde_freigabe').eq('id', refRowId).maybeSingle();
+    if (ref?.kunde_freigabe === 'nein') {  // vom Kunden gesperrtes Foto nie an KI übergeben
+      return res.status(403).json({ error: 'Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.' });
+    }
     if (ref?.bild_url) referenceImages.push({
       url: ref.bild_url, name: mode === 'foto' ? 'hintergrund' : 'person',
       isLogo: false, beschreibung: ref.beschreibung || null,
@@ -533,8 +537,9 @@ async function prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller 
   if (!job) { const e = new Error('Job nicht gefunden.'); e.status = 404; throw e; }
   const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
   const { data: ref } = await supabase.from('talentone_referenzbilder')
-    .select('id, kunde_id, bild_url, beschreibung').eq('id', foto_id).maybeSingle();
+    .select('id, kunde_id, bild_url, beschreibung, kunde_freigabe').eq('id', foto_id).maybeSingle();
   if (!ref?.bild_url) { const e = new Error('Foto nicht gefunden.'); e.status = 404; throw e; }
+  if (ref.kunde_freigabe === 'nein') { const e = new Error('Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.'); e.status = 403; throw e; }
 
   // Foto → data-URI
   const fotoBuf = (await fetchAsBuffer(ref.bild_url)).buffer;
@@ -714,7 +719,8 @@ router.get('/:id/text-bloecke', async (req, res) => {
   let baseBildUrl = null;
   if (kind === 'strikt') baseBildUrl = spec.base_url || c.bild_ohne_logo_url || c.bild_url;
   else {
-    const { data: ref } = await supabase.from('talentone_referenzbilder').select('bild_url').eq('id', spec.foto_id).maybeSingle();
+    const { data: ref } = await supabase.from('talentone_referenzbilder').select('bild_url').eq('id', spec.foto_id)
+      .neq('kunde_freigabe', 'nein').maybeSingle();  // gesperrte Fotos nicht neu einrendern
     baseBildUrl = ref?.bild_url || c.bild_url;
   }
 
@@ -793,7 +799,10 @@ router.post('/:id/regenerate', async (req, res) => {
     const refRowId = mode === 'foto' ? foto_id : personenfoto_id;
     if (refRowId) {
       const { data: ref } = await supabase
-        .from('talentone_referenzbilder').select('bild_url, beschreibung').eq('id', refRowId).maybeSingle();
+        .from('talentone_referenzbilder').select('bild_url, beschreibung, kunde_freigabe').eq('id', refRowId).maybeSingle();
+      if (ref?.kunde_freigabe === 'nein') {  // vom Kunden gesperrtes Foto nie an KI übergeben
+        return res.status(403).json({ error: 'Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.' });
+      }
       if (ref?.bild_url) referenceImages.push({
         url: ref.bild_url, name: mode === 'foto' ? 'hintergrund' : 'person',
         isLogo: false, beschreibung: ref.beschreibung || null,
@@ -1364,6 +1373,7 @@ router.post('/v2/szenen-komposition', async (req, res) => {
     const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
     const { data: foto } = await supabase.from('talentone_referenzbilder').select('*').eq('id', foto_id).maybeSingle();
     if (!foto?.bild_url) return res.status(404).json({ error: 'Foto nicht gefunden.' });
+    if (foto.kunde_freigabe === 'nein') return res.status(403).json({ error: 'Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.' });
     if (foto.ki_verarbeitung_erlaubt === false) return res.status(403).json({ error: 'Für dieses Foto ist KI-Verarbeitung gesperrt (nur lokale Verarbeitung erlaubt).' });
 
     // Erste Nutzung pro Kunde: Bestätigung „Kunde ist informiert".

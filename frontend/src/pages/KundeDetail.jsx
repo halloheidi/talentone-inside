@@ -17,6 +17,7 @@ import StandaloneAdBudgetModal from '../components/StandaloneAdBudgetModal.jsx';
 import AnredeAbfrage from '../components/AnredeAbfrage.jsx';
 import AvvAnfrageModal from '../components/AvvAnfrageModal.jsx';
 import { anredeLabel, anredeOffen } from '../lib/anrede.js';
+import { FreigabeBadge, istGesperrt, zaehleUnsicher } from '../components/FreigabeBadge.jsx';
 import InvoicesSection, { SendInvoiceMailModal } from '../components/InvoicesSection.jsx';
 import { ItemBadge } from '../components/NaechsterSchrittBadge.jsx';
 import { SendOfferModal, SendOrderModal, BillingModal, DeclineModal, PHASE_META } from './OffersList.jsx';
@@ -1093,7 +1094,10 @@ export default function KundeDetail() {
         <div className="ref-strip" id="referenzbilder">
           <div className="ref-strip-title">
             {referenzbilder.length > 0
-              ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)</>
+              ? <>Referenzbilder: {referenzbilder.length} Datei{referenzbilder.length === 1 ? '' : 'en'} ({referenzbilder.filter(r => r.uploaded_via === 'kunde').length} vom Kunden)
+                  {referenzbilder.filter(istGesperrt).length > 0 && <span style={{ color: '#b91c1c', fontWeight: 600 }}> · {referenzbilder.filter(istGesperrt).length} gesperrt</span>}
+                  {zaehleUnsicher(referenzbilder) > 0 && <span style={{ color: '#b45309', fontWeight: 600 }}> · {zaehleUnsicher(referenzbilder)} zur Klärung</span>}
+                </>
               : <>Noch keine Referenzbilder hinterlegt.</>}
           </div>
           <div className="ref-strip-grid">
@@ -1108,6 +1112,7 @@ export default function KundeDetail() {
                   <img src={r.bild_url} alt="" />
                 </button>
                 {r.typ === 'logo' && <span className="ref-strip-badge">Logo</span>}
+                <FreigabeBadge r={r} />
                 <button
                   type="button"
                   className="ref-strip-del"

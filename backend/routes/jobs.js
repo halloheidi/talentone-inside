@@ -695,6 +695,13 @@ router.post('/:id/send-pruefung', async (req, res) => {
     }
     const pruefungUrl = `${getPublicBaseUrl(kunde.agentur)}/pruefung/${token}`;
 
+    // Foto-Durchsicht: jede (Re-)Prüfung ist eine neue Durchsicht — bereits geprüfte
+    // Freigaben zurücksetzen (auch früher bestätigte), damit der Kunde sie neu bewertet.
+    const { data: resetRows } = await supabase.from('talentone_referenzbilder')
+      .update({ kunde_freigabe: null, kunde_kommentar: null, kunde_geprueft_am: null })
+      .eq('kunde_id', kunde.id).select('id');
+    const fotosPruefen = (resetRows?.length || 0) > 0;
+
     // Kombinierter Versand: optional Logo/Foto-Upload-Link in DERSELBEN Mail mitschicken
     // (statt zwei getrennter Mails). Braucht den upload_token des Kunden.
     const umfang = ['beides', 'logo', 'fotos'].includes(umfangReq) ? umfangReq : 'beides';
@@ -709,7 +716,7 @@ router.post('/:id/send-pruefung', async (req, res) => {
     }
 
     const { sendDatenPruefungMail } = await import('../mail.js');
-    await sendDatenPruefungMail({ to: empfaenger, betreff, customText, kunde, job, pruefungUrl, uploadUrl, umfang });
+    await sendDatenPruefungMail({ to: empfaenger, betreff, customText, kunde, job, pruefungUrl, uploadUrl, umfang, fotosPruefen });
 
     await supabase.from('talentone_versand').insert({
       job_id: job.id,

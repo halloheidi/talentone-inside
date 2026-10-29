@@ -9,6 +9,7 @@ import CropModal from '../../components/CropModal.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
 import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
+import { istGesperrt } from '../../components/FreigabeBadge.jsx';
 
 const TYPE_META = {
   intro:    { label: 'Startseite',  icon: '👋', removable: false },
@@ -126,6 +127,7 @@ export default function JobFunnel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [referenzen, setReferenzen] = useState([]);
+  const [gesperrteZeigen, setGesperrteZeigen] = useState(false); // vom Kunden gesperrte Fotos einblenden
   const [generatedImages, setGeneratedImages] = useState([]);
   const [genBusy, setGenBusy] = useState(false);
   const [initBusy, setInitBusy] = useState(false);
@@ -474,9 +476,11 @@ export default function JobFunnel() {
   const funnelUrl = externAktiv && externUrl.trim() ? externUrl.trim() : internalUrl;
   const previewFunnel = { ...funnel, screens, conversion_ziel: conversionZiel };
 
+  const gesperrteRefAnzahl = referenzen.filter(istGesperrt).length;
+  const sichtbareReferenzen = gesperrteZeigen ? referenzen : referenzen.filter(r => !istGesperrt(r));
   const allImages = [
     ...generatedImages.map(g => ({ id: `g-${g.ts}`, bild_url: g.url, source: 'KI' })),
-    ...referenzen.map(r => ({ id: r.id, bild_url: r.bild_url, source: r.uploaded_via === 'kunde' ? 'Kunde' : 'Mitarbeiter' })),
+    ...sichtbareReferenzen.map(r => ({ id: r.id, bild_url: r.bild_url, source: r.uploaded_via === 'kunde' ? 'Kunde' : 'Mitarbeiter', gesperrt: istGesperrt(r), kommentar: r.kunde_kommentar || null })),
   ];
 
   return (
@@ -779,14 +783,23 @@ export default function JobFunnel() {
         }
       >
         <p className="pane-hint">KI-generiertes Stimmungsbild zur Stelle (kein Text-Overlay) oder vorhandenes Personenfoto verwenden.</p>
+        {gesperrteRefAnzahl > 0 && (
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ink-3)', margin: '0 0 10px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={gesperrteZeigen} onChange={e => setGesperrteZeigen(e.target.checked)} />
+            {gesperrteRefAnzahl} vom Kunden gesperrte{gesperrteRefAnzahl === 1 ? 's' : ''} Foto{gesperrteRefAnzahl === 1 ? '' : 's'} anzeigen
+          </label>
+        )}
         {allImages.length === 0 && (
           <div className="funnel-img-empty">Noch keine Bilder verfügbar — generiere eins über die Buttons unten.</div>
         )}
         <div className="funnel-img-grid">
           {allImages.map(img => (
-            <button key={img.id} type="button" className="funnel-img-card" onClick={() => pickImage(img.bild_url)}>
-              <img src={img.bild_url} alt="" />
-              <div className="funnel-img-source">{img.source}</div>
+            <button key={img.id} type="button" className="funnel-img-card" disabled={img.gesperrt}
+              style={img.gesperrt ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
+              title={img.gesperrt ? (img.kommentar ? `Vom Kunden gesperrt: ${img.kommentar}` : 'Vom Kunden gesperrt') : undefined}
+              onClick={() => { if (!img.gesperrt) pickImage(img.bild_url); }}>
+              <img src={img.bild_url} alt="" style={{ position: 'relative' }} />
+              <div className="funnel-img-source">{img.gesperrt ? 'gesperrt' : img.source}</div>
             </button>
           ))}
         </div>

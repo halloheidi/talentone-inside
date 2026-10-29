@@ -95,6 +95,9 @@ export async function generateVerbesserung({ referenzbildId, optionen, hintergru
   const { data: original, error: eGet } = await supabase.from('talentone_referenzbilder')
     .select('*').eq('id', referenzbildId).maybeSingle();
   if (eGet || !original) throw new Error('Referenzbild nicht gefunden.');
+  if (original.kunde_freigabe === 'nein') {  // vom Kunden gesperrtes Foto nie an KI übergeben
+    throw new Error('Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.');
+  }
   if (original.verbessert_von) {
     // Man kann auch verbesserte Versionen erneut verbessern (Kette),
     // aber der Prompt basiert dann auf der letzten Version.

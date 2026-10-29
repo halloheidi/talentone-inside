@@ -152,6 +152,10 @@ export default function PublicFormular({ variant = 'formular' }) {
   const [avv, setAvv] = useState(null);
   const [avvChecked, setAvvChecked] = useState(false);
   const [avvName, setAvvName] = useState('');
+  // Foto-Durchsicht (nur Prüfung): vorhandene Referenzbilder + Kunden-Freigabe.
+  const [referenzbilder, setReferenzbilder] = useState([]); // [{id, bild_url, typ, beschreibung, freigabe, kommentar}]
+  const [pruefungFotoBusy, setPruefungFotoBusy] = useState(false);
+  const pruefungFotosInputRef = useRef(null);
 
   useEffect(() => { loadMetaPixel(META_PIXEL_ID); }, []);
 
@@ -162,6 +166,7 @@ export default function PublicFormular({ variant = 'formular' }) {
         .then(res => {
           setInfo(res.kunde);
           setAvv(res.avv || null);
+          setReferenzbilder(Array.isArray(res.referenzbilder) ? res.referenzbilder : []);
           setProjekttyp(res.job?.projekttyp || 'mitarbeitergewinnung');
           const j = res.job || {};
           setNeukundenDaten(j.neukunden_daten || {});
@@ -352,6 +357,33 @@ export default function PublicFormular({ variant = 'formular' }) {
     setFotoBusy(false);
   }
 
+  /* ───── Foto-Durchsicht (Prüfung): Freigabe/Kommentar je Bild + Neu-Upload ───── */
+  function setFotoFreigabe(id, freigabe) {
+    setReferenzbilder(prev => prev.map(r => r.id === id ? { ...r, freigabe } : r));
+  }
+  function setFotoKommentar(id, kommentar) {
+    setReferenzbilder(prev => prev.map(r => r.id === id ? { ...r, kommentar } : r));
+  }
+  async function onPruefungFotosChange(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setPruefungFotoBusy(true);
+    for (const file of files) {
+      try {
+        const fileData = await fileToBase64(file);
+        const res = await publicApi(`/pruefung/${token}/foto`, {
+          method: 'POST',
+          body: { fileData, fileName: file.name, contentType: file.type || 'image/jpeg' },
+        });
+        if (res.referenzbild) setReferenzbilder(prev => [res.referenzbild, ...prev]);
+      } catch (err) {
+        alert(`Foto "${file.name}" fehlgeschlagen: ${err.message}`);
+      }
+    }
+    setPruefungFotoBusy(false);
+  }
+
   /* ───── Submit ───── */
   async function onSubmit(e) {
     e.preventDefault();
@@ -406,6 +438,7 @@ export default function PublicFormular({ variant = 'formular' }) {
             formdata: form,
             avv_akzeptiert: !!avvChecked,
             avv_name: avvName.trim() || undefined,
+            fotos: referenzbilder.map(r => ({ id: r.id, freigabe: r.freigabe || 'ja', kommentar: (r.kommentar || '').trim() || null })),
           },
         });
         setDone(true);
@@ -718,6 +751,52 @@ export default function PublicFormular({ variant = 'formular' }) {
                 </div>
               )}
             </div>
+          </fieldset>
+          )}
+
+          {/* ───── Deine Fotos (nur Prüfung, wenn Referenzbilder existieren) ───── */}
+          {istPruefung && referenzbilder.length > 0 && (
+          <fieldset className="formular-section">
+            <legend>{t(info, 'Deine Fotos', 'Ihre Fotos')}</legend>
+            <p className="upload-block-hint" style={{ marginTop: 0, marginBottom: 14 }}>
+              {t(info,
+                'Das sind die Fotos, die uns vorliegen. Bitte markiere, was wir weiter verwenden dürfen — und was nicht mehr (z. B. „Kollege nicht mehr im Betrieb", „altes Logo").',
+                'Das sind die Fotos, die uns vorliegen. Bitte markieren Sie, was wir weiter verwenden dürfen — und was nicht mehr (z. B. „Kollege nicht mehr im Betrieb", „altes Logo").')}
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14 }}>
+              {referenzbilder.map(r => {
+                const wert = r.freigabe || 'ja';
+                const farbe = wert === 'nein' ? '#b91c1c' : wert === 'unsicher' ? '#b45309' : '#166534';
+                return (
+                  <div key={r.id} style={{ border: `1.5px solid ${wert === 'ja' ? 'var(--line)' : farbe}`, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                    <div style={{ position: 'relative', aspectRatio: '1 / 1', background: '#f4f3f1' }}>
+                      <img src={r.bild_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: wert === 'nein' ? 0.55 : 1 }} />
+                      {r.typ === 'logo' && <span style={{ position: 'absolute', top: 6, left: 6, background: '#0a0a0a', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 5, textTransform: 'uppercase' }}>Logo</span>}
+                    </div>
+                    <div style={{ padding: '10px 10px 12px' }}>
+                      {r.beschreibung && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.beschreibung}>{r.beschreibung}</div>}
+                      <div style={{ display: 'grid', gap: 5 }}>
+                        {[['ja', t(info, 'Weiter verwenden', 'Weiter verwenden')], ['nein', t(info, 'Nicht mehr verwenden', 'Nicht mehr verwenden')], ['unsicher', t(info, 'Unsicher', 'Unsicher')]].map(([val, label]) => (
+                          <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, cursor: 'pointer', color: wert === val ? farbe : 'var(--ink-2)', fontWeight: wert === val ? 700 : 400 }}>
+                            <input type="radio" name={`foto-${r.id}`} checked={wert === val} onChange={() => setFotoFreigabe(r.id, val)} />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {wert !== 'ja' && (
+                        <input type="text" value={r.kommentar || ''} onChange={e => setFotoKommentar(r.id, e.target.value)}
+                          placeholder={t(info, 'Kommentar (optional)', 'Kommentar (optional)')}
+                          style={{ marginTop: 8, width: '100%', padding: '6px 9px', border: '1px solid var(--line)', borderRadius: 7, fontSize: 12.5, boxSizing: 'border-box' }} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <input ref={pruefungFotosInputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple style={{ display: 'none' }} onChange={onPruefungFotosChange} />
+            <button type="button" className="btn-ghost btn-sm" style={{ marginTop: 14 }} disabled={pruefungFotoBusy} onClick={() => pruefungFotosInputRef.current?.click()}>
+              {pruefungFotoBusy ? 'Lade hoch…' : '+ Neue Fotos hochladen'}
+            </button>
           </fieldset>
           )}
 

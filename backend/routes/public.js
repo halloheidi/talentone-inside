@@ -766,7 +766,24 @@ router.get('/pruefung/:token', async (req, res) => {
     ? (avvAnnahme?.pdf_url || (await getPersonalizedAvvPdf(kunde.id)).url || avvVersion?.pdf_url || null)
     : null;
 
+  // Foto-Durchsicht: vorhandene Referenzbilder des Kunden (Kundenakte + Stellen)
+  // zur Freigabe anzeigen. Reihenfolge: Fotos vor Logos, neueste zuerst.
+  let referenzbilder = [];
+  if (kunde) {
+    const { data: refs } = await supabase.from('talentone_referenzbilder')
+      .select('id, bild_url, typ, label, beschreibung, kunde_freigabe, kunde_kommentar')
+      .eq('kunde_id', kunde.id)
+      .order('created_at', { ascending: false });
+    referenzbilder = (refs || []).map(r => ({
+      id: r.id, bild_url: r.bild_url, typ: r.typ,
+      beschreibung: r.beschreibung || r.label || null,
+      freigabe: r.kunde_freigabe || null,
+      kommentar: r.kunde_kommentar || null,
+    }));
+  }
+
   res.json({
+    referenzbilder,
     job: {
       id: job.id, stelle: job.stelle, region: job.region, gehalt: job.gehalt,
       benefits: Array.isArray(job.benefits) ? job.benefits : [],
@@ -789,7 +806,7 @@ router.get('/pruefung/:token', async (req, res) => {
 
 // POST /api/public/pruefung/:token — Änderungen direkt in den Job übernehmen.
 router.post('/pruefung/:token', async (req, res) => {
-  const { kunde: kundePatch = {}, job: jobPatch = {}, formdata = {}, neukunden_daten, avv_akzeptiert, avv_name } = req.body || {};
+  const { kunde: kundePatch = {}, job: jobPatch = {}, formdata = {}, neukunden_daten, avv_akzeptiert, avv_name, fotos } = req.body || {};
   const { data: job } = await supabase.from('talentone_jobs')
     .select('*').eq('pruefung_token', req.params.token).maybeSingle();
   if (!job) return res.status(404).json({ error: 'Link ungültig.' });
@@ -861,6 +878,36 @@ router.post('/pruefung/:token', async (req, res) => {
   }
   if (Object.keys(kUpd).length && kunde?.id) await supabase.from('talentone_kunden').update(kUpd).eq('id', kunde.id);
 
+  // Foto-Durchsicht: Freigaben je Referenzbild speichern (nur Bilder dieses Kunden).
+  // Nichts wird gelöscht; 'nein' sperrt das Bild für KI/Picker, 'unsicher' bleibt nutzbar.
+  let fotoZusammenfassung = null;
+  if (Array.isArray(fotos) && fotos.length && kunde?.id) {
+    const { data: ownRefs } = await supabase.from('talentone_referenzbilder')
+      .select('id, beschreibung, label').eq('kunde_id', kunde.id);
+    const ownMap = new Map((ownRefs || []).map(r => [r.id, r]));
+    const jetzt = new Date().toISOString();
+    let geprueft = 0, gesperrt = 0, unsicher = 0;
+    const kommentarLines = [];
+    for (const f of fotos) {
+      if (!f || !ownMap.has(f.id)) continue;  // nur eigene Bilder berücksichtigen
+      const frei = ['ja', 'nein', 'unsicher'].includes(f.freigabe) ? f.freigabe : 'ja';
+      const kommentar = (f.kommentar || '').toString().trim() || null;
+      await supabase.from('talentone_referenzbilder')
+        .update({ kunde_freigabe: frei, kunde_kommentar: kommentar, kunde_geprueft_am: jetzt })
+        .eq('id', f.id).eq('kunde_id', kunde.id);
+      geprueft++;
+      if (frei === 'nein') gesperrt++; else if (frei === 'unsicher') unsicher++;
+      if (kommentar && frei !== 'ja') {
+        const name = ownMap.get(f.id)?.beschreibung || ownMap.get(f.id)?.label || 'Foto';
+        kommentarLines.push(`„${name}" (${frei === 'nein' ? 'gesperrt' : 'unsicher'}): ${kommentar}`);
+      }
+    }
+    if (geprueft) {
+      fotoZusammenfassung = `📷 Fotos: ${geprueft} geprüft · ${gesperrt} gesperrt · ${unsicher} unsicher`
+        + (kommentarLines.length ? `\n${kommentarLines.map(l => `   – ${l}`).join('\n')}` : '');
+    }
+  }
+
   res.json({ ok: true, creatives_warnung: creativesVorhanden });
 
   // Hintergrund: Diff-Kommentar am Projekt + interne Team-Mail (best-effort).
@@ -869,6 +916,7 @@ router.post('/pruefung/:token', async (req, res) => {
       const projekt = await findProjektForJob(job, kunde);
       const diffText = diff.length ? diff.map(l => `• ${l}`).join('\n')
         : '(keine inhaltlichen Änderungen — Kunde hat die Angaben bestätigt)';
+      const diffFull = [diffText, fotoZusammenfassung].filter(Boolean).join('\n\n');
       const warnLine = creativesVorhanden
         ? '\n\n⚠️ Es existieren bereits Creatives/Ad Copies — bitte prüfen, ob sie noch zu den geänderten Daten passen.'
         : '';
@@ -876,21 +924,51 @@ router.post('/pruefung/:token', async (req, res) => {
         await supabase.from('talentone_kommentare').insert({
           projekt_id: projekt.id,
           autor: 'Kunde (Daten-Prüfung)',
-          text: `📋 Kunde hat die Stellendaten geprüft/ergänzt:\n\n${diffText}${warnLine}`,
+          text: `📋 Kunde hat die Stellendaten geprüft/ergänzt:\n\n${diffFull}${warnLine}`,
           quelle: 'pruefung',
           erwaehnungen: projekt.verantwortlich ? [projekt.verantwortlich] : [],
         });
       }
       const insideBase = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
       await sendTeamAlertMail({
-        subject: `📋 ${kunde?.firmenname || 'Kunde'} hat die Stellendaten geprüft${creativesVorhanden ? ' — ⚠️ Creatives prüfen' : ''}`,
+        subject: `📋 ${kunde?.firmenname || 'Kunde'} hat die Stellendaten geprüft${fotoZusammenfassung ? ' + Fotos' : ''}${creativesVorhanden ? ' — ⚠️ Creatives prüfen' : ''}`,
         headline: 'Kunde hat die Daten-Prüfung abgeschlossen',
-        lead: `${kunde?.firmenname || 'Kunde'} · ${newJobVals.stelle || 'Stelle'}\n\n${diffText}${warnLine}`,
+        lead: `${kunde?.firmenname || 'Kunde'} · ${newJobVals.stelle || 'Stelle'}\n\n${diffFull}${warnLine}`,
         linkUrl: `${insideBase}/kunden/${job.kunde_id}/jobs/${job.id}/stelle`,
         linkLabel: 'Zum Stelle-Tab',
       });
     } catch (err) { console.warn('[pruefung-sync]', err.message); }
   })().catch(err => console.error('[pruefung-sync-uncaught]', err.message));
+});
+
+// POST /api/public/pruefung/:token/foto — neue Fotos während der Durchsicht hochladen.
+// Nutzt den job-eigenen pruefung_token (anders als /formular/:token/foto, das am
+// Kunden-Formular-Token hängt). Neue Bilder sind ungeprüft (kunde_freigabe = NULL).
+router.post('/pruefung/:token/foto', async (req, res) => {
+  const { data: job } = await supabase.from('talentone_jobs')
+    .select('id, kunde_id').eq('pruefung_token', req.params.token).maybeSingle();
+  if (!job) return res.status(404).json({ error: 'Link ungültig.' });
+
+  const { fileData, fileName = 'foto.jpg', contentType = 'image/jpeg', beschreibung } = req.body || {};
+  if (!fileData) return res.status(400).json({ error: 'fileData fehlt.' });
+
+  try {
+    const roh = Buffer.from(fileData, 'base64');
+    const norm = await normalizeImageForStorage(roh, { kind: 'foto', label: fileName });
+    const stem = safeFilenameStem(fileName);
+    const path = `${job.kunde_id}/${Date.now()}-${stem}.${norm.ext}`;
+    const publicUrl = await uploadBuffer({ bucket: 'talentone-referenzbilder', path, buffer: norm.buffer, contentType: norm.contentType });
+    const { data: row, error: insErr } = await supabase
+      .from('talentone_referenzbilder').insert({
+        kunde_id: job.kunde_id, bild_url: publicUrl, typ: 'foto',
+        beschreibung: beschreibung || null, uploaded_via: 'kunde',
+      }).select('id, bild_url, typ, beschreibung, kunde_freigabe, kunde_kommentar').single();
+    if (insErr) return res.status(500).json({ error: insErr.message });
+    res.status(201).json({ referenzbild: { ...row, freigabe: row.kunde_freigabe || null, kommentar: row.kunde_kommentar || null } });
+  } catch (err) {
+    console.error('[pruefung/foto]', err.message);
+    res.status(400).json({ error: err.userMessage || err.message });
+  }
 });
 
 /* ════════════════ Zufriedenheits-Feedback (feedback_token) ════════════════

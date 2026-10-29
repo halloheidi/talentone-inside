@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api.js';
+import { FreigabeBadge, istGesperrt } from '../../components/FreigabeBadge.jsx';
 
 // Creative-Wizard V2 (Test, paralleler Reiter). Reine VERDRAHTUNG der bestehenden
 // Render-Pfade (keine neue Render-Logik):
@@ -45,6 +46,7 @@ export default function JobCreativesV2() {
   const [verbessernBusy, setVerbessernBusy] = useState(false);
   const [formate, setFormate] = useState({ quadrat: true, feed: false, story: false });
   const [freisteller, setFreisteller] = useState(true);
+  const [gesperrteZeigen, setGesperrteZeigen] = useState(false); // vom Kunden gesperrte Fotos einblenden
 
   const [rendering, setRendering] = useState(false);
   const [msg, setMsg] = useState('');
@@ -63,14 +65,20 @@ export default function JobCreativesV2() {
     api(`/creatives?job_id=${job.id}`).then(r => setResults((r.creatives || []).slice(0, 12))).catch(() => {});
   }
 
-  // ── Bildlage-Diagnose ──
+  // Vom Kunden gesperrte Fotos ('nein') zählen nicht als nutzbares Material und
+  // sind im Picker standardmäßig ausgeblendet.
+  const nutzbareFotos = useMemo(() => fotos.filter(f => !istGesperrt(f)), [fotos]);
+  const gesperrteAnzahl = fotos.length - nutzbareFotos.length;
+  const pickerFotos = gesperrteZeigen ? fotos : nutzbareFotos;
+
+  // ── Bildlage-Diagnose (nur nutzbare Fotos) ──
   const diagnose = useMemo(() => {
-    const n = fotos.length;
-    const personen = fotos.filter(f => f.hat_person === true).length;
+    const n = nutzbareFotos.length;
+    const personen = nutzbareFotos.filter(f => f.hat_person === true).length;
     if (n === 0) return { badge: 'keine Fotos', farbe: '#991b1b', bg: '#fee2e2', empfehlung: 'ki_motiv', grund: 'Keine Fotos in der Akte — komplett neues KI-Bild. Tipp: Kundenfotos anfragen (echtes Material wirkt glaubwürdiger).' };
     if (personen > 0) return { badge: 'Material gut', farbe: '#166534', bg: '#dcfce7', empfehlung: 'eigenes_foto', grund: `${personen} Foto(s) mit Personen — echtes Kundenfoto bevorzugen (wirkt am glaubwürdigsten).` };
     return { badge: 'nur Umgebung', farbe: '#92400e', bg: '#fef3c7', empfehlung: 'eigenes_foto', grund: `${n} Foto(s), aber ohne markierte Personen — eigenes Foto nutzen und im nächsten Schritt „Szene mit Personen beleben".` };
-  }, [fotos]);
+  }, [nutzbareFotos]);
 
   // Empfohlenen Pfad vorwählen (frei änderbar)
   useEffect(() => { if (!bildquelle && fotos !== null) setBildquelle(diagnose.empfehlung); /* eslint-disable-next-line */ }, [diagnose.empfehlung]);
@@ -236,9 +244,15 @@ export default function JobCreativesV2() {
           {bildquelle === 'eigenes_foto' && (
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Foto wählen & Einwilligung prüfen:</div>
-              {fotos.length === 0 ? <p className="pane-hint">Keine Fotos in der Akte.</p> : (
+              {gesperrteAnzahl > 0 && (
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={gesperrteZeigen} onChange={e => setGesperrteZeigen(e.target.checked)} />
+                  {gesperrteAnzahl} vom Kunden gesperrte{gesperrteAnzahl === 1 ? 's' : ''} Foto{gesperrteAnzahl === 1 ? '' : 's'} anzeigen
+                </label>
+              )}
+              {pickerFotos.length === 0 ? <p className="pane-hint">Keine Fotos in der Akte.</p> : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 10 }}>
-                  {fotos.map(f => <FotoKachel key={f.id} foto={f} selected={fotoId === f.id} onSelect={() => setFotoId(f.id)} onFlag={(patch) => patchFoto(f.id, patch, setFotos)} />)}
+                  {pickerFotos.map(f => <FotoKachel key={f.id} foto={f} selected={fotoId === f.id} onSelect={() => { if (!istGesperrt(f)) setFotoId(f.id); }} onFlag={(patch) => patchFoto(f.id, patch, setFotos)} />)}
                 </div>
               )}
             </div>
@@ -409,12 +423,15 @@ function FotoKachel({ foto, selected, onSelect, onFlag }) {
   const [lowRes, setLowRes] = useState(false);
   const wf = foto.werbefreigabe || 'ungeklaert';
   const wfMeta = { ja: { l: '✓ Werbefreigabe', c: '#166534', b: '#dcfce7' }, nein: { l: '✗ keine Freigabe', c: '#991b1b', b: '#fee2e2' }, ungeklaert: { l: '? Freigabe ungeklärt', c: '#92400e', b: '#fef3c7' } }[wf];
+  const gesperrt = istGesperrt(foto);
   return (
-    <div style={{ border: selected ? '2px solid #1b3f80' : '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-      <button type="button" onClick={onSelect} style={{ display: 'block', width: '100%', border: 'none', padding: 0, cursor: 'pointer', background: 'transparent' }}>
-        <img src={foto.bild_url} alt="" onLoad={e => { const w = e.target.naturalWidth, h = e.target.naturalHeight; if (w && h && Math.min(w, h) < 1200) setLowRes(true); }} style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
+    <div style={{ border: selected ? '2px solid #1b3f80' : `1px solid ${gesperrt ? '#b91c1c' : 'var(--line)'}`, borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+      <button type="button" onClick={onSelect} disabled={gesperrt} style={{ position: 'relative', display: 'block', width: '100%', border: 'none', padding: 0, cursor: gesperrt ? 'not-allowed' : 'pointer', background: 'transparent' }}>
+        <img src={foto.bild_url} alt="" onLoad={e => { const w = e.target.naturalWidth, h = e.target.naturalHeight; if (w && h && Math.min(w, h) < 1200) setLowRes(true); }} style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block', opacity: gesperrt ? 0.55 : 1 }} />
+        <FreigabeBadge r={foto} />
       </button>
       <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {gesperrt && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#991b1b', background: '#fee2e2', borderRadius: 5, padding: '2px 6px', alignSelf: 'flex-start' }} title={foto.kunde_kommentar || ''}>✗ vom Kunden gesperrt</span>}
         <span style={{ fontSize: 10.5, fontWeight: 700, color: wfMeta.c, background: wfMeta.b, borderRadius: 5, padding: '2px 6px', alignSelf: 'flex-start' }}>{wfMeta.l}</span>
         {lowRes && <span style={{ fontSize: 10, fontWeight: 600, color: '#92400e', background: '#fef3c7', borderRadius: 5, padding: '2px 6px', alignSelf: 'flex-start', lineHeight: 1.3 }} title="Veredelung (Upscale) folgt">⚠ Niedrige Auflösung — Veredelung (Upscale) folgt; aktuell über Johannes anfragen</span>}
         <select className="cell-input" style={{ fontSize: 11 }} value={wf} onChange={e => onFlag({ werbefreigabe: e.target.value })}>
