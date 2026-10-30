@@ -119,12 +119,19 @@ export function normalizeEntwurf(parsed) {
   const positionenRaw = Array.isArray(p.positionen) ? p.positionen : [];
   const offene = new Set((Array.isArray(p.offene_punkte) ? p.offene_punkte : []).map(x => String(x || '').trim()).filter(Boolean));
 
+  const offeneHatTitel = (titel) => {
+    const t = titel.toLowerCase();
+    for (const o of offene) if (o.toLowerCase().includes(t)) return true;
+    return false;
+  };
   const positionen = positionenRaw.map((l) => {
     const titel = String(l?.titel || l?.title || '').trim();
     const preis = l?.einzelpreis_netto === null || l?.einzelpreis_netto === undefined || l?.einzelpreis_netto === ''
       ? null
       : coerceNummer(l.einzelpreis_netto);
-    if (preis === null && titel) offene.add(`Preis für „${titel}" fehlt`);
+    // Fehlender Preis = offener Punkt — aber nur, wenn die KI ihn nicht ohnehin
+    // schon (anders formuliert) genannt hat.
+    if (preis === null && titel && !offeneHatTitel(titel)) offene.add(`Preis für „${titel}" fehlt`);
     const kat = POSITION_KATEGORIEN.has(l?.kategorie) ? l.kategorie : 'setup';
     return {
       titel,
@@ -169,7 +176,8 @@ export function normalizeEntwurf(parsed) {
 export async function generateOfferDraft({ brand, kunde, kontext = {}, closeEintraege = [], freitext = '', bausteine = [] } = {}) {
   const anredeHinweis = anredePromptHinweis(kunde || kontext?.kunde || {});
   const system = SYSTEM_LEITPLANKEN(brandLabel(brand), anredeHinweis);
-  const user = `Erstelle einen Angebots-Entwurf auf Basis des folgenden Kontexts.\n\n${renderKontext({ kontext, closeEintraege, freitext, bausteine })}`;
+  const heute = new Date().toISOString().slice(0, 10);
+  const user = `Heutiges Datum: ${heute}. Verwende nur Daten (gueltig_bis, Startdatum) in der Zukunft, ausgehend von heute.\n\nErstelle einen Angebots-Entwurf auf Basis des folgenden Kontexts.\n\n${renderKontext({ kontext, closeEintraege, freitext, bausteine })}`;
 
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
@@ -187,7 +195,8 @@ export async function generateOfferDraft({ brand, kunde, kontext = {}, closeEint
 export async function refineOfferDraft({ brand, kunde, kontext = {}, entwurf, anweisung = '' } = {}) {
   const anredeHinweis = anredePromptHinweis(kunde || kontext?.kunde || {});
   const system = SYSTEM_LEITPLANKEN(brandLabel(brand), anredeHinweis);
-  const user = `Hier ist der aktuelle Angebots-Entwurf als JSON:\n\n${JSON.stringify(entwurf || {}, null, 2)}\n\nÄndere AUSSCHLIESSLICH das Folgende und lass alles andere unverändert:\n"${String(anweisung || '').trim()}"\n\nGib den vollständigen, überarbeiteten Entwurf im selben JSON-Schema zurück.`;
+  const heute = new Date().toISOString().slice(0, 10);
+  const user = `Heutiges Datum: ${heute}. Verwende nur Daten in der Zukunft.\n\nHier ist der aktuelle Angebots-Entwurf als JSON:\n\n${JSON.stringify(entwurf || {}, null, 2)}\n\nÄndere AUSSCHLIESSLICH das Folgende und lass alles andere unverändert:\n"${String(anweisung || '').trim()}"\n\nGib den vollständigen, überarbeiteten Entwurf im selben JSON-Schema zurück.`;
 
   const data = await callClaudeWithRetry({
     model: CLAUDE_MODEL,
