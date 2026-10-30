@@ -81,6 +81,11 @@ export function buildEasybillOfferPayload({
   guarantee_note = null,
   werbebudget_modus = 'position',
   tagesbudget_empfehlung = null,
+  // KI-Variante: freie Textblöcke vor den Positionen + optionaler
+  // Zahlungsbedingungen-Override (sonst greift das Marken-Template).
+  einleitung = null,
+  leistungsbeschreibung = null,
+  zahlungsbedingungen = null,
 } = {}) {
   const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
   // Empfehlungs-Modus: Werbebudget ist NICHT Bestandteil der Rechnung — keine
@@ -126,6 +131,15 @@ export function buildEasybillOfferPayload({
 
   const items = [];
   let pos = 1;
+
+  // KI-Variante: Einleitung + Leistungsbeschreibung als TEXT-Blöcke GANZ oben,
+  // noch vor den Positionen. Baukasten übergibt sie nie → unverändert.
+  if (einleitung && einleitung.trim()) {
+    items.push(makeTextPosition({ pos: pos++, title: null, body: einleitung.trim() }));
+  }
+  if (leistungsbeschreibung && leistungsbeschreibung.trim()) {
+    items.push(makeTextPosition({ pos: pos++, title: 'Leistungsumfang', body: leistungsbeschreibung.trim() }));
+  }
 
   // Setup zuerst
   for (const l of setupLines) {
@@ -212,7 +226,8 @@ export function buildEasybillOfferPayload({
   const guaranteeLabel = guarantee_type === 'applications'
     ? 'Bewerbungs-Garantie'
     : (findTemplate(templates, 'guarantee_label') || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand] || 'Garantie');
-  const paymentTerms   = findTemplate(templates, 'payment_terms');
+  // Zahlungsbedingungen: KI-Override (falls gepflegt) schlägt das Marken-Template.
+  const paymentTerms   = (zahlungsbedingungen && zahlungsbedingungen.trim()) || findTemplate(templates, 'payment_terms');
   if (guarantee)    items.push(makeTextPosition({ pos: pos++, title: guaranteeLabel,      body: guarantee }));
   if (paymentTerms) items.push(makeTextPosition({ pos: pos++, title: 'Zahlungsbedingungen', body: paymentTerms }));
 

@@ -178,6 +178,75 @@ export async function searchLeads(query, limit = 8) {
 }
 
 /**
+ * Lädt die Aktivitäten eines Leads der letzten `sinceDays` Tage und normalisiert
+ * sie auf { id, type, date, title, excerpt } — für den KI-Angebots-Kontext.
+ * Berücksichtigt Notizen, Anrufe (inkl. Zusammenfassung), E-Mails (Betreff +
+ * Auszug) und Meetings (Titel/Notiz/Transkript). Best-effort: liefert [] bei
+ * fehlendem Key oder Fehler, blockt nie den aufrufenden Flow.
+ * @returns {Promise<Array<{id,type,date,title,excerpt}>>}
+ */
+export async function fetchLeadActivities(leadId, { sinceDays = 90 } = {}) {
+  if (!(await getCloseKey()) || !leadId) return [];
+  const sinceIso = new Date(Date.now() - sinceDays * 86400000).toISOString();
+  const sinceDay = sinceIso.slice(0, 10);
+  const out = [];
+  let skip = 0;
+  try {
+    for (let page = 0; page < 5; page++) {
+      const res = await closeFetch(
+        `/activity/?lead_id=${encodeURIComponent(leadId)}&_limit=100&_skip=${skip}`
+        + `&date_created__gte=${encodeURIComponent(sinceIso)}`);
+      const data = res.data || [];
+      for (const a of data) {
+        const day = String(a?.date_created || a?.date || '').slice(0, 10);
+        if (day && day < sinceDay) continue; // Sicherheits-Filter falls Server-Filter ignoriert
+        const norm = normalizeCloseActivity(a, day);
+        if (norm) out.push(norm);
+      }
+      if (!res.has_more || data.length === 0) break;
+      skip += data.length;
+    }
+  } catch (err) {
+    console.warn('[close/fetchLeadActivities]', err.message);
+  }
+  return out;
+}
+
+function clipText(s, n = 600) {
+  const t = String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return t.length > n ? `${t.slice(0, n)}…` : t;
+}
+
+// Normalisiert eine Close-Aktivität; irrelevante Typen (SMS, Status-Changes etc.)
+// → null. Nur inhaltstragende Einträge gehen in den KI-Kontext.
+function normalizeCloseActivity(a, day) {
+  const type = a?._type || a?.type;
+  const base = { id: a?.id || null, date: day || null };
+  switch (type) {
+    case 'Note':
+      return { ...base, type: 'note', title: 'Notiz', excerpt: clipText(a.note || a.note_html) };
+    case 'Call': {
+      const dir = a.direction === 'outbound' ? 'ausgehend' : a.direction === 'inbound' ? 'eingehend' : '';
+      const mins = a.duration ? `, ${Math.round(a.duration / 60)} Min` : '';
+      const body = a.summary || a.note || a.note_html || '';
+      return { ...base, type: 'call', title: `Anruf${dir ? ` (${dir})` : ''}${mins}`, excerpt: clipText(body) };
+    }
+    case 'Email': {
+      const dir = a.direction === 'outbound' ? 'gesendet' : 'empfangen';
+      const subj = clipText(a.subject, 140) || 'ohne Betreff';
+      return { ...base, type: 'email', title: `E-Mail (${dir}): ${subj}`, excerpt: clipText(a.body_text || a.body_preview) };
+    }
+    case 'Meeting': {
+      const title = clipText(a.title, 140);
+      const body = a.note || a.user_note || a.summary || a.transcript || '';
+      return { ...base, type: 'meeting', title: `Meeting${title ? `: ${title}` : ''}`, excerpt: clipText(body) };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * Best-effort-Note für allgemeine Tool-Aktivitäten (Formular-Versand, Feedback,
  * Zahlungen, Go-Live etc.). Liest close_lead_id vom Kunden (primär), fällt
  * bei Bedarf auf projekte.close_lead_id oder Email-Suche zurück. Blockt nie

@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import Icon from '../components/Icon.jsx';
 import KundePicker from '../components/KundePicker.jsx';
+import OfferKITab from './offer/OfferKITab.jsx';
 
 // Fängt Renderfehler eines Wizard-Schritts ab, damit nie eine weiße Seite
 // stehen bleibt. `key={step}` am Aufruf setzt die Boundary beim Schrittwechsel
@@ -135,6 +136,8 @@ export default function OfferWizard() {
   const [params] = useSearchParams();
   const preselectKundeId = params.get('kunde_id') || null;
   const [step, setStep] = useState(1);
+  // Schritt 3: "Baukasten" (bestehend) | "Individuell mit KI" (additiv).
+  const [modus, setModus] = useState('baukasten');
 
   // Schritt 1
   const [customer, setCustomer] = useState(null); // Cache-Row: { id, easybill_id, company_name, ... }
@@ -489,6 +492,14 @@ export default function OfferWizard() {
           onPickKunde={pickInternerKunde} onKundeExistiertNicht={markKundeExistiertNicht} onResetKunde={resetInternerKunde} />}
         {step === 2 && <Step2Brand brand={brand} onSelect={setBrand} />}
         {step === 3 && (
+          <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <button type="button" className={modus === 'baukasten' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('baukasten')}>Baukasten</button>
+            <button type="button" className={modus === 'ki' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('ki')}>Individuell mit KI</button>
+          </div>
+          {modus === 'ki' ? (
+            <OfferKITab brand={brand} customer={customer} alsoInTool={alsoInTool} />
+          ) : (
           <Step3Config
             brand={brand} products={products}
             selectedIds={selectedIds} onToggle={id => setSelectedIds(cur => {
@@ -528,6 +539,8 @@ export default function OfferWizard() {
             discountValue={discountValue} setDiscountValue={setDiscountValue}
             totals={totals}
           />
+          )}
+          </>
         )}
         {step === 4 && (
           <Step4Preview
@@ -561,7 +574,7 @@ export default function OfferWizard() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <button className="btn-ghost" disabled={step === 1} onClick={() => setStep(s => s - 1)}>← Zurück</button>
-        {step < 4 && (
+        {step < 4 && !(step === 3 && modus === 'ki') && (
           <button className="btn-primary" disabled={!canNext} onClick={() => setStep(s => s + 1)}>Weiter →</button>
         )}
       </div>

@@ -126,6 +126,12 @@ export async function ensureProjektForOffer(offer) {
       auftrag_checkliste: items,
       garantie:           guaranteeActive,
       garantie_details:   guaranteeText,
+      // Vertragsmodell/Laufzeit aus dem Angebot vorbelegen (nur wenn gepflegt —
+      // Baukasten-Angebote haben das nicht und lassen die Felder null). Start-Datum
+      // bleibt bewusst leer: es wird bei Go-Live gesetzt.
+      ...(offer.vertragsmodell ? { vertragsmodell: offer.vertragsmodell } : {}),
+      ...(offer.laufzeit_wert != null ? { laufzeit_wert: offer.laufzeit_wert } : {}),
+      ...(offer.laufzeit_einheit ? { laufzeit_einheit: offer.laufzeit_einheit } : {}),
       // Werbebudget-Modus aus dem Angebot: bei 'empfehlung' hinterlegt das Team
       // das Kunden-Zahlungsmittel im Werbekonto (kein Zahlungslink-Flow).
       werbebudget_modus:      offer.werbebudget_modus || 'position',

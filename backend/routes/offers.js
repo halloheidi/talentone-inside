@@ -10,10 +10,11 @@ import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfT
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
 import { sendAngebotMail, sendAuftragMail } from '../mail.js';
-import { addNote as closeAddNote } from '../close.js';
+import { addNote as closeAddNote, fetchLeadActivities, searchLeads, findLead } from '../close.js';
 import { buildEckdatenBlock } from '../mail-eckdaten.js';
 import { ensureProjektForOffer } from '../auftrag-automation.js';
 import { resolveKundeIdForOffer, linkOfferToKunde, createKundeFromSnapshot } from '../offer-linking.js';
+import { generateOfferDraft, refineOfferDraft } from '../offer-ki.js';
 
 const router = Router();
 
@@ -28,6 +29,28 @@ const EXTRA_JOB_SKUS_BY_BRAND = {
 
 // Deutsche Zahlenformatierung wie im Frontend
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+
+const VERTRAGSMODELLE = new Set(['kampagne', 'abo']);
+const LAUFZEIT_EINHEITEN = new Set(['tage', 'monate']);
+
+/* Additive Felder der KI-Variante aus dem Request-Body in DB-Form bringen.
+   Nur im Body gesetzte Werte werden übernommen — der Baukasten-Pfad schickt
+   sie nie mit und bleibt damit unverändert. Von POST (create) + PATCH genutzt. */
+function kiFeldPatch(b) {
+  const out = {};
+  if (b.erstellt_via !== undefined) out.erstellt_via = b.erstellt_via === 'ki' ? 'ki' : 'baukasten';
+  if (b.ki_kontext !== undefined) out.ki_kontext = b.ki_kontext || null;
+  if (b.ki_versionen !== undefined) out.ki_versionen = Array.isArray(b.ki_versionen) ? b.ki_versionen : [];
+  if (b.einleitung !== undefined) out.einleitung = b.einleitung ? String(b.einleitung) : null;
+  if (b.leistungsbeschreibung !== undefined) out.leistungsbeschreibung = b.leistungsbeschreibung ? String(b.leistungsbeschreibung) : null;
+  if (b.zahlungsbedingungen !== undefined) out.zahlungsbedingungen = b.zahlungsbedingungen ? String(b.zahlungsbedingungen) : null;
+  if (b.gueltig_bis !== undefined) out.gueltig_bis = /^\d{4}-\d{2}-\d{2}$/.test(String(b.gueltig_bis || '').slice(0, 10)) ? String(b.gueltig_bis).slice(0, 10) : null;
+  if (b.offene_punkte !== undefined) out.offene_punkte = Array.isArray(b.offene_punkte) ? b.offene_punkte.map(x => String(x || '').trim()).filter(Boolean) : [];
+  if (b.vertragsmodell !== undefined) out.vertragsmodell = VERTRAGSMODELLE.has(b.vertragsmodell) ? b.vertragsmodell : null;
+  if (b.laufzeit_wert !== undefined) { const n = Number(b.laufzeit_wert); out.laufzeit_wert = Number.isFinite(n) ? Math.round(n) : null; }
+  if (b.laufzeit_einheit !== undefined) out.laufzeit_einheit = LAUFZEIT_EINHEITEN.has(b.laufzeit_einheit) ? b.laufzeit_einheit : null;
+  return out;
+}
 
 /* Ersetzt {{keys}} im E-Mail-Body durch die Angebotsdaten. */
 function fillMergeTags(text, ctx) {
@@ -602,6 +625,141 @@ function resolveGuarantee(b) {
    }
    Serverseitige Neuberechnung — verhindert Manipulation der Summen im Frontend.
 */
+/* ══════════════ "Individuell mit KI": Kontext, Close, Generierung ══════════════
+   Alle Routen rein intern (hinter requireAuth wie das ganze Modul). Die
+   Generierung erzeugt NUR einen Entwurf — gespeichert wird später über denselben
+   POST / -Pfad (positionen_snapshot + KI-Felder). */
+
+/* GET /api/offers/ki/kunde-kontext?kunde_id= — Kundenakte-Auszug fürs KI-Panel.
+   Rein lesend; die Blöcke sind im Frontend einzeln ab-/zuwählbar. */
+router.get('/ki/kunde-kontext', async (req, res) => {
+  try {
+    const kundeId = (req.query.kunde_id || '').toString().trim();
+    if (!kundeId) return res.status(400).json({ error: 'kunde_id fehlt.' });
+    const { data: kunde } = await supabase.from('talentone_kunden')
+      .select('id, firmenname, branche, ansprechpartner, anrede_form, anrede_titel, nachname, close_lead_id, email, agentur')
+      .eq('id', kundeId).maybeSingle();
+    if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
+
+    const [{ data: jobs = [] }, { data: projekte = [] }, { count: stimmenCount }, { count: bilderCount }] = await Promise.all([
+      supabase.from('talentone_jobs')
+        .select('id, stelle, region, projekt_id, projekttyp, created_at')
+        .eq('kunde_id', kundeId).order('created_at', { ascending: false }),
+      supabase.from('talentone_projekte')
+        .select('id, projekt, status, projektart, vertragsmodell, laufzeit_wert, laufzeit_einheit, start_datum, startdatum_abo, enddatum_abo, projektdauer, garantie, garantie_art, garantie_ziel, garantie_position, notizen, created_at')
+        .eq('kunde_id', kundeId).order('created_at', { ascending: false }),
+      supabase.from('talentone_mitarbeiterstimmen').select('id', { count: 'exact', head: true }).eq('kunde_id', kundeId),
+      supabase.from('talentone_referenzbilder').select('id', { count: 'exact', head: true }).eq('kunde_id', kundeId),
+    ]);
+
+    const projektById = Object.fromEntries((projekte || []).map(p => [p.id, p]));
+    const verknuepfteProjektIds = new Set((jobs || []).map(j => j.projekt_id).filter(Boolean));
+
+    const stellen = (jobs || []).map(j => {
+      const p = j.projekt_id ? projektById[j.projekt_id] : null;
+      return { stelle: j.stelle || 'Stelle', region: j.region || null, projekttyp: j.projekttyp || null, status: p?.status || null };
+    });
+
+    // Altprojekte = Projekte des Kunden ohne verknüpfte Stelle (Historie).
+    const altprojekte = (projekte || []).filter(p => !verknuepfteProjektIds.has(p.id)).map(p => ({
+      projekt: p.projekt || null,
+      status: p.status || null,
+      projektart: p.projektart || null,
+      von: (p.start_datum || p.startdatum_abo || '').slice(0, 10) || null,
+      bis: (p.enddatum_abo || '').slice(0, 10) || null,
+      ergebnis: p.notizen ? String(p.notizen).slice(0, 300) : null,
+    }));
+
+    // Bisheriger Vertrag: jüngstes verknüpftes Projekt mit Vertragsmodell, sonst irgendeines.
+    const vertragProjekt = (projekte || []).find(p => verknuepfteProjektIds.has(p.id) && p.vertragsmodell)
+      || (projekte || []).find(p => p.vertragsmodell);
+    const vertrag = vertragProjekt ? {
+      vertragsmodell: vertragProjekt.vertragsmodell || null,
+      laufzeit_wert: vertragProjekt.laufzeit_wert || null,
+      laufzeit_einheit: vertragProjekt.laufzeit_einheit || null,
+      garantie: vertragProjekt.garantie_position || (vertragProjekt.garantie ? 'vorhanden' : null),
+    } : null;
+
+    res.json({
+      kunde: {
+        id: kunde.id, firmenname: kunde.firmenname, branche: kunde.branche || null,
+        ansprechpartner: kunde.ansprechpartner || null, anrede_form: kunde.anrede_form || null,
+        anrede_titel: kunde.anrede_titel || null, nachname: kunde.nachname || null, email: kunde.email || null,
+      },
+      close_lead_id: kunde.close_lead_id || null,
+      stellen, altprojekte, vertrag,
+      mitarbeiterstimmen_anzahl: stimmenCount || 0,
+      referenzbilder_anzahl: bilderCount || 0,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/offers/ki/close-kontext?lead_id=&kunde_id= — letzte 90 Tage Close-Aktivität.
+   lead_id direkt ODER über kunde_id → close_lead_id aufgelöst. */
+router.get('/ki/close-kontext', async (req, res) => {
+  try {
+    let leadId = (req.query.lead_id || '').toString().trim();
+    if (!leadId && req.query.kunde_id) {
+      const { data: k } = await supabase.from('talentone_kunden')
+        .select('close_lead_id').eq('id', req.query.kunde_id).maybeSingle();
+      leadId = k?.close_lead_id || '';
+    }
+    if (!leadId) return res.json({ lead_id: null, eintraege: [] });
+    const eintraege = await fetchLeadActivities(leadId, { sinceDays: 90 });
+    res.json({ lead_id: leadId, eintraege });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/offers/ki/lead-suche?q= — Close-Lead-Suche (Firmenname) zum Verknüpfen. */
+router.get('/ki/lead-suche', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (!q) return res.json({ leads: [] });
+    const leads = await searchLeads(q, 8);
+    res.json({ leads: (leads || []).map(l => ({ id: l.id, name: l.display_name || l.name || '(ohne Name)', status: l.status_label || null })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/offers/ki/generate — strukturierter KI-Entwurf aus Kontext + Freitext. */
+router.post('/ki/generate', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!BRANDS.has(b.brand)) return res.status(400).json({ error: 'brand ungültig.' });
+    const entwurf = await generateOfferDraft({
+      brand: b.brand,
+      kunde: b.kontext?.kunde || null,
+      kontext: b.kontext || {},
+      closeEintraege: Array.isArray(b.close_eintraege) ? b.close_eintraege : [],
+      freitext: b.freitext || '',
+      bausteine: Array.isArray(b.bausteine) ? b.bausteine : [],
+    });
+    res.json({ entwurf });
+  } catch (err) {
+    console.error('[offers/ki/generate]', err.message);
+    res.status(502).json({ error: `KI-Generierung fehlgeschlagen: ${err.message}` });
+  }
+});
+
+/* POST /api/offers/ki/refine — Nachschärfen: ändert nur das in anweisung Genannte. */
+router.post('/ki/refine', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.entwurf) return res.status(400).json({ error: 'entwurf fehlt.' });
+    if (!String(b.anweisung || '').trim()) return res.status(400).json({ error: 'anweisung fehlt.' });
+    const entwurf = await refineOfferDraft({
+      brand: BRANDS.has(b.brand) ? b.brand : 'talentone',
+      kunde: b.kontext?.kunde || null,
+      kontext: b.kontext || {},
+      entwurf: b.entwurf,
+      anweisung: b.anweisung,
+    });
+    res.json({ entwurf });
+  } catch (err) {
+    console.error('[offers/ki/refine]', err.message);
+    res.status(502).json({ error: `Nachschärfen fehlgeschlagen: ${err.message}` });
+  }
+});
+
 router.post('/', async (req, res) => {
   const b = req.body || {};
   if (!BRANDS.has(b.brand)) return res.status(400).json({ error: 'brand ungültig.' });
@@ -711,6 +869,9 @@ router.post('/', async (req, res) => {
       tagesbudget_empfehlung:      tagesbudget,
       created_by:                  req.user?.email || null,
     };
+    // KI-Variante: einleitung/leistungsbeschreibung/vertrag/offene_punkte/ki_*
+    // additiv übernehmen (Baukasten schickt nichts davon → unverändert).
+    Object.assign(row, kiFeldPatch(b));
 
     const { data, error } = await supabase
       .from('talentone_offers')
@@ -821,6 +982,8 @@ router.patch('/:id', async (req, res) => {
       const raw = Number(b.hires_target);
       patch.hires_target = Number.isFinite(raw) ? Math.max(1, Math.min(10, Math.round(raw))) : 1;
     }
+    // KI-Felder beim Draft-Update mitführen (nur wenn im Body gesetzt).
+    Object.assign(patch, kiFeldPatch(b));
 
     const { data, error } = await supabase
       .from('talentone_offers')
@@ -921,6 +1084,10 @@ router.post('/:id/create-easybill', async (req, res) => {
       guarantee_note: offer.guarantee_note || null,
       werbebudget_modus: offer.werbebudget_modus || 'position',
       tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
+      // KI-Variante: freie Textblöcke + Zahlungsbedingungen-Override (sonst null).
+      einleitung: offer.einleitung || null,
+      leistungsbeschreibung: offer.leistungsbeschreibung || null,
+      zahlungsbedingungen: offer.zahlungsbedingungen || null,
     });
 
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
