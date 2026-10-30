@@ -186,6 +186,9 @@ export async function searchLeads(query, limit = 8) {
  * @returns {Promise<Array<{id,type,date,title,excerpt}>>}
  */
 export async function fetchLeadActivities(leadId, { sinceDays = 90 } = {}) {
+  // Manche close_lead_id-Werte tragen einen abschließenden Schrägstrich (aus
+  // kopierten Lead-URLs) — der bricht die Activity-Abfrage. Zuverlässig strippen.
+  leadId = String(leadId || '').replace(/\/+$/, '');
   if (!(await getCloseKey()) || !leadId) return [];
   const sinceIso = new Date(Date.now() - sinceDays * 86400000).toISOString();
   const sinceDay = sinceIso.slice(0, 10);
