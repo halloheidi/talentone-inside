@@ -32,6 +32,8 @@ const ABSENDER = {
   johannes: 'Johannes Wirth',
   daniel:   'Daniel Nowag',
 };
+// Anzeigename der Angebots-Marke (für Signatur/From "<Name> · <Marke>").
+function markeName(brand) { return brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne'; }
 
 const router = Router();
 
@@ -820,7 +822,9 @@ router.post('/:id/send-annahme-mail', async (req, res) => {
       to: b.to, offerBrand: offer.brand, subject: b.subject, body: b.body,
       pdfBuffer, pdfFilename: `${firma}_Angebot.pdf`,
       ctaUrl: annahme_url, ctaLabel: 'Angebot ansehen & annehmen',
-      fromName: ABSENDER[absender],
+      // Absender-Anzeigename "<Johannes|Daniel> · <Marke>"; From-Domain kommt
+      // markenrichtig aus getOfferMailFrom(brand) in sendAngebotMail.
+      fromName: `${ABSENDER[absender]} · ${markeName(offer.brand)}`,
     });
 
     await supabase.from('talentone_offers').update({

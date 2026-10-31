@@ -92,6 +92,7 @@ export default function PublicAngebot() {
   if (!info) return <div className="public-page"><div className="public-card">Lade…</div></div>;
 
   const bereitsAngenommen = !!info.angenommen_am || done;
+  const brand = getBrand(info.agentur);
 
   return (
     <div className="public-page">
@@ -141,7 +142,7 @@ export default function PublicAngebot() {
               <h4 style={{ fontSize: 13.5, margin: '0 0 6px', color: '#555' }}>Optional zubuchbar</h4>
               <div style={{ display: 'grid', gap: 6 }}>
                 {opts.map(p => (
-                  <label key={p.index} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 10px', border: '1px solid', borderColor: optionen.has(p.index) ? 'var(--accent, #0a7)' : '#e5e5e5', borderRadius: 8, cursor: bereitsAngenommen ? 'default' : 'pointer' }}>
+                  <label key={p.index} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 10px', border: '1px solid', borderColor: optionen.has(p.index) ? brand.accent : '#e5e5e5', borderRadius: 8, cursor: bereitsAngenommen ? 'default' : 'pointer' }}>
                     <span style={{ display: 'flex', gap: 8 }}>
                       <input type="checkbox" disabled={bereitsAngenommen || info.abgelaufen} checked={optionen.has(p.index)}
                         onChange={e => setOptionen(prev => { const n = new Set(prev); e.target.checked ? n.add(p.index) : n.delete(p.index); return n; })} />
@@ -187,7 +188,7 @@ export default function PublicAngebot() {
             </label>
             {error && <div className="alert alert-error">{error}</div>}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button className="btn-primary" disabled={busy} type="submit">{busy ? 'Sende…' : 'Angebot annehmen'}</button>
+              <button className="btn-primary" disabled={busy} type="submit" style={{ background: brand.accent, color: brand.accentInk, borderColor: brand.accent }}>{busy ? 'Sende…' : 'Angebot annehmen'}</button>
               <button className="btn-ghost" type="button" onClick={() => setRueckfrageOffen(o => !o)}>Rückfrage stellen</button>
             </div>
           </form>
@@ -200,6 +201,10 @@ export default function PublicAngebot() {
           </form>
         )}
         {rueckfrageDone && <div className="alert" style={{ marginTop: 12, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af' }}>Danke — Ihre Rückfrage ist bei uns eingegangen. Wir melden uns.</div>}
+
+        <div style={{ marginTop: 20, paddingTop: 12, borderTop: '1px solid #eee', textAlign: 'center', fontSize: 11.5, color: '#9a9994' }}>
+          {brand.footer} · <a href={brand.websiteUrl} target="_blank" rel="noreferrer" style={{ color: '#5a5955' }}>{brand.websiteUrl.replace(/^https?:\/\//, '')}</a>
+        </div>
       </div>
     </div>
   );
