@@ -276,7 +276,12 @@ export async function generateOfferDraft({ brand, kunde, kontext = {}, closeEint
     system,
     messages: [{ role: 'user', content: user }],
   });
-  return enforceLeitplanken(normalizeEntwurf(parseJsonContent(data)), freitext, { enforceGarantie: true });
+  const entwurf = enforceLeitplanken(normalizeEntwurf(parseJsonContent(data)), freitext, { enforceGarantie: true });
+  // Firmenname ist bei easybill-Kunden bekannt → "Firmenname fehlt"-Hinweise raus.
+  if (kontext?.kunde?.firmenname) {
+    entwurf.offene_punkte = entwurf.offene_punkte.filter(o => !/firmen[\- ]?name/i.test(o));
+  }
+  return entwurf;
 }
 
 /**

@@ -139,6 +139,8 @@ export default function OfferWizard() {
   const [step, setStep] = useState(1);
   // Schritt 3: "Baukasten" (bestehend) | "Individuell mit KI" (additiv).
   const [modus, setModus] = useState('baukasten');
+  // Close-Lead am Angebot (gilt mit UND ohne Inside-Kunden; wird mit dem Angebot gespeichert).
+  const [closeLeadId, setCloseLeadId] = useState(null);
 
   // Schritt 1
   const [customer, setCustomer] = useState(null); // Cache-Row: { id, easybill_id, company_name, ... }
@@ -494,13 +496,13 @@ export default function OfferWizard() {
         {step === 2 && <Step2Brand brand={brand} onSelect={setBrand} />}
         {step === 3 && (
           <>
-          <CloseVerknuepfenBox kundeId={customer?.tool_kunde_id} firmenname={customer?.company_name || customer?.tool_kunde_name} />
+          <CloseVerknuepfenBox kundeId={customer?.tool_kunde_id} firmenname={customer?.company_name || customer?.tool_kunde_name} initialLeadId={closeLeadId} onLeadChange={setCloseLeadId} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <button type="button" className={modus === 'baukasten' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('baukasten')}>Baukasten</button>
             <button type="button" className={modus === 'ki' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('ki')}>Individuell mit KI</button>
           </div>
           {modus === 'ki' ? (
-            <OfferKITab brand={brand} customer={customer} alsoInTool={alsoInTool} />
+            <OfferKITab brand={brand} customer={customer} alsoInTool={alsoInTool} closeLeadId={closeLeadId} />
           ) : (
           <Step3Config
             brand={brand} products={products}

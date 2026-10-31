@@ -50,13 +50,15 @@ export async function resolveKundeIdForOffer({ customer_id, easybill_customer_id
  * @param {string} p.brand     'talentone' | 'nowag_wirth'
  * @returns {Promise<object>} die angelegte Kunden-Row
  */
-export async function createKundeFromSnapshot({ snapshot, brand }) {
+export async function createKundeFromSnapshot({ snapshot, brand, anredeForm, closeLeadId } = {}) {
   const snap = snapshot || {};
   const firmenname = String(snap.company_name || snap.firmenname || '').trim();
   if (!firmenname) throw new Error('Firmenname fehlt im Angebot.');
 
   const ansprechpartner = [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim();
   const agentur = brand === 'nowag_wirth' ? 'nowagwirth' : 'talentone';
+  // Anrede: Auswahl respektieren (du|sie), sonst B2B-Default 'sie' (nie 'du' ohne Angabe).
+  const anrede = (anredeForm === 'du' || anredeForm === 'sie') ? anredeForm : 'sie';
 
   const kundeData = {
     firmenname,
@@ -69,7 +71,8 @@ export async function createKundeFromSnapshot({ snapshot, brand }) {
     ort: snap.city || null,
     agentur,                 // Constraint: talentone|nowagwirth
     status: 'wartend',       // Constraint: wartend|aktiv (NICHT 'vorbereitung'/'interessent')
-    anrede_form: 'sie',      // Constraint: du|sie (klein) — B2B-Default
+    anrede_form: anrede,     // Constraint: du|sie (klein)
+    ...(closeLeadId ? { close_lead_id: String(closeLeadId) } : {}),
   };
 
   const { data: kunde, error } = await supabase

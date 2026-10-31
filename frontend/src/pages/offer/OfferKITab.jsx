@@ -36,19 +36,20 @@ function toEditLines(positionen) {
  * Speichern. Nutzt dieselben Backend-Endpunkte wie der Baukasten (POST /offers,
  * create-easybill), ergänzt um die /offers/ki/*-Routen. Rein additiv.
  */
-export default function OfferKITab({ brand, customer, alsoInTool }) {
+export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: wizardLeadId = null }) {
   const navigate = useNavigate();
   const kundeId = customer?.tool_kunde_id || null;
+  const istEasybillOnly = !kundeId;
 
   // Kontext
   const [kontext, setKontext] = useState(null);
   const [blockAn, setBlockAn] = useState({ kundenakte: true, stellen: true, altprojekte: true, vertrag: true, stimmen: true, bilder: true });
-  const [closeLeadId, setCloseLeadId] = useState(null);
+  const [closeLeadId, setCloseLeadId] = useState(wizardLeadId);
   const [closeEintraege, setCloseEintraege] = useState([]); // { id, type, date, title, excerpt, _an }
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeGeladen, setCloseGeladen] = useState(false);
-  const [leadQuery, setLeadQuery] = useState('');
-  const [leadTreffer, setLeadTreffer] = useState([]);
+  // Anrede für easybill-only-Kunden (Default Sie, nie Du ohne Angabe).
+  const [anredeForm, setAnredeForm] = useState('sie');
   const [freitext, setFreitext] = useState('');
   const [bausteine, setBausteine] = useState([]);
   const [bausteinAn, setBausteinAn] = useState(new Set());
@@ -98,12 +99,35 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
           const res = await api(`/offers/ki/kunde-kontext?kunde_id=${encodeURIComponent(kundeId)}`);
           if (cancel) return;
           setKontext(res);
-          setCloseLeadId(res.close_lead_id || null);
+          if (res.close_lead_id) setCloseLeadId(res.close_lead_id);
         } catch (e) { if (!cancel) setError(e.message); }
       })();
+    } else {
+      // Kein Inside-Kunde: Kontext aus easybill-Kundendaten (Firma/Ansprechpartner/Adresse).
+      setKontext({
+        kunde: {
+          firmenname: customer?.company_name || null,
+          ansprechpartner: [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') || null,
+          nachname: customer?.last_name || null,
+          email: customer?.email || null,
+          branche: null,
+        },
+        stellen: [], altprojekte: [], vertrag: null,
+        mitarbeiterstimmen_anzahl: 0, referenzbilder_anzahl: 0,
+        _easybillOnly: true,
+      });
     }
     return () => { cancel = true; };
-  }, [brand, kundeId]);
+  }, [brand, kundeId, customer?.easybill_id]);
+
+  // Close-Lead aus dem Wizard (Verknüpfen-Box): übernehmen + Einträge laden.
+  useEffect(() => {
+    if (wizardLeadId && wizardLeadId !== closeLeadId) {
+      setCloseLeadId(wizardLeadId);
+      closeLaden(wizardLeadId);
+    }
+    // eslint-disable-next-line
+  }, [wizardLeadId]);
 
   // Anrede-/Adressblock-Abgleich laden, sobald der easybill-Kunde feststeht.
   useEffect(() => {
@@ -121,9 +145,10 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
   }, [customer?.easybill_id, kundeId]);
 
   async function closeLaden(leadId = null) {
+    const lid = leadId || closeLeadId;
     setCloseBusy(true); setError('');
     try {
-      const q = leadId ? `lead_id=${encodeURIComponent(leadId)}` : `kunde_id=${encodeURIComponent(kundeId)}`;
+      const q = lid ? `lead_id=${encodeURIComponent(lid)}` : `kunde_id=${encodeURIComponent(kundeId)}`;
       const res = await api(`/offers/ki/close-kontext?${q}`);
       setCloseLeadId(res.lead_id || leadId || closeLeadId);
       // Nicht verwendbare (nur interne) Einträge sind standardmäßig abgewählt.
@@ -137,7 +162,7 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
   function empfaengerWaehlen(opt) {
     setEmpfaenger(opt);
     if (!opt) return;
-    const form = kontext?.kunde?.anrede_form === 'sie' ? 'sie' : 'du';
+    const form = istEasybillOnly ? anredeForm : (kontext?.kunde?.anrede_form === 'du' ? 'du' : 'sie');
     const parts = opt.name ? String(opt.name).trim().split(/\s+/) : [];
     const vorname = opt.first_name || parts[0] || '';
     const nachname = opt.last_name || (parts.length > 1 ? parts[parts.length - 1] : '');
@@ -150,14 +175,6 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       gruss = `Guten Tag ${opt.name},`;
     }
     setEinleitung(prev => `${gruss} ${stripLeadingGreeting(prev || '')}`.trim());
-  }
-
-  async function leadSuchen() {
-    if (!leadQuery.trim()) return;
-    try {
-      const res = await api(`/offers/ki/lead-suche?q=${encodeURIComponent(leadQuery.trim())}`);
-      setLeadTreffer(res.leads || []);
-    } catch (e) { setError(e.message); }
   }
 
   // Entwurf in die Editor-Felder spiegeln.
@@ -193,12 +210,16 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
     entwurfUebernehmen(v.entwurf);
   }
 
+  // Effektive Anrede: bei easybill-only aus der Auswahl, sonst aus dem Kunden.
+  const effektiveAnrede = istEasybillOnly ? anredeForm : (kontext?.kunde?.anrede_form || 'sie');
+
   // Den (gefilterten) Kontext für die Generierung zusammenstellen.
   function kontextFuerKI() {
     if (!kontext) return {};
     const k = {};
-    if (blockAn.kundenakte) k.kunde = kontext.kunde;
-    else k.kunde = { anrede_form: kontext.kunde?.anrede_form, firmenname: kontext.kunde?.firmenname };
+    const kundeMitAnrede = { ...(kontext.kunde || {}), anrede_form: effektiveAnrede };
+    if (blockAn.kundenakte) k.kunde = kundeMitAnrede;
+    else k.kunde = { anrede_form: effektiveAnrede, firmenname: kontext.kunde?.firmenname };
     if (blockAn.stellen) k.stellen = kontext.stellen || [];
     if (blockAn.altprojekte) k.altprojekte = kontext.altprojekte || [];
     if (blockAn.vertrag) k.vertrag = kontext.vertrag || null;
@@ -318,8 +339,11 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
         country: customer.country, number: customer.number, phone_1: customer.phone_1,
       },
       customer_id: customer.tool_kunde_id || null,
-      also_in_tool: alsoInTool && !customer.tool_kunde_id,
-      close_lead_id: closeLeadId || null,
+      // KI-Pfad: Kunde wird NICHT vorab angelegt (ein abgelehntes Angebot soll
+      // keinen Karteileichen-Kunden erzeugen). Ohne Inside-Kunden legt erst die
+      // Annahme (ensureProjektForOffer) den Kunden aus easybill + Close an.
+      also_in_tool: false,
+      close_lead_id: wizardLeadId || closeLeadId || null,
       positionen_snapshot: positionen.map(p => ({
         product_id: null, custom: true, optional: !!p.optional,
         category: p.kategorie === 'monthly' ? 'monthly' : 'setup',
@@ -344,6 +368,8 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
         // Gewählter Empfänger (steuert easybill-Adressblock über contact_id).
         gewaehlte_contact_id: empfaenger?.contact_id || null,
         gewaehlter_empfaenger: empfaenger?.name || null,
+        // Anrede (für Kunden-Anlage bei Annahme ohne Inside-Kunden).
+        anrede_form: effektiveAnrede,
       },
       ki_versionen: versionen.map(v => v.entwurf),
     };
@@ -397,29 +423,41 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       {/* ── Kontext-Panel ── */}
       <section>
         <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Kontext fürs Angebot</h3>
-        {!kundeId && (
+        {istEasybillOnly && (
           <div className="alert" style={{ background: '#fff7ed', border: '1px solid #fdba74', color: '#9a3412', fontSize: 13 }}>
-            Kein interner Kunde verknüpft — Kundenakte und Close-Kontext stehen nicht automatisch zur Verfügung. Du kannst trotzdem über den Freitext generieren.
+            Kein Inside-Kunde — Kontext aus easybill + Close.
           </div>
         )}
         {kontext && (
           <div className="card" style={{ padding: 14, display: 'grid', gap: 8, background: 'var(--gray-50)' }}>
             <div style={{ fontWeight: 600, fontSize: 13 }}>{kontext.kunde?.firmenname}{kontext.kunde?.branche ? ` · ${kontext.kunde.branche}` : ''}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px' }}>
-              {checkbox('Kundenakte (Firma, Ansprechpartner)', blockAn.kundenakte, v => setBlockAn(s => ({ ...s, kundenakte: v })))}
-              {checkbox(`Stellen (${kontext.stellen?.length || 0})`, blockAn.stellen, v => setBlockAn(s => ({ ...s, stellen: v })))}
-              {checkbox(`Altprojekte/Historie (${kontext.altprojekte?.length || 0})`, blockAn.altprojekte, v => setBlockAn(s => ({ ...s, altprojekte: v })))}
-              {checkbox('Bisheriger Vertrag', blockAn.vertrag, v => setBlockAn(s => ({ ...s, vertrag: v })))}
-              {checkbox(`Mitarbeiterstimmen (${kontext.mitarbeiterstimmen_anzahl || 0})`, blockAn.stimmen, v => setBlockAn(s => ({ ...s, stimmen: v })))}
-              {checkbox(`Referenzbilder (${kontext.referenzbilder_anzahl || 0})`, blockAn.bilder, v => setBlockAn(s => ({ ...s, bilder: v })))}
-            </div>
+            {istEasybillOnly ? (
+              <>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+                  Ansprechpartner: {kontext.kunde?.ansprechpartner || '—'}{kontext.kunde?.email ? ` · ${kontext.kunde.email}` : ''}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
+                  <span>Anrede:</span>
+                  <label style={{ display: 'flex', gap: 5, cursor: 'pointer' }}><input type="radio" name="anrede" checked={anredeForm === 'sie'} onChange={() => setAnredeForm('sie')} />Sie</label>
+                  <label style={{ display: 'flex', gap: 5, cursor: 'pointer' }}><input type="radio" name="anrede" checked={anredeForm === 'du'} onChange={() => setAnredeForm('du')} />Du</label>
+                </div>
+              </>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px' }}>
+                {checkbox('Kundenakte (Firma, Ansprechpartner)', blockAn.kundenakte, v => setBlockAn(s => ({ ...s, kundenakte: v })))}
+                {checkbox(`Stellen (${kontext.stellen?.length || 0})`, blockAn.stellen, v => setBlockAn(s => ({ ...s, stellen: v })))}
+                {checkbox(`Altprojekte/Historie (${kontext.altprojekte?.length || 0})`, blockAn.altprojekte, v => setBlockAn(s => ({ ...s, altprojekte: v })))}
+                {checkbox('Bisheriger Vertrag', blockAn.vertrag, v => setBlockAn(s => ({ ...s, vertrag: v })))}
+                {checkbox(`Mitarbeiterstimmen (${kontext.mitarbeiterstimmen_anzahl || 0})`, blockAn.stimmen, v => setBlockAn(s => ({ ...s, stimmen: v })))}
+                {checkbox(`Referenzbilder (${kontext.referenzbilder_anzahl || 0})`, blockAn.bilder, v => setBlockAn(s => ({ ...s, bilder: v })))}
+              </div>
+            )}
           </div>
         )}
       </section>
 
       {/* ── Close-Kontext ── */}
-      {kundeId && (
-        <section>
+      <section>
           <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Close — Gesprächskontext (letzte 90 Tage)</h3>
           {closeLeadId ? (
             <>
@@ -455,21 +493,11 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
               )}
             </>
           ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Kein Close-Lead verknüpft. Firmenname suchen und verknüpfen:</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="input" placeholder="Firmenname…" value={leadQuery} onChange={e => setLeadQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && leadSuchen()} />
-                <button className="btn-ghost" onClick={leadSuchen}>Suchen</button>
-              </div>
-              {leadTreffer.map(l => (
-                <button key={l.id} className="btn-ghost" style={{ justifyContent: 'flex-start' }} onClick={() => { setCloseLeadId(l.id); closeLaden(l.id); setLeadTreffer([]); }}>
-                  {l.name}{l.status ? ` · ${l.status}` : ''}
-                </button>
-              ))}
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+              Kein Close-Lead verknüpft. Verknüpfe oben in der Box einen Lead (Firmenname oder Lead-URL), um den Gesprächskontext zu nutzen.
             </div>
           )}
         </section>
-      )}
 
       {/* ── Freitext ── */}
       <section>

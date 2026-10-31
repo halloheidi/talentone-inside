@@ -4,6 +4,7 @@
 // als auch vom Direkt-AB-Endpoint aufgerufen.
 
 import { supabase } from './supabase.js';
+import { createKundeFromSnapshot } from './offer-linking.js';
 
 // SKUs, die eigene Checklisten-Items auslösen (an beiden Marken angeglichen).
 const PHOTO_SKUS         = new Set(['NW-OPT-PHOTO']);
@@ -76,6 +77,25 @@ export async function ensureProjektForOffer(offer) {
     .maybeSingle();
   if (existing) return { projekt: existing, created: false };
 
+  // Angebot ohne Inside-Kunden (easybill-only): JETZT — bei Annahme, nicht vorher —
+  // den Kunden aus easybill-Snapshot + Close anlegen (anrede_form aus dem KI-Panel,
+  // close_lead_id vom Angebot). So erzeugt ein abgelehntes Angebot keinen
+  // Karteileichen-Kunden.
+  let customerId = offer.customer_id || null;
+  if (!customerId) {
+    try {
+      const neu = await createKundeFromSnapshot({
+        snapshot: offer.customer_snapshot, brand: offer.brand,
+        anredeForm: offer.ki_kontext?.anrede_form,
+        closeLeadId: offer.close_lead_id,
+      });
+      customerId = neu.id;
+      await supabase.from('talentone_offers').update({ customer_id: customerId }).eq('id', offer.id);
+    } catch (e) {
+      console.warn('[ensureProjektForOffer] Inside-Kunde-Anlage fehlgeschlagen:', e.message);
+    }
+  }
+
   // Katalog laden, SKUs für die gewählten Produkte auflösen
   const { data: products } = await supabase
     .from('talentone_offer_products')
@@ -118,7 +138,7 @@ export async function ensureProjektForOffer(offer) {
     .insert({
       projekt:            projektname,
       kunde:              firma,
-      kunde_id:           offer.customer_id || null,
+      kunde_id:           customerId,
       close_lead_id:      offer.close_lead_id || null,
       offer_id:           offer.id,
       projektart:         brandLabel,
