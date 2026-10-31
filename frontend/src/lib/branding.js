@@ -35,6 +35,16 @@ export function getBrand(agentur) {
   return BRANDS[agentur] || BRANDS.talentone;
 }
 
+// Eigene Marken-Subdomain der Angebots-Annahme-Seite (ein Token gilt nur unter
+// seiner Marken-Domain; PublicAngebot leitet sonst dorthin um).
+const OFFER_DOMAINS = {
+  talentone:  import.meta.env.VITE_TALENTONE_OFFER_DOMAIN  || 'angebot.talent-one.de',
+  nowagwirth: import.meta.env.VITE_NOWAGWIRTH_OFFER_DOMAIN || 'angebot.nowagwirth.com',
+};
+export function getOfferDomain(agentur) {
+  return OFFER_DOMAINS[agentur] || OFFER_DOMAINS.talentone;
+}
+
 // Liefert die Basis-URL für Kunden-Links (Funnel, Bewerberliste, Review, Upload, Formular).
 // Im lokalen Dev (localhost) immer aktuelle Origin, sonst Brand-Domain.
 export function getBrandBaseUrl(agentur) {

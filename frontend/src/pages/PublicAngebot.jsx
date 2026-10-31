@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getBrand } from '../lib/branding.js';
+import { getBrand, getOfferDomain } from '../lib/branding.js';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 async function publicApi(path, options = {}) {
@@ -47,7 +47,17 @@ export default function PublicAngebot() {
   const [rueckfrageDone, setRueckfrageDone] = useState(false);
 
   useEffect(() => {
-    publicApi(`/angebot/${token}`).then(setInfo).catch(e => setLoadError(e.message));
+    publicApi(`/angebot/${token}`).then(d => {
+      // Ein Token gilt nur unter seiner Marken-Domain — sonst dorthin umleiten.
+      const host = window.location.hostname;
+      const ziel = getOfferDomain(d.agentur);
+      const lokal = /^(localhost|127\.0\.0\.1)$/.test(host);
+      if (!lokal && host !== ziel) {
+        window.location.replace(`https://${ziel}/angebot/${token}`);
+        return; // info bleibt null → „Lade…" bis zur Weiterleitung
+      }
+      setInfo(d);
+    }).catch(e => setLoadError(e.message));
   }, [token]);
 
   const pflicht = useMemo(() => (info?.positionen || []).filter(p => !p.optional), [info]);

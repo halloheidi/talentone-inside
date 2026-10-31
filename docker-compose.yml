@@ -21,7 +21,7 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
       # API für beide Domains
-      - "traefik.http.routers.inside-api.rule=(Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`)) && PathPrefix(`/api`)"
+      - "traefik.http.routers.inside-api.rule=(Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`) || Host(`angebot.talent-one.de`) || Host(`angebot.nowagwirth.com`)) && PathPrefix(`/api`)"
       - "traefik.http.routers.inside-api.entrypoints=web,websecure"
       - "traefik.http.routers.inside-api.tls=true"
       - "traefik.http.routers.inside-api.tls.certresolver=mytlschallenge"
@@ -45,12 +45,14 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
       # Web-UI für beide Domains
-      - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`)"
+      - "traefik.http.routers.inside-web.rule=Host(`inside.talent-one.de`) || Host(`recruiting.nowagwirth.com`) || Host(`angebot.talent-one.de`) || Host(`angebot.nowagwirth.com`)"
       - "traefik.http.routers.inside-web.entrypoints=web,websecure"
       - "traefik.http.routers.inside-web.tls=true"
       - "traefik.http.routers.inside-web.tls.certresolver=mytlschallenge"
       - "traefik.http.routers.inside-web.tls.domains[0].main=inside.talent-one.de"
       - "traefik.http.routers.inside-web.tls.domains[1].main=recruiting.nowagwirth.com"
+      - "traefik.http.routers.inside-web.tls.domains[2].main=angebot.talent-one.de"
+      - "traefik.http.routers.inside-web.tls.domains[3].main=angebot.nowagwirth.com"
       - "traefik.http.routers.inside-web.priority=1"
       - "traefik.http.services.inside-web.loadbalancer.server.port=80"
 

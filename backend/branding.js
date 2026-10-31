@@ -4,6 +4,10 @@
 const TALENTONE_DOMAIN = process.env.TALENTONE_DOMAIN || 'inside.talent-one.de';
 const NOWAGWIRTH_DOMAIN = process.env.NOWAGWIRTH_DOMAIN || 'recruiting.nowagwirth.com';
 
+// Eigene Marken-Subdomains für die öffentlichen Angebots-Annahme-Seiten.
+const TALENTONE_OFFER_DOMAIN = process.env.TALENTONE_OFFER_DOMAIN || 'angebot.talent-one.de';
+const NOWAGWIRTH_OFFER_DOMAIN = process.env.NOWAGWIRTH_OFFER_DOMAIN || 'angebot.nowagwirth.com';
+
 // Mitteilung an Resend: wenn nowagwirth.com noch nicht verifiziert, Fallback auf talent-one.de
 const NOWAGWIRTH_MAIL_VERIFIED = process.env.NOWAGWIRTH_MAIL_VERIFIED === '1';
 
@@ -79,6 +83,11 @@ export function getBranding(agentur) {
 export function getPublicBaseUrl(agentur) {
   const brand = getBranding(agentur);
   return `https://${brand.domain}`;
+}
+
+// Basis-URL für Angebots-Annahme-Links/PDF je Angebots-Marke (eigene Subdomain).
+export function getOfferPublicBaseUrl(agentur) {
+  return `https://${agentur === 'nowagwirth' ? NOWAGWIRTH_OFFER_DOMAIN : TALENTONE_OFFER_DOMAIN}`;
 }
 
 // Liefert die korrekte Resend-From-Adresse. Wenn die Mail-Domain der Agentur

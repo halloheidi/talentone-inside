@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { anrede } from '../anrede.js';
-import { getPublicBaseUrl } from '../branding.js';
+import { getPublicBaseUrl, getOfferPublicBaseUrl } from '../branding.js';
 import { calculateOfferTotals, validateAdBudget, aggregateSnapshot, resolveOfferPositions, validatePositions } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized, getCustomer, listCustomerContacts } from '../easybill.js';
@@ -768,7 +768,7 @@ router.get('/:id/annahme-mail-preview', async (req, res) => {
     const { data: offer } = await supabase.from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
     if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
     const token = await ensureAnnahmeToken(offer);
-    const annahme_url = `${getPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
+    const annahme_url = `${getOfferPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
 
     let kunde = null;
     if (offer.customer_id) {
@@ -811,7 +811,7 @@ router.post('/:id/send-annahme-mail', async (req, res) => {
     if (!offer.easybill_document_id) return res.status(409).json({ error: 'Angebot hat noch kein easybill-Dokument — bitte zuerst erzeugen.' });
 
     const token = await ensureAnnahmeToken(offer);
-    const annahme_url = `${getPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
+    const annahme_url = `${getOfferPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
     const absender = ['johannes', 'daniel'].includes(b.absender) ? b.absender : 'johannes';
 
     await ensureFinalized(offer.easybill_document_id);
