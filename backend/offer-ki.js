@@ -292,7 +292,8 @@ export async function generateOfferMail({ brand, kunde, freitext = '', closeEint
 
 Regeln:
 - Anrede: ${anredeHinweis}. Durchgängig.
-- body: 5–8 Sätze in Absätzen (\\n\\n getrennt): kurzer Bezug auf das Gespräch, was im Angebot steckt (2–3 Stichpunkte, jeweils mit "• " am Zeilenanfang), Gültigkeit, Hinweis "über den Button unten können Sie das Angebot ansehen und direkt annehmen", freundlicher Abschluss.
+- body: 5–8 Sätze in Absätzen (\\n\\n getrennt): neutrale, freundliche Eröffnung, was im Angebot steckt (2–3 Stichpunkte, jeweils mit "• " am Zeilenanfang), Gültigkeit, Hinweis "über den Button unten können Sie das Angebot ansehen und direkt annehmen", freundlicher Abschluss.
+- Behaupte NIEMALS ein Gespräch oder eine Absprache ("wie besprochen", "unser Strategiegespräch", "wie vereinbart"), wenn der Freitext oder der Gesprächskontext das nicht ausdrücklich belegt. Ohne Beleg neutral eröffnen ("gerne unterbreiten wir Ihnen unser Angebot").
 - Schließe mit einer Signatur: ${absenderName ? `"${absenderName}" + "${label}"` : `"Ihr Team von ${label}"`}.
 - Wording: niemals "kostenlos"; keine Plattformnamen (Meta, Facebook, Instagram, TikTok); Erstgespräch = "Strategiegespräch".
 - Erwähne NIEMALS Konflikte, Zahlungs-/Geld-Historie oder Probleme. Historie nur als sachliche Fakten.
