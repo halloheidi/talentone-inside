@@ -13,6 +13,7 @@ import PublicBewerbungen from './pages/PublicBewerbungen.jsx';
 import PublicAnfragen from './pages/PublicAnfragen.jsx';
 import PublicPortal from './pages/PublicPortal.jsx';
 import PublicAvv from './pages/PublicAvv.jsx';
+import PublicAngebot from './pages/PublicAngebot.jsx';
 import PublicFeedback from './pages/PublicFeedback.jsx';
 import GwOptin from './pages/GwOptin.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
@@ -82,6 +83,7 @@ export default function App() {
       <Route path="/anfragen/:token" element={<PublicAnfragen />} />
       <Route path="/portal/:token" element={<PublicPortal />} />
       <Route path="/avv/:token" element={<PublicAvv />} />
+      <Route path="/angebot/:token" element={<PublicAngebot />} />
       <Route path="/gw-optin/:token" element={<GwOptin />} />
       <Route
         path="/"

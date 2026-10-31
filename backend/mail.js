@@ -1650,6 +1650,8 @@ export async function sendKampagnePauseMail({ to, kunde, job, ansprechpartner, c
 export async function sendAngebotMail({
   to, offerBrand, subject, body, pdfBuffer, pdfFilename,
   extraAttachments = [],   // [{ filename, content: Buffer|string(base64) }, ...]
+  ctaUrl = null, ctaLabel = 'Angebot ansehen & annehmen',  // optionaler Button
+  fromName = null,         // überschreibt den Absender-Anzeigenamen (z.B. "Johannes Wirth")
 }) {
   if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY nicht gesetzt.');
   const brand = getBranding(agenturForOfferBrand(offerBrand));
@@ -1660,16 +1662,22 @@ export async function sendAngebotMail({
     .map(p => `<p style="font-size:14.5px;line-height:1.65;color:#2a2a2a;margin:0 0 14px;">${escape(p).replace(/\n/g, '<br>')}</p>`)
     .join('');
 
+  const ctaHtml = ctaUrl ? `
+    <tr><td style="padding:4px 32px 20px;">
+      <a href="${escape(ctaUrl)}" style="display:inline-block;background:${brand.primary};color:#ffffff;text-decoration:none;font-size:14.5px;font-weight:600;padding:12px 24px;border-radius:10px;">${escape(ctaLabel)}</a>
+    </td></tr>` : '';
+
   const content = `
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9a9994;margin:0 0 8px;">📄 Angebot · ${escape(brand.name)}</p>
       ${bodyHtml}
     </td></tr>
+    ${ctaHtml}
     <tr><td style="padding:0 32px 24px;">
       <p style="font-size:13px;line-height:1.6;color:#5a5955;margin:14px 0 0;">Bei Fragen einfach auf diese Mail antworten.</p>
     </td></tr>`;
   const html = brandedShell({ brand, contentHtml: content });
-  const text = String(body || '');
+  const text = `${String(body || '')}${ctaUrl ? `\n\n${ctaLabel}: ${ctaUrl}` : ''}`;
 
   const attachments = [];
   if (pdfBuffer) attachments.push({
@@ -1690,7 +1698,7 @@ export async function sendAngebotMail({
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: getOfferMailFrom(brand),
+      from: fromName ? mitAbsendername(getOfferMailFrom(brand), fromName) : getOfferMailFrom(brand),
       to: recipients,
       bcc: bccList,
       reply_to: getOfferMailReplyTo(brand),

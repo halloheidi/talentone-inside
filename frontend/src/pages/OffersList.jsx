@@ -8,6 +8,7 @@ import { AdBudgetChips } from './OfferWizard.jsx';
 import { displayNameForEmail } from '../lib/team-display.js';
 import AnredeAbfrage from '../components/AnredeAbfrage.jsx';
 import { anredeOffen } from '../lib/anrede.js';
+import AnnahmeMailModal from './offer/AnnahmeMailModal.jsx';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -20,6 +21,34 @@ const STATUS_LABEL = {
 };
 
 const BRAND_LABEL = { talentone: 'TalentOne', nowag_wirth: 'Nowag & Wirth' };
+
+function fmtD(d) { return d ? new Date(d).toLocaleDateString('de-DE') : null; }
+function offerAbgelaufenClient(o) {
+  if (o.status === 'accepted') return false;
+  const now = Date.now();
+  if (o.gueltig_bis) return new Date(`${o.gueltig_bis}T23:59:59`).getTime() < now;
+  const basis = o.sent_at || o.created_at;
+  return basis ? (new Date(basis).getTime() + 30 * 86400000 < now) : false;
+}
+// Versand-/Annahme-Timeline + 7-Tage-Erinnerung (interner Hinweis, keine Kunden-Mail).
+function OfferTimeline({ o }) {
+  const teile = [];
+  if (o.sent_at) teile.push(`Gesendet ${fmtD(o.sent_at)}`);
+  if (o.geoeffnet_am) teile.push('Geöffnet');
+  if (o.accepted_at && o.status === 'accepted') teile.push(`Angenommen ${fmtD(o.accepted_at)}${o.angenommen_von ? ` · ${o.angenommen_von}` : ''}`);
+  if (o.rueckfrage_am) teile.push('Rückfrage');
+  const abgelaufen = offerAbgelaufenClient(o);
+  if (abgelaufen) teile.push('Abgelaufen');
+  const reminder = o.sent_at && !o.geoeffnet_am && o.status !== 'accepted' && !abgelaufen
+    && (Date.now() - new Date(o.sent_at).getTime() > 7 * 86400000);
+  if (!teile.length && !reminder) return null;
+  return (
+    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-4)', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      {teile.length > 0 && <span>{teile.join(' · ')}</span>}
+      {reminder && <span style={{ padding: '1px 7px', borderRadius: 100, background: '#fff2d4', color: '#a34e00', fontWeight: 700 }}>⏰ 7 Tage ohne Öffnung</span>}
+    </div>
+  );
+}
 
 // Phasen-Badges — gleiche Farb-Codierung wie im BillingModal
 export const PHASE_META = {
@@ -71,6 +100,7 @@ export default function OffersList() {
   const [sendOrderModal, setSendOrderModal] = useState(null); // dgl. für AB-Versand
   const [billingOffer, setBillingOffer] = useState(null); // Angebot fürs Abrechnungs-Modal
   const [declineOffer, setDeclineOffer] = useState(null); // Angebot fürs Decline-Modal
+  const [annahmeMailOffer, setAnnahmeMailOffer] = useState(null); // Angebot für Versandmail + Annahme-Link
   const [linkOffer, setLinkOffer] = useState(null); // verwaistes Angebot fürs Zuordnungs-Modal
   const [linkBusy, setLinkBusy] = useState(false);
 
@@ -300,6 +330,7 @@ export default function OffersList() {
                           {o.decline_note.slice(0, 40)}{o.decline_note.length > 40 ? '…' : ''}
                         </div>
                       )}
+                      <OfferTimeline o={o} />
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--ink-3)' }} title={o.created_by || undefined}>
                       {o.created_by ? displayNameForEmail(o.created_by) : '—'}
@@ -323,6 +354,10 @@ export default function OffersList() {
                           disabled={isBusy}
                           onClick={() => openSendModal(o)}
                         >{isBusy ? '⏳' : (o.status === 'sent' ? '✉︎ Erneut senden' : '✉︎ An Kunden senden')}</button>
+                      )}
+                      {hasPdf && (o.status === 'created' || o.status === 'sent') && (
+                        <button className="btn-primary btn-sm" title="KI-Begleitmail mit Annahme-Link an den Kunden"
+                          disabled={isBusy} onClick={() => setAnnahmeMailOffer(o)}>🔗 Annahme-Mail</button>
                       )}
                       {o.status === 'accepted' && (
                         <button
@@ -417,6 +452,14 @@ export default function OffersList() {
         onClose={() => setDeclineOffer(null)}
         onDeclined={() => { setDeclineOffer(null); load(); }}
       />
+
+      {annahmeMailOffer && (
+        <AnnahmeMailModal
+          offer={annahmeMailOffer}
+          onClose={() => setAnnahmeMailOffer(null)}
+          onSent={() => { setAnnahmeMailOffer(null); load(); }}
+        />
+      )}
 
       <Modal open={!!linkOffer} onClose={() => setLinkOffer(null)}
         title={`Angebot verknüpfen — ${linkOffer?.customer_snapshot?.company_name || linkOffer?.easybill_customer_id || ''}`}>

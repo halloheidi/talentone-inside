@@ -5,6 +5,7 @@ import Modal from '../components/Modal.jsx';
 import Icon from '../components/Icon.jsx';
 import KundePicker from '../components/KundePicker.jsx';
 import OfferKITab from './offer/OfferKITab.jsx';
+import CloseVerknuepfenBox from './offer/CloseVerknuepfenBox.jsx';
 
 // Fängt Renderfehler eines Wizard-Schritts ab, damit nie eine weiße Seite
 // stehen bleibt. `key={step}` am Aufruf setzt die Boundary beim Schrittwechsel
@@ -493,6 +494,7 @@ export default function OfferWizard() {
         {step === 2 && <Step2Brand brand={brand} onSelect={setBrand} />}
         {step === 3 && (
           <>
+          <CloseVerknuepfenBox kundeId={customer?.tool_kunde_id} firmenname={customer?.company_name || customer?.tool_kunde_name} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <button type="button" className={modus === 'baukasten' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('baukasten')}>Baukasten</button>
             <button type="button" className={modus === 'ki' ? 'btn-primary' : 'btn-ghost'} onClick={() => setModus('ki')}>Individuell mit KI</button>

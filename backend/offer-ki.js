@@ -280,6 +280,36 @@ export async function generateOfferDraft({ brand, kunde, kontext = {}, closeEint
 }
 
 /**
+ * Entwirft die Begleit-E-Mail zum Angebot (Betreff + Body). Gleicher Kontext wie
+ * das Angebot: Freitext, gefilterte Close-Einträge, Anrede. Der Annahme-Button
+ * wird NICHT in den Body geschrieben (fügt die Mail-Funktion automatisch an).
+ * @returns {Promise<{subject:string, body:string}>}
+ */
+export async function generateOfferMail({ brand, kunde, freitext = '', closeEintraege = [], positionen = [], vertrag = {}, gueltigBis = null, absenderName = '' } = {}) {
+  const anredeHinweis = anredePromptHinweis(kunde || {});
+  const label = brandLabel(brand);
+  const system = `Du schreibst die kurze Begleit-E-Mail zu einem Angebot von ${label}, einer Recruiting-Agentur. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt {"subject": "...", "body": "..."} — keine Markdown-Backticks.
+
+Regeln:
+- Anrede: ${anredeHinweis}. Durchgängig.
+- body: 5–8 Sätze in Absätzen (\\n\\n getrennt): kurzer Bezug auf das Gespräch, was im Angebot steckt (2–3 Stichpunkte, jeweils mit "• " am Zeilenanfang), Gültigkeit, Hinweis "über den Button unten können Sie das Angebot ansehen und direkt annehmen", freundlicher Abschluss.
+- Schließe mit einer Signatur: ${absenderName ? `"${absenderName}" + "${label}"` : `"Ihr Team von ${label}"`}.
+- Wording: niemals "kostenlos"; keine Plattformnamen (Meta, Facebook, Instagram, TikTok); Erstgespräch = "Strategiegespräch".
+- Erwähne NIEMALS Konflikte, Zahlungs-/Geld-Historie oder Probleme. Historie nur als sachliche Fakten.
+- Nenne KEINE konkreten Preise im Fließtext (die stehen im Angebot). Füge den Button/Link NICHT selbst ein.`;
+  const inhalt = (positionen || []).map(p => `- ${p.titel || p.title}${p.optional ? ' (optional)' : ''}`).join('\n');
+  const user = `Freitext (Vertrieb): ${freitext || '-'}
+Im Angebot enthalten:
+${inhalt || '-'}
+Vertrag: ${vertrag?.vertragsmodell || '-'}${vertrag?.laufzeit_wert ? `, Laufzeit ${vertrag.laufzeit_wert} ${vertrag.laufzeit_einheit || ''}` : ''}
+Gültig bis: ${gueltigBis || '-'}
+${(closeEintraege || []).length ? 'Gesprächskontext (nur unkritische Inhalte nutzen, nicht zitieren):\n' + closeEintraege.map(e => `- ${e.title}: ${e.excerpt}`).join('\n') : ''}`;
+  const data = await callClaudeWithRetry({ model: CLAUDE_MODEL, max_tokens: 1200, system, messages: [{ role: 'user', content: user }] });
+  const p = parseJsonContent(data);
+  return { subject: String(p.subject || 'Ihr Angebot').trim(), body: String(p.body || '').trim() };
+}
+
+/**
  * Nachschärfen: ändert nur das in `anweisung` Genannte, Rest bleibt.
  * @returns {Promise<object>} normalisierter, überarbeiteter Entwurf
  */

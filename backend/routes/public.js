@@ -12,7 +12,9 @@ import { attachStableAnhaenge } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
-import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, sendeKundenFeedbackSofort, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
+import { sendFormularEingang, sendReviewBenachrichtigung, sendMentionMail, sendTeamAlertMail, sendeKundenFeedbackSofort, sendAngebotMail, MAIL_BRAND_LOGOS, MAIL_BRAND_ABSENDER } from '../mail.js';
+import { getDocumentPdf, ensureFinalized } from '../easybill.js';
+import { ensureProjektForOffer } from '../auftrag-automation.js';
 import { vermerkeUpload, markAnfrageBeantwortetWennErfuellt } from '../upload-benachrichtigung.js';
 
 // mail_brand → { logo_url, name } für die Public-Seiten (Review/Anfragen). EINE Quelle
@@ -1783,6 +1785,193 @@ router.post('/avv/:token/akzeptieren', async (req, res) => {
     console.error('[avv/akzeptieren]', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+/* ── Angebots-Annahme (Public per annahme_token) ── */
+
+async function loadOfferByAnnahmeToken(token) {
+  if (!token) return null;
+  const { data } = await supabase.from('talentone_offers').select('*').eq('annahme_token', token).maybeSingle();
+  return data || null;
+}
+function offerAbgelaufen(offer) {
+  const now = Date.now();
+  if (offer.gueltig_bis) return new Date(`${offer.gueltig_bis}T23:59:59`).getTime() < now;
+  const basis = offer.sent_at || offer.created_at;
+  return basis ? (new Date(basis).getTime() + 30 * 86400000 < now) : false;
+}
+function istMonatlich(cat) { return cat === 'monthly' || cat === 'option_monthly'; }
+function mapOfferPositionen(offer) {
+  return (offer.positions_snapshot || []).map((p, i) => ({
+    index: i,
+    titel: p.title, beschreibung: p.description,
+    menge: p.quantity, einzelpreis_netto: Number(p.unit_price) || 0,
+    periodisch: istMonatlich(p.category), optional: !!p.optional,
+  }));
+}
+function garantieText(offer) {
+  if (offer.guarantee_note && offer.guarantee_note.trim()) return offer.guarantee_note.trim();
+  if (offer.guarantee_type === 'applications') return `Mindestens ${offer.guarantee_applications_count || 0} Bewerbungen innerhalb der Laufzeit.`;
+  if (offer.guarantee_type === 'hire' || Number(offer.guarantee_period_days) > 0) return 'Erfolgsgarantie bis zur ersten Einstellung.';
+  return null;
+}
+
+// GET /api/public/angebot/:token — Angebot ansehen
+router.get('/angebot/:token', async (req, res) => {
+  try {
+    const offer = await loadOfferByAnnahmeToken(req.params.token);
+    if (!offer) return res.status(404).json({ error: 'Link ungültig.' });
+    if (!offer.geoeffnet_am) {
+      supabase.from('talentone_offers').update({ geoeffnet_am: new Date().toISOString() }).eq('id', offer.id).then(() => {}, () => {});
+    }
+    const agentur = offer.brand === 'nowag_wirth' ? 'nowagwirth' : 'talentone';
+    let firmenname = offer.customer_snapshot?.company_name || null, logo_url = null, avv_url = null;
+    if (offer.customer_id) {
+      const { data: k } = await supabase.from('talentone_kunden').select('firmenname, logo_url, portal_token').eq('id', offer.customer_id).maybeSingle();
+      if (k) {
+        firmenname = k.firmenname || firmenname;
+        logo_url = k.logo_url || null;
+        if (k.portal_token) avv_url = `${getPublicBaseUrl(agentur)}/avv/${k.portal_token}`;
+      }
+    }
+    res.json({
+      firmenname, logo_url, agentur, brand: offer.brand,
+      einleitung: offer.einleitung || null,
+      leistungsbeschreibung: offer.leistungsbeschreibung || null,
+      positionen: mapOfferPositionen(offer),
+      vertrag: {
+        vertragsmodell: offer.vertragsmodell || null,
+        laufzeit_wert: offer.laufzeit_wert ?? null,
+        laufzeit_einheit: offer.laufzeit_einheit || null,
+        garantie: garantieText(offer),
+      },
+      zahlungsbedingungen: offer.zahlungsbedingungen || null,
+      gueltig_bis: offer.gueltig_bis || null,
+      vat_rate: Number(offer.vat_rate) || 19,
+      status: offer.status,
+      angenommen_am: offer.accepted_at || null,
+      angenommen_von: offer.angenommen_von || null,
+      abgelaufen: offerAbgelaufen(offer),
+      hat_pdf: !!offer.easybill_document_id,
+      avv_url,
+    });
+  } catch (err) { console.error('[public/angebot]', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/public/angebot/:token/pdf — easybill-PDF (tokenbasiert)
+router.get('/angebot/:token/pdf', async (req, res) => {
+  try {
+    const offer = await loadOfferByAnnahmeToken(req.params.token);
+    if (!offer || !offer.easybill_document_id) return res.status(404).send('PDF nicht verfügbar.');
+    await ensureFinalized(offer.easybill_document_id);
+    const pdf = await getDocumentPdf(offer.easybill_document_id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="Angebot.pdf"');
+    res.send(pdf);
+  } catch (err) { console.error('[public/angebot/pdf]', err.message); res.status(502).send('PDF-Fehler.'); }
+});
+
+// POST /api/public/angebot/:token/akzeptieren  { name, funktion, agb_ok, optionen:[index] }
+router.post('/angebot/:token/akzeptieren', async (req, res) => {
+  try {
+    const offer = await loadOfferByAnnahmeToken(req.params.token);
+    if (!offer) return res.status(404).json({ error: 'Link ungültig.' });
+    if (offer.accepted_at || offer.status === 'accepted') return res.status(409).json({ error: 'Dieses Angebot wurde bereits angenommen.' });
+    if (offerAbgelaufen(offer)) return res.status(410).json({ error: 'Dieses Angebot ist abgelaufen.' });
+
+    const b = req.body || {};
+    const name = String(b.name || '').trim();
+    const funktion = String(b.funktion || '').trim();
+    if (!name) return res.status(400).json({ error: 'Bitte Name angeben.' });
+    if (!b.agb_ok) return res.status(400).json({ error: 'Bitte die verbindliche Annahme bestätigen.' });
+
+    // Positions-Snapshot = Pflicht + angekreuzte Optionen (werden Pflicht); nicht
+    // gewählte Optionen fallen raus.
+    const snap = offer.positions_snapshot || [];
+    const gewaehlt = new Set((Array.isArray(b.optionen) ? b.optionen : []).map(Number));
+    const angenommeneOptionen = snap.filter((p, i) => p.optional && gewaehlt.has(i));
+    const mergedSnap = snap
+      .filter((p, i) => !p.optional || gewaehlt.has(i))
+      .map(p => (p.optional ? { ...p, optional: false } : p));
+
+    const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim();
+    const { data: updated } = await supabase.from('talentone_offers').update({
+      positions_snapshot: mergedSnap,
+      status: 'accepted',
+      accepted_at: new Date().toISOString(),
+      angenommen_von: name,
+      angenommen_funktion: funktion || null,
+      angenommen_ip: ip || null,
+      angenommene_optionen: angenommeneOptionen,
+    }).eq('id', offer.id).select().single();
+
+    // Bestehender Annahme-Pfad: easybill finalisieren + Projekt anlegen.
+    if (updated.easybill_document_id) { try { await ensureFinalized(updated.easybill_document_id); } catch (e) { console.warn('[angebot/akzeptieren finalize]', e.message); } }
+    let projekt = null;
+    try { projekt = (await ensureProjektForOffer(updated)).projekt; } catch (e) { console.error('[angebot/akzeptieren projekt]', e.message); }
+
+    // Kickoff als nächster Schritt am Projekt vormerken (idempotent).
+    if (projekt?.id) {
+      const liste = Array.isArray(projekt.auftrag_checkliste) ? projekt.auftrag_checkliste : [];
+      if (!liste.some(it => it.key === 'kickoff_planen')) {
+        await supabase.from('talentone_projekte').update({
+          auftrag_checkliste: [{ key: 'kickoff_planen', label: 'Kickoff planen', done: false }, ...liste],
+        }).eq('id', projekt.id);
+      }
+    }
+
+    // Bestätigungsmail an den Kunden (Zusammenfassung + PDF) + interne Team-Mail.
+    const firma = updated.customer_snapshot?.company_name || 'Kunde';
+    const empf = updated.sent_to || updated.customer_snapshot?.email;
+    const optTxt = angenommeneOptionen.length ? `\n\nHinzugebuchte Optionen:\n${angenommeneOptionen.map(o => `• ${o.title}`).join('\n')}` : '';
+    if (empf && updated.easybill_document_id) {
+      try {
+        const pdf = await getDocumentPdf(updated.easybill_document_id);
+        await sendAngebotMail({
+          to: empf, offerBrand: updated.brand,
+          subject: 'Bestätigung Ihrer Angebotsannahme',
+          body: `vielen Dank — wir haben Ihre verbindliche Annahme erhalten.${optTxt}\n\nIm Anhang finden Sie das Angebot als PDF. Wir melden uns in Kürze zur Abstimmung des Kickoffs.`,
+          pdfBuffer: pdf, pdfFilename: 'Angebot.pdf',
+        });
+      } catch (e) { console.warn('[angebot/akzeptieren bestätigung]', e.message); }
+    }
+    try {
+      await sendTeamAlertMail({
+        subject: `✅ ${firma} hat das Angebot angenommen`,
+        headline: `${firma} hat angenommen`,
+        lead: `Angenommen von ${name}${funktion ? ` (${funktion})` : ''}.${angenommeneOptionen.length ? ` Optionen: ${angenommeneOptionen.map(o => o.title).join(', ')}` : ' Keine Zusatzoptionen.'} Nächster Schritt: Kickoff planen.`,
+        linkUrl: projekt?.id ? `${process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de'}/kunden/${updated.customer_id || ''}` : null,
+        linkLabel: 'Zum Kunden',
+      });
+    } catch (e) { console.warn('[angebot/akzeptieren team]', e.message); }
+
+    if (updated.close_lead_id) {
+      try { await addTask({ leadId: updated.close_lead_id, text: `Angebot angenommen von ${name} — Kickoff planen` }); } catch { /* best-effort */ }
+    }
+    res.json({ ok: true });
+  } catch (err) { console.error('[angebot/akzeptieren]', err.message); res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/public/angebot/:token/rueckfrage  { text }
+router.post('/angebot/:token/rueckfrage', async (req, res) => {
+  try {
+    const offer = await loadOfferByAnnahmeToken(req.params.token);
+    if (!offer) return res.status(404).json({ error: 'Link ungültig.' });
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Bitte eine Rückfrage eingeben.' });
+    await supabase.from('talentone_offers').update({ rueckfrage_am: new Date().toISOString(), rueckfrage_text: text }).eq('id', offer.id);
+    const firma = offer.customer_snapshot?.company_name || 'Kunde';
+    try {
+      await sendTeamAlertMail({
+        subject: `❓ Rückfrage zum Angebot — ${firma}`,
+        headline: `Rückfrage von ${firma}`,
+        lead: text,
+        linkUrl: `${process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de'}/angebote`,
+        linkLabel: 'Zu den Angeboten',
+      });
+    } catch (e) { console.warn('[angebot/rueckfrage team]', e.message); }
+    res.json({ ok: true });
+  } catch (err) { console.error('[angebot/rueckfrage]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/public/portal/:token — komplettes Dashboard

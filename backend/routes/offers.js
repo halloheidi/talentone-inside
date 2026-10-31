@@ -2,8 +2,10 @@
 // Die easybill-Erzeugung folgt in Phase 3.
 
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { supabase } from '../supabase.js';
 import { anrede } from '../anrede.js';
+import { getPublicBaseUrl } from '../branding.js';
 import { calculateOfferTotals, validateAdBudget, aggregateSnapshot, resolveOfferPositions, validatePositions } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
 import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized, getCustomer, listCustomerContacts } from '../easybill.js';
@@ -14,7 +16,22 @@ import { addNote as closeAddNote, fetchLeadActivities, searchLeads, findLead } f
 import { buildEckdatenBlock } from '../mail-eckdaten.js';
 import { ensureProjektForOffer } from '../auftrag-automation.js';
 import { resolveKundeIdForOffer, linkOfferToKunde, createKundeFromSnapshot } from '../offer-linking.js';
-import { generateOfferDraft, refineOfferDraft, classifyCloseEntries } from '../offer-ki.js';
+import { generateOfferDraft, refineOfferDraft, classifyCloseEntries, generateOfferMail } from '../offer-ki.js';
+
+// offer.brand ('talentone'|'nowag_wirth') → Agentur-Key für Branding/Public-URL.
+function agenturForBrand(brand) { return brand === 'nowag_wirth' ? 'nowagwirth' : 'talentone'; }
+// Angebots-Annahme-Token lazy erzeugen (Muster wie pruefung/portal_token).
+async function ensureAnnahmeToken(offer) {
+  if (offer.annahme_token) return offer.annahme_token;
+  const token = randomUUID();
+  await supabase.from('talentone_offers').update({ annahme_token: token }).eq('id', offer.id);
+  return token;
+}
+// Begleitmail-Absender (Anzeigename für From + Signatur).
+const ABSENDER = {
+  johannes: 'Johannes Wirth',
+  daniel:   'Daniel Nowag',
+};
 
 const router = Router();
 
@@ -521,7 +538,7 @@ router.get('/resolve-kunde', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, billing_external_at, billing_external_note, billing_external_by, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value, werbebudget_modus, tagesbudget_empfehlung')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, billing_external_at, billing_external_note, billing_external_by, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value, werbebudget_modus, tagesbudget_empfehlung, erstellt_via, annahme_token, geoeffnet_am, angenommen_von, angenommen_funktion, rueckfrage_am, gueltig_bis')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
@@ -720,8 +737,102 @@ router.get('/ki/lead-suche', async (req, res) => {
     const q = (req.query.q || '').toString().trim();
     if (!q) return res.json({ leads: [] });
     const leads = await searchLeads(q, 8);
-    res.json({ leads: (leads || []).map(l => ({ id: l.id, name: l.display_name || l.name || '(ohne Name)', status: l.status_label || null })) });
+    res.json({ leads: (leads || []).map(l => ({
+      id: l.id,
+      name: l.display_name || l.name || '(ohne Name)',
+      status: l.status_label || null,
+      ort: l.addresses?.[0]?.city || l.addresses?.[0]?.state || null,
+    })) });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* POST /api/offers/ki/close-verknuepfen  { kunde_id, lead_id }
+   Speichert die Close-Lead-Verknüpfung am Kunden (einmalig beim Anlegen). */
+router.post('/ki/close-verknuepfen', async (req, res) => {
+  try {
+    const { kunde_id, lead_id } = req.body || {};
+    if (!kunde_id || !lead_id) return res.status(400).json({ error: 'kunde_id und lead_id erforderlich.' });
+    const { error } = await supabase.from('talentone_kunden')
+      .update({ close_lead_id: String(lead_id) }).eq('id', kunde_id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true, close_lead_id: String(lead_id) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* GET /api/offers/:id/annahme-mail-preview?absender= — KI-Entwurf der Versandmail
+   + Annahme-Link (Token wird lazy erzeugt). */
+router.get('/:id/annahme-mail-preview', async (req, res) => {
+  try {
+    const { data: offer } = await supabase.from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    const token = await ensureAnnahmeToken(offer);
+    const annahme_url = `${getPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
+
+    let kunde = null;
+    if (offer.customer_id) {
+      const { data: k } = await supabase.from('talentone_kunden')
+        .select('ansprechpartner, anrede_form, nachname, email, agentur').eq('id', offer.customer_id).maybeSingle();
+      kunde = k || null;
+    }
+    const absender = ['johannes', 'daniel'].includes(req.query.absender) ? req.query.absender : 'johannes';
+    let closeEintraege = [];
+    if (offer.close_lead_id) {
+      try { closeEintraege = (await classifyCloseEntries(await fetchLeadActivities(offer.close_lead_id, { sinceDays: 90 }))).filter(e => e.verwendbar !== false).slice(0, 8); }
+      catch { /* optional */ }
+    }
+    const positionen = (offer.positions_snapshot || []).map(p => ({ titel: p.title, optional: !!p.optional }));
+    const mail = await generateOfferMail({
+      brand: offer.brand, kunde,
+      freitext: offer.ki_kontext?.freitext || '',
+      closeEintraege, positionen,
+      vertrag: { vertragsmodell: offer.vertragsmodell, laufzeit_wert: offer.laufzeit_wert, laufzeit_einheit: offer.laufzeit_einheit },
+      gueltigBis: offer.gueltig_bis, absenderName: ABSENDER[absender],
+    });
+    res.json({
+      subject: mail.subject, body: mail.body,
+      to: offer.customer_snapshot?.email || kunde?.email || '',
+      annahme_url, absender,
+      absender_optionen: Object.entries(ABSENDER).map(([key, name]) => ({ key, name })),
+      hat_easybill: !!offer.easybill_document_id,
+    });
+  } catch (err) { console.error('[annahme-mail-preview]', err.message); res.status(502).json({ error: err.message }); }
+});
+
+/* POST /api/offers/:id/send-annahme-mail  { to, subject, body, absender }
+   Versendet die Begleitmail mit easybill-PDF-Anhang + Annahme-Button, BCC intern. */
+router.post('/:id/send-annahme-mail', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.to || !b.subject || !b.body) return res.status(400).json({ error: 'to, subject und body erforderlich.' });
+    const { data: offer } = await supabase.from('talentone_offers').select('*').eq('id', req.params.id).maybeSingle();
+    if (!offer) return res.status(404).json({ error: 'Angebot nicht gefunden.' });
+    if (!offer.easybill_document_id) return res.status(409).json({ error: 'Angebot hat noch kein easybill-Dokument — bitte zuerst erzeugen.' });
+
+    const token = await ensureAnnahmeToken(offer);
+    const annahme_url = `${getPublicBaseUrl(agenturForBrand(offer.brand))}/angebot/${token}`;
+    const absender = ['johannes', 'daniel'].includes(b.absender) ? b.absender : 'johannes';
+
+    await ensureFinalized(offer.easybill_document_id);
+    const pdfBuffer = await getDocumentPdf(offer.easybill_document_id);
+    const firma = (offer.customer_snapshot?.company_name || 'Angebot').replace(/[^\w\-]+/g, '_');
+
+    await sendAngebotMail({
+      to: b.to, offerBrand: offer.brand, subject: b.subject, body: b.body,
+      pdfBuffer, pdfFilename: `${firma}_Angebot.pdf`,
+      ctaUrl: annahme_url, ctaLabel: 'Angebot ansehen & annehmen',
+      fromName: ABSENDER[absender],
+    });
+
+    await supabase.from('talentone_offers').update({
+      status: offer.status === 'accepted' ? 'accepted' : 'sent',
+      sent_at: new Date().toISOString(), sent_to: b.to, absender,
+    }).eq('id', offer.id);
+
+    if (offer.close_lead_id) {
+      try { await closeAddNote({ leadId: offer.close_lead_id, note: `📧 Angebot per Mail an ${b.to} gesendet (mit Annahme-Link).` }); } catch { /* best-effort */ }
+    }
+    res.json({ ok: true, annahme_url });
+  } catch (err) { console.error('[send-annahme-mail]', err.message); res.status(502).json({ error: `Versand fehlgeschlagen: ${err.message}` }); }
 });
 
 /* GET /api/offers/ki/anrede-abgleich?easybill_customer_id=&kunde_id=
