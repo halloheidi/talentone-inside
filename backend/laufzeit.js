@@ -95,7 +95,7 @@ export async function laufzeitStatus(projekt) {
     base.einheit = projekt.laufzeit_einheit || 'monate';
     base.soll = projekt.laufzeit_wert ?? null;    // Monate (null = offene Laufzeit)
     const start = parseDatum(projekt.start_datum);
-    if (!start) { hinweise.push('kein_start_datum'); if (garantie) hinweise.push('abo_mit_garantie'); return base; }
+    if (!start) { hinweise.push('kein_start_datum'); return base; }
 
     const jetzt = heute();
     const bruttoTage = tageDiff(start, jetzt);
@@ -111,7 +111,7 @@ export async function laufzeitStatus(projekt) {
       const endeOhnePause = einheitMonate ? addMonate(start, base.soll) : new Date(start.getTime() + base.soll * MS_TAG);
       base.ende_voraussichtlich = ymd(new Date(endeOhnePause.getTime() + ptage * MS_TAG));
     }
-    if (garantie) hinweise.push('abo_mit_garantie');   // Garantie bei Abo ist ungewöhnlich → Warnung (nicht blockierend)
+    // Abo + Garantie ist ausdrücklich zulässig (frei kombinierbar) — keine Warnung mehr.
     return base;
   }
 

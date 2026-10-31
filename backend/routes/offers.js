@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
 import { anrede } from '../anrede.js';
 import { calculateOfferTotals, validateAdBudget, aggregateSnapshot, resolveOfferPositions, validatePositions } from '../offer-calc.js';
 import { buildEasybillOfferPayload } from '../offer-easybill-builder.js';
-import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized } from '../easybill.js';
+import { createOffer, createChargeConfirm, getDocument, getDocumentPdf, listPdfTemplates, ensureFinalized, getCustomer, listCustomerContacts } from '../easybill.js';
 import { getPdfTemplate, getPdfTemplateConfig } from '../easybill-templates.js';
 import { syncOne, syncOpenOffers, getOfferSyncStatus } from '../offer-sync.js';
 import { sendAngebotMail, sendAuftragMail } from '../mail.js';
@@ -14,7 +14,7 @@ import { addNote as closeAddNote, fetchLeadActivities, searchLeads, findLead } f
 import { buildEckdatenBlock } from '../mail-eckdaten.js';
 import { ensureProjektForOffer } from '../auftrag-automation.js';
 import { resolveKundeIdForOffer, linkOfferToKunde, createKundeFromSnapshot } from '../offer-linking.js';
-import { generateOfferDraft, refineOfferDraft } from '../offer-ki.js';
+import { generateOfferDraft, refineOfferDraft, classifyCloseEntries } from '../offer-ki.js';
 
 const router = Router();
 
@@ -705,7 +705,11 @@ router.get('/ki/close-kontext', async (req, res) => {
       leadId = k?.close_lead_id || '';
     }
     if (!leadId) return res.json({ lead_id: null, eintraege: [] });
-    const eintraege = await fetchLeadActivities(leadId, { sinceDays: 90 });
+    const roh = await fetchLeadActivities(leadId, { sinceDays: 90 });
+    // Risiko-Vorfilter: Zahlungs-/Konflikt-Themen werden klassifiziert. Nicht
+    // verwendbare Einträge bleiben in der Liste (Vorschau grau "nur intern"),
+    // gehen aber nicht in den Kundentext.
+    const eintraege = await classifyCloseEntries(roh);
     res.json({ lead_id: leadId, eintraege });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -720,6 +724,35 @@ router.get('/ki/lead-suche', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* GET /api/offers/ki/anrede-abgleich?easybill_customer_id=&kunde_id=
+   Vergleicht den Tool-Ansprechpartner mit dem easybill-Kontakt/Adressnamen.
+   Bei Abweichung kann der User im Editor den gültigen Namen wählen (Anrede +
+   Adressblock). easybill-Adressblock lässt sich nur über contact_id steuern. */
+router.get('/ki/anrede-abgleich', async (req, res) => {
+  try {
+    const ebId = (req.query.easybill_customer_id || '').toString().trim();
+    const kundeId = (req.query.kunde_id || '').toString().trim();
+    let toolName = null;
+    if (kundeId) {
+      const { data: k } = await supabase.from('talentone_kunden')
+        .select('ansprechpartner, nachname').eq('id', kundeId).maybeSingle();
+      toolName = (k?.ansprechpartner || k?.nachname || '').trim() || null;
+    }
+    let easybillName = null, contacts = [];
+    if (ebId) {
+      const [cust, kontakte] = await Promise.all([
+        getCustomer(ebId).catch(() => null),
+        listCustomerContacts(ebId),
+      ]);
+      if (cust) easybillName = `${cust.first_name || ''} ${cust.last_name || ''}`.trim() || cust.company_name || null;
+      contacts = kontakte || [];
+    }
+    const norm = s => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const abweichung = !!(toolName && easybillName && norm(toolName) !== norm(easybillName));
+    res.json({ tool_name: toolName, easybill_name: easybillName, easybill_contacts: contacts, abweichung });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /* POST /api/offers/ki/generate — strukturierter KI-Entwurf aus Kontext + Freitext. */
 router.post('/ki/generate', async (req, res) => {
   try {
@@ -729,7 +762,9 @@ router.post('/ki/generate', async (req, res) => {
       brand: b.brand,
       kunde: b.kontext?.kunde || null,
       kontext: b.kontext || {},
-      closeEintraege: Array.isArray(b.close_eintraege) ? b.close_eintraege : [],
+      // Harte Sicherung: als "nur intern" klassifizierte Close-Einträge gehen nie
+      // in den Kundentext, selbst wenn das Frontend sie mitschicken würde.
+      closeEintraege: (Array.isArray(b.close_eintraege) ? b.close_eintraege : []).filter(e => e && e.verwendbar !== false),
       freitext: b.freitext || '',
       bausteine: Array.isArray(b.bausteine) ? b.bausteine : [],
     });
@@ -752,6 +787,7 @@ router.post('/ki/refine', async (req, res) => {
       kontext: b.kontext || {},
       entwurf: b.entwurf,
       anweisung: b.anweisung,
+      freitext: b.freitext || '',
     });
     res.json({ entwurf });
   } catch (err) {
@@ -1105,6 +1141,8 @@ router.post('/:id/create-easybill', async (req, res) => {
         items,
         pdfTemplate: getPdfTemplate(offer.brand, 'OFFER'),
         externalId:  offer.id, // Rücksync-Anker für Phase 4
+        // KI-Variante: gewählter Empfänger-Kontakt steuert den Adressblock.
+        contactId:   offer.ki_kontext?.gewaehlte_contact_id || null,
       });
     } catch (err) {
       // easybill-Fehler → Draft bleibt bestehen, sauber ins UI zurück

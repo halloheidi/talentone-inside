@@ -46,6 +46,12 @@ function euroToCents(euro) {
   return Math.round(Number(euro || 0) * 100);
 }
 
+// Euro-Betrag für Textblöcke (z.B. "1.490,00 €").
+const _eurFmt = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+function euroFmt(euro) {
+  return _eurFmt.format(Number(euro) || 0);
+}
+
 // Fallback-Labels, falls in talentone_offer_templates kein passender
 // Key gepflegt ist. Bevorzugt wird der Template-Key (siehe unten).
 const DEFAULT_GUARANTEE_LABEL_BY_BRAND = {
@@ -122,8 +128,12 @@ export function buildEasybillOfferPayload({
     ? { ...l }
     : { ...l, description: productById.get(l.product_id)?.description || '', _sort: productById.get(l.product_id)?.sort_order || 0 });
 
-  let setupLines   = resolved.filter(isSetup);
-  let monthlyLines = resolved.filter(isMonthly);
+  // Optionale Positionen laufen NICHT als summierte POSITION, sondern als
+  // eigener "Optional zubuchbar"-Textblock mit Preis (easybill kennt keine
+  // nicht-summierte Preis-Position; TEXT ist der verlässliche Weg).
+  const optionalLines = resolved.filter(l => l.optional);
+  let setupLines   = resolved.filter(l => isSetup(l) && !l.optional);
+  let monthlyLines = resolved.filter(l => isMonthly(l) && !l.optional);
   if (!useSnapshot) {
     setupLines   = setupLines.sort((a, b) => (a._sort || 0) - (b._sort || 0));
     monthlyLines = monthlyLines.sort((a, b) => (a._sort || 0) - (b._sort || 0));
@@ -196,6 +206,22 @@ export function buildEasybillOfferPayload({
   // den Positionen. Kunde hinterlegt eigenes Zahlungsmittel, Meta zahlt direkt.
   if (istEmpfehlung) {
     items.push(makeTextPosition({ pos: pos++, title: 'Hinweis zum Werbebudget', body: buildWerbebudgetHinweis(tagesbudget_empfehlung) }));
+  }
+
+  // Optional zubuchbare Positionen: eigener Textblock mit sichtbarem Preis,
+  // NICHT Teil der Angebotssumme.
+  if (optionalLines.length) {
+    const zeilen = optionalLines.map(l => {
+      const periodisch = MONTHLY_CATS.has(l.category) ? ' / Monat' : '';
+      const preis = `${euroFmt(l.unit_price)}${periodisch} netto`;
+      const desc = l.description && l.description.trim() ? ` – ${l.description.trim()}` : '';
+      return `• ${l.title} — ${preis}${desc}`;
+    });
+    items.push(makeTextPosition({
+      pos: pos++,
+      title: 'Optional zubuchbar',
+      body: `${zeilen.join('\n')}\n\nDiese Positionen sind nicht Teil der Angebotssumme und können auf Wunsch hinzugebucht werden.`,
+    }));
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)

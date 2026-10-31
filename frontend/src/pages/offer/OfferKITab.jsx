@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api.js';
+import { stripLeadingGreeting } from '../../lib/anrede.js';
 
 const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 
@@ -26,6 +27,7 @@ function toEditLines(positionen) {
     einheit: p.einheit || 'Stk.',
     einzelpreis_netto: p.einzelpreis_netto == null ? null : Number(p.einzelpreis_netto),
     kategorie: p.kategorie === 'monthly' ? 'monthly' : 'setup',
+    optional: !!p.optional,
   }));
 }
 
@@ -50,6 +52,10 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
   const [freitext, setFreitext] = useState('');
   const [bausteine, setBausteine] = useState([]);
   const [bausteinAn, setBausteinAn] = useState(new Set());
+
+  // Anrede-/Adressblock-Abgleich (easybill-Kontakt vs. Tool-Ansprechpartner)
+  const [anredeInfo, setAnredeInfo] = useState(null); // { tool_name, easybill_name, easybill_contacts, abweichung }
+  const [empfaenger, setEmpfaenger] = useState(null); // { name, contact_id, first_name, last_name, salutation }
 
   // Generierung / Entwurf
   const [generating, setGenerating] = useState(false);
@@ -99,16 +105,51 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
     return () => { cancel = true; };
   }, [brand, kundeId]);
 
+  // Anrede-/Adressblock-Abgleich laden, sobald der easybill-Kunde feststeht.
+  useEffect(() => {
+    const ebId = customer?.easybill_id;
+    if (!ebId) return;
+    let cancel = false;
+    (async () => {
+      try {
+        const p = new URLSearchParams({ easybill_customer_id: String(ebId), ...(kundeId ? { kunde_id: kundeId } : {}) });
+        const res = await api(`/offers/ki/anrede-abgleich?${p}`);
+        if (!cancel) setAnredeInfo(res);
+      } catch { /* optional */ }
+    })();
+    return () => { cancel = true; };
+  }, [customer?.easybill_id, kundeId]);
+
   async function closeLaden(leadId = null) {
     setCloseBusy(true); setError('');
     try {
       const q = leadId ? `lead_id=${encodeURIComponent(leadId)}` : `kunde_id=${encodeURIComponent(kundeId)}`;
       const res = await api(`/offers/ki/close-kontext?${q}`);
       setCloseLeadId(res.lead_id || leadId || closeLeadId);
-      setCloseEintraege((res.eintraege || []).map(e => ({ ...e, _an: true })));
+      // Nicht verwendbare (nur interne) Einträge sind standardmäßig abgewählt.
+      setCloseEintraege((res.eintraege || []).map(e => ({ ...e, _an: e.verwendbar !== false })));
       setCloseGeladen(true);
     } catch (e) { setError(e.message); }
     finally { setCloseBusy(false); }
+  }
+
+  // Empfänger wählen: steuert easybill-Adressblock (contact_id) + Anrede im Text.
+  function empfaengerWaehlen(opt) {
+    setEmpfaenger(opt);
+    if (!opt) return;
+    const form = kontext?.kunde?.anrede_form === 'sie' ? 'sie' : 'du';
+    const parts = opt.name ? String(opt.name).trim().split(/\s+/) : [];
+    const vorname = opt.first_name || parts[0] || '';
+    const nachname = opt.last_name || (parts.length > 1 ? parts[parts.length - 1] : '');
+    let gruss;
+    if (form === 'du') {
+      gruss = `Hallo ${vorname || opt.name},`;
+    } else if (opt.salutation && nachname) {
+      gruss = `Sehr geehrte${opt.salutation === 'Frau' ? ' Frau' : 'r Herr'} ${nachname},`;
+    } else {
+      gruss = `Guten Tag ${opt.name},`;
+    }
+    setEinleitung(prev => `${gruss} ${stripLeadingGreeting(prev || '')}`.trim());
   }
 
   async function leadSuchen() {
@@ -174,7 +215,8 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       const body = {
         brand,
         kontext: kontextFuerKI(),
-        close_eintraege: closeEintraege.filter(e => e._an).map(e => ({ id: e.id, type: e.type, date: e.date, title: e.title, excerpt: e.excerpt })),
+        close_eintraege: closeEintraege.filter(e => e._an && e.verwendbar !== false)
+          .map(e => ({ id: e.id, type: e.type, date: e.date, title: e.title, excerpt: e.excerpt, verwendbar: true })),
         freitext,
         bausteine: gewaehlteBausteine,
       };
@@ -188,7 +230,7 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
     if (!anweisung.trim()) return;
     setRefining(true); setError('');
     try {
-      const body = { brand, kontext: kontextFuerKI(), entwurf: aktuellerEntwurf(), anweisung };
+      const body = { brand, kontext: kontextFuerKI(), entwurf: aktuellerEntwurf(), anweisung, freitext };
       const res = await api('/offers/ki/refine', { method: 'POST', body });
       pushVersion(res.entwurf, `Nachgeschärft: „${anweisung.slice(0, 40)}${anweisung.length > 40 ? '…' : ''}"`);
       setAnweisung('');
@@ -203,7 +245,7 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       gueltig_bis: gueltigBis || null, offene_punkte: offenePunkte,
       positionen: positionen.map(p => ({
         titel: p.titel, beschreibung: p.beschreibung, menge: p.menge, einheit: p.einheit,
-        einzelpreis_netto: p.einzelpreis_netto, kategorie: p.kategorie,
+        einzelpreis_netto: p.einzelpreis_netto, kategorie: p.kategorie, optional: !!p.optional,
       })),
       vertrag: {
         vertragsmodell: vertragsmodell || null,
@@ -219,6 +261,7 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
   const summe = useMemo(() => {
     let setup = 0, monthly = 0;
     for (const p of positionen) {
+      if (p.optional) continue; // optionale Positionen zählen nicht zur Summe
       const preis = Number(p.einzelpreis_netto) || 0;
       const zeile = preis * (Number(p.menge) || 1);
       if (p.kategorie === 'monthly') monthly += zeile; else setup += zeile;
@@ -234,11 +277,24 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
   }
   function posHinzufuegen() {
     setPositionen(prev => [...prev, {
-      key: `pos-neu-${Date.now()}`, titel: '', beschreibung: '', menge: 1, einheit: 'Stk.', einzelpreis_netto: 0, kategorie: 'setup',
+      key: `pos-neu-${Date.now()}`, titel: '', beschreibung: '', menge: 1, einheit: 'Stk.', einzelpreis_netto: 0, kategorie: 'setup', optional: false,
     }]);
   }
 
   const preisLuecke = positionen.some(p => p.einzelpreis_netto == null || !Number.isFinite(Number(p.einzelpreis_netto)));
+  const internHinweise = closeEintraege.filter(e => e.verwendbar === false).map(e => e.grund).filter(Boolean);
+
+  const empfaengerOptionen = useMemo(() => {
+    if (!anredeInfo) return [];
+    const opts = [];
+    const kontakte = anredeInfo.easybill_contacts || [];
+    if (anredeInfo.easybill_name && !kontakte.some(c => c.name === anredeInfo.easybill_name)) {
+      opts.push({ key: 'ebdefault', label: `${anredeInfo.easybill_name} (easybill-Adresse)`, name: anredeInfo.easybill_name, contact_id: null });
+    }
+    for (const c of kontakte) opts.push({ key: `c${c.id}`, label: `${c.name} (easybill)`, name: c.name, contact_id: c.id, first_name: c.first_name, last_name: c.last_name, salutation: c.salutation });
+    if (anredeInfo.tool_name) opts.push({ key: 'tool', label: `${anredeInfo.tool_name} (Tool)`, name: anredeInfo.tool_name, contact_id: null });
+    return opts;
+  }, [anredeInfo]);
 
   function guaranteeFelder() {
     const type = garantieArt === 'keine' ? 'none' : garantieArt;
@@ -265,7 +321,7 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       also_in_tool: alsoInTool && !customer.tool_kunde_id,
       close_lead_id: closeLeadId || null,
       positionen_snapshot: positionen.map(p => ({
-        product_id: null, custom: true,
+        product_id: null, custom: true, optional: !!p.optional,
         category: p.kategorie === 'monthly' ? 'monthly' : 'setup',
         title: p.titel, description: p.beschreibung,
         unit_price: Number(p.einzelpreis_netto) || 0,
@@ -283,8 +339,11 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
       ki_kontext: {
         freitext,
         kundenakte: kontext || null,
-        close_eintraege: closeEintraege.filter(e => e._an).map(e => e.id),
+        close_eintraege: closeEintraege.filter(e => e._an && e.verwendbar !== false).map(e => e.id),
         bausteine: bausteine.filter(b => bausteinAn.has(b.id)).map(b => ({ id: b.id, title: b.title })),
+        // Gewählter Empfänger (steuert easybill-Adressblock über contact_id).
+        gewaehlte_contact_id: empfaenger?.contact_id || null,
+        gewaehlter_empfaenger: empfaenger?.name || null,
       },
       ki_versionen: versionen.map(v => v.entwurf),
     };
@@ -370,17 +429,28 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
                 </button>
               )}
               {closeGeladen && closeEintraege.length === 0 && <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Keine Einträge in den letzten 90 Tagen.</div>}
+              {internHinweise.length > 0 && (
+                <div className="card" style={{ padding: '8px 10px', marginBottom: 8, background: '#fffbeb', border: '1px solid #fde68a', fontSize: 12 }}>
+                  <strong style={{ color: '#92400e' }}>Nur intern (nicht im Kundentext):</strong>
+                  <div style={{ color: '#92400e', marginTop: 2 }}>{internHinweise.join(' · ')}</div>
+                </div>
+              )}
               {closeEintraege.length > 0 && (
                 <div className="card" style={{ padding: 10, display: 'grid', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                  {closeEintraege.map((e, i) => (
-                    <label key={e.id || i} style={{ display: 'flex', gap: 8, fontSize: 12.5, cursor: 'pointer', alignItems: 'flex-start' }}>
-                      <input type="checkbox" checked={e._an} onChange={ev => setCloseEintraege(prev => prev.map((x, j) => (j === i ? { ...x, _an: ev.target.checked } : x)))} style={{ marginTop: 3 }} />
-                      <span>
-                        <span style={{ fontWeight: 600 }}>{e.title}</span>{e.date ? <span style={{ color: 'var(--ink-3)' }}> · {e.date}</span> : null}
-                        {e.excerpt ? <div style={{ color: 'var(--ink-2)', marginTop: 2 }}>{e.excerpt}</div> : null}
-                      </span>
-                    </label>
-                  ))}
+                  {closeEintraege.map((e, i) => {
+                    const intern = e.verwendbar === false;
+                    return (
+                      <label key={e.id || i} style={{ display: 'flex', gap: 8, fontSize: 12.5, cursor: intern ? 'default' : 'pointer', alignItems: 'flex-start', opacity: intern ? 0.55 : 1 }}>
+                        <input type="checkbox" checked={!intern && e._an} disabled={intern}
+                          onChange={ev => setCloseEintraege(prev => prev.map((x, j) => (j === i ? { ...x, _an: ev.target.checked } : x)))} style={{ marginTop: 3 }} />
+                        <span>
+                          <span style={{ fontWeight: 600 }}>{e.title}</span>{e.date ? <span style={{ color: 'var(--ink-3)' }}> · {e.date}</span> : null}
+                          {intern ? <span style={{ color: '#b45309', fontWeight: 600 }}> · nur intern{e.grund ? ` (${e.grund})` : ''}</span> : null}
+                          {e.excerpt ? <div style={{ color: 'var(--ink-2)', marginTop: 2 }}>{e.excerpt}</div> : null}
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -449,6 +519,21 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
             </div>
           )}
 
+          {anredeInfo?.abweichung && (
+            <div className="card" style={{ padding: 12, background: '#fff7ed', border: '1px solid #fdba74' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: '#9a3412', marginBottom: 6 }}>Empfänger prüfen — Name weicht ab</div>
+              <div style={{ fontSize: 12.5, color: '#9a3412', marginBottom: 8 }}>
+                easybill-Adressblock: <strong>{anredeInfo.easybill_name || '—'}</strong> · Tool-Ansprechpartner: <strong>{anredeInfo.tool_name || '—'}</strong>. Wähle, welcher Name für Adressblock und Anrede gilt:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {empfaengerOptionen.map(opt => (
+                  <button key={opt.key} type="button" className={empfaenger?.key === opt.key ? 'btn-primary' : 'btn-ghost'} style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => empfaengerWaehlen(opt)}>{opt.label}</button>
+                ))}
+              </div>
+              {empfaenger && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>Gewählt: {empfaenger.name}{empfaenger.contact_id ? ' — easybill-Adressblock wird auf diesen Kontakt gesetzt.' : ' — Adressblock kommt aus den easybill-Stammdaten (ggf. dort anpassen); Anrede im Text ist angeglichen.'}</div>}
+            </div>
+          )}
+
           <label style={{ display: 'grid', gap: 4 }}>
             <span style={{ fontWeight: 600, fontSize: 13 }}>Einleitung</span>
             <textarea className="input" rows={4} value={einleitung} onChange={e => setEinleitung(e.target.value)} style={{ resize: 'vertical' }} />
@@ -472,10 +557,15 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
                   <input className="input" placeholder="€ netto" value={p.einzelpreis_netto == null ? '' : euroStr(p.einzelpreis_netto)}
                     onChange={e => setPos(p.key, { einzelpreis_netto: parseEuro(e.target.value) })}
                     style={p.einzelpreis_netto == null ? { borderColor: '#f87171', background: '#fef2f2' } : undefined} />
-                  <select className="input" value={p.kategorie} onChange={e => setPos(p.key, { kategorie: e.target.value })}>
-                    <option value="setup">einmalig</option>
-                    <option value="monthly">monatlich</option>
-                  </select>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    <select className="input" value={p.kategorie} onChange={e => setPos(p.key, { kategorie: e.target.value })}>
+                      <option value="setup">einmalig</option>
+                      <option value="monthly">monatlich</option>
+                    </select>
+                    <label style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center', color: 'var(--ink-3)' }}>
+                      <input type="checkbox" checked={!!p.optional} onChange={e => setPos(p.key, { optional: e.target.checked })} />optional
+                    </label>
+                  </div>
                   <button className="btn-ghost" style={{ padding: '4px 6px' }} onClick={() => posEntfernen(p.key)} title="Entfernen">✕</button>
                 </div>
               ))}
@@ -483,7 +573,10 @@ export default function OfferKITab({ brand, customer, alsoInTool }) {
             <div>
               <button className="btn-ghost" onClick={posHinzufuegen}>+ Position</button>
             </div>
-            <div style={{ display: 'flex', gap: 18, justifyContent: 'flex-end', fontSize: 13 }}>
+            <div style={{ display: 'flex', gap: 18, justifyContent: 'flex-end', fontSize: 13, flexWrap: 'wrap' }}>
+              {positionen.some(p => p.optional) && (
+                <span style={{ color: 'var(--ink-3)' }}>{positionen.filter(p => p.optional).length} optional (nicht in Summe)</span>
+              )}
               <span>Einmalig netto: <strong>{eur.format(summe.setup)}</strong></span>
               <span>Monatlich netto: <strong>{eur.format(summe.monthly)}</strong></span>
               <span style={{ color: 'var(--ink-3)' }}>Monat 1 brutto: {eur.format((summe.setup + summe.monthly) * 1.19)}</span>

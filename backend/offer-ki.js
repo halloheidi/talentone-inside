@@ -24,15 +24,18 @@ Harte Leitplanken (immer einhalten):
 - KEINE Zusagen zu Bewerbungszahlen oder Einstellungen im Fließtext (einleitung/leistungsbeschreibung). Solche Zusagen gehören ausschließlich in vertrag.garantie_* und nur, wenn eine Garantie ausdrücklich vereinbart wurde.
 - ANREDE: ${anredeHinweis}. Durchgängig in allen Texten.
 - WORDING: niemals das Wort "kostenlos" verwenden; keine Werbeplattform-Namen nennen (Meta, Facebook, Instagram, TikTok); das Erstgespräch heißt "Strategiegespräch".
-- HISTORIE: Hat der Kunde eine Vorgeschichte (Altprojekte / frühere Kampagne), nimm in der Einleitung persönlich und konkret darauf Bezug.
-- CLOSE-DATEN sind interne Gesprächsnotizen: zitiere sie NICHT wörtlich. Nutze nur die inhaltlichen Ergebnisse (was besprochen oder vereinbart wurde).
+- HISTORIE: Hat der Kunde eine Vorgeschichte (Altprojekte / frühere Kampagne), nimm sie NUR als sachliche Fakten auf (welche Stellen, welcher Zeitraum, welches Ergebnis). Der Kundentext erwähnt NIEMALS Konflikte, Zahlungs-/Geld-Historie, Mahnungen, Rechnungsstreitigkeiten, Beschwerden, Kündigungen, Abbrüche oder Unzufriedenheit — weder direkt noch angedeutet ("Unklarheiten", "Neustart nach den Problemen" o.ä. sind verboten).
+- KEINE BEHAUPTETEN ABSPRACHEN: Formulierungen wie "wie besprochen", "wie vereinbart", "wie zugesagt", "wie abgestimmt" NUR verwenden, wenn der Freitext eine solche Absprache ausdrücklich enthält. Sonst neutral formulieren ("gerne bieten wir Ihnen an …").
+- GARANTIE: Setze vertrag.garantie_art NUR, wenn der Freitext eine Garantie ausdrücklich nennt. Sagt der Freitext "keine Garantie" o.ä., ist garantie_art=null. Schweigt der Freitext zur Garantie, ist garantie_art=null und es kommt ein offener Punkt "Garantie gewünscht? (keine / Einstellung / Bewerbungen)". Abo + Garantie ist ausdrücklich zulässig (z.B. "6 Einstellungen → 6 Monate Abo mit Einstellungsgarantie").
+- CLOSE-DATEN sind interne Gesprächsnotizen: zitiere sie NICHT wörtlich. Nutze nur unkritische inhaltliche Ergebnisse (siehe HISTORIE).
+- OPTIONALE POSITIONEN: Erkenne im Freitext "optional", "zubuchbar", "auf Wunsch" → setze für diese Position optional=true. Optionale Positionen haben einen Preis, zählen aber NICHT zur Angebotssumme.
 
 JSON-Schema (alle Felder liefern; Arrays notfalls leer, unbekannte Werte null):
 {
-  "einleitung": "persönliche Anrede-Zeile + 3-5 Sätze, Bezug auf Gespräch/Historie",
+  "einleitung": "persönliche Anrede-Zeile + 3-5 Sätze, Bezug auf Gespräch/Historie (nur sachliche Fakten)",
   "leistungsbeschreibung": "ein bis mehrere Absätze zu Leistung und Ablauf",
   "positionen": [
-    { "titel": "kurz", "beschreibung": "1-2 Sätze", "menge": 1, "einheit": "Stk.", "einzelpreis_netto": 1490, "kategorie": "setup" }
+    { "titel": "kurz", "beschreibung": "1-2 Sätze", "menge": 1, "einheit": "Stk.", "einzelpreis_netto": 1490, "kategorie": "setup", "optional": false }
   ],
   "vertrag": {
     "vertragsmodell": "kampagne" | "abo" | null,
@@ -46,7 +49,7 @@ JSON-Schema (alle Felder liefern; Arrays notfalls leer, unbekannte Werte null):
   "gueltig_bis": "YYYY-MM-DD oder null",
   "offene_punkte": ["kurze Hinweise auf fehlende Angaben"]
 }
-kategorie ist "setup" (einmalig) oder "monthly" (monatlich wiederkehrend).`;
+kategorie ist "setup" (einmalig) oder "monthly" (monatlich wiederkehrend). optional ist true/false.`;
 
 function brandLabel(brand) {
   return brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
@@ -140,6 +143,7 @@ export function normalizeEntwurf(parsed) {
       einheit: String(l?.einheit || 'Stk.').trim() || 'Stk.',
       einzelpreis_netto: preis,
       kategorie: kat,
+      optional: !!l?.optional,
     };
   }).filter(l => l.titel);
 
@@ -169,6 +173,93 @@ export function normalizeEntwurf(parsed) {
   };
 }
 
+// Behauptete Absprachen & Garantie-Steuerung.
+const ABSPRACHE_CLAIM = /\b(wie\s+(bereits\s+)?(besprochen|vereinbart|zugesagt|abgestimmt)|wie\s+telefonisch\s+besprochen)\b/i;
+const ABSPRACHE_BELEG = /(besproch|vereinbart|zugesagt|abgestimmt|telefon|gespräch|gespraech|call|meeting|termin|kennengelernt)/i;
+const GARANTIE_FREITEXT = /(garantie|garantiert|einstellungsgarantie|bewerbungsgarantie|bis zur (ersten )?einstellung)/i;
+const GARANTIE_VERNEINT = /((keine|ohne)\s+garantie|garantie\s+(raus|weg|entfernen|nicht|streichen))/i;
+
+/**
+ * Setzt die inhaltlichen Leitplanken nach der Generierung durch:
+ *  - behauptete Absprachen ohne Freitext-Beleg → offener Punkt,
+ *  - (nur bei enforceGarantie) Garantie nur, wenn der Freitext sie nennt.
+ */
+export function enforceLeitplanken(entwurf, freitext = '', { enforceGarantie = true } = {}) {
+  const ft = String(freitext || '');
+  const offene = new Set(entwurf.offene_punkte || []);
+
+  const text = `${entwurf.einleitung || ''}\n${entwurf.leistungsbeschreibung || ''}`;
+  if (ABSPRACHE_CLAIM.test(text) && !ABSPRACHE_BELEG.test(ft)) {
+    offene.add('Das Angebot behauptet eine Absprache ("wie besprochen/vereinbart"), die der Freitext nicht belegt — bitte prüfen oder neutral formulieren.');
+  }
+
+  if (enforceGarantie) {
+    const v = entwurf.vertrag || (entwurf.vertrag = {});
+    const verneint = GARANTIE_VERNEINT.test(ft);
+    const genannt = GARANTIE_FREITEXT.test(ft) && !verneint;
+    if (!genannt) {
+      v.garantie_art = null; v.garantie_ziel = null; v.garantie_position = null;
+      if (!verneint) offene.add('Garantie gewünscht? (keine / Einstellung / Bewerbungen)');
+    }
+  }
+
+  entwurf.offene_punkte = Array.from(offene);
+  return entwurf;
+}
+
+// Close-Einträge, deren INHALT nicht in Kundentext gehört (Zahlungsverzug,
+// Mahnung, strittige Rechnung, Beschwerde, Kündigung, Abbruch, Unzufriedenheit).
+const CLOSE_RISIKO = /(mahnung|zahlungsverzug|verzug|inkasso|offene\s+(rechnung|posten)|überfällig|ueberfaellig|nicht\s+(be)?zahlt|zahlungserinnerung|rechnungsstreit|strittige?\s+rechnung|reklamation|beschwerde|unzufrieden|enttäusch|enttaeusch|kündig|kuendig|vertragsabbruch|abbruch|abgebrochen|rechtsanwalt|\banwalt|rückerstattung|ruckerstattung|geld\s+zurück|storno)/i;
+
+function keywordKlass(e) {
+  const hay = `${e.title || ''} ${e.excerpt || ''}`;
+  const m = hay.match(CLOSE_RISIKO);
+  return m ? { verwendbar: false, grundLabel: m[0].trim() } : { verwendbar: true, grundLabel: null };
+}
+function formatGrund(label, date) {
+  if (!label) return null;
+  const l = label.charAt(0).toUpperCase() + label.slice(1);
+  const monat = date ? ` (${String(date).slice(0, 7)})` : '';
+  return `${l}${monat}`;
+}
+
+/**
+ * Klassifiziert Close-Einträge: welche sind inhaltlich in Kundentext verwendbar?
+ * Deterministische Keyword-Baseline + optionale KI-Verfeinerung (eine Anfrage).
+ * Keyword-Veto bleibt immer bestehen (sicherer). Rückgabe: Einträge + { verwendbar, grund }.
+ */
+export async function classifyCloseEntries(entries = []) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return [];
+  const base = list.map(e => { const k = keywordKlass(e); return { ...e, verwendbar: k.verwendbar, grundLabel: k.grundLabel }; });
+
+  let merged = base;
+  try {
+    const kompakt = list.map((e, i) => `#${i} [${e.date || ''}] ${e.type || ''}: ${String(e.title || '')} — ${String(e.excerpt || '').slice(0, 300)}`).join('\n');
+    const data = await callClaudeWithRetry({
+      model: CLAUDE_MODEL, max_tokens: 1500,
+      system: 'Du klassifizierst interne CRM-Einträge daraufhin, ob ihr Inhalt in einem Kunden-Angebotstext sachlich verwendbar ist. NICHT verwendbar (false) sind Einträge über Zahlungsverzug, Mahnung, offene/strittige Rechnungen, Beschwerden, Kündigung, Vertragsabbruch oder Unzufriedenheit. Antworte NUR als JSON {"items":[{"i":0,"verwendbar":true,"grund":null}]}. grund ist bei false ein kurzes internes Label (z.B. "Zahlungsthema"), sonst null.',
+      messages: [{ role: 'user', content: kompakt }],
+    });
+    const parsed = parseJsonContent(data);
+    const byI = new Map((parsed.items || []).map(x => [Number(x.i), x]));
+    merged = base.map((e, i) => {
+      const v = byI.get(i);
+      const verwendbar = e.verwendbar !== false && (!v || v.verwendbar !== false);
+      const grundLabel = verwendbar ? null : (e.grundLabel || (v && v.grund) || 'nur intern');
+      return { ...e, verwendbar, grundLabel };
+    });
+  } catch (err) {
+    console.warn('[offer-ki/classifyCloseEntries]', err.message);
+  }
+
+  return merged.map(e => ({
+    id: e.id, type: e.type, date: e.date, title: e.title, excerpt: e.excerpt,
+    verwendbar: e.verwendbar,
+    grund: e.verwendbar ? null : formatGrund(e.grundLabel, e.date),
+  }));
+}
+
 /**
  * Erstgenerierung eines Angebots-Entwurfs.
  * @returns {Promise<object>} normalisierter Entwurf (siehe normalizeEntwurf)
@@ -185,14 +276,14 @@ export async function generateOfferDraft({ brand, kunde, kontext = {}, closeEint
     system,
     messages: [{ role: 'user', content: user }],
   });
-  return normalizeEntwurf(parseJsonContent(data));
+  return enforceLeitplanken(normalizeEntwurf(parseJsonContent(data)), freitext, { enforceGarantie: true });
 }
 
 /**
  * Nachschärfen: ändert nur das in `anweisung` Genannte, Rest bleibt.
  * @returns {Promise<object>} normalisierter, überarbeiteter Entwurf
  */
-export async function refineOfferDraft({ brand, kunde, kontext = {}, entwurf, anweisung = '' } = {}) {
+export async function refineOfferDraft({ brand, kunde, kontext = {}, entwurf, anweisung = '', freitext = '' } = {}) {
   const anredeHinweis = anredePromptHinweis(kunde || kontext?.kunde || {});
   const system = SYSTEM_LEITPLANKEN(brandLabel(brand), anredeHinweis);
   const heute = new Date().toISOString().slice(0, 10);
@@ -204,5 +295,7 @@ export async function refineOfferDraft({ brand, kunde, kontext = {}, entwurf, an
     system,
     messages: [{ role: 'user', content: user }],
   });
-  return normalizeEntwurf(parseJsonContent(data));
+  // Absprachen-Check gegen Freitext+Anweisung; Garantie NICHT neu erzwingen
+  // (Refine soll eine zuvor gesetzte Garantie nicht ungewollt entfernen).
+  return enforceLeitplanken(normalizeEntwurf(parseJsonContent(data)), `${freitext}\n${anweisung}`, { enforceGarantie: false });
 }

@@ -246,7 +246,7 @@ export async function getDocument(documentId) {
  */
 export async function createOffer({
   customerId, title = 'Angebot', items = [], text = null,
-  pdfTemplate = null, externalId = null,
+  pdfTemplate = null, externalId = null, contactId = null,
 }) {
   const body = {
     type: 'OFFER',
@@ -257,7 +257,28 @@ export async function createOffer({
   if (text !== null && text !== '') body.text = text;
   if (pdfTemplate)                   body.pdf_template = pdfTemplate;
   if (externalId)                    body.external_id = externalId;
+  // contact_id steuert den Empfänger-/Adressblock (ein bestimmter easybill-Kontakt).
+  if (contactId)                     body.contact_id = Number(contactId);
   return easybill('/documents', { method: 'POST', body });
+}
+
+/** Kontakte eines easybill-Kunden (für den Anrede-/Adressblock-Abgleich). */
+export async function listCustomerContacts(customerId) {
+  if (!customerId) return [];
+  try {
+    const data = await easybill(`/customers/${encodeURIComponent(customerId)}/contacts?limit=100`);
+    const items = data?.items || data?.data || [];
+    return items.map(c => ({
+      id: c.id,
+      name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company_name || '(ohne Name)',
+      first_name: c.first_name || null,
+      last_name: c.last_name || null,
+      salutation: c.salutation || null,
+    }));
+  } catch (err) {
+    console.warn('[easybill/listCustomerContacts]', err.message);
+    return [];
+  }
 }
 
 /**

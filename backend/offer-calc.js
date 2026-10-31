@@ -119,11 +119,13 @@ export function calculateOfferTotals({
  * damit beide garantiert dieselbe Rechenlogik verwenden.
  */
 export function finalizeTotals(lines, { ad_budget_monthly = null, vat_rate = 19, discount_type = null, discount_value = 0 } = {}) {
+  // Optionale Positionen (optional=true) zählen NICHT in die Summe — sie stehen
+  // nur als "Optional zubuchbar" im Dokument. Bleiben aber in `positions`.
   const setup_before_discount = round2(
-    lines.filter(l => SETUP_CATEGORIES.has(l.category)).reduce((sum, l) => sum + l.line_total, 0)
+    lines.filter(l => SETUP_CATEGORIES.has(l.category) && !l.optional).reduce((sum, l) => sum + l.line_total, 0)
   );
   const monthly_total_service = round2(
-    lines.filter(l => MONTHLY_CATEGORIES.has(l.category)).reduce((sum, l) => sum + l.line_total, 0)
+    lines.filter(l => MONTHLY_CATEGORIES.has(l.category) && !l.optional).reduce((sum, l) => sum + l.line_total, 0)
   );
 
   // Rabatt auf setup_total anwenden. Bleibt bei 0 wenn kein Rabatt gesetzt.
@@ -184,6 +186,7 @@ export function normalizeSnapshotLine(l) {
     sku: l?.sku ?? null,
     category,
     custom: !!l?.custom || !l?.product_id,
+    optional: !!l?.optional,
     title: String(l?.title || '').trim(),
     description: String(l?.description || ''),
     unit_price,
