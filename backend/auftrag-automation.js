@@ -5,6 +5,7 @@
 
 import { supabase } from './supabase.js';
 import { createKundeFromSnapshot } from './offer-linking.js';
+import { invalidateKanban } from './kanban-cache.js';
 
 // SKUs, die eigene Checklisten-Items auslösen (an beiden Marken angeglichen).
 const PHOTO_SKUS         = new Set(['NW-OPT-PHOTO']);
@@ -54,6 +55,31 @@ export function buildAuftragChecklist({
     }
   }
   return items;
+}
+
+/**
+ * Best-effort-Stellenname aus dem Angebot. Die KI-Beschreibungen nennen die
+ * Rolle verlässlich als „für die Stelle <Rolle>" / „für die Position <Rolle>"
+ * (siehe positions_snapshot/leistungsbeschreibung). Gefunden → bereinigter Titel
+ * (ohne „(m/w/d)"), sonst null → Aufrufer nutzt Platzhalter zum Umbenennen.
+ *
+ * @param {object} offer — talentone_offers-Row
+ * @returns {string|null}
+ */
+export function stellennameAusAngebot(offer) {
+  const texte = [];
+  if (Array.isArray(offer?.positions_snapshot)) {
+    for (const p of offer.positions_snapshot) if (p?.description) texte.push(String(p.description));
+  }
+  if (offer?.leistungsbeschreibung) texte.push(String(offer.leistungsbeschreibung));
+  if (offer?.ki_kontext?.freitext) texte.push(String(offer.ki_kontext.freitext));
+  const hay = texte.join('\n');
+  const m = hay.match(/für die (?:Stelle|Position)\s+([^.,;:\n(]{2,60})/i);
+  if (m) {
+    const s = m[1].trim().replace(/\s*\((?:m\/w\/d|w\/m\/d|d\/m\/w|m\/w|w\/m)\)\s*$/i, '').trim();
+    if (s) return s.slice(0, 120);
+  }
+  return null;
 }
 
 /**
@@ -112,8 +138,10 @@ export async function ensureProjektForOffer(offer) {
   });
 
   const brandLabel = offer.brand === 'nowag_wirth' ? 'Nowag & Wirth' : 'TalentOne';
+  const agentur = offer.brand === 'nowag_wirth' ? 'nowagwirth' : 'talentone';
   const firma = offer.customer_snapshot?.company_name || 'Kunde';
   const projektname = `${firma} — ${brandLabel}`.slice(0, 200);
+  const stellenTitel = stellennameAusAngebot(offer);
 
   // Garantie 1:1 aus dem Angebot übernehmen — Zeitraum UND Beschreibungstext,
   // nicht nur das Flag. Ist im Angebot ein Freitext (guarantee_note) gepflegt,
@@ -139,6 +167,8 @@ export async function ensureProjektForOffer(offer) {
       projekt:            projektname,
       kunde:              firma,
       kunde_id:           customerId,
+      agentur,
+      gesuchte_positionen: stellenTitel || null,
       close_lead_id:      offer.close_lead_id || null,
       offer_id:           offer.id,
       projektart:         brandLabel,
@@ -170,5 +200,37 @@ export async function ensureProjektForOffer(offer) {
     }
     throw new Error(`talentone_projekte insert: ${error.message}`);
   }
+
+  // Stelle(n) am Projekt anlegen (nur wenn ein Inside-Kunde vorhanden/angelegt ist —
+  // talentone_jobs.kunde_id ist NOT NULL). Jede Stelle im Angebot = ein Job am selben
+  // Projekt (Vertrag/Garantie liegen am Projekt und gelten damit für alle Stellen).
+  // Erst dadurch erscheint der Kunde im Stellen-Kanban mit Chip „Vorbereitung" und
+  // NICHT in den Altprojekten (= Projekte ohne verknüpfte Stelle).
+  if (customerId) {
+    try {
+      const anzahlStellen = Math.max(1, 1 + (Number(offer.additional_positions_count) || 0));
+      const kurz = offer.easybill_document_id || String(offer.id).slice(0, 8);
+      const jobRows = [];
+      for (let i = 0; i < anzahlStellen; i++) {
+        // Titel nur für die erste Stelle aus dem Angebot ableitbar (es gibt keine
+        // getrennten Titel je Stelle); weitere bekommen einen Platzhalter zum Umbenennen.
+        const stelle = (i === 0 && stellenTitel)
+          ? stellenTitel
+          : `Stelle aus Angebot ${kurz}${anzahlStellen > 1 ? ` (${i + 1})` : ''}`;
+        jobRows.push({
+          kunde_id:    customerId,
+          projekt_id:  created.id,
+          stelle,
+          projekttyp:  'mitarbeitergewinnung',
+        });
+      }
+      const { error: jobErr } = await supabase.from('talentone_jobs').insert(jobRows);
+      if (jobErr) console.warn('[ensureProjektForOffer] Stellen-Anlage fehlgeschlagen:', jobErr.message);
+    } catch (e) {
+      console.warn('[ensureProjektForOffer] Stellen-Anlage fehlgeschlagen:', e.message);
+    }
+  }
+
+  invalidateKanban();
   return { projekt: created, created: true };
 }
