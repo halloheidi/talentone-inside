@@ -63,12 +63,23 @@ function kiFeldPatch(b) {
   if (b.einleitung !== undefined) out.einleitung = b.einleitung ? String(b.einleitung) : null;
   if (b.leistungsbeschreibung !== undefined) out.leistungsbeschreibung = b.leistungsbeschreibung ? String(b.leistungsbeschreibung) : null;
   if (b.zahlungsbedingungen !== undefined) out.zahlungsbedingungen = b.zahlungsbedingungen ? String(b.zahlungsbedingungen) : null;
+  if (b.werbebudget_hinweis !== undefined) out.werbebudget_hinweis = b.werbebudget_hinweis ? String(b.werbebudget_hinweis) : null;
   if (b.gueltig_bis !== undefined) out.gueltig_bis = /^\d{4}-\d{2}-\d{2}$/.test(String(b.gueltig_bis || '').slice(0, 10)) ? String(b.gueltig_bis).slice(0, 10) : null;
   if (b.offene_punkte !== undefined) out.offene_punkte = Array.isArray(b.offene_punkte) ? b.offene_punkte.map(x => String(x || '').trim()).filter(Boolean) : [];
   if (b.vertragsmodell !== undefined) out.vertragsmodell = VERTRAGSMODELLE.has(b.vertragsmodell) ? b.vertragsmodell : null;
   if (b.laufzeit_wert !== undefined) { const n = Number(b.laufzeit_wert); out.laufzeit_wert = Number.isFinite(n) ? Math.round(n) : null; }
   if (b.laufzeit_einheit !== undefined) out.laufzeit_einheit = LAUFZEIT_EINHEITEN.has(b.laufzeit_einheit) ? b.laufzeit_einheit : null;
   return out;
+}
+
+/* Fügt einen Satz als eigenen Absatz VOR der Signatur ein (letzter Absatz).
+   Hat der Body nur einen Absatz, wird der Satz angehängt. Deterministisch —
+   kein KI-Umweg, damit der Werbebudget-Satz wortgleich erscheint. */
+function insertVorSignatur(body, satz) {
+  const parts = String(body || '').split(/\n{2,}/);
+  if (parts.length >= 2) parts.splice(parts.length - 1, 0, satz);
+  else parts.push(satz);
+  return parts.join('\n\n');
 }
 
 /* Ersetzt {{keys}} im E-Mail-Body durch die Angebotsdaten. */
@@ -540,7 +551,7 @@ router.get('/resolve-kunde', async (req, res) => {
 router.get('/', async (req, res) => {
   let q = supabase
     .from('talentone_offers')
-    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, billing_external_at, billing_external_note, billing_external_by, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value, werbebudget_modus, tagesbudget_empfehlung, erstellt_via, annahme_token, geoeffnet_am, angenommen_von, angenommen_funktion, rueckfrage_am, gueltig_bis')
+    .select('id, brand, customer_id, easybill_customer_id, customer_snapshot, status, setup_total, monthly_total, first_month_total, ad_budget_monthly, vat_rate, easybill_document_id, easybill_order_document_id, easybill_pdf_url, accepted_at, created_at, created_by, sent_at, sent_to, order_sent_at, order_sent_to, campaign_started_at, billing_ended_at, billing_paused_at, billing_pause_reason, billing_external_at, billing_external_note, billing_external_by, guarantee_type, guarantee_period_days, guarantee_applications_count, guarantee_note, hires_target, service_waived_override, decline_note, declined_at, discount_type, discount_value, werbebudget_modus, tagesbudget_empfehlung, werbebudget_hinweis, erstellt_via, annahme_token, geoeffnet_am, angenommen_von, angenommen_funktion, rueckfrage_am, gueltig_bis')
     .order('created_at', { ascending: false });
   if (req.query.brand)  q = q.eq('brand', req.query.brand);
   if (req.query.status) q = q.eq('status', req.query.status);
@@ -790,8 +801,13 @@ router.get('/:id/annahme-mail-preview', async (req, res) => {
       vertrag: { vertragsmodell: offer.vertragsmodell, laufzeit_wert: offer.laufzeit_wert, laufzeit_einheit: offer.laufzeit_einheit },
       gueltigBis: offer.gueltig_bis, absenderName: ABSENDER[absender],
     });
+    // Werbebudget-Satz: nur wenn der Kunde das Budget zusätzlich selbst trägt
+    // (modus 'kunde'). Deterministisch vor die Signatur gesetzt, editierbar im Modal.
+    const body = offer.ki_kontext?.werbebudget?.modus === 'kunde'
+      ? insertVorSignatur(mail.body, 'Das Werbebudget für die Anzeigen fällt zusätzlich an — Details im Angebot.')
+      : mail.body;
     res.json({
-      subject: mail.subject, body: mail.body,
+      subject: mail.subject, body,
       to: offer.customer_snapshot?.email || kunde?.email || '',
       annahme_url, absender,
       absender_optionen: Object.entries(ABSENDER).map(([key, name]) => ({ key, name })),
@@ -1220,7 +1236,7 @@ router.post('/:id/create-easybill', async (req, res) => {
     if (!vPos.ok) return res.status(400).json({ error: vPos.error });
 
     // Payload deterministisch bauen — Summen recomputed, kein Trust auf DB-Werte
-    const { items } = buildEasybillOfferPayload({
+    const { items, text, textPrefix } = buildEasybillOfferPayload({
       brand: offer.brand,
       products: products || [],
       positions,
@@ -1235,10 +1251,14 @@ router.post('/:id/create-easybill', async (req, res) => {
       guarantee_note: offer.guarantee_note || null,
       werbebudget_modus: offer.werbebudget_modus || 'position',
       tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
-      // KI-Variante: freie Textblöcke + Zahlungsbedingungen-Override (sonst null).
+      // KI-Variante: schlankes PDF (Einleitung über der Tabelle via text_prefix,
+      // Leistungsbeschreibung NICHT ins PDF, Werbebudget-Block, Schlusstext via text).
       einleitung: offer.einleitung || null,
       leistungsbeschreibung: offer.leistungsbeschreibung || null,
       zahlungsbedingungen: offer.zahlungsbedingungen || null,
+      werbebudget_hinweis: offer.werbebudget_hinweis || null,
+      gueltig_bis: offer.gueltig_bis || null,
+      erstellt_via: offer.erstellt_via || 'baukasten',
     });
 
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
@@ -1254,6 +1274,8 @@ router.post('/:id/create-easybill', async (req, res) => {
         customerId:  Number(offer.easybill_customer_id),
         title,
         items,
+        text,
+        textPrefix,
         pdfTemplate: getPdfTemplate(offer.brand, 'OFFER'),
         externalId:  offer.id, // Rücksync-Anker für Phase 4
         // KI-Variante: gewählter Empfänger-Kontakt steuert den Adressblock.
@@ -1322,7 +1344,7 @@ router.post('/:id/create-easybill-order', async (req, res) => {
     const vPos = validatePositions(positions);
     if (!vPos.ok) return res.status(400).json({ error: vPos.error });
 
-    const { items } = buildEasybillOfferPayload({
+    const { items, text, textPrefix } = buildEasybillOfferPayload({
       brand: offer.brand,
       products: products || [],
       positions,
@@ -1337,6 +1359,13 @@ router.post('/:id/create-easybill-order', async (req, res) => {
       guarantee_note: offer.guarantee_note || null,
       werbebudget_modus: offer.werbebudget_modus || 'position',
       tagesbudget_empfehlung: offer.tagesbudget_empfehlung ?? null,
+      // Gleiche KI-Schlankfassung wie beim Angebot (konsistentes PDF).
+      einleitung: offer.einleitung || null,
+      leistungsbeschreibung: offer.leistungsbeschreibung || null,
+      zahlungsbedingungen: offer.zahlungsbedingungen || null,
+      werbebudget_hinweis: offer.werbebudget_hinweis || null,
+      gueltig_bis: offer.gueltig_bis || null,
+      erstellt_via: offer.erstellt_via || 'baukasten',
     });
     if (!items.length) return res.status(400).json({ error: 'Keine Positionen im Angebot.' });
 
@@ -1350,6 +1379,8 @@ router.post('/:id/create-easybill-order', async (req, res) => {
         customerId:  Number(offer.easybill_customer_id),
         title,
         items,
+        text,
+        textPrefix,
         pdfTemplate: getPdfTemplate(offer.brand, 'CHARGE_CONFIRM'),
         externalId:  offer.id,
       });

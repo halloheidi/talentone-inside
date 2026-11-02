@@ -1838,6 +1838,7 @@ router.get('/angebot/:token', async (req, res) => {
       firmenname, logo_url, agentur, brand: offer.brand,
       einleitung: offer.einleitung || null,
       leistungsbeschreibung: offer.leistungsbeschreibung || null,
+      werbebudget_hinweis: offer.werbebudget_hinweis || null,
       positionen: mapOfferPositionen(offer),
       vertrag: {
         vertragsmodell: offer.vertragsmodell || null,

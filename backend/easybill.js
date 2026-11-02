@@ -245,7 +245,7 @@ export async function getDocument(documentId) {
  * @returns {Promise<object>}            Das erzeugte Document-Objekt inkl. id
  */
 export async function createOffer({
-  customerId, title = 'Angebot', items = [], text = null,
+  customerId, title = 'Angebot', items = [], text = null, textPrefix = null,
   pdfTemplate = null, externalId = null, contactId = null,
 }) {
   const body = {
@@ -254,7 +254,9 @@ export async function createOffer({
     title,
     items,
   };
-  if (text !== null && text !== '') body.text = text;
+  if (text !== null && text !== '')             body.text = text;
+  // text_prefix = Fließtext ÜBER der Positionstabelle (z.B. gekürzte Einleitung).
+  if (textPrefix !== null && textPrefix !== '') body.text_prefix = textPrefix;
   if (pdfTemplate)                   body.pdf_template = pdfTemplate;
   if (externalId)                    body.external_id = externalId;
   // contact_id steuert den Empfänger-/Adressblock (ein bestimmter easybill-Kontakt).
@@ -287,7 +289,7 @@ export async function listCustomerContacts(customerId) {
  * Struktur identisch zu createOffer, nur type='CHARGE_CONFIRM'.
  */
 export async function createChargeConfirm({
-  customerId, title = 'Auftragsbestätigung', items = [], text = null,
+  customerId, title = 'Auftragsbestätigung', items = [], text = null, textPrefix = null,
   pdfTemplate = null, externalId = null,
 }) {
   const body = {
@@ -296,7 +298,8 @@ export async function createChargeConfirm({
     title,
     items,
   };
-  if (text !== null && text !== '') body.text = text;
+  if (text !== null && text !== '')             body.text = text;
+  if (textPrefix !== null && textPrefix !== '') body.text_prefix = textPrefix;
   if (pdfTemplate)                   body.pdf_template = pdfTemplate;
   if (externalId)                    body.external_id = externalId;
   return easybill('/documents', { method: 'POST', body });

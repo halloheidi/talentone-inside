@@ -178,6 +178,12 @@ export default function PublicAngebot() {
             {info.vertrag.garantie && <div style={{ marginTop: 4 }}><strong>Garantie:</strong> {info.vertrag.garantie}</div>}
           </div>
         )}
+        {info.werbebudget_hinweis && (
+          <div style={{ marginTop: 14, padding: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, fontSize: 13.5 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>Werbebudget</strong>
+            <span style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{info.werbebudget_hinweis}</span>
+          </div>
+        )}
         {info.zahlungsbedingungen && <p style={{ fontSize: 12.5, color: '#666', marginTop: 10 }}><strong>Zahlungsbedingungen:</strong> {info.zahlungsbedingungen}</p>}
 
         {info.hat_pdf && (

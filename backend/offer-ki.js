@@ -29,6 +29,7 @@ Harte Leitplanken (immer einhalten):
 - GARANTIE: Setze vertrag.garantie_art NUR, wenn der Freitext eine Garantie ausdrücklich nennt. Sagt der Freitext "keine Garantie" o.ä., ist garantie_art=null. Schweigt der Freitext zur Garantie, ist garantie_art=null und es kommt ein offener Punkt "Garantie gewünscht? (keine / Einstellung / Bewerbungen)". Abo + Garantie ist ausdrücklich zulässig (z.B. "6 Einstellungen → 6 Monate Abo mit Einstellungsgarantie").
 - CLOSE-DATEN sind interne Gesprächsnotizen: zitiere sie NICHT wörtlich. Nutze nur unkritische inhaltliche Ergebnisse (siehe HISTORIE).
 - OPTIONALE POSITIONEN: Erkenne im Freitext "optional", "zubuchbar", "auf Wunsch" → setze für diese Position optional=true. Optionale Positionen haben einen Preis, zählen aber NICHT zur Angebotssumme.
+- WERBEBUDGET: Gib im Feld "werbebudget" an, wie das Werbebudget für die Anzeigenschaltung gehandhabt wird. modus="kunde", wenn der Kunde das Werbebudget selbst/direkt trägt (nicht Bestandteil des Angebots). modus="inklusive", wenn es in einer Angebotsposition enthalten ist. modus=null, wenn der Freitext nichts dazu sagt. betrag/einheit NUR befüllen, wenn der Freitext/Baustein ausdrücklich eine Budget-Höhe nennt (einheit "tag" oder "monat"); sonst betrag=null und einheit=null. Erfinde NIEMALS eine Budget-Höhe. Formuliere KEINEN Werbebudget-Satz selbst — das übernimmt das System aus diesen Angaben.
 
 JSON-Schema (alle Felder liefern; Arrays notfalls leer, unbekannte Werte null):
 {
@@ -45,6 +46,7 @@ JSON-Schema (alle Felder liefern; Arrays notfalls leer, unbekannte Werte null):
     "garantie_ziel": 1,
     "garantie_position": "Freitext der Garantie oder null"
   },
+  "werbebudget": { "modus": "kunde" | "inklusive" | null, "betrag": 30, "einheit": "tag" | "monat" | null },
   "zahlungsbedingungen": "Freitext oder leer",
   "gueltig_bis": "YYYY-MM-DD oder null",
   "offene_punkte": ["kurze Hinweise auf fehlende Angaben"]
@@ -114,6 +116,42 @@ function coerceNummer(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+const _wbFmt = new Intl.NumberFormat('de-DE');
+
+/**
+ * Deterministischer Werbebudget-Satz (Sie-Form) aus den strukturierten Angaben.
+ * Erfindet NIE eine Zahl: fehlt der Monatsbetrag, bleibt der Satz ohne Höhe und
+ * der Aufrufer setzt den offenen Punkt "Werbebudget-Empfehlung fehlt".
+ * Kein Plattformname (Leitplanke) — "Werbeplattform" statt Meta/Facebook.
+ * @param {{modus:('kunde'|'inklusive'|null), betragMonat:(number|null)}} wb
+ * @returns {string} Satz oder '' (modus unbekannt)
+ */
+export function buildWerbebudgetHinweisKI({ modus, betragMonat } = {}) {
+  const hoehe = betragMonat != null ? `${_wbFmt.format(Math.round(betragMonat))} €/Monat` : null;
+  if (modus === 'kunde') {
+    return `Das Werbebudget für die Anzeigenschaltung${hoehe ? ` (empfohlen ca. ${hoehe})` : ''} wird von Ihnen direkt an die Werbeplattform gezahlt und ist nicht Bestandteil dieses Angebots.`;
+  }
+  if (modus === 'inklusive') {
+    return `Das Werbebudget${hoehe ? ` von ${hoehe}` : ''} ist in der monatlichen Kampagnenbetreuung enthalten.`;
+  }
+  return '';
+}
+
+// Normalisiert den Werbebudget-Block der KI-Antwort → { modus, betrag_monat, hinweis }.
+// Rechnet eine Tages-Angabe deterministisch auf den Monat (×30) hoch (keine KI-Arithmetik).
+function normalizeWerbebudget(raw) {
+  const r = raw || {};
+  const modus = (r.modus === 'kunde' || r.modus === 'inklusive') ? r.modus : null;
+  const betrag = coerceNummer(r.betrag);
+  const einheit = (r.einheit === 'tag' || r.einheit === 'monat') ? r.einheit : null;
+  let betragMonat = null;
+  if (betrag != null && betrag > 0) {
+    if (einheit === 'tag') betragMonat = Math.round(betrag * 30);
+    else if (einheit === 'monat') betragMonat = Math.round(betrag);
+  }
+  return { modus, betrag_monat: betragMonat, hinweis: buildWerbebudgetHinweisKI({ modus, betragMonat }) };
+}
+
 // Bringt die KI-Antwort in die kanonische, sichere Form (keine Fantasiepreise,
 // gültige Enums, Arrays garantiert). offene_punkte wird ggf. um fehlende Preise
 // ergänzt, falls die KI das versäumt hat.
@@ -162,11 +200,21 @@ export function normalizeEntwurf(parsed) {
     gueltig = String(p.gueltig_bis).slice(0, 10);
   }
 
+  // Werbebudget-Pflichtblock: Satz deterministisch aus den KI-Angaben, nie erfundene Zahl.
+  const wb = normalizeWerbebudget(p.werbebudget);
+  if (wb.modus === null) {
+    offene.add('Werbebudget: zahlt der Kunde direkt oder ist es enthalten? (Modus + Empfehlung/Höhe angeben)');
+  } else if (wb.betrag_monat == null) {
+    offene.add('Werbebudget-Empfehlung fehlt');
+  }
+
   return {
     einleitung: String(p.einleitung || '').trim(),
     leistungsbeschreibung: String(p.leistungsbeschreibung || '').trim(),
     positionen,
     vertrag,
+    werbebudget: { modus: wb.modus, betrag_monat: wb.betrag_monat },
+    werbebudget_hinweis: wb.hinweis,
     zahlungsbedingungen: String(p.zahlungsbedingungen || '').trim(),
     gueltig_bis: gueltig,
     offene_punkte: Array.from(offene),

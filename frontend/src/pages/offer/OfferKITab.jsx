@@ -70,6 +70,8 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
   // Editor-Felder
   const [einleitung, setEinleitung] = useState('');
   const [leistung, setLeistung] = useState('');
+  const [werbebudgetHinweis, setWerbebudgetHinweis] = useState('');
+  const [werbebudget, setWerbebudget] = useState({ modus: null, betrag_monat: null });
   const [zahlung, setZahlung] = useState('');
   const [gueltigBis, setGueltigBis] = useState('');
   const [offenePunkte, setOffenePunkte] = useState([]);
@@ -181,6 +183,8 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
   function entwurfUebernehmen(entwurf) {
     setEinleitung(entwurf.einleitung || '');
     setLeistung(entwurf.leistungsbeschreibung || '');
+    setWerbebudgetHinweis(entwurf.werbebudget_hinweis || '');
+    setWerbebudget(entwurf.werbebudget || { modus: null, betrag_monat: null });
     setZahlung(entwurf.zahlungsbedingungen || '');
     setGueltigBis(entwurf.gueltig_bis || '');
     setOffenePunkte(Array.isArray(entwurf.offene_punkte) ? entwurf.offene_punkte : []);
@@ -263,6 +267,7 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
   function aktuellerEntwurf() {
     return {
       einleitung, leistungsbeschreibung: leistung, zahlungsbedingungen: zahlung,
+      werbebudget_hinweis: werbebudgetHinweis, werbebudget,
       gueltig_bis: gueltigBis || null, offene_punkte: offenePunkte,
       positionen: positionen.map(p => ({
         titel: p.titel, beschreibung: p.beschreibung, menge: p.menge, einheit: p.einheit,
@@ -353,6 +358,7 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
       })),
       // KI-spezifische Felder
       einleitung, leistungsbeschreibung: leistung,
+      werbebudget_hinweis: werbebudgetHinweis || null,
       zahlungsbedingungen: zahlung || null,
       gueltig_bis: gueltigBis || null,
       offene_punkte: offenePunkte,
@@ -370,6 +376,8 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
         gewaehlter_empfaenger: empfaenger?.name || null,
         // Anrede (für Kunden-Anlage bei Annahme ohne Inside-Kunden).
         anrede_form: effektiveAnrede,
+        // Werbebudget-Modus (steuert den Zusatz-Satz in der Versandmail).
+        werbebudget: { modus: werbebudget?.modus || null, betrag_monat: werbebudget?.betrag_monat ?? null },
       },
       ki_versionen: versionen.map(v => v.entwurf),
     };
@@ -567,8 +575,12 @@ export default function OfferKITab({ brand, customer, alsoInTool, closeLeadId: w
             <textarea className="input" rows={4} value={einleitung} onChange={e => setEinleitung(e.target.value)} style={{ resize: 'vertical' }} />
           </label>
           <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Leistungsbeschreibung</span>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Leistungsbeschreibung <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(nur Annahme-Seite, nicht im PDF)</span></span>
             <textarea className="input" rows={5} value={leistung} onChange={e => setLeistung(e.target.value)} style={{ resize: 'vertical' }} />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Werbebudget-Hinweis <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}>(Pflichtblock — erscheint in PDF &amp; Annahme-Seite)</span></span>
+            <textarea className="input" rows={2} value={werbebudgetHinweis} onChange={e => setWerbebudgetHinweis(e.target.value)} placeholder="z. B. „Das Werbebudget für die Anzeigenschaltung wird von Ihnen direkt an die Werbeplattform gezahlt …“" style={{ resize: 'vertical' }} />
           </label>
 
           {/* Positionen */}

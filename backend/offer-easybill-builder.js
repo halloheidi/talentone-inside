@@ -87,12 +87,18 @@ export function buildEasybillOfferPayload({
   guarantee_note = null,
   werbebudget_modus = 'position',
   tagesbudget_empfehlung = null,
-  // KI-Variante: freie Textblöcke vor den Positionen + optionaler
-  // Zahlungsbedingungen-Override (sonst greift das Marken-Template).
+  // KI-Variante: schlankes PDF — Einleitung über der Tabelle (text_prefix),
+  // Leistungsbeschreibung NICHT ins PDF, Werbebudget-Pflichtblock, Garantie +
+  // Zahlungsbedingungen + Gültigkeit in den Schlusstext (text). Gegatet über
+  // erstellt_via==='ki'; der Baukasten-Pfad bleibt unverändert.
   einleitung = null,
   leistungsbeschreibung = null,
   zahlungsbedingungen = null,
+  werbebudget_hinweis = null,
+  gueltig_bis = null,
+  erstellt_via = 'baukasten',
 } = {}) {
+  const istKI = erstellt_via === 'ki';
   const extraSkus = EXTRA_JOB_SKUS_BY_BRAND[brand] || [];
   // Empfehlungs-Modus: Werbebudget ist NICHT Bestandteil der Rechnung — keine
   // Position, keine Summe. Deshalb geht in die Kalkulation ad_budget_monthly=0,
@@ -141,14 +147,21 @@ export function buildEasybillOfferPayload({
 
   const items = [];
   let pos = 1;
+  // text_prefix (über der Tabelle) + text (Schlusstext) für die KI-Variante.
+  let textPrefix = null;
 
-  // KI-Variante: Einleitung + Leistungsbeschreibung als TEXT-Blöcke GANZ oben,
-  // noch vor den Positionen. Baukasten übergibt sie nie → unverändert.
-  if (einleitung && einleitung.trim()) {
-    items.push(makeTextPosition({ pos: pos++, title: null, body: einleitung.trim() }));
-  }
-  if (leistungsbeschreibung && leistungsbeschreibung.trim()) {
-    items.push(makeTextPosition({ pos: pos++, title: 'Leistungsumfang', body: leistungsbeschreibung.trim() }));
+  if (istKI) {
+    // Einleitung gekürzt (max. 3 Sätze) über die Tabelle — als text_prefix, NICHT
+    // als Position. Leistungsbeschreibung kommt NICHT ins PDF.
+    textPrefix = kuerzeEinleitung(einleitung, 3);
+  } else {
+    // Baukasten (Alt-Pfad): Einleitung + Leistungsbeschreibung als TEXT-Blöcke oben.
+    if (einleitung && einleitung.trim()) {
+      items.push(makeTextPosition({ pos: pos++, title: null, body: einleitung.trim() }));
+    }
+    if (leistungsbeschreibung && leistungsbeschreibung.trim()) {
+      items.push(makeTextPosition({ pos: pos++, title: 'Leistungsumfang', body: leistungsbeschreibung.trim() }));
+    }
   }
 
   // Setup zuerst
@@ -202,9 +215,9 @@ export function buildEasybillOfferPayload({
     }));
   }
 
-  // Empfehlungs-Modus: kein Preis, nur ein Hinweis-Textblock (Sie-Form) unter
-  // den Positionen. Kunde hinterlegt eigenes Zahlungsmittel, Meta zahlt direkt.
-  if (istEmpfehlung) {
+  // Empfehlungs-Modus (nur Baukasten): Hinweis-Textblock unter den Positionen.
+  // Die KI-Variante nutzt stattdessen den eigenen Werbebudget-Pflichtblock (unten).
+  if (istEmpfehlung && !istKI) {
     items.push(makeTextPosition({ pos: pos++, title: 'Hinweis zum Werbebudget', body: buildWerbebudgetHinweis(tagesbudget_empfehlung) }));
   }
 
@@ -222,6 +235,11 @@ export function buildEasybillOfferPayload({
       title: 'Optional zubuchbar',
       body: `${zeilen.join('\n')}\n\nDiese Positionen sind nicht Teil der Angebotssumme und können auf Wunsch hinzugebucht werden.`,
     }));
+  }
+
+  // KI-Variante: Werbebudget-Pflichtblock als TEXT (nach „Optional zubuchbar").
+  if (istKI && werbebudget_hinweis && werbebudget_hinweis.trim()) {
+    items.push(makeTextPosition({ pos: pos++, title: 'Werbebudget', body: werbebudget_hinweis.trim() }));
   }
 
   // Schlusstexte als eigene TEXT-Positionen (kein Preis)
@@ -254,10 +272,38 @@ export function buildEasybillOfferPayload({
     : (findTemplate(templates, 'guarantee_label') || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand] || 'Garantie');
   // Zahlungsbedingungen: KI-Override (falls gepflegt) schlägt das Marken-Template.
   const paymentTerms   = (zahlungsbedingungen && zahlungsbedingungen.trim()) || findTemplate(templates, 'payment_terms');
+
+  if (istKI) {
+    // KI-Variante: Garantie + Zahlungsbedingungen + Gültigkeit in den Schlusstext
+    // (easybill-Feld text), NICHT als Positions-TEXT-Blöcke. So bleiben in der
+    // Tabelle nur „Optional zubuchbar" und „Werbebudget".
+    const schluss = [];
+    if (guarantee)    schluss.push(`${guaranteeLabel}: ${guarantee}`);
+    if (paymentTerms) schluss.push(`Zahlungsbedingungen: ${paymentTerms}`);
+    const g = gueltigBisSatz(gueltig_bis);
+    if (g) schluss.push(g);
+    return { items, text: schluss.length ? schluss.join('\n\n') : null, textPrefix, totals };
+  }
+
   if (guarantee)    items.push(makeTextPosition({ pos: pos++, title: guaranteeLabel,      body: guarantee }));
   if (paymentTerms) items.push(makeTextPosition({ pos: pos++, title: 'Zahlungsbedingungen', body: paymentTerms }));
 
-  return { items, text: null, totals };
+  return { items, text: null, textPrefix: null, totals };
+}
+
+// Kürzt die KI-Einleitung auf max. N Sätze (für text_prefix über der Tabelle).
+function kuerzeEinleitung(text, maxSaetze = 3) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  const saetze = s.split(/(?<=[.!?])\s+/).filter(Boolean);
+  return saetze.slice(0, maxSaetze).join(' ').trim() || null;
+}
+
+// „Dieses Angebot ist gültig bis TT.MM.JJJJ." aus einem ISO-Datum (oder null).
+function gueltigBisSatz(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(String(iso))) return null;
+  const [y, m, d] = String(iso).slice(0, 10).split('-');
+  return `Dieses Angebot ist gültig bis ${d}.${m}.${y}.`;
 }
 
 function sortByCatalogOrder(productById) {
