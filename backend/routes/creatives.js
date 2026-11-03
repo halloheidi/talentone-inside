@@ -16,7 +16,7 @@ import {
   deleteFromStorage,
   STORAGE_BUCKET as CREATIVES_BUCKET,
 } from '../imagegen.js';
-import { uploadBuffer, extFromMime, safeFilenameStem, fetchAsBuffer } from '../storage.js';
+import { uploadBuffer, extFromMime, safeFilenameStem, fetchAsBuffer, createSignedUploadUrl } from '../storage.js';
 import { generateOverlays } from '../overlay-renderer.js';
 import { makeTransparent, composeLogoOverlay } from '../logo.js';
 import { UnsupportedImageError } from '../imageops.js';
@@ -94,6 +94,18 @@ const router = Router();
 const VALID_FORMATS = new Set(['quadrat', 'feed', 'story', 'sonstiges']);
 const VALID_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
 const VALID_VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime']);
+
+// Format aus Pixel-Dimensionen ableiten (für Video-Direct-Uploads misst der Browser
+// Breite/Höhe und schickt sie mit). Richtwerte: 9:16≈0.56, 4:5=0.8, 1:1=1.0.
+function formatFromDimensions(w, h) {
+  const bw = Number(w), bh = Number(h);
+  if (!bw || !bh) return null;
+  const r = bw / bh;
+  if (r <= 0.65) return 'story';
+  if (r <= 0.92) return 'feed';
+  if (r <= 1.15) return 'quadrat';
+  return 'sonstiges';
+}
 
 /* In-Memory-Map für die jüngste Generation-Fehlermeldung pro Job.
    Frontend pollt /api/creatives und bekommt last_generation_error mit, um
@@ -216,6 +228,70 @@ router.post('/upload', async (req, res) => {
     return res.status(500).json({ error: 'Kein Creative konnte gespeichert werden.', details: errors });
   }
   res.status(201).json({ creatives: inserted, errors: errors.length ? errors : undefined });
+});
+
+/* POST /api/creatives/upload-url  body: { job_id, fileName, contentType }
+   Liefert eine signierte Upload-URL, mit der der Browser große Dateien (Video-Reels)
+   DIREKT in den Bucket lädt — ohne Umweg über den Backend-Container (umgeht das JSON-Body-Limit).
+   Danach meldet der Client die Metadaten über POST /register. */
+router.post('/upload-url', async (req, res) => {
+  try {
+    const { job_id, fileName, contentType } = req.body || {};
+    if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
+    const ct = String(contentType || '').toLowerCase();
+    const isVideo = VALID_VIDEO_MIMES.has(ct);
+    if (!isVideo && !VALID_IMAGE_MIMES.has(ct)) {
+      return res.status(400).json({ error: `Nicht unterstützter Typ: ${ct || '(leer)'}` });
+    }
+    const ext = extFromMime(ct, isVideo ? 'mp4' : 'png');
+    const stem = safeFilenameStem(fileName);
+    const path = `${job_id}/${isVideo ? 'video' : 'bild'}-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${stem}.${ext}`;
+    const signed = await createSignedUploadUrl({ bucket: CREATIVES_BUCKET, path });
+    if (!signed?.signedUrl) return res.status(502).json({ error: 'Signierte Upload-URL konnte nicht erstellt werden.' });
+    res.json(signed); // { signedUrl, token, path, publicUrl }
+  } catch (err) {
+    console.error('[creatives/upload-url]', err.message);
+    res.status(500).json({ error: err.message || 'Upload-URL fehlgeschlagen.' });
+  }
+});
+
+/* POST /api/creatives/register  body: { job_id, path, contentType, format?, breite?, hoehe? }
+   Trägt ein per Direct-Upload hochgeladenes Creative in die Galerie ein. Bei Video wird das
+   Format bevorzugt aus den (im Browser gemessenen) Dimensionen abgeleitet, sonst aus der Auswahl. */
+router.post('/register', async (req, res) => {
+  try {
+    const { job_id, path, contentType, format: formatIn, breite, hoehe } = req.body || {};
+    if (!job_id || !path) return res.status(400).json({ error: 'job_id und path sind Pflicht.' });
+    if (!String(path).startsWith(`${job_id}/`)) return res.status(400).json({ error: 'Pfad passt nicht zum Job.' });
+    const ct = String(contentType || '').toLowerCase();
+    const isVideo = VALID_VIDEO_MIMES.has(ct);
+    const isImage = VALID_IMAGE_MIMES.has(ct);
+    if (!isVideo && !isImage) return res.status(400).json({ error: `Nicht unterstützter Typ: ${ct || '(leer)'}` });
+
+    const fromDims = formatFromDimensions(breite, hoehe);
+    const format = (isVideo && fromDims) ? fromDims
+      : (VALID_FORMATS.has(formatIn) ? formatIn : (fromDims || 'sonstiges'));
+    const typ = isVideo ? 'video' : 'bild';
+    const bildUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${CREATIVES_BUCKET}/${path}`;
+    const baseRow = { job_id, format, typ, bild_url: bildUrl, status: 'fertig', prompt: null };
+
+    let { data, error: insErr } = await supabase
+      .from('talentone_creatives')
+      .insert({ ...baseRow, quelle: 'upload' })
+      .select().single();
+    if (insErr && /column.*quelle.*does not exist|could not find.*quelle/i.test(insErr.message)) {
+      const retry = await supabase.from('talentone_creatives').insert(baseRow).select().single();
+      data = retry.data; insErr = retry.error;
+    }
+    if (insErr) {
+      console.error('[creatives/register] DB-Insert fehlgeschlagen:', insErr.message);
+      return res.status(500).json({ error: insErr.message });
+    }
+    res.status(201).json({ creative: data });
+  } catch (err) {
+    console.error('[creatives/register]', err.message);
+    res.status(500).json({ error: err.message || 'Registrierung fehlgeschlagen.' });
+  }
 });
 
 /* GET /api/creatives?job_id=…&archived=true — Galerie für ein Projekt.

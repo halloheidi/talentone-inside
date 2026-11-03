@@ -1,22 +1,40 @@
 // Helpers für Supabase Storage (Upload, Delete, URL-Parsing).
 // Backend uploaded mit Service Role Key → bypasst RLS.
 
-/** Legt einen (privaten) Bucket an, falls er noch nicht existiert. Idempotent. */
-export async function ensureBucket(name, { isPublic = false } = {}) {
-  const list = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket`, {
-    headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` },
-  });
+/** Legt einen Bucket an, falls er noch nicht existiert — und hält (wenn angegeben)
+ *  Größen-Limit und erlaubte MIME-Typen aktuell. Idempotent; die Limits sind damit
+ *  im Code versioniert und werden beim Deploy angewendet (kein manueller DB-Eingriff). */
+export async function ensureBucket(name, { isPublic = false, fileSizeLimit = null, allowedMimeTypes = null } = {}) {
+  const auth = { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` };
+  const spec = {};
+  if (fileSizeLimit != null) spec.file_size_limit = fileSizeLimit;
+  if (allowedMimeTypes != null) spec.allowed_mime_types = allowedMimeTypes;
+
+  const list = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket`, { headers: auth });
+  let exists = false;
   if (list.ok) {
     const existing = await list.json();
-    if (Array.isArray(existing) && existing.some(b => b.name === name || b.id === name)) return;
+    exists = Array.isArray(existing) && existing.some(b => b.name === name || b.id === name);
+  }
+  if (exists) {
+    // Bucket vorhanden — nur wenn Limits/MIME vorgegeben sind, per PUT aktualisieren.
+    if (Object.keys(spec).length) {
+      const upd = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket/${name}`, {
+        method: 'PUT',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public: !!isPublic, ...spec }),
+      });
+      if (!upd.ok) {
+        const body = await upd.text().catch(() => '');
+        console.warn(`[Storage] Bucket-Update ${name} ${upd.status}: ${body.slice(0, 200)}`);
+      }
+    }
+    return;
   }
   const create = await fetch(`${process.env.SUPABASE_URL}/storage/v1/bucket`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ id: name, name, public: !!isPublic }),
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: name, name, public: !!isPublic, ...spec }),
   });
   if (!create.ok) {
     const body = await create.text();
@@ -78,6 +96,37 @@ export async function createSignedUrl({ bucket, path, expiresIn = 3600 }) {
   const j = await res.json();
   // Supabase liefert signedURL relativ (…/object/sign/bucket/path?token=…).
   return j?.signedURL ? `${process.env.SUPABASE_URL}/storage/v1${j.signedURL}` : null;
+}
+
+/** Erzeugt eine signierte Upload-URL, mit der der Browser eine Datei DIREKT in den
+ *  Bucket lädt (ohne Umweg über den Backend-Container). Für große Video-Reels.
+ *  Rückgabe: { signedUrl (PUT-Ziel), token, path, publicUrl }. */
+export async function createSignedUploadUrl({ bucket, path }) {
+  const res = await fetch(
+    `${process.env.SUPABASE_URL}/storage/v1/object/upload/sign/${bucket}/${path}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Storage upload-sign ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const j = await res.json();
+  // Supabase liefert { url: '/object/upload/sign/bucket/path?token=…' } (relativ).
+  const rel = j?.url || '';
+  const token = (rel.split('token=')[1] || '').split('&')[0] || null;
+  return {
+    signedUrl: rel ? `${process.env.SUPABASE_URL}/storage/v1${rel}` : null,
+    token,
+    path,
+    publicUrl: `${process.env.SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`,
+  };
 }
 
 export async function deleteFromBucket(bucket, publicUrlOrPath) {
