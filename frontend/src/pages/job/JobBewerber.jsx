@@ -1,9 +1,31 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api.js';
 import { BewerberListe } from '../../components/BewerberListe.jsx';
 import KriterienKachel from '../../components/KriterienKachel.jsx';
+
+// Fängt Renderfehler der Bewerberliste ab, damit nie eine stille leere/read-only
+// Seite stehen bleibt — der Grund wird gezeigt, „Erneut laden" lädt neu.
+class ListeErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[JobBewerber] Renderfehler:', error, info?.componentStack); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="alert alert-error" style={{ margin: 0 }}>
+          <strong>Die Bewerberliste konnte nicht angezeigt werden.</strong>
+          <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'pre-wrap' }}>{String(this.state.error?.message || this.state.error)}</div>
+          <div style={{ marginTop: 10 }}>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => window.location.reload()}>↻ Erneut laden</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // B4: Interne Bewerberliste der Stelle = geteilte BewerberListe (modus='intern').
 // Ersetzt die alte interne Bewerberansicht. Oben die Kriterien-Kachel (wie im Portal).
@@ -15,19 +37,26 @@ export default function JobBewerber() {
   const [spalten, setSpalten] = useState([]);
   const [kritLog, setKritLog] = useState(null);    // { kunde_am }
   const [akteBewId, setAkteBewId] = useState(null);
+  const [ladeFehler, setLadeFehler] = useState(null);
   const jobId = job.id;
   const autorName = `N&W · ${me?.name || me?.email || user?.email || 'Mitarbeiter'}`;
 
   const load = useCallback(async () => {
-    const [d, k, sp] = await Promise.all([
-      api(`/bewerbungen/job/${jobId}`),
-      api(`/jobs/${jobId}/kriterien`).catch(() => ({})),
-      api(`/bewerbungen/job/${jobId}/spalten`).catch(() => ({ spalten: [] })),
-    ]);
-    setData(d);
-    if (k.kriterien) setStruktur(k.kriterien);
-    if (k.log) setKritLog(k.log);
-    setSpalten(sp.spalten || []);
+    setLadeFehler(null);
+    try {
+      const [d, k, sp] = await Promise.all([
+        api(`/bewerbungen/job/${jobId}`),
+        api(`/jobs/${jobId}/kriterien`).catch(() => ({})),
+        api(`/bewerbungen/job/${jobId}/spalten`).catch(() => ({ spalten: [] })),
+      ]);
+      setData(d);
+      if (k.kriterien) setStruktur(k.kriterien);
+      if (k.log) setKritLog(k.log);
+      setSpalten(sp.spalten || []);
+    } catch (e) {
+      // Nie still hängen bleiben: Grund zeigen + „Erneut laden" anbieten.
+      setLadeFehler(e?.body?.error || e?.message || 'Unbekannter Fehler beim Laden der Bewerber.');
+    }
   }, [jobId]);
   useEffect(() => { load(); }, [load]);
 
@@ -84,6 +113,15 @@ export default function JobBewerber() {
     await load();
   }
 
+  if (ladeFehler) return (
+    <div className="alert alert-error" style={{ margin: 0 }}>
+      <strong>Bewerber konnten nicht geladen werden.</strong>
+      <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'pre-wrap' }}>{ladeFehler}</div>
+      <div style={{ marginTop: 10 }}>
+        <button type="button" className="btn-ghost btn-sm" onClick={load}>↻ Erneut laden</button>
+      </div>
+    </div>
+  );
   if (!data) return <div className="card empty">Lade Bewerber…</div>;
 
   const kundeKurz = kritLog?.kunde_am ? new Date(kritLog.kunde_am) : null;
@@ -94,13 +132,15 @@ export default function JobBewerber() {
     <div style={{ display: 'grid', gap: 16 }}>
       <KriterienKachel value={struktur} onSave={saveKriterien} accent="#1b3f80"
         titel="Kriterien dieser Stelle" hinweis={kundeHint || 'KO/Muss/Wunsch — wir prüfen sie bei jedem Bewerber.'} />
-      <BewerberListe
-        job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
-        akteBewId={akteBewId} onAkte={setAkteBewId}
-        onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual}
-        onGesellenwerk={onGesellenwerk} onGesellenwerkOptin={onGesellenwerkOptin} gwMailReady={!!data.gw_mail_ready}
-        onReload={load}
-      />
+      <ListeErrorBoundary>
+        <BewerberListe
+          job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
+          akteBewId={akteBewId} onAkte={setAkteBewId}
+          onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual}
+          onGesellenwerk={onGesellenwerk} onGesellenwerkOptin={onGesellenwerkOptin} gwMailReady={!!data.gw_mail_ready}
+          onReload={load}
+        />
+      </ListeErrorBoundary>
     </div>
   );
 }

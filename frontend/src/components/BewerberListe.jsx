@@ -293,7 +293,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                     </td>
                     <td style={tdBase}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
                     {/* Bearbeitung = abgeleitet (read-only, beide Modi) */}
-                    <td style={tdBase}>
+                    <td style={tdBase} title={intern ? 'Automatisch aus dem Verlauf abgeleitet (Ampel, Feedback, Kontakt, Kriterien, Notiz) — nicht direkt editierbar. Ändert sich über die anderen Spalten.' : 'Automatisch abgeleiteter Status.'}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: BEARB_BY_KEY[bst.key].color }}>{bLabel}</span>
                     </td>
                     <td style={{ ...tdBase, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
