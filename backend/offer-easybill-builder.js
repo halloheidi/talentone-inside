@@ -215,6 +215,48 @@ export function buildEasybillOfferPayload({
     }));
   }
 
+  // Garantie (Text + Label) zentral ableiten. Fuer die KI-Variante wird sie als
+  // eigener TEXT-Block DIREKT nach den Positionen gesetzt (vor „Optional" +
+  // „Werbebudget"); der Baukasten nutzt dieselben Werte weiter unten im Schluss.
+  // Garantie NUR, wenn eine Garantie gewaehlt wurde. Rueckwaerts-kompatibel:
+  // fehlt guarantee_type, an guarantee_period_days koppeln.
+  const guaranteeAktiv = guarantee_type
+    ? guarantee_type !== 'none'
+    : Number(guarantee_period_days) > 0;
+  let guarantee = null;
+  if (guaranteeAktiv) {
+    // Text: gepflegter Note-Text > generierter Default je Art.
+    guarantee = (guarantee_note && guarantee_note.trim()) || null;
+    if (!guarantee) {
+      if (istKI) {
+        // KI-PDF: knapper 1–2-Satz-Block, die Art steht im Satz selbst.
+        guarantee = guarantee_type === 'applications'
+          ? `Bewerbungsgarantie: mindestens ${guarantee_applications_count || 0} qualifizierte Bewerbungen.`
+          : 'Einstellungsgarantie: Wir begleiten die Kampagne bis zur erfolgreichen Einstellung.';
+      } else {
+        guarantee = guarantee_type === 'applications'
+          ? `Wir garantieren mindestens ${guarantee_applications_count || 0} Bewerbungen fuer die ausgeschriebene Stelle innerhalb der Kampagnenlaufzeit. Werden weniger erreicht, arbeiten wir ohne weitere Servicegebuehr weiter, bis die zugesagte Anzahl erreicht ist.`
+          : findTemplate(templates, 'guarantee'); // hire -> Template
+      }
+    }
+    if (guarantee) {
+      // Platzhalter fuellen (bisher blieb {{garantie_frist}} leer -> "nach Tagen").
+      guarantee = String(guarantee)
+        .replace(/\{\{\s*garantie_frist\s*\}\}/gi, String(Number(guarantee_period_days) || 0))
+        .replace(/\{\{\s*bewerbungen\s*\}\}/gi, String(guarantee_applications_count || 0));
+    }
+  }
+  // Label passend zur Art: Bewerbungs-Garantie ist keine "Erfolgsgarantie".
+  const guaranteeLabel = guarantee_type === 'applications'
+    ? 'Bewerbungs-Garantie'
+    : (findTemplate(templates, 'guarantee_label') || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand] || 'Garantie');
+
+  // KI-PDF: Garantie als eigener TEXT-Block direkt nach den Positionen
+  // (Reihenfolge: Einleitung · Positionen · Garantie · Optional · Werbebudget · Schluss).
+  if (istKI && guarantee) {
+    items.push(makeTextPosition({ pos: pos++, title: 'Garantie', body: guarantee }));
+  }
+
   // Empfehlungs-Modus (nur Baukasten): Hinweis-Textblock unter den Positionen.
   // Die KI-Variante nutzt stattdessen den eigenen Werbebudget-Pflichtblock (unten).
   if (istEmpfehlung && !istKI) {
@@ -242,43 +284,15 @@ export function buildEasybillOfferPayload({
     items.push(makeTextPosition({ pos: pos++, title: 'Werbebudget', body: werbebudget_hinweis.trim() }));
   }
 
-  // Schlusstexte als eigene TEXT-Positionen (kein Preis)
-  // Garantie-Position NUR, wenn eine Garantie gewaehlt wurde. Frueher wurde sie
-  // gerendert, sobald ein guarantee-Template existierte (schlug auch bei "keine
-  // Garantie" durch) — das ist der Bug, den wir hier schliessen.
-  // Rueckwaerts-kompatibel: fehlt guarantee_type, an guarantee_period_days koppeln.
-  const guaranteeAktiv = guarantee_type
-    ? guarantee_type !== 'none'
-    : Number(guarantee_period_days) > 0;
-  let guarantee = null;
-  if (guaranteeAktiv) {
-    // Text: gepflegter Note-Text > generierter Default je Art.
-    guarantee = (guarantee_note && guarantee_note.trim()) || null;
-    if (!guarantee) {
-      guarantee = guarantee_type === 'applications'
-        ? `Wir garantieren mindestens ${guarantee_applications_count || 0} Bewerbungen fuer die ausgeschriebene Stelle innerhalb der Kampagnenlaufzeit. Werden weniger erreicht, arbeiten wir ohne weitere Servicegebuehr weiter, bis die zugesagte Anzahl erreicht ist.`
-        : findTemplate(templates, 'guarantee'); // hire -> Template
-    }
-    if (guarantee) {
-      // Platzhalter fuellen (bisher blieb {{garantie_frist}} leer -> "nach Tagen").
-      guarantee = String(guarantee)
-        .replace(/\{\{\s*garantie_frist\s*\}\}/gi, String(Number(guarantee_period_days) || 0))
-        .replace(/\{\{\s*bewerbungen\s*\}\}/gi, String(guarantee_applications_count || 0));
-    }
-  }
-  // Label passend zur Art: Bewerbungs-Garantie ist keine "Erfolgsgarantie".
-  const guaranteeLabel = guarantee_type === 'applications'
-    ? 'Bewerbungs-Garantie'
-    : (findTemplate(templates, 'guarantee_label') || DEFAULT_GUARANTEE_LABEL_BY_BRAND[brand] || 'Garantie');
+  // Schlusstexte (Garantie + Label sind oben abgeleitet — bei KI bereits als
+  // eigener Block nach den Positionen gesetzt, beim Baukasten unten als TEXT).
   // Zahlungsbedingungen: KI-Override (falls gepflegt) schlägt das Marken-Template.
   const paymentTerms   = (zahlungsbedingungen && zahlungsbedingungen.trim()) || findTemplate(templates, 'payment_terms');
 
   if (istKI) {
-    // KI-Variante: Garantie + Zahlungsbedingungen + Gültigkeit in den Schlusstext
-    // (easybill-Feld text), NICHT als Positions-TEXT-Blöcke. So bleiben in der
-    // Tabelle nur „Optional zubuchbar" und „Werbebudget".
+    // KI-Variante: Garantie steht bereits als eigener Block über „Optional".
+    // Im Schlusstext (easybill-Feld text) nur noch Zahlungsbedingungen + Gültigkeit.
     const schluss = [];
-    if (guarantee)    schluss.push(`${guaranteeLabel}: ${guarantee}`);
     if (paymentTerms) schluss.push(`Zahlungsbedingungen: ${paymentTerms}`);
     const g = gueltigBisSatz(gueltig_bis);
     if (g) schluss.push(g);
