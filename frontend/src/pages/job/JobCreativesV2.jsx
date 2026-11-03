@@ -1,8 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api.js';
 import { FreigabeBadge, istGesperrt } from '../../components/FreigabeBadge.jsx';
+import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
+
+// Fängt Renderfehler eines Wizard-Schritts ab, damit nie eine stille weiße Seite
+// stehen bleibt (Grund wird angezeigt + „Erneut laden"). `key={step}` am Aufruf
+// setzt die Boundary beim Schrittwechsel zurück.
+class StepErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[CreativesV2] Schritt-Renderfehler:', error, info?.componentStack); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="alert alert-error" style={{ margin: 0 }}>
+          <strong>Dieser Schritt konnte nicht geladen werden.</strong>
+          <div style={{ fontSize: 12, marginTop: 6, whiteSpace: 'pre-wrap' }}>{String(this.state.error?.message || this.state.error)}</div>
+          <div style={{ marginTop: 10 }}>
+            <button type="button" className="btn-ghost btn-sm" onClick={() => window.location.reload()}>↻ Erneut laden</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Creative-Wizard V2 (Test, paralleler Reiter). Reine VERDRAHTUNG der bestehenden
 // Render-Pfade (keine neue Render-Logik):
@@ -219,6 +243,7 @@ export default function JobCreativesV2() {
         ))}
       </div>
 
+      <StepErrorBoundary key={step}>
       {/* ── Schritt 1: Bildquelle ── */}
       {step === 1 && (
         <div>
@@ -382,6 +407,7 @@ export default function JobCreativesV2() {
           </div>
         </div>
       )}
+      </StepErrorBoundary>
 
       {/* Ergebnisse */}
       <div style={{ marginTop: 22 }}>
