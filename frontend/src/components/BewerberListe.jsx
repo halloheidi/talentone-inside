@@ -185,7 +185,7 @@ const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whi
 const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onStandardVorqual, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onStandardVorqual, onAnruf, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
   const [filter, setFilter] = useState('alle');
   const [gwDialogBewId, setGwDialogBewId] = useState(null);
   // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
@@ -221,12 +221,16 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   async function saveSpalte(bewId, spalteId, wert) { try { await onSpalte?.(bewId, spalteId, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveVorqual(bewId, feld, wert) { try { await onVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveStandard(bewId, feld, wert) { try { await onStandardVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
+  async function saveAnruf(bewId, payload) { try { await onAnruf?.(bewId, payload); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveGesellenwerk(bewId, body) { await onGesellenwerk?.(bewId, body); await onReload?.(); }
   // Effektiver Vorqual-Wert: Kundenwert (überschreibt) sonst interner Recruiter-Wert.
   const vorqualWert = (b, name) => (b.feedback?.vorqual_werte_kunde?.[name] ?? b.vorqualifizierung_werte?.[name] ?? '');
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
+      {/* Mobil (<900px) klappen die reinen Arbeits-Spalten (Anruf, VG-Termin, Kunde kontaktiert,
+          Nächste Aktion) weg — alle sind in der Akte (Drawer) erreichbar. */}
+      <style>{`@media (max-width:900px){.bl-inline-extra{display:none}}`}</style>
       <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>👥 {intern ? 'Bewerbungen' : `${t(kunde, 'Deine', 'Ihre')} Bewerbungen`} ({personenGesamt}{personenGesamt !== bewerbungen.length && <span style={{ fontSize: 13, fontWeight: 400, color: '#9a9994' }}> · {bewerbungen.length} Eingänge</span>})</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
         {['alle', ...BEARBEITUNG.map(o => o.key)].map(f => {
@@ -257,10 +261,17 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 <th style={thName}>Name</th>
                 <th style={thBase}>Eingang</th>
                 <th style={thBase}>Bearbeitung</th>
+                {intern && <th style={thBase} className="bl-inline-extra">Anruf</th>}
+                {/* Intern: Standard-Vorqual direkt nach dem Anruf (Erreichbarkeit zuerst → neben dem Anruf). */}
+                {intern && standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
                 <th style={thBase}>Kriterien</th>
                 <th style={thBase}>Feedback</th>
                 {intern && <th style={thBase}>Ampel</th>}
-                {standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
+                {intern && <th style={thBase} className="bl-inline-extra">VG-Termin</th>}
+                {intern && <th style={thBase} className="bl-inline-extra">Kunde kontaktiert</th>}
+                {intern && <th style={thBase} className="bl-inline-extra">Nächste Aktion</th>}
+                {/* Portal: Standard-Vorqual an gewohnter Stelle (nach Feedback). */}
+                {!intern && standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
                 {vorqualFelder.map(f => <th key={`vq-${f.name}`} style={{ ...thBase, background: '#f4f7ff' }} title={f.name}>{f.name}</th>)}
                 {frageSpalten.map(f => <th key={`fr-${f}`} style={thBase} title={f}>{frageTitel(f).length > 32 ? frageTitel(f).slice(0, 30) + '…' : frageTitel(f)}</th>)}
                 {customSpalten.map(sp => <th key={`cs-${sp.id}`} style={{ ...thBase, background: '#eef7ff' }}>{sp.name}</th>)}
@@ -281,6 +292,16 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 const werte = b.spalten_werte || {};
                 const dubs = dubletten(b);
                 const dubTitle = dubs.length > 1 ? `${dubs.length}× dieselbe Person (gleiche E-Mail/Telefon) · frühere Eingänge: ${fruehereEingaengeText(dubs.filter(x => x.id !== b.id))}` : '';
+                // Standard-Vorqual-Zellen einmal bauen, an EINER Position gerendert (intern vs. Portal).
+                const stdCells = standardFelder.map(f => {
+                  const v = standardWert(b, f);
+                  const editable = intern && typeof onStandardVorqual === 'function';
+                  return (
+                    <td key={`std-${f.id}`} style={{ ...tdBase, background: '#f6fdf9' }} onClick={editable ? stop : undefined}>
+                      <StandardVorqualCell feld={f} value={v} editable={editable} inlineSel={inlineSel} onSave={wert => saveStandard(b.id, f, wert)} />
+                    </td>
+                  );
+                });
                 return (
                   <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
                     <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
@@ -300,6 +321,12 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                     <td style={tdBase} title={intern ? 'Automatisch aus dem Verlauf abgeleitet (Ampel, Feedback, Kontakt, Kriterien, Notiz) — nicht direkt editierbar. Ändert sich über die anderen Spalten.' : 'Automatisch abgeleiteter Status.'}>
                       <span style={{ fontSize: 11, fontWeight: 700, color: BEARB_BY_KEY[bst.key].color }}>{bLabel}</span>
                     </td>
+                    {intern && (
+                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
+                        <AnrufCell bewerbung={b} primary={primary} onLog={(payload) => saveAnruf(b.id, payload)} canLog={typeof onAnruf === 'function'} />
+                      </td>
+                    )}
+                    {intern && stdCells}
                     <td style={{ ...tdBase, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
                     {/* Feedback-Status inline (Kunde) */}
                     <td style={tdBase} onClick={stop}>
@@ -322,16 +349,27 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                         </select>
                       </td>
                     )}
-                    {/* Standard-Vorqualifizierung (global): intern editierbar, Portal read-only. */}
-                    {standardFelder.map(f => {
-                      const v = standardWert(b, f);
-                      const editable = intern && typeof onStandardVorqual === 'function';
-                      return (
-                        <td key={`std-${f.id}`} style={{ ...tdBase, background: '#f6fdf9' }} onClick={editable ? stop : undefined}>
-                          <StandardVorqualCell feld={f} value={v} editable={editable} inlineSel={inlineSel} onSave={wert => saveStandard(b.id, f, wert)} />
-                        </td>
-                      );
-                    })}
+                    {/* Weitere Arbeits-Spalten (intern, mobil ausgeblendet). */}
+                    {intern && (
+                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
+                        <input type="date" value={(b.notiz?.vg_vereinbart_am || '').slice(0, 10)} title="VG-Termin"
+                          onChange={e => savePatch(b.id, { vg_vereinbart_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} />
+                      </td>
+                    )}
+                    {intern && (
+                      <td style={{ ...tdBase, textAlign: 'center' }} className="bl-inline-extra" onClick={stop}>
+                        <input type="checkbox" checked={!!b.notiz?.kunde_kontaktiert} title="Dem Kunden vorgestellt"
+                          onChange={e => savePatch(b.id, { kunde_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} />
+                      </td>
+                    )}
+                    {intern && (
+                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
+                        <input defaultValue={b.notiz?.naechste_aktion || ''} placeholder="…"
+                          onBlur={e => (e.target.value || '') !== (b.notiz?.naechste_aktion || '') && savePatch(b.id, { naechste_aktion: e.target.value || null })} style={{ ...inlineSel, maxWidth: 150 }} />
+                      </td>
+                    )}
+                    {/* Portal: Standard-Vorqual read-only an gewohnter Stelle. */}
+                    {!intern && stdCells}
                     {/* Vorqualifizierungs-Felder der Stelle: Kunde bearbeitet (vorqual_werte_kunde), intern read-only (von uns) */}
                     {vorqualFelder.map(f => {
                       const v = vorqualWert(b, f.name);
@@ -455,7 +493,7 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
   // Gemeinsamer Verlauf: Eingang + Anrufversuche + Kommentare, chronologisch.
   const events = [];
   if (b.created_at) events.push({ at: b.created_at, rolle: null, autor: null, text: 'Bewerbung eingegangen', typ: 'eingang' });
-  for (const a of (n.anrufversuche || [])) if (a?.datum) events.push({ at: a.datum, rolle: 'nw', autor: 'TalentOne', text: `Anrufversuch — ${a.ergebnis || 'offen'}${a.notiz ? ` · ${a.notiz}` : ''}`, typ: 'anruf' });
+  for (const a of (n.anrufversuche || [])) if (a?.datum || a?.ts) events.push({ at: a.ts || a.datum, rolle: 'nw', autor: a.nutzer || 'TalentOne', text: `Anrufversuch — ${ANRUF_LABEL[a.ergebnis] || a.ergebnis || 'offen'}${a.notiz ? ` · ${a.notiz}` : ''}`, typ: 'anruf' });
   for (const k of (b.kommentare || [])) events.push({ at: k.created_at, rolle: k.autor_typ, autor: k.autor_name || (k.autor_typ === 'kunde' ? 'Kunde' : 'TalentOne'), text: k.text, typ: 'kommentar' });
   events.sort((x, y) => new Date(x.at) - new Date(y.at));
 
@@ -525,6 +563,11 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
                 <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>VG-Termin <input type="date" value={(n.vg_vereinbart_am || '').slice(0, 10)} onChange={e => patchIntern({ vg_vereinbart_am: e.target.value || null })} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px' }} /></label>
                 <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>Eingestellt <select value={n.eingestellt || 'offen'} onChange={e => patchIntern({ eingestellt: e.target.value })} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px' }}>{['offen', 'ja', 'nein'].map(s => <option key={s} value={s}>{s}</option>)}</select></label>
               </div>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>Nächste Aktion
+                <input defaultValue={n.naechste_aktion || ''} placeholder="z.B. morgen erneut anrufen"
+                  onBlur={e => (e.target.value || '') !== (n.naechste_aktion || '') && patchIntern({ naechste_aktion: e.target.value || null })}
+                  style={{ flex: 1, border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px', fontSize: 13 }} />
+              </label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <strong style={{ fontSize: 12, color: '#5a5955' }}>Anrufversuch:</strong>
                 <input type="date" value={anruf.datum} onChange={e => setAnruf(a => ({ ...a, datum: e.target.value }))} style={{ border: '1px solid #ececea', borderRadius: 6, padding: '4px 6px', fontSize: 12 }} />
@@ -687,6 +730,55 @@ function StandardVorqualCell({ feld, value, editable, onSave, inlineSel }) {
       }}
       style={{ ...inlineSel, maxWidth: isPlz ? 72 : 120 }}
     />
+  );
+}
+
+const ANRUF_LABEL = { erreicht: 'erreicht', nicht_erreicht: 'nicht erreicht', mailbox: 'Mailbox' };
+
+// Inline-Anruf (Block A): 📞 öffnet ein Mini-Popover „Erreicht / Nicht erreicht" + optionales
+// Ergebnis. Protokolliert einen Anrufversuch (Zeitstempel + Nutzer); die Zelle zeigt klein
+// „zuletzt 02.11. · nicht erreicht · 3×". Die abgeleitete Bearbeitung springt nach dem Reload.
+function AnrufCell({ bewerbung, onLog, canLog }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const av = (Array.isArray(bewerbung.notiz?.anrufversuche) ? bewerbung.notiz.anrufversuche : []).filter(a => a?.datum || a?.ts);
+  const last = av.slice().sort((a, b) => new Date(b.ts || b.datum) - new Date(a.ts || a.datum))[0] || null;
+  async function log(erreicht) {
+    setBusy(true);
+    try { await onLog({ erreicht, notiz: text }); setText(''); setOpen(false); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {canLog && (
+          <button type="button" onClick={() => setOpen(o => !o)} title="Anruf protokollieren"
+            style={{ fontSize: 13, lineHeight: 1, padding: '3px 7px', borderRadius: 6, border: '1px solid #e0e0dd', background: open ? '#eef2ff' : '#fff', cursor: 'pointer' }}>📞</button>
+        )}
+        {last ? (
+          <span style={{ fontSize: 10.5, color: '#5a5955', whiteSpace: 'nowrap' }} title={last.nutzer ? `zuletzt von ${last.nutzer}` : undefined}>
+            {new Date(last.ts || last.datum).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} · {ANRUF_LABEL[last.ergebnis] || 'offen'} · {av.length}×
+          </span>
+        ) : (!canLog && <span style={{ color: '#9a9994' }}>—</span>)}
+      </div>
+      {open && canLog && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 20, background: '#fff', border: '1px solid #e0e0dd', borderRadius: 10, boxShadow: '0 6px 24px rgba(0,0,0,0.14)', padding: 10, width: 220 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <button type="button" disabled={busy} onClick={() => log(true)}
+              style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 8px', borderRadius: 6, border: '1px solid #bbf7d0', background: '#dcfce7', color: '#166534', cursor: 'pointer' }}>Erreicht</button>
+            <button type="button" disabled={busy} onClick={() => log(false)}
+              style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: '6px 8px', borderRadius: 6, border: '1px solid #fecaca', background: '#fee2e2', color: '#991b1b', cursor: 'pointer' }}>Nicht erreicht</button>
+          </div>
+          <input value={text} onChange={e => setText(e.target.value)} placeholder="Ergebnis (optional)"
+            onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); setText(''); } }}
+            style={{ width: '100%', boxSizing: 'border-box', fontSize: 12, padding: '5px 7px', border: '1px solid #e0e0dd', borderRadius: 6 }} />
+          <div style={{ textAlign: 'right', marginTop: 6 }}>
+            <button type="button" onClick={() => { setOpen(false); setText(''); }} style={{ fontSize: 11, color: '#5a5955', background: 'transparent', border: 'none', cursor: 'pointer' }}>schließen</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

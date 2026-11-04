@@ -23,10 +23,13 @@ const ANRUF_ERGEBNISSE = ['erreicht', 'nicht_erreicht', 'mailbox'];
 
 function sanitizeAnrufversuche(arr) {
   if (!Array.isArray(arr)) return [];
-  return arr.slice(0, 10).map(a => ({
+  return arr.slice(0, 50).map(a => ({
     datum: a?.datum || null,
+    // ts = voller Zeitstempel (Inline-Anruf-Button), nutzer = wer es protokolliert hat.
+    ts: a?.ts ? a.ts.toString().slice(0, 40) : null,
     ergebnis: ANRUF_ERGEBNISSE.includes(a?.ergebnis) ? a.ergebnis : null,
     notiz: a?.notiz?.toString().slice(0, 500) || '',
+    nutzer: a?.nutzer ? a.nutzer.toString().slice(0, 120) : null,
   }));
 }
 

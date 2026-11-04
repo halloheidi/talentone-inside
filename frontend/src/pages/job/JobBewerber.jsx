@@ -123,6 +123,21 @@ export default function JobBewerber() {
     if (wert === '' || wert == null) delete werte[feld]; else werte[feld] = wert;
     await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte } });
   }, [bewerbungen]);
+  // Inline-Anruf (Block A): hängt einen Anrufversuch mit Zeitstempel + Nutzer an
+  // notiz.anrufversuche an. ergebnis='erreicht'|'nicht_erreicht' steuert sofort die
+  // abgeleitete Bearbeitung (kontaktversuch → vorqualifiziert).
+  const onAnruf = useCallback(async (bewId, { erreicht, notiz }) => {
+    const b = bewerbungen.find(x => x.id === bewId);
+    const av = Array.isArray(b?.notiz?.anrufversuche) ? b.notiz.anrufversuche : [];
+    const eintrag = {
+      datum: new Date().toISOString().slice(0, 10),
+      ts: new Date().toISOString(),
+      ergebnis: erreicht ? 'erreicht' : 'nicht_erreicht',
+      notiz: (notiz || '').trim(),
+      nutzer: autorName,
+    };
+    await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { anrufversuche: [...av, eintrag] } });
+  }, [bewerbungen, autorName]);
   // Standard-Vorqualifizierung: notiz_feld-Felder spiegeln eine bestehende Spalte
   // (gehaltswunsch/verfuegbarkeit), sonst std_<id> im vorqualifizierung_werte-Objekt.
   const onStandardVorqual = useCallback(async (bewId, feld, wert) => {
@@ -165,7 +180,7 @@ export default function JobBewerber() {
         <BewerberListe
           job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
           akteBewId={akteBewId} onAkte={setAkteBewId}
-          onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual} onStandardVorqual={onStandardVorqual}
+          onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual} onStandardVorqual={onStandardVorqual} onAnruf={onAnruf}
           onGesellenwerk={onGesellenwerk} onGesellenwerkOptin={onGesellenwerkOptin} gwMailReady={!!data.gw_mail_ready}
           onReload={load}
         />
