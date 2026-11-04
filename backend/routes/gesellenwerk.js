@@ -15,7 +15,7 @@ const GW_BETRIEB_LABEL = { interessant: 'Interessant', angesprochen: 'Angesproch
 // keine Umsätze). Zuständig wird best-effort auf den Close-Nutzernamen aufgelöst.
 async function ladeBetriebe() {
   const { data = [] } = await supabase.from('talentone_bk_kunden_uebersicht')
-    .select('id, firma, ort, ansprechpartner, zustaendig_close_user_id, gw_status, gw_status_am, gw_status_von, gw_notiz')
+    .select('id, firma, branche, ort, ansprechpartner, zustaendig_close_user_id, gw_status, gw_status_am, gw_status_von, gw_notiz')
     .not('gw_status', 'is', null)
     .order('gw_status_am', { ascending: false, nullsFirst: false });
   let userMap = {};
@@ -25,6 +25,7 @@ async function ladeBetriebe() {
   return (data || []).map(k => ({
     id: k.id,
     firma: k.firma,
+    branche: k.branche || null,
     ort: k.ort || null,
     ansprechpartner: k.ansprechpartner || null,
     zustaendig: k.zustaendig_close_user_id ? (userMap[k.zustaendig_close_user_id] || '—') : '—',
@@ -125,9 +126,8 @@ router.get('/betriebe-export.csv', async (req, res) => {
   try {
     const list = await ladeBetriebe();
     const esc = s => { const t = (s == null ? '' : String(s)); return /[";\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    // Branche: kein Feld im Bestandskunden-Datensatz → Spalte bleibt leer.
     const head = ['Firma', 'Branche', 'Ort', 'Status', 'Ansprechpartner', 'Zuständig'];
-    const rows = list.map(b => [b.firma, '', b.ort || '', b.gw_status_label, b.ansprechpartner || '', b.zustaendig || ''].map(esc).join(';'));
+    const rows = list.map(b => [b.firma, b.branche || '', b.ort || '', b.gw_status_label, b.ansprechpartner || '', b.zustaendig || ''].map(esc).join(';'));
     const csv = '﻿' + [head.join(';'), ...rows].join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="gesellenwerk-betriebe-${new Date().toISOString().slice(0, 10)}.csv"`);

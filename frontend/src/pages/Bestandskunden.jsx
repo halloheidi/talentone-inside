@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
 import PageContainer from '../components/PageContainer.jsx';
+import BrancheField from '../components/BrancheField.jsx';
 
 const eur = n => `${Math.round(Number(n) || 0).toLocaleString('de-DE')} €`;
 const datum = d => (d ? new Date(d).toLocaleDateString('de-DE') : '—');
@@ -66,6 +67,18 @@ export default function Bestandskunden() {
       applyResult(id, res);
     } catch (err) { setNotice('Fehler: ' + err.message); load(); }
     finally { setBusyId(null); }
+  }
+
+  // Branche: Freitext-Modus feuert pro Tastendruck → optimistisch lokal + debounced speichern.
+  const brancheTimers = useRef({});
+  function onBrancheChange(id, v) {
+    setKunden(prev => prev.map(k => k.id === id ? { ...k, branche: v } : k));
+    clearTimeout(brancheTimers.current[id]);
+    brancheTimers.current[id] = setTimeout(() => {
+      api(`/bestandskunden/${id}`, { method: 'PATCH', body: { branche: v } })
+        .then(res => applyResult(id, res))
+        .catch(err => { setNotice('Fehler: ' + err.message); load(); });
+    }, 600);
   }
 
   async function chooseLead(candidateId) {
@@ -169,6 +182,7 @@ export default function Bestandskunden() {
               <tr>
                 <th>Status</th>
                 <th style={{ cursor: 'pointer', minWidth: 220 }} onClick={() => setSortKey('firma')}>Firma</th>
+                <th>Branche</th>
                 <th>Ort</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => setSortKey('letzte')}>Letzte Rg.</th>
                 <th style={{ textAlign: 'right' }}>Anz.</th>
@@ -195,6 +209,10 @@ export default function Bestandskunden() {
                       <div style={{ fontSize: 11, color: 'var(--ink-4,#999)' }}>
                         Nr. {k.kundennummer}{k.fruehere_bezeichnung ? ` · früher: ${k.fruehere_bezeichnung}` : ''}
                       </div>
+                    </td>
+                    <td style={{ minWidth: 150 }}>
+                      <BrancheField value={k.branche || ''} onChange={v => onBrancheChange(k.id, v)}
+                        selectClassName="cell-input" inputClassName="cell-input" />
                     </td>
                     <td>{k.ort || '—'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{datum(k.letzte_rechnung)}</td>

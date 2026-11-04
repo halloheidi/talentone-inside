@@ -60,7 +60,7 @@ router.patch('/:id', async (req, res) => {
     if (!REAKT.has(b.reaktivierung)) return res.status(400).json({ error: "reaktivierung muss 'offen', 'angehen' oder 'verbrannt' sein." });
     patch.reaktivierung = b.reaktivierung;
   }
-  for (const f of ['zustaendig_close_user_id', 'notiz', 'telefon', 'email', 'close_lead_id', 'gw_notiz']) {
+  for (const f of ['zustaendig_close_user_id', 'notiz', 'telefon', 'email', 'close_lead_id', 'gw_notiz', 'branche']) {
     if (b[f] !== undefined) patch[f] = b[f] === '' ? null : b[f];
   }
 

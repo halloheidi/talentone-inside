@@ -222,12 +222,13 @@ export default function Gesellenwerk() {
             <div style={{ overflowX: 'auto' }}>
               <table className="table" style={{ margin: 0, width: '100%' }}>
                 <thead>
-                  <tr><th>Firma</th><th>Ort</th><th>Status</th><th>Ansprechpartner</th><th>Zuständig</th><th>Zuletzt geändert</th><th>Notiz</th></tr>
+                  <tr><th>Firma</th><th>Branche</th><th>Ort</th><th>Status</th><th>Ansprechpartner</th><th>Zuständig</th><th>Zuletzt geändert</th><th>Notiz</th></tr>
                 </thead>
                 <tbody>
                   {betriebe.map(b => (
                     <tr key={b.id}>
                       <td style={{ fontWeight: 600, minWidth: 220 }}>{b.firma}</td>
+                      <td>{b.branche || '—'}</td>
                       <td>{b.ort || '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{b.gw_status_label}</td>
                       <td>{b.ansprechpartner || '—'}</td>
