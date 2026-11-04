@@ -94,8 +94,9 @@ export default function JobBewerber() {
     ...job,
     kriterien_struktur: struktur,
     vorqualifizierung_felder: Array.isArray(job.vorqualifizierung_felder) ? job.vorqualifizierung_felder : [],
+    standard_vorqual_felder: Array.isArray(data?.standard_vorqual_felder) ? data.standard_vorqual_felder : [],
     bewerber_spalten: spalten,
-  }), [job, struktur, spalten]);
+  }), [job, struktur, spalten, data]);
 
   const koIds = (struktur.ko || []).map(k => k.id);
 
@@ -121,6 +122,19 @@ export default function JobBewerber() {
     const werte = { ...(b?.notiz?.vorqualifizierung_werte || {}) };
     if (wert === '' || wert == null) delete werte[feld]; else werte[feld] = wert;
     await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte } });
+  }, [bewerbungen]);
+  // Standard-Vorqualifizierung: notiz_feld-Felder spiegeln eine bestehende Spalte
+  // (gehaltswunsch/verfuegbarkeit), sonst std_<id> im vorqualifizierung_werte-Objekt.
+  const onStandardVorqual = useCallback(async (bewId, feld, wert) => {
+    if (feld.notiz_feld) {
+      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { [feld.notiz_feld]: wert || null } });
+    } else {
+      const b = bewerbungen.find(x => x.id === bewId);
+      const werte = { ...(b?.notiz?.vorqualifizierung_werte || {}) };
+      const key = feld.std_key;
+      if (wert === '' || wert == null) delete werte[key]; else werte[key] = wert;
+      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte } });
+    }
   }, [bewerbungen]);
 
   async function saveKriterien(wert) {
@@ -151,7 +165,7 @@ export default function JobBewerber() {
         <BewerberListe
           job={jobForListe} bewerbungen={bewerbungen} kunde={kunde} primary="#1b3f80" modus="intern"
           akteBewId={akteBewId} onAkte={setAkteBewId}
-          onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual}
+          onPatch={onPatch} onKommentar={onKommentar} onSpalte={onSpalte} onVorqual={onVorqual} onStandardVorqual={onStandardVorqual}
           onGesellenwerk={onGesellenwerk} onGesellenwerkOptin={onGesellenwerkOptin} gwMailReady={!!data.gw_mail_ready}
           onReload={load}
         />

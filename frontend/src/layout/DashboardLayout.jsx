@@ -83,6 +83,10 @@ function GlobalNav({ isAdmin }) {
             <Icon name="users" />
             <span>📧 Gmail-Konten</span>
           </NavLink>
+          <NavLink to="/admin/vorqualifizierung" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
+            <Icon name="users" />
+            <span>📋 Vorqualifizierung</span>
+          </NavLink>
           <NavLink to="/bestandskunden" className={({ isActive }) => `nav-item ${isActive ? 'is-active' : ''}`}>
             <Icon name="users" />
             <span>🔄 Bestandskunden</span>

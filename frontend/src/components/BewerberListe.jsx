@@ -185,7 +185,7 @@ const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whi
 const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
 
 /* ══════════════════════ Liste ══════════════════════ */
-export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
+export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onStandardVorqual, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
   const [filter, setFilter] = useState('alle');
   const [gwDialogBewId, setGwDialogBewId] = useState(null);
   // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
@@ -195,6 +195,8 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   const kriterienDa = hatKriterien(job.kriterien_struktur);
   const intern = modus === 'intern';
   const vorqualFelder = Array.isArray(job.vorqualifizierung_felder) ? job.vorqualifizierung_felder.filter(f => f && f.name) : [];
+  // Standard-Vorqualifizierung (global, für jede Stelle) — vor den stellenspez. Feldern.
+  const standardFelder = Array.isArray(job.standard_vorqual_felder) ? job.standard_vorqual_felder.filter(f => f && f.name) : [];
 
   // Dubletten an dieser Stelle: gleiche Person (E-Mail ODER Telefon) — keine Zusammenführung.
   // Jede Bewerbung kennt ihre Personengruppe; gezählt werden eindeutige Personen.
@@ -218,6 +220,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   async function savePatch(bewId, patch) { try { await onPatch?.(bewId, patch); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveSpalte(bewId, spalteId, wert) { try { await onSpalte?.(bewId, spalteId, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveVorqual(bewId, feld, wert) { try { await onVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
+  async function saveStandard(bewId, feld, wert) { try { await onStandardVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveGesellenwerk(bewId, body) { await onGesellenwerk?.(bewId, body); await onReload?.(); }
   // Effektiver Vorqual-Wert: Kundenwert (überschreibt) sonst interner Recruiter-Wert.
   const vorqualWert = (b, name) => (b.feedback?.vorqual_werte_kunde?.[name] ?? b.vorqualifizierung_werte?.[name] ?? '');
@@ -257,6 +260,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                 <th style={thBase}>Kriterien</th>
                 <th style={thBase}>Feedback</th>
                 {intern && <th style={thBase}>Ampel</th>}
+                {standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
                 {vorqualFelder.map(f => <th key={`vq-${f.name}`} style={{ ...thBase, background: '#f4f7ff' }} title={f.name}>{f.name}</th>)}
                 {frageSpalten.map(f => <th key={`fr-${f}`} style={thBase} title={f}>{frageTitel(f).length > 32 ? frageTitel(f).slice(0, 30) + '…' : frageTitel(f)}</th>)}
                 {customSpalten.map(sp => <th key={`cs-${sp.id}`} style={{ ...thBase, background: '#eef7ff' }}>{sp.name}</th>)}
@@ -318,6 +322,16 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
                         </select>
                       </td>
                     )}
+                    {/* Standard-Vorqualifizierung (global): intern editierbar, Portal read-only. */}
+                    {standardFelder.map(f => {
+                      const v = standardWert(b, f);
+                      const editable = intern && typeof onStandardVorqual === 'function';
+                      return (
+                        <td key={`std-${f.id}`} style={{ ...tdBase, background: '#f6fdf9' }} onClick={editable ? stop : undefined}>
+                          <StandardVorqualCell feld={f} value={v} editable={editable} inlineSel={inlineSel} onSave={wert => saveStandard(b.id, f, wert)} />
+                        </td>
+                      );
+                    })}
                     {/* Vorqualifizierungs-Felder der Stelle: Kunde bearbeitet (vorqual_werte_kunde), intern read-only (von uns) */}
                     {vorqualFelder.map(f => {
                       const v = vorqualWert(b, f.name);
@@ -620,6 +634,59 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
         </div>
       </div>
     </div>
+  );
+}
+
+// Wert eines Standard-Vorqualifizierungsfeldes an einer Bewerbung auflösen:
+// notiz_feld-Felder spiegeln eine bestehende Notiz-Spalte, sonst std_<id> im
+// vorqualifizierung_werte-Objekt (intern wie Portal gleich befüllt).
+function standardWert(b, feld) {
+  if (feld.notiz_feld) return b.notiz?.[feld.notiz_feld] ?? '';
+  return b.vorqualifizierung_werte?.[feld.std_key] ?? b.notiz?.vorqualifizierung_werte?.[feld.std_key] ?? '';
+}
+
+// Eine Standard-Vorqual-Zelle: janein = Toggle-Chip, select = Dropdown,
+// text/zahl = Inline-Input (PLZ: 5-stellig geprüft). Portal (editable=false) read-only.
+function StandardVorqualCell({ feld, value, editable, onSave, inlineSel }) {
+  const leer = <span style={{ color: '#9a9994' }}>—</span>;
+  if (!editable) {
+    return value ? <span>{value}</span> : leer;
+  }
+  if (feld.typ === 'janein') {
+    const next = (value === '' || value == null) ? 'Ja' : value === 'Ja' ? 'Nein' : '';
+    const bg = value === 'Ja' ? '#dcfce7' : value === 'Nein' ? '#fee2e2' : '#f1f1ee';
+    const col = value === 'Ja' ? '#166534' : value === 'Nein' ? '#991b1b' : '#9a9994';
+    return (
+      <button type="button" onClick={() => onSave(next)} title="Ja / Nein / — (klicken zum Wechseln)"
+        style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 100, border: '1px solid #e0e0dd', background: bg, color: col, cursor: 'pointer', minWidth: 42 }}>
+        {value || '—'}
+      </button>
+    );
+  }
+  if (feld.typ === 'select' && Array.isArray(feld.optionen) && feld.optionen.length) {
+    return (
+      <select value={value || ''} onChange={e => onSave(e.target.value)} style={inlineSel}>
+        <option value="">—</option>
+        {feld.optionen.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
+  const isPlz = feld.validierung === 'plz';
+  const isZahl = feld.typ === 'zahl';
+  return (
+    <input
+      defaultValue={value || ''}
+      inputMode={isPlz || isZahl ? 'numeric' : undefined}
+      maxLength={isPlz ? 5 : undefined}
+      placeholder="—"
+      onBlur={e => {
+        const v = e.target.value.trim();
+        if (v === (value || '')) return;
+        if (isPlz && v && !/^\d{5}$/.test(v)) { alert('Bitte eine 5-stellige PLZ eingeben.'); e.target.value = value || ''; return; }
+        onSave(v);
+      }}
+      style={{ ...inlineSel, maxWidth: isPlz ? 72 : 120 }}
+    />
   );
 }
 

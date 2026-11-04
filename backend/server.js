@@ -37,6 +37,7 @@ import anfragenRouter from './routes/anfragen.js';
 import stilvorlagenRouter from './routes/stilvorlagen.js';
 import emailVorlagenRouter from './routes/email-vorlagen.js';
 import assistentRouter from './routes/assistent.js';
+import vorqualStandardfelderRouter from './routes/vorqual-standardfelder.js';
 import { ensureBucket } from './storage.js';
 import { supabase } from './supabase.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
@@ -134,6 +135,7 @@ app.use('/api/stilvorlagen', requireAuth, stilvorlagenRouter);
 app.use('/api/email-vorlagen', requireAuth, emailVorlagenRouter);
 app.use('/api/assistent', requireAuth, assistentRouter);
 app.use('/api/eigene-leads', requireAuth, eigeneLeadsRouter);
+app.use('/api/vorqual-standardfelder', requireAuth, vorqualStandardfelderRouter);
 app.use('/api', requireAuth, exportsRouter); // mountet /api/jobs/:id/export/...
 
 // Wer bin ich? Wird vom Frontend genutzt, um Admin-only-Menüs auszublenden.

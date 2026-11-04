@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { effektiveVorqualFelder } from '../vorqualifizierung.js';
+import { ladeStandardfelder } from '../vorqual-standardfelder.js';
 import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, normalizeKriterienStruktur, prepareKriterienStrukturWrite, diffKriterienStruktur, kriterienErfuellt } from '../kriterien.js';
 import { laufzeitStatus } from '../laufzeit.js';
 import { invalidateKanban, invalidateLaufzeit } from '../kanban-cache.js';
@@ -2112,6 +2113,8 @@ router.get('/portal/:token', async (req, res) => {
     }
 
     // Pipeline-Stufen normalisieren
+    // Standard-Vorqualifizierungsfelder (global) — im Portal nur kundensichtbare.
+    const standardFelderKunde = await ladeStandardfelder({ nurKunde: true });
     const jobsOut = jobs.map(j => {
       let pipeline = Array.isArray(j.pipeline_stufen) && j.pipeline_stufen.length
         ? j.pipeline_stufen : DEFAULT_PIPELINE;
@@ -2130,6 +2133,7 @@ router.get('/portal/:token', async (req, res) => {
         kriterien_struktur: normalizeKriterienStruktur(j.wichtige_kriterien_struktur ?? j.wichtige_kriterien),
         laufzeit: j.projekt_id ? (laufzeitByProjekt[j.projekt_id] || null) : null,
         vorqualifizierung_felder: effektiveVorqualFelder(j),
+        standard_vorqual_felder: standardFelderKunde,
         bewerber_spalten: bewerberSpaltenByJob[j.id] || [],
         // Befuellte Vorqual-Felder + wichtige Kriterien (immer) — gleiche
         // Spaltenlogik wie in der Public-Bewerberliste.

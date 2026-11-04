@@ -9,6 +9,7 @@ import { attachStableAnhaenge } from '../anhaenge.js';
 import { personenGruppen } from '../dubletten.js';
 import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
 import { vormerkenAusAbsage, vormerkungDerPerson, gwMailReady, versendeOptinMail } from '../gesellenwerk.js';
+import { ladeStandardfelder } from '../vorqual-standardfelder.js';
 
 const router = Router();
 
@@ -485,7 +486,10 @@ async function loadBewerbungenFuerJob(jobId) {
     }
   }
 
-  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare, gesellenwerk, gw_mail_ready: gwMailReady() };
+  // Standard-Vorqualifizierungsfelder (global, für JEDE Stelle) — intern alle aktiven.
+  const standard_vorqual_felder = await ladeStandardfelder();
+
+  return { bewerbungen: bewerbungenMitAnhaengen, notizen, feedback, werte, funnels, kommentare, gesellenwerk, gw_mail_ready: gwMailReady(), standard_vorqual_felder };
 }
 
 // GET /api/bewerbungen/uebersicht — Kunden-/Stellen-Karten aus Bewerber-Sicht (live/pausiert).
