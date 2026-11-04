@@ -61,7 +61,14 @@
       "Bash(scp -o StrictHostKeyChecking=no __TRACKED_VAR__/regress-kunde-payload.mjs root@69.62.116.44:/tmp/rk.mjs)",
       "Bash(node -e \"import\\('./adcopies.js'\\).then\\(m=>console.log\\('adcopies exports:', Object.keys\\(m\\).join\\(','\\)\\)\\).catch\\(e=>console.log\\('IMPORT ERR:', e.message\\)\\)\")",
       "Bash(git restore *)",
-      "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/smoke-gen.mjs root@69.62.116.44:/tmp/sg.mjs)"
+      "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/smoke-gen.mjs root@69.62.116.44:/tmp/sg.mjs)",
+      "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/verify-mail-link.mjs root@69.62.116.44:/tmp/vml.mjs)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); bs=d.get\\('bewerbungen',[]\\); print\\('Kunde:', \\(d.get\\('kunde'\\) or {}\\).get\\('firmenname'\\)\\); print\\('Stelle:', \\(d.get\\('job'\\) or {}\\).get\\('stelle'\\)\\); print\\('Bewerber gesamt:', len\\(bs\\)\\); print\\('6282c2bb sichtbar:', any\\(b.get\\('id',''\\).startswith\\('6282c2bb'\\) for b in bs\\)\\)\")",
+      "Bash(grep -rn \"useJob\\\\|function JobView\\\\|api\\(\\\\`/jobs\\\\|/jobs/\\\\${\" frontend/src/pages/JobView.jsx)",
+      "Bash(scp -o StrictHostKeyChecking=no /private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad/verify-neukunden.mjs root@69.62.116.44:/tmp/vn.mjs)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); j=d.get\\('job'\\) or {}; nk=j.get\\('neukunden_daten'\\) or {}; print\\('projekttyp:', j.get\\('projekttyp'\\)\\); print\\('produkt:', nk.get\\('produkt'\\)\\); print\\('unterschied gesetzt:', bool\\(nk.get\\('unterschied'\\)\\)\\); print\\('neukunden_daten-Felder:', sorted\\(nk.keys\\(\\)\\)\\)\")",
+      "Bash(scp -o StrictHostKeyChecking=no __TRACKED_VAR__/verify-anschreiben.mjs root@69.62.116.44:/tmp/va.mjs)",
+      "Bash(scp -o StrictHostKeyChecking=no __TRACKED_VAR__/verify-schuessler.mjs root@69.62.116.44:/tmp/vs.mjs)"
     ],
     "additionalDirectories": [
       "/private/tmp/claude-501/-Users-johanneswirth-dev-talentone-talentone-inside/da125ba2-1b7c-4575-9597-abcc0cfa81a9/scratchpad"
