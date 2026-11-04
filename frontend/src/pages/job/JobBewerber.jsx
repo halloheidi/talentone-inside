@@ -1,4 +1,5 @@
-import { Component, useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { useAuth } from '../../lib/auth.jsx';
 import { api } from '../../lib/api.js';
@@ -38,6 +39,9 @@ export default function JobBewerber() {
   const [kritLog, setKritLog] = useState(null);    // { kunde_am }
   const [akteBewId, setAkteBewId] = useState(null);
   const [ladeFehler, setLadeFehler] = useState(null);
+  const [sp] = useSearchParams();
+  const bewParam = sp.get('bewerbung');
+  const bewParamApplied = useRef(null);
   const jobId = job.id;
   const autorName = `N&W · ${me?.name || me?.email || user?.email || 'Mitarbeiter'}`;
 
@@ -74,6 +78,17 @@ export default function JobBewerber() {
       gesellenwerk: gesellenwerk[b.id] || null,
     }));
   }, [data]);
+
+  // ?bewerbung=<id> (z.B. aus einem umgeleiteten Alt-Link): passende Akte einmalig
+  // öffnen, sobald die Liste geladen ist. Pro Parameter-Wert nur einmal, damit ein
+  // manuelles Schließen nicht sofort wieder überschrieben wird.
+  useEffect(() => {
+    if (!bewParam || bewParamApplied.current === bewParam) return;
+    if (bewerbungen.some(b => b.id === bewParam)) {
+      bewParamApplied.current = bewParam;
+      setAkteBewId(bewParam);
+    }
+  }, [bewParam, bewerbungen]);
 
   const jobForListe = useMemo(() => ({
     ...job,

@@ -633,8 +633,13 @@ export default function JobView() {
   const { kundeId, jobId } = useParams();
   const [sp] = useSearchParams();
   const navigate = useNavigate();
-  // Alte Bewerber-Verlinkung (?tab=bewerber) → neuer Bewerber-Tab.
-  useEffect(() => { if (sp.get('tab') === 'bewerber') navigate(`/kunden/${kundeId}/jobs/${jobId}/bewerber`, { replace: true }); }, [sp, kundeId, jobId, navigate]);
+  // Alte Bewerber-Verlinkung (?tab=bewerber) → neuer Bewerber-Tab. ?bewerbung bleibt
+  // erhalten, damit der Bewerber-Tab die passende Akte direkt öffnen kann.
+  useEffect(() => {
+    if (sp.get('tab') !== 'bewerber') return;
+    const bew = sp.get('bewerbung');
+    navigate(`/kunden/${kundeId}/jobs/${jobId}/bewerber${bew ? `?bewerbung=${bew}` : ''}`, { replace: true });
+  }, [sp, kundeId, jobId, navigate]);
   const { me, user, flags } = useAuth();
   // Creative-Wizard V2 (Test): Reiter per Flag. Alt-Reiter „Creatives" wird bei
   // hide_creatives_v1 ausgeblendet (nicht gelöscht — Rückweg bleibt jederzeit).

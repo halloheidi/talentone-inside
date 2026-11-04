@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { t } from '../lib/anrede.js';
+import { useInsidePublicRedirect } from '../lib/insideRedirect.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -399,13 +400,19 @@ export default function PublicBewerbungen() {
   const [managerOpen, setManagerOpen] = useState(false);
   const [erklaerungOffen, setErklaerungOffen] = useState(true);
 
+  // Eingeloggte Inside-Nutzer: alten Telefonisten-Link → interne Stelle umleiten.
+  const bewParam = new URLSearchParams(window.location.search).get('bewerbung');
+  const insideStatus = useInsidePublicRedirect(token, bewParam);
+
   // B2: alte Direktlinks → Portal-Dashboard umleiten (mit ?bewerbung erhalten).
+  // Nur für echte Kunden (ohne Inside-Login) — Inside-Nutzer gehen in die interne Stelle.
   useEffect(() => {
+    if (insideStatus !== 'none') return;
     const pt = data?.kunde?.portal_token;
     if (!pt) return;
     const bew = new URLSearchParams(window.location.search).get('bewerbung');
     window.location.replace(`/portal/${pt}${bew ? `?bewerbung=${bew}` : ''}`);
-  }, [data]);
+  }, [data, insideStatus]);
 
   useEffect(() => {
     let cancel = false;
@@ -556,6 +563,8 @@ export default function PublicBewerbungen() {
     return list;
   }, [data, aktivFilter, ampelFilter, sortAsc]);
 
+  // Inside-Nutzer: während Session-Prüfung/Weiterleitung keine Kundendaten zeigen.
+  if (insideStatus === 'checking') return <div className="pub-shell"><div className="pub-loading">Lade…</div></div>;
   if (loading) return <div className="pub-shell"><div className="pub-loading">Lade…</div></div>;
   if (error) return <div className="pub-shell"><div className="pub-error">{error}</div></div>;
   if (!data) return null;

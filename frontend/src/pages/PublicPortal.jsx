@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useInsidePublicRedirect } from '../lib/insideRedirect.js';
 import Lightbox from '../components/Lightbox.jsx';
 import KriterienEditor from '../components/KriterienEditor.jsx';
 import KriterienKachel from '../components/KriterienKachel.jsx';
@@ -109,6 +110,9 @@ export default function PublicPortal() {
   const [akteBewId, setAkteBewId] = useState(null);
   const bewerbungParam = search.get('bewerbung');
 
+  // Eingeloggte Inside-Nutzer: Portal-Link → interne Stelle/Kunde umleiten.
+  const insideStatus = useInsidePublicRedirect(token, bewerbungParam);
+
   async function load() {
     try {
       const res = await api(`/public/portal/${token}`);
@@ -137,6 +141,9 @@ export default function PublicPortal() {
     if (b) { setActiveJobId(b.job_id); setAkteBewId(b.id); }
   }, [data, bewerbungParam]);
 
+  // Inside-Nutzer: während Session-Prüfung/Weiterleitung keine Kundendaten zeigen.
+  if (insideStatus === 'checking') return <FullMsg text="Lade…" />;
+
   // Wenn Einladungs-Token in der URL: Setup-Modus zeigen (unabhaengig von needsLogin)
   if (einladungsToken) {
     return <PasswortSetzen token={token} einladung={einladungsToken}
@@ -155,6 +162,16 @@ export default function PublicPortal() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f7f6f2', color: '#0a0a0a', fontFamily: '-apple-system, sans-serif' }}>
+      {/* Impersonation-Fall: ein Inside-Nutzer ist hier gelandet (Auto-Redirect
+          nicht möglich) → Leiste mit Link in die interne Ansicht. */}
+      {insideStatus === 'failed' && (
+        <div style={{ background: '#1b3f80', color: '#fff', padding: '8px 16px', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span>Du bist intern eingeloggt — das ist die Kundenansicht.</span>
+          <Link to={data.kunde?.id ? `/kunden/${data.kunde.id}` : '/kunden'} style={{ color: '#fff', fontWeight: 700, textDecoration: 'underline' }}>
+            Zur internen Liste →
+          </Link>
+        </div>
+      )}
       <style>{`@media(max-width:640px){.pp-main{padding:16px 16px 40px!important}.pp-header{padding:14px 16px!important}.pp-meta{display:none!important}}`}</style>
       <header className="pp-header" style={{ background: brand.primary, color: '#fff', padding: '18px 24px', display: 'flex', alignItems: 'center', gap: 16, borderBottom: `3px solid ${primary}` }}>
         {data.kunde?.logo_url && (

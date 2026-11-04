@@ -38,6 +38,7 @@ import stilvorlagenRouter from './routes/stilvorlagen.js';
 import emailVorlagenRouter from './routes/email-vorlagen.js';
 import assistentRouter from './routes/assistent.js';
 import { ensureBucket } from './storage.js';
+import { supabase } from './supabase.js';
 import easybillWebhookRouter from './routes/easybill-webhook.js';
 import { startEasybillCustomerSyncScheduler } from './easybill-sync.js';
 import { startOfferSyncScheduler } from './offer-sync.js';
@@ -145,6 +146,50 @@ app.get('/api/me', requireAuth, async (req, res) => {
     is_admin: !!(email && isAdminEmail(email)),
     flags,
   });
+});
+
+// Alte Public-Links (Portal/Bewerbungen) für eingeloggte Inside-Nutzer auflösen:
+// Token → interne IDs, damit das Frontend auf die interne Stelle umleiten kann.
+// bewerbungen_token → Stelle (+ Kunde); portal_token → Kunde; ?bewerbung → deren
+// Stelle (liefert/überschreibt job_id, nur wenn sie zum aufgelösten Kunden gehört
+// — kein Fremd-Leak). requireAuth: nur für eingeloggte Inside-Nutzer.
+app.get('/api/resolve-public-token/:token', requireAuth, async (req, res) => {
+  const token = req.params.token;
+  const bewId = req.query.bewerbung || null;
+  if (!token) return res.status(400).json({ error: 'Token fehlt.' });
+  try {
+    let kunde_id = null, job_id = null, bewerbung_id = null;
+
+    // 1) bewerbungen_token → Stelle (+ Kunde)
+    const { data: job } = await supabase.from('talentone_jobs')
+      .select('id, kunde_id').eq('bewerbungen_token', token).maybeSingle();
+    if (job) { job_id = job.id; kunde_id = job.kunde_id; }
+
+    // 2) sonst portal_token → Kunde
+    if (!kunde_id) {
+      const { data: kunde } = await supabase.from('talentone_kunden')
+        .select('id').eq('portal_token', token).maybeSingle();
+      if (kunde) kunde_id = kunde.id;
+    }
+
+    // 3) ?bewerbung → deren Stelle (liefert job_id v.a. im Portal-Fall)
+    if (bewId) {
+      const { data: bew } = await supabase.from('talentone_bewerbungen')
+        .select('id, job_id').eq('id', bewId).maybeSingle();
+      if (bew?.job_id) {
+        const { data: bjob } = await supabase.from('talentone_jobs')
+          .select('id, kunde_id').eq('id', bew.job_id).maybeSingle();
+        if (bjob && (!kunde_id || bjob.kunde_id === kunde_id)) {
+          job_id = bjob.id; kunde_id = bjob.kunde_id; bewerbung_id = bew.id;
+        }
+      }
+    }
+
+    if (!kunde_id) return res.status(404).json({ error: 'Token nicht gefunden.' });
+    res.json({ kunde_id, job_id, bewerbung_id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Feature-Flags verwalten (Admin). GET Liste, PUT { flag, email?, enabled }.
