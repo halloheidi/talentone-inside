@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from '../components/Modal.jsx';
+import PageContainer from '../components/PageContainer.jsx';
 
 const eur = n => `${Math.round(Number(n) || 0).toLocaleString('de-DE')} €`;
 const datum = d => (d ? new Date(d).toLocaleDateString('de-DE') : '—');
@@ -12,6 +13,8 @@ const STATUS = {
   inaktiv_2plus:{ label: 'Inaktiv > 2 J',    color: '#c2410c', bg: '#ffedd5' },
 };
 const REAKT = { offen: 'Offen', angehen: 'Angehen', verbrannt: 'Verbrannt' };
+// Gesellenwerk-Vormerkung für Betriebe (getrennt vom Kandidaten-Pool).
+const GW = { '': '—', interessant: 'Interessant', angesprochen: 'Angesprochen', registriert: 'Registriert', kein_interesse: 'Kein Interesse' };
 
 export default function Bestandskunden() {
   const [kunden, setKunden] = useState([]);
@@ -23,6 +26,7 @@ export default function Bestandskunden() {
   const [statusFilter, setStatusFilter] = useState('');
   const [reaktFilter, setReaktFilter] = useState('');
   const [zustFilter, setZustFilter] = useState('');
+  const [gwAktivFilter, setGwAktivFilter] = useState(false); // Chip: nur Interessant/Angesprochen
   const [sort, setSort] = useState({ key: 'inaktiv', dir: 'asc' });
   const [detail, setDetail] = useState(null);        // kunde für Drawer
   const [detailRechnungen, setDetailRechnungen] = useState(null);
@@ -94,6 +98,7 @@ export default function Bestandskunden() {
       if (statusFilter && k.status !== statusFilter) return false;
       if (reaktFilter && k.reaktivierung !== reaktFilter) return false;
       if (zustFilter && k.zustaendig_close_user_id !== zustFilter) return false;
+      if (gwAktivFilter && !['interessant', 'angesprochen'].includes(k.gw_status)) return false;
       if (q) {
         const hay = [k.firma, k.fruehere_bezeichnung, k.ort, k.kundennummer].filter(Boolean).join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
@@ -114,12 +119,13 @@ export default function Bestandskunden() {
       return 0;
     });
     return list;
-  }, [kunden, search, statusFilter, reaktFilter, zustFilter, sort]);
+  }, [kunden, search, statusFilter, reaktFilter, zustFilter, gwAktivFilter, sort]);
 
   const setSortKey = key => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
 
   return (
     <div>
+      <PageContainer wide />
       <div className="page-head">
         <div>
           <h1 className="page-title">Bestandskunden</h1>
@@ -146,6 +152,13 @@ export default function Bestandskunden() {
           <option value="">Alle Zuständigen</option>
           {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
+        <button type="button" onClick={() => setGwAktivFilter(v => !v)}
+          title="Nur Betriebe mit Gesellenwerk-Status Interessant oder Angesprochen"
+          style={{ padding: '6px 12px', borderRadius: 100, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            border: gwAktivFilter ? '1.5px solid #0a0a0a' : '1px solid var(--line,#ddd)',
+            background: gwAktivFilter ? '#0a0a0a' : '#fff', color: gwAktivFilter ? '#fff' : '#0a0a0a' }}>
+          🔨 Gesellenwerk: Interessant/Angesprochen{gwAktivFilter ? ' ×' : ''}
+        </button>
         <span style={{ alignSelf: 'center', fontSize: 13, color: 'var(--ink-3,#666)' }}>{filtered.length} angezeigt</span>
       </div>
 
@@ -155,15 +168,16 @@ export default function Bestandskunden() {
             <thead>
               <tr>
                 <th>Status</th>
-                <th style={{ cursor: 'pointer' }} onClick={() => setSortKey('firma')}>Firma</th>
+                <th style={{ cursor: 'pointer', minWidth: 220 }} onClick={() => setSortKey('firma')}>Firma</th>
                 <th>Ort</th>
                 <th style={{ cursor: 'pointer' }} onClick={() => setSortKey('letzte')}>Letzte Rg.</th>
-                <th>Anz.</th>
-                <th style={{ cursor: 'pointer' }} onClick={() => setSortKey('umsatz')}>Umsatz netto</th>
+                <th style={{ textAlign: 'right' }}>Anz.</th>
+                <th style={{ cursor: 'pointer', textAlign: 'right' }} onClick={() => setSortKey('umsatz')}>Umsatz netto</th>
                 <th>Reaktivierung</th>
                 <th>Zuständig</th>
+                <th>Gesellenwerk</th>
                 <th>Close-Task</th>
-                <th>Notiz</th>
+                <th style={{ minWidth: 260 }}>Notiz</th>
                 <th>Telefon / E-Mail</th>
               </tr>
             </thead>
@@ -174,7 +188,7 @@ export default function Bestandskunden() {
                 return (
                   <tr key={k.id} style={{ opacity: isBusy ? 0.6 : 1 }}>
                     <td><span style={{ padding: '2px 8px', borderRadius: 100, fontSize: 11, fontWeight: 700, color: st.color, background: st.bg, whiteSpace: 'nowrap' }}>{st.label}</span></td>
-                    <td>
+                    <td style={{ minWidth: 220 }}>
                       <button onClick={() => openDetail(k)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontWeight: 600, color: '#0a0a0a' }}>
                         {k.firma}
                       </button>
@@ -184,8 +198,8 @@ export default function Bestandskunden() {
                     </td>
                     <td>{k.ort || '—'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{datum(k.letzte_rechnung)}</td>
-                    <td>{k.anzahl_rechnungen || 0}</td>
-                    <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{eur(k.umsatz_netto)}</td>
+                    <td style={{ textAlign: 'right' }}>{k.anzahl_rechnungen || 0}</td>
+                    <td style={{ whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>{eur(k.umsatz_netto)}</td>
                     <td>
                       <select className="cell-input" value={k.reaktivierung} disabled={isBusy}
                         onChange={e => updateField(k.id, 'reaktivierung', e.target.value)}>
@@ -200,6 +214,17 @@ export default function Bestandskunden() {
                       </select>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
+                      <select className="cell-input" value={k.gw_status || ''} disabled={isBusy}
+                        onChange={e => updateField(k.id, 'gw_status', e.target.value)}>
+                        {Object.entries(GW).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      {k.gw_status && k.gw_status_am && (
+                        <div style={{ fontSize: 10, color: 'var(--ink-4,#999)' }}>
+                          {datum(k.gw_status_am)}{k.gw_status_von ? ` · ${k.gw_status_von}` : ''}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
                       {k.close_task_status === 'offen'
                         ? <span style={{ color: '#a16207' }}>offen{k.zustaendig_close_user_id ? ` · ${userMap[k.zustaendig_close_user_id] || ''}` : ''}</span>
                         : k.close_task_status === 'erledigt'
@@ -208,7 +233,7 @@ export default function Bestandskunden() {
                       {k.close_lead_id && <> · <a href={`https://app.close.com/lead/${k.close_lead_id}/`} target="_blank" rel="noreferrer">Lead</a></>}
                     </td>
                     <td>
-                      <input className="cell-input" defaultValue={k.notiz || ''} placeholder="Notiz…" style={{ minWidth: 120 }}
+                      <input className="cell-input" defaultValue={k.notiz || ''} placeholder="Notiz…" style={{ minWidth: 260, width: '100%' }}
                         onBlur={e => { if ((e.target.value || '') !== (k.notiz || '')) updateField(k.id, 'notiz', e.target.value); }} />
                     </td>
                     <td>

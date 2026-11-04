@@ -3,12 +3,28 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { listUsers, getCloseKey } from '../close.js';
+import { listUsers, getCloseKey, addTask } from '../close.js';
 import { applyCloseTaskState } from '../bestandskunden-close.js';
 import { runBestandskundenSync, runCloseTaskStatusSync, getBestandskundenSyncStatus } from '../bestandskunden-sync.js';
 
 const router = Router();
 const REAKT = new Set(['offen', 'angehen', 'verbrannt']);
+const GW_STATUS = new Set(['interessant', 'angesprochen', 'registriert', 'kein_interesse']);
+
+// Legt einen Close-Task „Gesellenwerk-Betrieb" am verknüpften Lead an (nur falls
+// close_lead_id vorhanden). Analog zum „Altkunde"-Task, aber eigener Anlass.
+// Fehler blockieren nie das Speichern — Aufrufer zeigt eine Warnung.
+async function createGesellenwerkTask(kunde) {
+  if (!kunde.close_lead_id) return 'Kein Close-Lead verknüpft — Gesellenwerk-Task nicht angelegt.';
+  if (!(await getCloseKey())) return 'CLOSE_API_KEY nicht gesetzt — Gesellenwerk-Task nicht angelegt.';
+  try {
+    const due = new Date(); due.setDate(due.getDate() + 1);
+    let text = `Gesellenwerk-Betrieb: ${kunde.firma || ''} als Partnerbetrieb für gesellenwerk.de ansprechen.`;
+    if (kunde.gw_notiz && kunde.gw_notiz.trim()) text += `\n\n${kunde.gw_notiz.trim()}`;
+    await addTask({ leadId: kunde.close_lead_id, text, assignedTo: kunde.zustaendig_close_user_id || null, dueIso: due.toISOString() });
+    return null;
+  } catch (e) { return `Gesellenwerk-Task fehlgeschlagen: ${e.message}`; }
+}
 
 // GET /api/bestandskunden — komplette Liste inkl. Aggregate + Status.
 router.get('/', async (req, res) => {
@@ -44,9 +60,24 @@ router.patch('/:id', async (req, res) => {
     if (!REAKT.has(b.reaktivierung)) return res.status(400).json({ error: "reaktivierung muss 'offen', 'angehen' oder 'verbrannt' sein." });
     patch.reaktivierung = b.reaktivierung;
   }
-  for (const f of ['zustaendig_close_user_id', 'notiz', 'telefon', 'email', 'close_lead_id']) {
+  for (const f of ['zustaendig_close_user_id', 'notiz', 'telefon', 'email', 'close_lead_id', 'gw_notiz']) {
     if (b[f] !== undefined) patch[f] = b[f] === '' ? null : b[f];
   }
+
+  // Gesellenwerk-Betriebsstatus: bei Änderung Zeitstempel + Nutzer mitführen.
+  let gwAngesprochenNeu = false;
+  if (b.gw_status !== undefined) {
+    const wert = b.gw_status === '' ? null : b.gw_status;
+    if (wert !== null && !GW_STATUS.has(wert)) return res.status(400).json({ error: 'Ungültiger gw_status.' });
+    const { data: vorher } = await supabase.from('talentone_bk_kunden').select('gw_status').eq('id', req.params.id).maybeSingle();
+    if ((vorher?.gw_status || null) !== wert) {
+      patch.gw_status = wert;
+      patch.gw_status_am = new Date().toISOString();
+      patch.gw_status_von = req.user?.email || null;
+      gwAngesprochenNeu = wert === 'angesprochen' && (vorher?.gw_status || null) !== 'angesprochen';
+    }
+  }
+
   if (!Object.keys(patch).length) return res.status(400).json({ error: 'Keine Änderungen.' });
   patch.updated_at = new Date().toISOString();
 
@@ -54,14 +85,21 @@ router.patch('/:id', async (req, res) => {
     .update(patch).eq('id', req.params.id).select('id').single();
   if (error || !updated) return res.status(error ? 500 : 404).json({ error: error?.message || 'Kunde nicht gefunden.' });
 
-  // Close-Task nur bei Steuer-relevanten Änderungen abgleichen (nicht bei Tel/Email).
+  // „Angesprochen" → Close-Task „Gesellenwerk-Betrieb" am Lead (falls close_lead_id).
+  let gwWarnung = null;
+  if (gwAngesprochenNeu) {
+    const { data: k } = await supabase.from('talentone_bk_kunden_uebersicht').select('*').eq('id', req.params.id).maybeSingle();
+    gwWarnung = await createGesellenwerkTask(k || {});
+  }
+
+  // Close-Task (Altkunde) nur bei Steuer-relevanten Änderungen abgleichen (nicht bei Tel/Email/Gesellenwerk).
   const closeRelevant = ['reaktivierung', 'zustaendig_close_user_id', 'notiz', 'close_lead_id'].some(f => patch[f] !== undefined);
   if (!closeRelevant) {
     const { data: k } = await supabase.from('talentone_bk_kunden_uebersicht').select('*').eq('id', req.params.id).maybeSingle();
-    return res.json({ kunde: k });
+    return res.json({ kunde: k, ...(gwWarnung ? { close_warnung: gwWarnung } : {}) });
   }
   const result = await applyCloseTaskState(req.params.id);
-  res.json(result);
+  res.json({ ...result, ...(gwWarnung ? { close_warnung: gwWarnung } : {}) });
 });
 
 // POST /api/bestandskunden/sync — manueller easybill+close-Sync.

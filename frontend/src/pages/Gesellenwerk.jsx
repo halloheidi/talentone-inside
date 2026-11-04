@@ -20,13 +20,18 @@ function einwilligungText(v) {
   return { txt: '✓', color: '#166534' };
 }
 
+const datum = d => (d ? new Date(d).toLocaleDateString('de-DE') : '—');
+
 export default function Gesellenwerk() {
+  const [view, setView] = useState('kandidaten');   // kandidaten | betriebe
   const [list, setList] = useState([]);
   const [gewerke, setGewerke] = useState([]);
   const [mailReady, setMailReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('vorgeschlagen');
+  const [betriebe, setBetriebe] = useState(null);   // null = noch nicht geladen
+  const [betriebeError, setBetriebeError] = useState('');
   const [fEinwilligung, setFEinwilligung] = useState('alle');  // alle|ja|nein
   const [fGewerk, setFGewerk] = useState('alle');
   const [busyId, setBusyId] = useState(null);
@@ -43,6 +48,12 @@ export default function Gesellenwerk() {
     finally { setLoading(false); }
   }
   useEffect(() => { load(); }, []);
+
+  async function loadBetriebe() {
+    try { const r = await api('/gesellenwerk/betriebe'); setBetriebe(r.betriebe || []); setBetriebeError(''); }
+    catch (e) { setBetriebeError(e.message); setBetriebe([]); }
+  }
+  useEffect(() => { if (view === 'betriebe' && betriebe === null) loadBetriebe(); }, [view, betriebe]);
 
   const counts = useMemo(() => {
     const c = {}; for (const t of TABS) c[t.key] = 0;
@@ -80,14 +91,33 @@ export default function Gesellenwerk() {
       <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div>
           <h1 className="page-title">Gesellenwerk-Pool</h1>
-          <p className="page-sub">Intern vorgemerkte Kandidaten für das Handwerks-Jobportal. Gewerk aus der Stelle, Wohnort aus der Funnel-Antwort.</p>
+          <p className="page-sub">{view === 'betriebe'
+            ? 'Betriebe mit Gesellenwerk-Status aus den Bestandskunden (read-only Übersicht).'
+            : 'Intern vorgemerkte Kandidaten für das Handwerks-Jobportal. Gewerk aus der Stelle, Wohnort aus der Funnel-Antwort.'}</p>
         </div>
-        <button onClick={() => downloadAuthed('/gesellenwerk/export.csv', `gesellenwerk-pool-${new Date().toISOString().slice(0, 10)}.csv`)}
+        <button onClick={() => view === 'betriebe'
+            ? downloadAuthed('/gesellenwerk/betriebe-export.csv', `gesellenwerk-betriebe-${new Date().toISOString().slice(0, 10)}.csv`)
+            : downloadAuthed('/gesellenwerk/export.csv', `gesellenwerk-pool-${new Date().toISOString().slice(0, 10)}.csv`)}
           style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--line)', background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
           ↓ CSV-Export
         </button>
       </div>
 
+      {/* Umschalter Kandidaten ↔ Betriebe */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {[{ k: 'kandidaten', l: 'Kandidaten' }, { k: 'betriebe', l: 'Betriebe' }].map(m => {
+          const aktiv = view === m.k;
+          return (
+            <button key={m.k} onClick={() => setView(m.k)} style={{
+              fontSize: 13, padding: '7px 16px', borderRadius: 100, cursor: 'pointer',
+              border: aktiv ? '1.5px solid #0a0a0a' : '1px solid #ececea',
+              background: aktiv ? '#0a0a0a' : '#fff', color: aktiv ? '#fff' : '#0a0a0a', fontWeight: aktiv ? 700 : 600,
+            }}>{m.l}</button>
+          );
+        })}
+      </div>
+
+      {view === 'kandidaten' && (<>
       {!loading && !mailReady && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 12px', marginBottom: 12, fontSize: 12.5, color: '#92400e' }}>
           Opt-in-Mails sind noch pausiert: Die Absender-Domain gesellenwerk.de ist in Resend noch nicht verifiziert (<code>GW_MAIL_READY=false</code>). Vormerken läuft normal.
@@ -180,6 +210,40 @@ export default function Gesellenwerk() {
             {gefiltert.length} Eintrag{gefiltert.length === 1 ? '' : 'e'}
           </div>
         </div>
+      )}
+      </>)}
+
+      {view === 'betriebe' && (
+        betriebeError ? <div className="alert alert-error">{betriebeError}</div>
+        : betriebe === null ? <div className="card empty">Lade…</div>
+        : betriebe.length === 0 ? <div className="card empty"><h2>Keine Betriebe</h2><p>Noch kein Bestandskunde mit Gesellenwerk-Status. Status wird unter „Bestandskunden" gepflegt.</p></div>
+        : (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table" style={{ margin: 0, width: '100%' }}>
+                <thead>
+                  <tr><th>Firma</th><th>Ort</th><th>Status</th><th>Ansprechpartner</th><th>Zuständig</th><th>Zuletzt geändert</th><th>Notiz</th></tr>
+                </thead>
+                <tbody>
+                  {betriebe.map(b => (
+                    <tr key={b.id}>
+                      <td style={{ fontWeight: 600, minWidth: 220 }}>{b.firma}</td>
+                      <td>{b.ort || '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{b.gw_status_label}</td>
+                      <td>{b.ansprechpartner || '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{b.zustaendig || '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{datum(b.gw_status_am)}{b.gw_status_von ? <div style={{ fontSize: 10, color: 'var(--ink-3)' }}>{b.gw_status_von}</div> : null}</td>
+                      <td style={{ fontSize: 12, color: 'var(--ink-3)', maxWidth: 260 }}>{b.gw_notiz ? <span title={b.gw_notiz}>{b.gw_notiz}</span> : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '8px 14px', fontSize: 12, color: 'var(--ink-4)', borderTop: '1px solid var(--line)' }}>
+              {betriebe.length} Betrieb{betriebe.length === 1 ? '' : 'e'} · read-only — Status wird unter „Bestandskunden" gepflegt.
+            </div>
+          </div>
+        )
       )}
     </div>
   );
