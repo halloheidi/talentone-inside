@@ -73,6 +73,110 @@ function FeldRow({ feld, onSaved, onDeleted }) {
   );
 }
 
+// ───────── Zuordnung je Stelle ─────────
+// Bildet stellenspezifische Vorqual-Felder auf globale Standardfelder ab:
+// kopiert vorhandene Werte ins Zielfeld (nur wo leer), entfernt danach den
+// stellenspezifischen Schlüssel + die Felddefinition aus allen Stellen.
+function ZuordnungRow({ row, standardfelder, onDone }) {
+  const [ziel, setZiel] = useState(row.vorschlag_id || '');
+  const [count, setCount] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // Dry-Run bei Ziel-Änderung (und initial): zeigt betroffene Bewerber.
+  useEffect(() => {
+    let abbruch = false;
+    if (!ziel) { setCount(0); return; }
+    setCount(null);
+    api(`/vorqual-zuordnung/dry-run?name=${encodeURIComponent(row.name)}&ziel_feld_id=${encodeURIComponent(ziel)}`)
+      .then(r => { if (!abbruch) setCount(r.count ?? 0); })
+      .catch(() => { if (!abbruch) setCount(null); });
+    return () => { abbruch = true; };
+  }, [ziel, row.name]);
+
+  async function uebernehmen() {
+    const zf = standardfelder.find(s => String(s.id) === String(ziel));
+    if (!zf) return;
+    if (!window.confirm(`„${row.name}" → Standardfeld „${zf.name}" übernehmen?\n\nWerte werden kopiert (nur wo das Zielfeld leer ist), danach wird das stellenspezifische Feld aus allen ${row.stellen_count} Stellen entfernt.`)) return;
+    setBusy(true);
+    try {
+      const r = await api('/vorqual-zuordnung/uebernehmen', { method: 'POST', body: { name: row.name, ziel_feld_id: ziel } });
+      onDone(row.name, `„${row.name}" → „${zf.name}": ${r.kopiert} Werte kopiert, ${r.stellen_bereinigt} Stellen bereinigt, ${r.feldwerte_entfernt} Feldwerte entfernt.`);
+    } catch (e) { alert(e.message); setBusy(false); }
+  }
+
+  const cell = { padding: '6px 8px', borderBottom: '1px solid #f1f1ee', verticalAlign: 'middle' };
+  const inp = { fontSize: 13, padding: '4px 7px', border: '1px solid #e0e0dd', borderRadius: 6, background: '#fff' };
+  return (
+    <tr>
+      <td style={cell}><strong>{row.name}</strong></td>
+      <td style={{ ...cell, textAlign: 'center', color: '#5a5955' }}>{row.stellen_count}</td>
+      <td style={cell}>
+        <select value={ziel} onChange={e => setZiel(e.target.value)} style={{ ...inp, minWidth: 220 }}>
+          <option value="">— (nicht zuordnen)</option>
+          {standardfelder.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </td>
+      <td style={{ ...cell, textAlign: 'center', fontSize: 12, color: '#5a5955' }}>
+        {!ziel ? '—' : count === null ? '…' : `${count} Bewerber`}
+      </td>
+      <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+        <button className="btn-primary btn-sm" disabled={busy || !ziel} onClick={uebernehmen}>Bestätigen</button>
+      </td>
+    </tr>
+  );
+}
+
+function ZuordnungCard() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [notiz, setNotiz] = useState('');
+
+  function load() {
+    setData(null);
+    api('/vorqual-zuordnung').then(setData).catch(e => setError(e.message));
+  }
+  useEffect(() => { load(); }, []);
+
+  function onDone(name, meldung) {
+    setNotiz(meldung);
+    load();
+  }
+
+  const th = { padding: '6px 8px', textAlign: 'left', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.05, color: '#5a5955', borderBottom: '1px solid #ececea' };
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3 style={{ margin: '0 0 6px', fontSize: 15 }}>Zuordnung je Stelle</h3>
+      <p className="page-sub" style={{ margin: '0 0 12px' }}>
+        Stellenspezifische Vorqual-Felder, die inhaltlich einem Standardfeld entsprechen. Beim Bestätigen werden vorhandene Werte ins Standardfeld übernommen (nur wo dort noch leer) und das stellenspezifische Feld aus allen Stellen entfernt. Nicht zugeordnete Felder bleiben unverändert.
+      </p>
+      {error && <div className="alert alert-error" style={{ marginBottom: 10 }}>{error}</div>}
+      {notiz && <div className="alert" style={{ marginBottom: 10, background: '#ecfdf5', color: '#065f46', padding: '8px 10px', borderRadius: 6, fontSize: 13 }}>{notiz}</div>}
+      {!data ? <div className="empty" style={{ color: '#9a9994', padding: 8 }}>Lade…</div> : (
+        data.rows.length === 0 ? (
+          <div style={{ color: '#9a9994', padding: 8, fontSize: 13 }}>Keine offenen Zuordnungen – alle stellenspezifischen Felder sind bereits Standardfelder oder individuell.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={th}>Feldname</th><th style={{ ...th, textAlign: 'center' }}>Stellen</th>
+                  <th style={th}>entspricht Standardfeld</th><th style={{ ...th, textAlign: 'center' }}>Betroffen</th><th style={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map(row => (
+                  <ZuordnungRow key={row.name} row={row} standardfelder={data.standardfelder} onDone={onDone} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export default function VorqualStandardfelder() {
   const [felder, setFelder] = useState(null);
   const [error, setError] = useState('');
@@ -145,6 +249,8 @@ export default function VorqualStandardfelder() {
           <button className="btn-primary" disabled={busy} onClick={create}>+ Hinzufügen</button>
         </div>
       </div>
+
+      <ZuordnungCard />
     </div>
   );
 }
