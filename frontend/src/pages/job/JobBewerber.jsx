@@ -119,9 +119,10 @@ export default function JobBewerber() {
   // Intern geschriebene Vorqual-Werte (nicht die Kundenwerte): in notiz.vorqualifizierung_werte mergen.
   const onVorqual = useCallback(async (bewId, feld, wert) => {
     const b = bewerbungen.find(x => x.id === bewId);
+    const alt = b?.notiz?.vorqualifizierung_werte?.[feld] ?? '';
     const werte = { ...(b?.notiz?.vorqualifizierung_werte || {}) };
     if (wert === '' || wert == null) delete werte[feld]; else werte[feld] = wert;
-    await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte } });
+    await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte, vorqual_change: { key: feld, label: feld, von: alt, nach: wert || '' } } });
   }, [bewerbungen]);
   // Inline-Anruf (Block A): hängt einen Anrufversuch mit Zeitstempel + Nutzer an
   // notiz.anrufversuche an. ergebnis='erreicht'|'nicht_erreicht' steuert sofort die
@@ -141,14 +142,16 @@ export default function JobBewerber() {
   // Standard-Vorqualifizierung: notiz_feld-Felder spiegeln eine bestehende Spalte
   // (gehaltswunsch/verfuegbarkeit), sonst std_<id> im vorqualifizierung_werte-Objekt.
   const onStandardVorqual = useCallback(async (bewId, feld, wert) => {
+    const b = bewerbungen.find(x => x.id === bewId);
     if (feld.notiz_feld) {
-      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { [feld.notiz_feld]: wert || null } });
+      const alt = b?.notiz?.[feld.notiz_feld] ?? '';
+      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { [feld.notiz_feld]: wert || null, vorqual_change: { key: feld.notiz_feld, label: feld.name, von: alt, nach: wert || '' } } });
     } else {
-      const b = bewerbungen.find(x => x.id === bewId);
-      const werte = { ...(b?.notiz?.vorqualifizierung_werte || {}) };
       const key = feld.std_key;
+      const alt = b?.notiz?.vorqualifizierung_werte?.[key] ?? '';
+      const werte = { ...(b?.notiz?.vorqualifizierung_werte || {}) };
       if (wert === '' || wert == null) delete werte[key]; else werte[key] = wert;
-      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte } });
+      await api(`/bewerbungen/${bewId}/notiz`, { method: 'PATCH', body: { vorqualifizierung_werte: werte, vorqual_change: { key, label: feld.name, von: alt, nach: wert || '' } } });
     }
   }, [bewerbungen]);
 

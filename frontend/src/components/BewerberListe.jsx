@@ -9,7 +9,7 @@
 //  onFeedback(patch)     → Kundenfeedback (Status/VG) — im Portal immer vorhanden
 //  onKommentar(text)     → neuer Kommentar in den gemeinsamen Verlauf (beide Modi)
 //  onReload()            → Daten nach einer Mutation neu laden
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { t } from '../lib/anrede.js';
 import { personenGruppen } from '../lib/dubletten.js';
 
@@ -183,6 +183,124 @@ const thBase = { padding: '8px 10px', textAlign: 'left', fontSize: 11, letterSpa
 const thName = { ...thBase, left: 0, zIndex: 3 };
 const tdBase = { padding: '8px 10px', fontSize: 12, verticalAlign: 'middle', whiteSpace: 'nowrap', borderBottom: '1px solid #f1f1ee' };
 const tdName = { ...tdBase, position: 'sticky', left: 0, background: '#fff', zIndex: 1, borderRight: '1px solid #eceae6' };
+// Dezente Spaltengruppen-Überschrift (zweite, obere Kopfzeile).
+const thGroup = { ...thBase, top: 0, padding: '3px 10px', fontSize: 10, letterSpacing: 0, textTransform: 'none', color: '#9a9994', fontWeight: 700 };
+
+/* ── Sortierung (Punkt 4) ── */
+const AMPEL_ORDER = { gruen: 0, gelb: 1, rot: 2, offen: 3 };
+// Vergleichsfunktion für eine Spalte; leere Werte wandern IMMER ans Ende (richtungsunabhängig).
+function makeComparator(col, dir) {
+  const s = dir === 'desc' ? -1 : 1;
+  return (x, y) => {
+    const a = col.sortVal(x), b = col.sortVal(y);
+    const ea = a === '' || a == null, eb = b === '' || b == null;
+    if (ea && eb) return 0;
+    if (ea) return 1;
+    if (eb) return -1;
+    let c;
+    if (col.sortType === 'num' || col.sortType === 'date') c = a - b;
+    else {
+      const na = /^\d+$/.test(String(a)), nb = /^\d+$/.test(String(b));
+      c = (na && nb) ? Number(a) - Number(b) : String(a).localeCompare(String(b), 'de', { sensitivity: 'base' });
+    }
+    return s * c;
+  };
+}
+// Sortierbarer Spaltenkopf.
+function Th({ col, sort, onSort, top }) {
+  const active = sort?.key === col.id;
+  const sortable = col.sortable !== false;
+  const arrow = active ? (sort.dir === 'asc' ? '▲' : '▼') : (sortable ? '⇅' : '');
+  return (
+    <th className={col.cls} title={col.title || col.label}
+      style={{ ...thBase, top, ...(col.thStyle || {}), cursor: sortable ? 'pointer' : 'default', userSelect: 'none' }}
+      onClick={sortable ? () => onSort(col.id) : undefined}>
+      {col.label}{arrow && <span style={{ marginLeft: 4, fontSize: 9, color: active ? '#1b3f80' : '#cfcdc7' }}>{arrow}</span>}
+    </th>
+  );
+}
+// Filter-Typ aus einem Vorqual-Feld ableiten (Punkt 5).
+function filterForFeld(f, valFn) {
+  if (f.typ === 'janein' || f.typ === 'ja_nein') return { type: 'select', val: valFn };
+  if (f.typ === 'select' && Array.isArray(f.optionen) && f.optionen.length) return { type: 'select', val: valFn };
+  if (f.validierung === 'plz') return { type: 'plz', val: valFn };
+  if (f.typ === 'datum') return undefined;
+  return { type: 'text', val: valFn };
+}
+
+/* ── Filter-Leiste je Spalte (Punkt 5): Select/Ja-Nein = Mehrfachauswahl,
+   Text = „enthält", PLZ = Präfix. Aktive Filter als Chips mit Editor-Popover. ── */
+function FilterBar({ cols, bewerbungen, filters, setFilters, primary }) {
+  const [menu, setMenu] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const available = cols.filter(c => filters[c.id] === undefined);
+  const distinct = (c) => [...new Set(bewerbungen.map(b => String(c.filter.val(b) ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
+  const summary = (c) => {
+    const v = filters[c.id];
+    if (c.filter.type === 'select') return (Array.isArray(v) && v.length) ? (v.length > 2 ? `${v.length} Werte` : v.join(', ')) : 'alle';
+    return v ? `„${v}"` : '…';
+  };
+  const setVal = (id, v) => setFilters(f => ({ ...f, [id]: v }));
+  const remove = (id) => { setFilters(f => { const n = { ...f }; delete n[id]; return n; }); setEdit(e => e === id ? null : e); };
+  const pop = { position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 30, background: '#fff', border: '1px solid #e0e0dd', borderRadius: 10, boxShadow: '0 6px 24px rgba(0,0,0,0.14)', padding: 10, minWidth: 180, maxHeight: 280, overflowY: 'auto' };
+  if (!cols.length) return null;
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+      {Object.keys(filters).map(id => {
+        const c = cols.find(x => x.id === id);
+        if (!c) return null;
+        return (
+          <span key={id} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button onClick={() => setEdit(e => e === id ? null : id)}
+              style={{ fontSize: 12, padding: '4px 10px', borderRadius: '100px 0 0 100px', border: `1.5px solid ${primary}`, borderRight: 'none', background: '#fff', color: primary, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {c.filterLabel || c.label}: {summary(c)} ▾
+            </button>
+            <button onClick={() => remove(id)} title="Filter entfernen"
+              style={{ fontSize: 12, padding: '4px 8px', borderRadius: '0 100px 100px 0', border: `1.5px solid ${primary}`, background: '#fff', color: primary, cursor: 'pointer' }}>×</button>
+            {edit === id && (
+              <div style={pop}>
+                {c.filter.type === 'select' ? (
+                  distinct(c).length ? distinct(c).map(v => {
+                    const on = Array.isArray(filters[id]) && filters[id].includes(v);
+                    return (
+                      <label key={v} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, padding: '2px 0', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={on} onChange={() => { const cur = Array.isArray(filters[id]) ? filters[id] : []; setVal(id, on ? cur.filter(x => x !== v) : [...cur, v]); }} />
+                        <span>{v}</span>
+                      </label>
+                    );
+                  }) : <div style={{ fontSize: 12, color: '#9a9994' }}>Keine Werte.</div>
+                ) : (
+                  <input autoFocus value={filters[id] || ''} onChange={e => setVal(id, e.target.value)}
+                    placeholder={c.filter.type === 'plz' ? 'Präfix, z.B. 97' : 'enthält…'} inputMode={c.filter.type === 'plz' ? 'numeric' : undefined}
+                    style={{ width: 150, fontSize: 13, padding: '5px 7px', border: '1px solid #e0e0dd', borderRadius: 6 }} />
+                )}
+                <div style={{ textAlign: 'right', marginTop: 6 }}>
+                  <button onClick={() => setEdit(null)} style={{ fontSize: 11, background: 'transparent', border: 'none', color: '#5a5955', cursor: 'pointer' }}>fertig</button>
+                </div>
+              </div>
+            )}
+          </span>
+        );
+      })}
+      {available.length > 0 && (
+        <span style={{ position: 'relative' }}>
+          <button onClick={() => setMenu(m => !m)}
+            style={{ fontSize: 12, padding: '4px 11px', borderRadius: 100, border: '1px dashed #c9c7c1', background: '#fafaf8', cursor: 'pointer', color: '#5a5955' }}>+ Filter</button>
+          {menu && (
+            <div style={pop}>
+              {available.map(c => (
+                <button key={c.id} onClick={() => { setFilters(f => ({ ...f, [c.id]: c.filter.type === 'select' ? [] : '' })); setEdit(c.id); setMenu(false); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12.5, padding: '5px 8px', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 6 }}>
+                  {c.filterLabel || c.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
 
 /* ══════════════════════ Liste ══════════════════════ */
 export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onStandardVorqual, onAnruf, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
@@ -223,8 +341,143 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   async function saveStandard(bewId, feld, wert) { try { await onStandardVorqual?.(bewId, feld, wert); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveAnruf(bewId, payload) { try { await onAnruf?.(bewId, payload); await onReload?.(); } catch (e) { alert(e.message); } }
   async function saveGesellenwerk(bewId, body) { await onGesellenwerk?.(bewId, body); await onReload?.(); }
-  // Effektiver Vorqual-Wert: Kundenwert (überschreibt) sonst interner Recruiter-Wert.
-  const vorqualWert = (b, name) => (b.feedback?.vorqual_werte_kunde?.[name] ?? b.vorqualifizierung_werte?.[name] ?? '');
+  // Effektiver Vorqual-Wert: gemeinsamer Store gewinnt (Punkt 3 — Kunde+intern
+  // schreiben jetzt dieselben Felder), alte reine Kundenwerte als Fallback.
+  const vorqualWert = (b, name) => (b.vorqualifizierung_werte?.[name] ?? b.feedback?.vorqual_werte_kunde?.[name] ?? '');
+
+  /* ── Spaltenmodell: EINE Quelle für Reihenfolge (Punkt 2), Render, Sortierung
+        (Punkt 4) und Filter (Punkt 5). Reihenfolge: Name · Eingang · Bearbeitung ·
+        [Anruf] · [Ampel] · Kriterien · Feedback · [Arbeits-Spalten] · Funnel ·
+        Standard-Vorqual · stellenspez. Vorqual · Custom · E-Mail · Telefon · [Notiz] · [GW]. ── */
+  const nameCol = { id: 'name', label: 'Name', sortType: 'text', sortVal: b => (b.name || '').toLowerCase() };
+
+  function feedbackCell(b) {
+    const fbSel = feedbackStatusOf(b); const fb = b.feedback?.status || '';
+    return onFeedback ? (
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <select value={fbSel} onChange={e => saveFeedback(b.id, { status: e.target.value })} style={inlineSel}>
+          {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+        </select>
+        {fbSel === 'vorstellungsgespraech' && (
+          <input type="date" value={(b.feedback?.vorstellungsgespraech_am || '').slice(0, 10)} title="VG-Termin"
+            onChange={e => saveFeedback(b.id, { vorstellungsgespraech_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} />
+        )}
+      </div>
+    ) : (fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fbSel] || '#5a5955' }}>{FEEDBACK_LABEL[fbSel] || fbSel}</span> : <span style={{ color: '#9a9994' }}>—</span>);
+  }
+  function vorqualCell(b, f, opts) {
+    const v = vorqualWert(b, f.name); const editable = !!onVorqual;
+    if (!editable) return v || <span style={{ color: '#9a9994' }}>—</span>;
+    return opts
+      ? <select value={v} onChange={e => saveVorqual(b.id, f.name, e.target.value)} style={inlineSel}><option value="">—</option>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>
+      : f.typ === 'datum'
+        ? <input type="date" value={(v || '').slice(0, 10)} onChange={e => saveVorqual(b.id, f.name, e.target.value)} style={inlineSel} />
+        : <input defaultValue={v} onBlur={e => e.target.value !== v && saveVorqual(b.id, f.name, e.target.value)} style={inlineSel} />;
+  }
+  function customCell(b, sp) {
+    const v = (b.spalten_werte || {})[sp.id] ?? '';
+    if (!onSpalte) return v || '—';
+    return sp.typ === 'dropdown' && Array.isArray(sp.optionen)
+      ? <select value={v} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel}><option value="">—</option>{sp.optionen.map(o => <option key={o} value={o}>{o}</option>)}</select>
+      : sp.typ === 'datum'
+        ? <input type="date" value={(v || '').slice(0, 10)} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />
+        : <input defaultValue={v} onBlur={e => e.target.value !== v && saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />;
+  }
+  function gwCell(b) {
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {b.gesellenwerk && <GwBadge gw={b.gesellenwerk} />}
+        <button onClick={() => setGwDialogBewId(b.id)} title="Für Gesellenwerk vormerken"
+          style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, border: '1px solid #e0e0dd', background: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          {b.gesellenwerk ? 'Bearbeiten' : '+ Vormerken'}
+        </button>
+      </div>
+    );
+  }
+  function nameInner(b) {
+    const amp = ampelOf(b.notiz);
+    const dubs = dubletten(b);
+    const dubTitle = dubs.length > 1 ? `${dubs.length}× dieselbe Person (gleiche E-Mail/Telefon) · frühere Eingänge: ${fruehereEingaengeText(dubs.filter(x => x.id !== b.id))}` : '';
+    const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
+    return (
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ position: 'relative', flexShrink: 0 }}>
+          <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
+          <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
+        </span>
+        <span style={{ fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</span>
+        {dubs.length > 1 && <span title={dubTitle} style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', borderRadius: 100, padding: '1px 6px', cursor: 'help' }}>{dubs.length}×</span>}
+        {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
+        {intern && b.gesellenwerk && <GwBadge gw={b.gesellenwerk} compact />}
+      </div>
+    );
+  }
+
+  const columns = [];
+  columns.push({ id: 'eingang', label: 'Eingang', sortType: 'date', sortVal: b => new Date(b.created_at).getTime(), cell: b => new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) });
+  columns.push({ id: 'bearbeitung', label: 'Bearbeitung', title: 'Automatisch aus dem Verlauf abgeleitet.', sortType: 'num', sortVal: b => BEARBEITUNG.findIndex(x => x.key === bearbeitungStatus(b).key), cell: b => { const bst = bearbeitungStatus(b); return <span style={{ fontSize: 11, fontWeight: 700, color: BEARB_BY_KEY[bst.key].color }}>{bearbeitungLabel(b)}</span>; } });
+  if (intern) columns.push({ id: 'anruf', label: 'Anruf', cls: 'bl-inline-extra', stop: true, sortType: 'date', sortVal: b => { const av = (Array.isArray(b.notiz?.anrufversuche) ? b.notiz.anrufversuche : []).filter(a => a?.datum || a?.ts); const l = av.sort((x, y) => new Date(y.ts || y.datum) - new Date(x.ts || x.datum))[0]; return l ? new Date(l.ts || l.datum).getTime() : null; }, cell: b => <AnrufCell bewerbung={b} primary={primary} onLog={p => saveAnruf(b.id, p)} canLog={typeof onAnruf === 'function'} /> });
+  if (intern) columns.push({ id: 'ampel', label: 'Ampel', stop: true, sortType: 'num', sortVal: b => AMPEL_ORDER[ampelOf(b.notiz)], filter: { type: 'select', val: b => AMPELN.find(a => a.key === ampelOf(b.notiz))?.label || '' }, cell: b => <select value={ampelOf(b.notiz)} onChange={e => savePatch(b.id, { ampel: e.target.value === 'offen' ? null : e.target.value })} style={inlineSel}>{AMPELN.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}</select> });
+  columns.push({ id: 'kriterien', label: 'Kriterien', sortType: 'num', sortVal: b => Object.values(b.notiz?.kriterien_check || {}).filter(v => v === true).length, tdStyle: { color: kriterienDa ? undefined : '#9a9994' }, cell: b => trefferText(job.kriterien_struktur, b.notiz?.kriterien_check) });
+  columns.push({ id: 'feedback', label: 'Feedback', stop: true, sortType: 'num', sortVal: b => FEEDBACK_OPTIONS.findIndex(o => o.key === feedbackStatusOf(b)), filter: { type: 'select', val: b => FEEDBACK_LABEL[feedbackStatusOf(b)] || '' }, cell: feedbackCell });
+  if (intern) columns.push({ id: 'vgtermin', label: 'VG-Termin', cls: 'bl-inline-extra', stop: true, sortType: 'date', sortVal: b => b.notiz?.vg_vereinbart_am ? new Date(b.notiz.vg_vereinbart_am).getTime() : null, cell: b => <input type="date" value={(b.notiz?.vg_vereinbart_am || '').slice(0, 10)} title="VG-Termin" onChange={e => savePatch(b.id, { vg_vereinbart_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} /> });
+  if (intern) columns.push({ id: 'kundekontaktiert', label: 'Kunde kontaktiert', cls: 'bl-inline-extra', stop: true, sortType: 'num', sortVal: b => b.notiz?.kunde_kontaktiert ? 1 : 0, thStyle: { textAlign: 'center' }, tdStyle: { textAlign: 'center' }, cell: b => <input type="checkbox" checked={!!b.notiz?.kunde_kontaktiert} title="Dem Kunden vorgestellt" onChange={e => savePatch(b.id, { kunde_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} /> });
+  if (intern) columns.push({ id: 'naechsteaktion', label: 'Nächste Aktion', cls: 'bl-inline-extra', stop: true, sortType: 'text', sortVal: b => (b.notiz?.naechste_aktion || '').toLowerCase(), cell: b => <input defaultValue={b.notiz?.naechste_aktion || ''} placeholder="…" onBlur={e => (e.target.value || '') !== (b.notiz?.naechste_aktion || '') && savePatch(b.id, { naechste_aktion: e.target.value || null })} style={{ ...inlineSel, maxWidth: 150 }} /> });
+  for (const f of frageSpalten) {
+    const lab = frageTitel(f);
+    columns.push({ id: `fr-${f}`, label: lab.length > 32 ? lab.slice(0, 30) + '…' : lab, title: f, filterLabel: lab, sortType: 'text', sortVal: b => antwortFor(b, f).toLowerCase(), filter: { type: 'select', val: b => antwortFor(b, f) }, tdStyle: b => ({ color: antwortFor(b, f) ? undefined : '#9a9994' }), cell: b => antwortFor(b, f) || '—' });
+  }
+  for (const f of standardFelder) {
+    columns.push({ id: `std-${f.id}`, label: f.name, group: 'vorqual', stop: true, title: `Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`, sortType: f.typ === 'zahl' ? 'num' : 'text', sortVal: b => { const v = standardWert(b, f); return f.typ === 'zahl' ? (v === '' || v == null ? null : Number(v)) : String(v || '').toLowerCase(); }, filter: filterForFeld(f, b => standardWert(b, f)), cell: b => <StandardVorqualCell feld={f} value={standardWert(b, f)} editable={typeof onStandardVorqual === 'function'} inlineSel={inlineSel} onSave={w => saveStandard(b.id, f, w)} /> });
+  }
+  for (const f of vorqualFelder) {
+    const opts = f.typ === 'ja_nein' ? ['Ja', 'Nein'] : (Array.isArray(f.optionen) ? f.optionen : null);
+    columns.push({ id: `vq-${f.name}`, label: f.name, group: 'vorqual', stop: true, title: f.name, sortType: 'text', sortVal: b => String(vorqualWert(b, f.name) || '').toLowerCase(), filter: opts ? { type: 'select', val: b => vorqualWert(b, f.name) } : (f.typ === 'datum' ? undefined : { type: 'text', val: b => vorqualWert(b, f.name) }), cell: b => vorqualCell(b, f, opts) });
+  }
+  for (const sp of customSpalten) {
+    columns.push({ id: `cs-${sp.id}`, label: sp.name, stop: !!onSpalte, sortType: 'text', sortVal: b => String((b.spalten_werte || {})[sp.id] || '').toLowerCase(), filter: { type: (sp.typ === 'dropdown' && Array.isArray(sp.optionen)) ? 'select' : 'text', val: b => (b.spalten_werte || {})[sp.id] || '' }, cell: b => customCell(b, sp) });
+  }
+  columns.push({ id: 'email', label: 'E-Mail', stop: true, sortType: 'text', sortVal: b => (b.email || '').toLowerCase(), cell: b => b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—' });
+  columns.push({ id: 'telefon', label: 'Telefon', stop: true, sortType: 'text', sortVal: b => (b.telefon || '').toLowerCase(), cell: b => b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—' });
+  if (intern) columns.push({ id: 'notiz', label: 'Notiz', stop: true, sortType: 'text', sortVal: b => (b.notiz?.notizen || '').toLowerCase(), cell: b => <input defaultValue={b.notiz?.notizen || ''} placeholder="Notiz…" onBlur={e => (e.target.value || '') !== (b.notiz?.notizen || '') && savePatch(b.id, { notizen: e.target.value || null })} style={{ ...inlineSel, maxWidth: 180 }} /> });
+  if (intern && onGesellenwerk) columns.push({ id: 'gesellenwerk', label: 'Gesellenwerk', stop: true, sortable: false, cell: gwCell });
+
+  const colById = {}; for (const c of [nameCol, ...columns]) colById[c.id] = c;
+  const filterableCols = columns.filter(c => c.filter);
+
+  // Sortierung + Spaltenfilter je Liste gemerkt (localStorage, Schlüssel = Stelle+Modus).
+  const viewKey = `bl-view-${job.id || 'x'}-${modus}`;
+  const [sort, setSort] = useState(() => { try { return JSON.parse(localStorage.getItem(viewKey) || '{}').sort || null; } catch { return null; } });
+  const [colFilters, setColFilters] = useState(() => { try { return JSON.parse(localStorage.getItem(viewKey) || '{}').filters || {}; } catch { return {}; } });
+  useEffect(() => { try { localStorage.setItem(viewKey, JSON.stringify({ sort, filters: colFilters })); } catch { /* ignore */ } }, [viewKey, sort, colFilters]);
+  const toggleSort = (key) => setSort(s => (!s || s.key !== key) ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null);
+
+  function passesColFilters(b) {
+    for (const id of Object.keys(colFilters)) {
+      const c = colById[id]; if (!c?.filter) continue;
+      const fv = colFilters[id];
+      const rv = String(c.filter.val(b) ?? '').trim();
+      if (c.filter.type === 'select') { if (Array.isArray(fv) && fv.length && !fv.includes(rv)) return false; }
+      else if (c.filter.type === 'text') { if (fv && !rv.toLowerCase().includes(String(fv).toLowerCase())) return false; }
+      else if (c.filter.type === 'plz') { if (fv && !rv.startsWith(String(fv))) return false; }
+    }
+    return true;
+  }
+  const sichtbar = gefiltert.filter(passesColFilters);
+  const sortCol = sort ? colById[sort.key] : null;
+  const sortiert = sortCol ? [...sichtbar].sort(makeComparator(sortCol, sort.dir)) : sichtbar;
+  const aktiveFilter = filter !== 'alle' || !!ampelFilter || Object.keys(colFilters).length > 0;
+
+  // Gruppen-Kopfzeile (dezente Überschrift „Vorqualifizierung") über den Vorqual-Spalten.
+  const hasGroup = columns.some(c => c.group);
+  const headerTop = hasGroup ? 26 : 0;
+  const groupSegments = [];
+  for (const col of columns) {
+    const g = col.group || null; const cls = col.cls || '';
+    const last = groupSegments[groupSegments.length - 1];
+    if (last && last.group === g && last.cls === cls) last.span++;
+    else groupSegments.push({ key: col.id, group: g, span: 1, cls });
+  }
 
   return (
     <div style={{ background: '#fff', borderRadius: 14, padding: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minWidth: 0 }}>
@@ -249,178 +502,54 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
           </button>
         )}
       </div>
+      {bewerbungen.length > 0 && (
+        <FilterBar cols={filterableCols} bewerbungen={bewerbungen} filters={colFilters} setFilters={setColFilters} primary={primary} />
+      )}
+      {aktiveFilter && bewerbungen.length > 0 && (
+        <div style={{ fontSize: 12, color: '#5a5955', marginBottom: 8 }}>
+          <strong>{sortiert.length}</strong> von {bewerbungen.length}
+        </div>
+      )}
       {bewerbungen.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Noch keine Bewerbungen eingegangen.</p>
-      ) : gefiltert.length === 0 ? (
+      ) : sortiert.length === 0 ? (
         <p style={{ color: '#9a9994' }}>Keine Bewerbungen in dieser Ansicht.</p>
       ) : (
         <div style={{ overflowX: 'auto', maxWidth: '100%', border: '1px solid #f1f1ee', borderRadius: 10 }}>
           <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: 13, minWidth: '100%' }}>
             <thead>
+              {hasGroup && (
+                <tr>
+                  <th style={{ ...thGroup, left: 0, zIndex: 4, background: '#fafaf8' }}></th>
+                  {groupSegments.map(seg => (
+                    <th key={seg.key} colSpan={seg.span} className={seg.cls || undefined}
+                      style={{ ...thGroup, ...(seg.group === 'vorqual' ? { color: '#1b3f80' } : {}) }}>
+                      {seg.group === 'vorqual' ? 'Vorqualifizierung' : ''}
+                    </th>
+                  ))}
+                </tr>
+              )}
               <tr>
-                <th style={thName}>Name</th>
-                <th style={thBase}>Eingang</th>
-                <th style={thBase}>Bearbeitung</th>
-                {intern && <th style={thBase} className="bl-inline-extra">Anruf</th>}
-                {/* Intern: Standard-Vorqual direkt nach dem Anruf (Erreichbarkeit zuerst → neben dem Anruf). */}
-                {intern && standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
-                <th style={thBase}>Kriterien</th>
-                <th style={thBase}>Feedback</th>
-                {intern && <th style={thBase}>Ampel</th>}
-                {intern && <th style={thBase} className="bl-inline-extra">VG-Termin</th>}
-                {intern && <th style={thBase} className="bl-inline-extra">Kunde kontaktiert</th>}
-                {intern && <th style={thBase} className="bl-inline-extra">Nächste Aktion</th>}
-                {/* Portal: Standard-Vorqual an gewohnter Stelle (nach Feedback). */}
-                {!intern && standardFelder.map(f => <th key={`std-${f.id}`} style={{ ...thBase, background: '#eefdf3' }} title={`Standard-Vorqualifizierung${f.notiz_feld ? ' (gespiegelt)' : ''}`}>{f.name}</th>)}
-                {vorqualFelder.map(f => <th key={`vq-${f.name}`} style={{ ...thBase, background: '#f4f7ff' }} title={f.name}>{f.name}</th>)}
-                {frageSpalten.map(f => <th key={`fr-${f}`} style={thBase} title={f}>{frageTitel(f).length > 32 ? frageTitel(f).slice(0, 30) + '…' : frageTitel(f)}</th>)}
-                {customSpalten.map(sp => <th key={`cs-${sp.id}`} style={{ ...thBase, background: '#eef7ff' }}>{sp.name}</th>)}
-                <th style={thBase}>E-Mail</th>
-                <th style={thBase}>Telefon</th>
-                {intern && <th style={thBase}>Notiz</th>}
-                {intern && onGesellenwerk && <th style={thBase}>Gesellenwerk</th>}
+                <th style={{ ...thName, top: headerTop, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('name')}>
+                  Name<span style={{ marginLeft: 4, fontSize: 9, color: sort?.key === 'name' ? '#1b3f80' : '#cfcdc7' }}>{sort?.key === 'name' ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+                </th>
+                {columns.map(col => <Th key={col.id} col={col} sort={sort} onSort={toggleSort} top={headerTop} />)}
               </tr>
             </thead>
             <tbody>
-              {gefiltert.map(b => {
-                const bst = bearbeitungStatus(b);
-                const bLabel = bearbeitungLabel(b);
-                const amp = ampelOf(b.notiz);
-                const fb = b.feedback?.status || '';
-                const fbSel = feedbackStatusOf(b);
-                const neuerKomm = (b.kommentare || []).some(k => k.autor_typ === 'kunde' && (!b.notiz?.updated_at || k.created_at > b.notiz.updated_at));
-                const werte = b.spalten_werte || {};
-                const dubs = dubletten(b);
-                const dubTitle = dubs.length > 1 ? `${dubs.length}× dieselbe Person (gleiche E-Mail/Telefon) · frühere Eingänge: ${fruehereEingaengeText(dubs.filter(x => x.id !== b.id))}` : '';
-                // Standard-Vorqual-Zellen einmal bauen, an EINER Position gerendert (intern vs. Portal).
-                const stdCells = standardFelder.map(f => {
-                  const v = standardWert(b, f);
-                  const editable = intern && typeof onStandardVorqual === 'function';
-                  return (
-                    <td key={`std-${f.id}`} style={{ ...tdBase, background: '#f6fdf9' }} onClick={editable ? stop : undefined}>
-                      <StandardVorqualCell feld={f} value={v} editable={editable} inlineSel={inlineSel} onSave={wert => saveStandard(b.id, f, wert)} />
-                    </td>
-                  );
-                });
-                return (
-                  <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
-                    <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span style={{ position: 'relative', flexShrink: 0 }}>
-                          <span style={{ width: 28, height: 28, borderRadius: '50%', background: '#eef0f4', color: '#44474d', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{initialen(b.name)}</span>
-                          <span style={{ position: 'absolute', bottom: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: AMPEL_FARBE[amp], border: '2px solid #fff' }} />
-                        </span>
-                        <span style={{ fontWeight: 600, color: '#1b3f80', textDecoration: 'underline' }}>{b.name || '—'}</span>
-                        {dubs.length > 1 && <span title={dubTitle} style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', borderRadius: 100, padding: '1px 6px', cursor: 'help' }}>{dubs.length}×</span>}
-                        {neuerKomm && <span title="Neuer Kommentar vom Kunden" style={{ flexShrink: 0 }}>💬</span>}
-                        {intern && b.gesellenwerk && <GwBadge gw={b.gesellenwerk} compact />}
-                      </div>
-                    </td>
-                    <td style={tdBase}>{new Date(b.created_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</td>
-                    {/* Bearbeitung = abgeleitet (read-only, beide Modi) */}
-                    <td style={tdBase} title={intern ? 'Automatisch aus dem Verlauf abgeleitet (Ampel, Feedback, Kontakt, Kriterien, Notiz) — nicht direkt editierbar. Ändert sich über die anderen Spalten.' : 'Automatisch abgeleiteter Status.'}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: BEARB_BY_KEY[bst.key].color }}>{bLabel}</span>
-                    </td>
-                    {intern && (
-                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
-                        <AnrufCell bewerbung={b} primary={primary} onLog={(payload) => saveAnruf(b.id, payload)} canLog={typeof onAnruf === 'function'} />
+              {sortiert.map(b => (
+                <tr key={b.id} style={{ opacity: b.ko_kriterium ? 0.6 : 1 }}>
+                  <td style={{ ...tdName, cursor: 'pointer' }} onClick={() => onAkte?.(b.id)} title="Akte öffnen">{nameInner(b)}</td>
+                  {columns.map(col => {
+                    const ts = typeof col.tdStyle === 'function' ? col.tdStyle(b) : (col.tdStyle || null);
+                    return (
+                      <td key={col.id} className={col.cls || undefined} style={{ ...tdBase, ...ts }} onClick={col.stop ? stop : undefined}>
+                        {col.cell(b)}
                       </td>
-                    )}
-                    {intern && stdCells}
-                    <td style={{ ...tdBase, color: kriterienDa ? undefined : '#9a9994' }}>{trefferText(job.kriterien_struktur, b.notiz?.kriterien_check)}</td>
-                    {/* Feedback-Status inline (Kunde) */}
-                    <td style={tdBase} onClick={stop}>
-                      {onFeedback ? (
-                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                          <select value={fbSel} onChange={e => saveFeedback(b.id, { status: e.target.value })} style={inlineSel}>
-                            {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
-                          </select>
-                          {fbSel === 'vorstellungsgespraech' && (
-                            <input type="date" value={(b.feedback?.vorstellungsgespraech_am || '').slice(0, 10)} title="VG-Termin"
-                              onChange={e => saveFeedback(b.id, { vorstellungsgespraech_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} />
-                          )}
-                        </div>
-                      ) : (fb ? <span style={{ fontSize: 11, fontWeight: 700, color: FEEDBACK_COLOR[fbSel] || '#5a5955' }}>{FEEDBACK_LABEL[fbSel] || fbSel}</span> : <span style={{ color: '#9a9994' }}>—</span>)}
-                    </td>
-                    {intern && (
-                      <td style={tdBase} onClick={stop}>
-                        <select value={amp} onChange={e => savePatch(b.id, { ampel: e.target.value === 'offen' ? null : e.target.value })} style={inlineSel}>
-                          {AMPELN.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
-                        </select>
-                      </td>
-                    )}
-                    {/* Weitere Arbeits-Spalten (intern, mobil ausgeblendet). */}
-                    {intern && (
-                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
-                        <input type="date" value={(b.notiz?.vg_vereinbart_am || '').slice(0, 10)} title="VG-Termin"
-                          onChange={e => savePatch(b.id, { vg_vereinbart_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} />
-                      </td>
-                    )}
-                    {intern && (
-                      <td style={{ ...tdBase, textAlign: 'center' }} className="bl-inline-extra" onClick={stop}>
-                        <input type="checkbox" checked={!!b.notiz?.kunde_kontaktiert} title="Dem Kunden vorgestellt"
-                          onChange={e => savePatch(b.id, { kunde_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} />
-                      </td>
-                    )}
-                    {intern && (
-                      <td style={tdBase} className="bl-inline-extra" onClick={stop}>
-                        <input defaultValue={b.notiz?.naechste_aktion || ''} placeholder="…"
-                          onBlur={e => (e.target.value || '') !== (b.notiz?.naechste_aktion || '') && savePatch(b.id, { naechste_aktion: e.target.value || null })} style={{ ...inlineSel, maxWidth: 150 }} />
-                      </td>
-                    )}
-                    {/* Portal: Standard-Vorqual read-only an gewohnter Stelle. */}
-                    {!intern && stdCells}
-                    {/* Vorqualifizierungs-Felder der Stelle: Kunde bearbeitet (vorqual_werte_kunde), intern read-only (von uns) */}
-                    {vorqualFelder.map(f => {
-                      const v = vorqualWert(b, f.name);
-                      const editable = !!onVorqual;
-                      const opts = f.typ === 'ja_nein' ? ['Ja', 'Nein'] : (Array.isArray(f.optionen) ? f.optionen : null);
-                      return (
-                        <td key={`vq-${f.name}`} style={{ ...tdBase, background: '#fbfcff' }} onClick={editable ? stop : undefined}>
-                          {!editable ? (v || <span style={{ color: '#9a9994' }}>—</span>)
-                            : opts
-                              ? <select value={v} onChange={e => saveVorqual(b.id, f.name, e.target.value)} style={inlineSel}><option value="">—</option>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>
-                              : f.typ === 'datum'
-                                ? <input type="date" value={(v || '').slice(0, 10)} onChange={e => saveVorqual(b.id, f.name, e.target.value)} style={inlineSel} />
-                                : <input defaultValue={v} onBlur={e => e.target.value !== v && saveVorqual(b.id, f.name, e.target.value)} style={inlineSel} />}
-                        </td>
-                      );
-                    })}
-                    {frageSpalten.map(f => { const v = antwortFor(b, f); return <td key={`fr-${f}`} style={{ ...tdBase, color: v ? undefined : '#9a9994' }}>{v || '—'}</td>; })}
-                    {customSpalten.map(sp => {
-                      const v = werte[sp.id] ?? '';
-                      if (!onSpalte) return <td key={`cs-${sp.id}`} style={{ ...tdBase, background: '#fbfcff' }}>{v || '—'}</td>;
-                      return (
-                        <td key={`cs-${sp.id}`} style={{ ...tdBase, background: '#fbfcff' }} onClick={stop}>
-                          {sp.typ === 'dropdown' && Array.isArray(sp.optionen)
-                            ? <select value={v} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel}><option value="">—</option>{sp.optionen.map(o => <option key={o} value={o}>{o}</option>)}</select>
-                            : sp.typ === 'datum'
-                              ? <input type="date" value={(v || '').slice(0, 10)} onChange={e => saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />
-                              : <input defaultValue={v} onBlur={e => e.target.value !== v && saveSpalte(b.id, sp.id, e.target.value)} style={inlineSel} />}
-                        </td>
-                      );
-                    })}
-                    <td style={tdBase} onClick={stop}>{b.email ? <a href={`mailto:${b.email}`}>{b.email}</a> : '—'}</td>
-                    <td style={tdBase} onClick={stop}>{b.telefon ? <a href={`tel:${b.telefon}`}>{b.telefon}</a> : '—'}</td>
-                    {intern && (
-                      <td style={tdBase} onClick={stop}>
-                        <input defaultValue={b.notiz?.notizen || ''} placeholder="Notiz…" onBlur={e => (e.target.value || '') !== (b.notiz?.notizen || '') && savePatch(b.id, { notizen: e.target.value || null })} style={{ ...inlineSel, maxWidth: 180 }} />
-                      </td>
-                    )}
-                    {intern && onGesellenwerk && (
-                      <td style={tdBase} onClick={stop}>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          {b.gesellenwerk && <GwBadge gw={b.gesellenwerk} />}
-                          <button onClick={() => setGwDialogBewId(b.id)} title="Für Gesellenwerk vormerken"
-                            style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, border: '1px solid #e0e0dd', background: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                            {b.gesellenwerk ? 'Bearbeiten' : '+ Vormerken'}
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+                    );
+                  })}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -495,6 +624,12 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
   if (b.created_at) events.push({ at: b.created_at, rolle: null, autor: null, text: 'Bewerbung eingegangen', typ: 'eingang' });
   for (const a of (n.anrufversuche || [])) if (a?.datum || a?.ts) events.push({ at: a.ts || a.datum, rolle: 'nw', autor: a.nutzer || 'TalentOne', text: `Anrufversuch — ${ANRUF_LABEL[a.ergebnis] || a.ergebnis || 'offen'}${a.notiz ? ` · ${a.notiz}` : ''}`, typ: 'anruf' });
   for (const k of (b.kommentare || [])) events.push({ at: k.created_at, rolle: k.autor_typ, autor: k.autor_name || (k.autor_typ === 'kunde' ? 'Kunde' : 'TalentOne'), text: k.text, typ: 'kommentar' });
+  // Vorqual-Änderungen (Punkt 3): „Gehaltswunsch geändert von Kunde: 3,6k → 3,8k"
+  for (const v of (Array.isArray(n.vorqual_verlauf) ? n.vorqual_verlauf : [])) {
+    if (!v?.ts) continue;
+    events.push({ at: v.ts, rolle: v.autor_typ === 'kunde' ? 'kunde' : 'nw', autor: v.autor || (v.autor_typ === 'kunde' ? 'Kunde' : 'TalentOne'),
+      text: `${v.feld || v.key} geändert: ${v.von || '—'} → ${v.nach || '—'}`, typ: 'vorqual' });
+  }
   events.sort((x, y) => new Date(x.at) - new Date(y.at));
 
   return (

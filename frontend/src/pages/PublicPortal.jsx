@@ -371,7 +371,11 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
   const feedbackFor = (bewId, patch) => api(`/public/portal/${token}/bewerbung/${bewId}/feedback`, { method: 'PATCH', body: JSON.stringify(patch) });
   const kommentarFor = (bewId, text) => api(`/public/portal/${token}/bewerbung/${bewId}/kommentar`, { method: 'POST', body: JSON.stringify({ text }) });
   const spalteFor = (bewId, spalteId, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/spalte/${spalteId}`, { method: 'PUT', body: JSON.stringify({ wert }) });
-  const vorqualFor = (bewId, feld, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/vorqual`, { method: 'PUT', body: JSON.stringify({ feld, wert }) });
+  // Vorqual-Werte: Kunde schreibt in DENSELBEN Store wie intern (Änderung landet
+  // im Akte-Verlauf, autor_typ='kunde'). Stellenspez. = Feldname als key; Standard =
+  // std_key bzw. gespiegelte Notiz-Spalte (notiz_feld).
+  const vorqualFor = (bewId, feld, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/vorqual`, { method: 'PUT', body: JSON.stringify({ key: feld, label: feld, wert }) });
+  const standardVorqualFor = (bewId, feld, wert) => api(`/public/portal/${token}/bewerbung/${bewId}/vorqual`, { method: 'PUT', body: JSON.stringify({ key: feld.notiz_feld || feld.std_key, notiz_feld: feld.notiz_feld || null, label: feld.name, wert }) });
   return (
     <section style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {!istNeukunden && (
@@ -408,7 +412,7 @@ function JobBlock({ job, token, kunde, brand, primary, primaryInk, anfragen, bew
           />
           <BewerberListe job={job} bewerbungen={bewerbungen} kunde={kunde} primary={primary} modus="kunde"
             ampelFilter={ampelFilter} onAmpelFilter={setAmpelFilter} akteBewId={akteBewId} onAkte={onAkte}
-            onFeedback={feedbackFor} onKommentar={kommentarFor} onSpalte={spalteFor} onVorqual={vorqualFor} onReload={onReload} />
+            onFeedback={feedbackFor} onKommentar={kommentarFor} onSpalte={spalteFor} onVorqual={vorqualFor} onStandardVorqual={standardVorqualFor} onReload={onReload} />
           <MitarbeiterstimmenPortalKachel token={token} kunde={kunde} primary={primary} />
         </>
       )}

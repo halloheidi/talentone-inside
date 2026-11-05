@@ -97,6 +97,24 @@ router.patch('/:id/notiz', async (req, res) => {
   if (body.anrufversuche !== undefined) {
     patch.anrufversuche = sanitizeAnrufversuche(body.anrufversuche);
   }
+  // Vorqual-Änderungsverlauf: das Frontend liefert {key,label,von,nach} mit; wir
+  // hängen (bei echter Änderung) einen Eintrag an das append-only vorqual_verlauf.
+  // autor_typ default 'intern' (dieser Endpoint ist der interne Pfad).
+  const vc = body.vorqual_change;
+  if (vc && typeof vc === 'object' && String(vc.von ?? '') !== String(vc.nach ?? '')) {
+    const { data: cur } = await supabase.from('talentone_bewerber_notizen')
+      .select('vorqual_verlauf').eq('bewerbung_id', bewId).maybeSingle();
+    const verlauf = Array.isArray(cur?.vorqual_verlauf) ? cur.vorqual_verlauf : [];
+    patch.vorqual_verlauf = [...verlauf.slice(-199), {
+      ts: new Date().toISOString(),
+      key: String(vc.key || '').slice(0, 120),
+      feld: String(vc.label || vc.key || '').slice(0, 160),
+      von: (vc.von ?? '').toString().slice(0, 500),
+      nach: (vc.nach ?? '').toString().slice(0, 500),
+      autor_typ: vc.autor_typ === 'kunde' ? 'kunde' : 'intern',
+      autor: (req.user?.email || req.user?.name || 'TalentOne').toString().slice(0, 160),
+    }];
+  }
   patch.updated_at = new Date().toISOString();
   patch.bewerbung_id = bewId;
 

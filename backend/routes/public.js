@@ -2020,7 +2020,7 @@ router.get('/portal/:token', async (req, res) => {
     const notizByBew = {};    // bewerbung_id -> volle Akte-Notiz
     if (bewIds.length) {
       const { data: notizen = [] } = await supabase.from('talentone_bewerber_notizen')
-        .select('bewerbung_id, status, bewertung, ampel, verfuegbarkeit, gehaltswunsch, naechste_aktion, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check, vorqualifizierung_werte, updated_at')
+        .select('bewerbung_id, status, bewertung, ampel, verfuegbarkeit, gehaltswunsch, naechste_aktion, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check, vorqualifizierung_werte, vorqual_verlauf, updated_at')
         .in('bewerbung_id', bewIds);
       for (const n of notizen) {
         vorqualWerteByBew[n.bewerbung_id] = n.vorqualifizierung_werte || {};
@@ -2036,6 +2036,7 @@ router.get('/portal/:token', async (req, res) => {
           anrufversuche: av, vg_vereinbart_am: n.vg_vereinbart_am || null,
           eingestellt: n.eingestellt || null, kunde_kontaktiert: !!n.kunde_kontaktiert, nw_kontaktiert: !!n.nw_kontaktiert,
           kriterien_check: n.kriterien_check || {}, updated_at: n.updated_at || null,
+          vorqual_verlauf: Array.isArray(n.vorqual_verlauf) ? n.vorqual_verlauf : [],
         };
       }
     }
@@ -2574,21 +2575,46 @@ router.put('/portal/:token/bewerbung/:bewId/spalte/:spalteId', async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-/* Vom Kunden gepflegter Vorqual-Feldwert (getrennt von den internen Recruiter-Werten). */
+/* Vorqual-Feldwert aus dem Portal — Kunde und Vorqualifiziererin schreiben in
+   DIESELBEN Felder (gemeinsamer Store talentone_bewerber_notizen). Jede Änderung
+   landet als Eintrag im vorqual_verlauf (autor_typ='kunde'), sichtbar im Akte-Verlauf.
+   Body: { key, wert, notiz_feld?, label? } — Alt-Form { feld, wert } bleibt kompatibel. */
+const PORTAL_NOTIZ_FELDER = new Set(['gehaltswunsch', 'verfuegbarkeit']);
 router.put('/portal/:token/bewerbung/:bewId/vorqual', async (req, res) => {
   try {
     const kunde = await portalGate(req, res); if (!kunde) return;
     if (!(await bewerbungGehoertKunde(req.params.bewId, kunde.id))) return res.status(403).json({ error: 'Bewerbung gehört nicht zu diesem Portal.' });
-    const feld = (req.body?.feld || '').toString().trim();
-    if (!feld) return res.status(400).json({ error: 'feld fehlt.' });
+    const key = (req.body?.key ?? req.body?.feld ?? '').toString().trim();
+    if (!key) return res.status(400).json({ error: 'key fehlt.' });
+    const label = (req.body?.label || key).toString().slice(0, 160);
+    const notizFeld = PORTAL_NOTIZ_FELDER.has(req.body?.notiz_feld) ? req.body.notiz_feld : null;
     const wert = req.body?.wert == null ? '' : String(req.body.wert).slice(0, 500);
-    const { data: cur } = await supabase.from('talentone_bewerber_kundenfeedback').select('vorqual_werte_kunde').eq('bewerbung_id', req.params.bewId).maybeSingle();
-    const werte = { ...(cur?.vorqual_werte_kunde || {}) };
-    if (wert === '') delete werte[feld]; else werte[feld] = wert;
-    const { data, error } = await supabase.from('talentone_bewerber_kundenfeedback')
-      .upsert({ bewerbung_id: req.params.bewId, vorqual_werte_kunde: werte, updated_at: new Date().toISOString() }, { onConflict: 'bewerbung_id' }).select().single();
+
+    const { data: cur } = await supabase.from('talentone_bewerber_notizen')
+      .select('vorqualifizierung_werte, vorqual_verlauf, gehaltswunsch, verfuegbarkeit')
+      .eq('bewerbung_id', req.params.bewId).maybeSingle();
+    const von = (notizFeld ? (cur?.[notizFeld] ?? '') : (cur?.vorqualifizierung_werte?.[key] ?? '')).toString();
+
+    const patch = { bewerbung_id: req.params.bewId, updated_at: new Date().toISOString() };
+    if (notizFeld) {
+      patch[notizFeld] = wert || null;
+    } else {
+      const werte = { ...(cur?.vorqualifizierung_werte || {}) };
+      if (wert === '') delete werte[key]; else werte[key] = wert;
+      patch.vorqualifizierung_werte = werte;
+    }
+    if (von !== wert) {
+      const verlauf = Array.isArray(cur?.vorqual_verlauf) ? cur.vorqual_verlauf : [];
+      patch.vorqual_verlauf = [...verlauf.slice(-199), {
+        ts: new Date().toISOString(), key: key.slice(0, 120), feld: label,
+        von: von.slice(0, 500), nach: wert.slice(0, 500),
+        autor_typ: 'kunde', autor: (kunde.firmenname || 'Kunde').toString().slice(0, 160),
+      }];
+    }
+    const { error } = await supabase.from('talentone_bewerber_notizen')
+      .upsert(patch, { onConflict: 'bewerbung_id' });
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ vorqual_werte_kunde: data.vorqual_werte_kunde || {} });
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
