@@ -8,22 +8,6 @@ import { effektiveGarantie, garantieBadge } from '../lib/garantie.js';
 const JobContext = createContext(null);
 export function useJob() { return useContext(JobContext); }
 
-// Debounced-Text mit Auto-Save (600 ms) — für inline editierbare Felder.
-function DebouncedInput({ value, onSave, placeholder }) {
-  const [local, setLocal] = useState(value ?? '');
-  const t = useRef(null);
-  const lastRef = useRef(value ?? '');
-  useEffect(() => { setLocal(value ?? ''); lastRef.current = value ?? ''; }, [value]);
-  function onChange(e) {
-    const val = e.target.value;
-    setLocal(val);
-    if (t.current) clearTimeout(t.current);
-    t.current = setTimeout(() => { if (val !== lastRef.current) { lastRef.current = val; onSave(val); } }, 600);
-  }
-  function flush() { if (t.current) clearTimeout(t.current); if (local !== lastRef.current) { lastRef.current = local; onSave(local); } }
-  return <input className="cell-input" type="text" value={local} placeholder={placeholder} onChange={onChange} onBlur={flush} />;
-}
-
 // Garantie-Badge am Projekt (JobView-Header) — reine Anzeige. Gepflegt wird der Typ
 // jetzt im Tab „Vertrag & Status". Einstellung → „· Y von X eingestellt",
 // Bewerbungen → „· Y von X Bewerbungen" (eindeutige Personen seit Start).

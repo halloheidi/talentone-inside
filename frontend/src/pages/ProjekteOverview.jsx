@@ -6,6 +6,7 @@ import { PHASE_META, computeBillingPhaseClient } from './OffersList.jsx';
 import PageContainer from '../components/PageContainer.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import ProjektStatusSelect, { STATUS_LABELS } from '../components/ProjektStatusSelect.jsx';
+import DebouncedInput from '../components/DebouncedInput.jsx';
 
 // Kanban-Spalten — jede Status-Stufe einzeln
 const PROJEKTART_OPTIONEN = [
@@ -221,22 +222,6 @@ function csvDownload(filename, rows) {
 }
 
 /* ─── Debounced ─── */
-function DebouncedInput({ value, onSave, type = 'text', rows, placeholder }) {
-  const [local, setLocal] = useState(value ?? '');
-  const t = useRef(null);
-  const lastRef = useRef(value ?? '');
-  useEffect(() => { setLocal(value ?? ''); lastRef.current = value ?? ''; }, [value]);
-  function onChange(e) {
-    const v = e.target.value;
-    setLocal(v);
-    if (t.current) clearTimeout(t.current);
-    t.current = setTimeout(() => { if (v !== lastRef.current) { lastRef.current = v; onSave(v); } }, 600);
-  }
-  function flush() { if (t.current) clearTimeout(t.current); if (local !== lastRef.current) { lastRef.current = local; onSave(local); } }
-  if (rows) return <textarea className="cell-input" rows={rows} value={local} placeholder={placeholder} onChange={onChange} onBlur={flush} />;
-  return <input className="cell-input" type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flush} />;
-}
-
 /* ═════════════════════ HAUPTKOMPONENTE ═════════════════════ */
 
 export default function ProjekteOverview() {
@@ -1087,7 +1072,7 @@ function ProjektSlideOver({ projektId, team, onClose, onUpdate, onDeleted }) {
               <label><span>Enddatum Abo</span><input type="date" className="cell-input" value={projekt.enddatum_abo || ''} onChange={e => patch({ enddatum_abo: e.target.value || null })} /></label>
               <label><span>Pausiert seit</span><input type="date" className="cell-input" value={projekt.pausiert_seit || ''} onChange={e => patch({ pausiert_seit: e.target.value || null })} /></label>
               <label><span>Werbekosten</span><DebouncedInput value={projekt.werbekosten || ''} onSave={patchField('werbekosten')} /></label>
-              <label><span>Monatsbudget (€)</span><input type="number" min="0" step="1" className="cell-input" value={projekt.monatsbudget_euro ?? ''} onChange={e => patch({ monatsbudget_euro: e.target.value.trim() === '' ? null : (Number(e.target.value) || 0) })} /></label>
+              <label><span>Monatsbudget (€)</span><DebouncedInput type="number" min="0" step="1" value={projekt.monatsbudget_euro ?? ''} onSave={v => patch({ monatsbudget_euro: v.trim() === '' ? null : (Number(v) || 0) })} /></label>
               <label className="slideover-full"><span>Meta-Werbekonto</span>
                 <SearchableSelect
                   value={projekt.meta_werbekonto_id || ''}

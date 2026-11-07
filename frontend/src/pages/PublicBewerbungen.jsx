@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { normalizeBewerbung } from '../lib/perspectiveParser.js';
 import { t } from '../lib/anrede.js';
 import { useInsidePublicRedirect } from '../lib/insideRedirect.js';
+import SharedDebouncedInput from '../components/DebouncedInput.jsx';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -36,27 +37,11 @@ const BRAND = {
   },
 };
 
-/* ─── Debounced Text/Textarea ─── */
-function DebouncedInput({ value, onSave, type = 'text', rows, placeholder }) {
-  const [local, setLocal] = useState(value ?? '');
-  const timerRef = useRef(null);
-  const lastRef = useRef(value ?? '');
-  useEffect(() => { setLocal(value ?? ''); lastRef.current = value ?? ''; }, [value]);
-  function onChange(e) {
-    const v = e.target.value;
-    setLocal(v);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (v === lastRef.current) return;
-      lastRef.current = v; onSave(v);
-    }, 600);
-  }
-  function flushOnBlur() {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (local !== lastRef.current) { lastRef.current = local; onSave(local); }
-  }
-  if (rows) return <textarea rows={rows} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
-  return <input type={type} value={local} placeholder={placeholder} onChange={onChange} onBlur={flushOnBlur} />;
+/* ─── Debounced Text/Textarea ───
+   Nutzt die gemeinsame, fokus-sichere Komponente; className="" erhält die
+   Portal-Optik (ohne interne cell-input-Klasse). */
+function DebouncedInput(props) {
+  return <SharedDebouncedInput className="" {...props} />;
 }
 
 /* ─── Inline Status-Dropdown (für Tabelle) ─── */

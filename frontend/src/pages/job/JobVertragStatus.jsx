@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
 import { GARANTIE_ARTEN, effektiveGarantie } from '../../lib/garantie.js';
+import DebouncedInput from '../../components/DebouncedInput.jsx';
 
 // „Vertrag & Status" — alle Projekt-/Vertragsdaten der Stelle an einem Ort.
 // Schreibt direkt auf das verknüpfte talentone_projekte. „Projekt" taucht als
@@ -131,10 +132,10 @@ export default function JobVertragStatus() {
           </label>
           <label><span style={lbl}>Laufzeit</span>
             <div style={{ display: 'flex', gap: 6, opacity: openEnd ? 0.45 : 1 }}>
-              <input type="number" min="0" step="1" className="cell-input" style={{ flex: 1 }} disabled={openEnd}
+              <DebouncedInput type="number" min="0" step="1" style={{ flex: 1 }} disabled={openEnd}
                 placeholder={openEnd ? 'monatlich' : ''}
                 value={openEnd ? '' : (projekt.laufzeit_wert ?? '')}
-                onChange={e => patch({ laufzeit_wert: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+                onSave={v => patch({ laufzeit_wert: v.trim() === '' ? null : (parseInt(v, 10) || 0) })} />
               <select className="cell-input" style={{ flex: 1 }} value={einheit} disabled={openEnd} onChange={field('laufzeit_einheit')}>
                 <option value="tage">Tage</option>
                 <option value="monate">Monate</option>
@@ -152,11 +153,13 @@ export default function JobVertragStatus() {
           </label>
           {projekt.werbebudget_modus === 'empfehlung' && (
             <label><span style={lbl}>Tagesbudget-Empfehlung (€)</span>
-              <input type="number" min="0" step="1" className="cell-input" value={projekt.tagesbudget_empfehlung ?? ''} onChange={field('tagesbudget_empfehlung')} />
+              <DebouncedInput type="number" min="0" step="1" value={projekt.tagesbudget_empfehlung ?? ''}
+                onSave={v => patch({ tagesbudget_empfehlung: v.trim() === '' ? null : (Number(v) || 0) })} />
             </label>
           )}
           <label><span style={lbl}>Monatsbudget (€)</span>
-            <input type="number" min="0" step="1" className="cell-input" value={projekt.monatsbudget_euro ?? ''} onChange={field('monatsbudget_euro')} />
+            <DebouncedInput type="number" min="0" step="1" value={projekt.monatsbudget_euro ?? ''}
+              onSave={v => patch({ monatsbudget_euro: v.trim() === '' ? null : (Number(v) || 0) })} />
           </label>
         </div>
         <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 12, alignItems: 'center' }}>
@@ -175,8 +178,8 @@ export default function JobVertragStatus() {
         {eff?.art === 'einstellung' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 10 }}>
             <label><span style={lbl}>Ziel: Einstellungen</span>
-              <input type="number" min="1" step="1" className="cell-input" value={projekt.garantie_ziel ?? 1}
-                onChange={e => patch({ garantie_ziel: e.target.value.trim() === '' ? 1 : Math.max(1, parseInt(e.target.value, 10) || 1) })} />
+              <DebouncedInput type="number" min="1" step="1" value={projekt.garantie_ziel ?? 1}
+                onSave={v => patch({ garantie_ziel: v.trim() === '' ? 1 : Math.max(1, parseInt(v, 10) || 1) })} />
             </label>
             <label><span style={lbl}>Für welche Position (Freitext)</span>
               <input className="cell-input" defaultValue={projekt.garantie_position || ''}
@@ -188,8 +191,8 @@ export default function JobVertragStatus() {
         {eff?.art === 'bewerbungen' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 10 }}>
             <label><span style={lbl}>Ziel: Bewerbungen (eindeutige Personen)</span>
-              <input type="number" min="0" step="1" className="cell-input" value={projekt.garantie_ziel ?? ''}
-                placeholder="z. B. 40" onChange={e => patch({ garantie_ziel: e.target.value.trim() === '' ? null : (parseInt(e.target.value, 10) || 0) })} />
+              <DebouncedInput type="number" min="0" step="1" value={projekt.garantie_ziel ?? ''}
+                placeholder="z. B. 40" onSave={v => patch({ garantie_ziel: v.trim() === '' ? null : (parseInt(v, 10) || 0) })} />
             </label>
           </div>
         )}
