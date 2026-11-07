@@ -25,6 +25,8 @@ import { TEXT_STILE, renderTextOverlay } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponierePositionen, safeFrac } from '../text-bloecke.js';
 import { pickFillColor, ciRollen, TITLE_SHADOW, fotoDimAlpha } from '../creative-ci.js';
+import { higgsfieldKonfiguriert } from '../higgsfield.js';
+import { erzeugeAnimiertesCreative } from '../animate.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -1035,6 +1037,81 @@ router.post('/:id/reel', async (req, res) => {
       console.error('[reel-bg]', err.message);
     }
   })().catch(err => console.error('[reel-bg] uncaught:', err));
+});
+
+/* POST /api/creatives/animieren — „Animierte Variante": Referenzfoto → Higgsfield-
+   Video (nur Ambient-Bewegung) + Text-Overlay (Layout A/B). Legt sofort eine
+   processing-Zeile an (typ=video, quelle=higgsfield_video), füllt sie im Hintergrund.
+   body: { job_id, foto_id, format:'quadrat'|'feed'|'story', vorlage:'A'|'B', spruch? } */
+router.post('/animieren', async (req, res) => {
+  if (!higgsfieldKonfiguriert()) return res.status(501).json({ error: 'Higgsfield-Key (HIGGSFIELD_API_KEY) nicht konfiguriert.' });
+  const { job_id, foto_id, format = 'story', vorlage = 'A', spruch } = req.body || {};
+  const LK = ['quadrat', 'feed', 'story'];
+  if (!LK.includes(format)) return res.status(400).json({ error: 'Ungültiges Format.' });
+  if (!istLayoutVorlage(vorlage)) return res.status(400).json({ error: 'Ungültige Vorlage.' });
+
+  try {
+    // KI-Freigabe des Fotos prüfen (zusätzlich zur kunde_freigabe-Prüfung in prepLayoutContext).
+    const { data: refCheck } = await supabase.from('talentone_referenzbilder')
+      .select('ki_verarbeitung_erlaubt, kunde_freigabe').eq('id', foto_id).maybeSingle();
+    if (!refCheck) return res.status(404).json({ error: 'Foto nicht gefunden.' });
+    if (refCheck.kunde_freigabe === 'nein') return res.status(403).json({ error: 'Dieses Foto hat der Kunde gesperrt.' });
+    if (refCheck.ki_verarbeitung_erlaubt === false) return res.status(403).json({ error: 'Für dieses Foto ist die KI-Verarbeitung nicht erlaubt.' });
+
+    const ctx = await prepLayoutContext({ job_id, vorlage, foto_id, slots: spruch ? { spruch } : null, freisteller: false });
+    if (ctx.kunde?.keine_ki_bilder) return res.status(403).json({ error: 'Für diesen Kunden sind KI-Bilder deaktiviert.' });
+
+    const renderSpec = { kind: 'higgsfield_video', vorlage, foto_id, format, slots: ctx.slots };
+    const { data: created, error: insErr } = await supabase.from('talentone_creatives').insert({
+      job_id, format, typ: 'video', quelle: 'higgsfield_video', referenzbild_id: foto_id,
+      bild_url: null, status: 'processing',
+      prompt: `Animierte Variante (Vorlage ${vorlage}, ${format})`,
+      render_spec: renderSpec,
+    }).select().single();
+    if (insErr) return res.status(500).json({ error: `DB-Insert fehlgeschlagen: ${insErr.message}` });
+
+    res.status(202).json({ creative: created, message: 'Animation gestartet — das Video erscheint in 1-3 Minuten in der Galerie.' });
+
+    (async () => {
+      await erzeugeAnimiertesCreative({
+        creativeId: created.id, job: ctx.job, kunde: ctx.kunde, refBildUrl: ctx.ref.bild_url,
+        logoUri: ctx.logoUri, vorlage, format, slots: ctx.slots,
+      });
+    })().catch(err => console.error('[animate-bg] uncaught:', err));
+  } catch (err) {
+    if (res.headersSent) return;
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/* POST /api/creatives/:id/animieren-retry — erneut versuchen. Ist das Higgsfield-
+   Rohvideo schon da (nur Overlay/ffmpeg hat gehakt), wird NUR das Overlay neu gebaut
+   (keine neuen Credits); sonst läuft die volle Pipeline erneut. */
+router.post('/:id/animieren-retry', async (req, res) => {
+  if (!higgsfieldKonfiguriert()) return res.status(501).json({ error: 'Higgsfield-Key nicht konfiguriert.' });
+  const { data: existing } = await supabase.from('talentone_creatives').select('*').eq('id', req.params.id).single();
+  if (!existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
+  if (existing.quelle !== 'higgsfield_video') return res.status(400).json({ error: 'Kein animiertes Creative.' });
+
+  const spec = existing.render_spec || {};
+  const vorlage = spec.vorlage || 'A';
+  const format = spec.format || existing.format || 'story';
+  try {
+    const ctx = await prepLayoutContext({ job_id: existing.job_id, vorlage, foto_id: spec.foto_id || existing.referenzbild_id, slots: null, freisteller: false });
+    await supabase.from('talentone_creatives').update({ status: 'processing', fehler: null }).eq('id', existing.id);
+    res.status(202).json({ accepted: true, message: 'Erneuter Versuch gestartet.' });
+
+    (async () => {
+      await erzeugeAnimiertesCreative({
+        creativeId: existing.id, job: ctx.job, kunde: ctx.kunde, refBildUrl: ctx.ref.bild_url,
+        logoUri: ctx.logoUri, vorlage, format, slots: spec.slots || ctx.slots,
+        rohVideoUrl: existing.roh_video_url || null,
+      });
+    })().catch(err => console.error('[animate-retry-bg] uncaught:', err));
+  } catch (err) {
+    if (res.headersSent) return;
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 /* ─────────────── Story (9:16) aus Feed-Creative ableiten ───────────────

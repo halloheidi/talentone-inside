@@ -646,7 +646,7 @@ router.post('/review/:token', async (req, res) => {
   // Snapshot der referenzierten Creatives + Adcopies zum Zeitpunkt des Reviews
   // → bleibt erhalten auch wenn Creatives später regeneriert/gelöscht werden.
   const [{ data: creativesNow = [] }, { data: adcopiesNow = [] }] = await Promise.all([
-    supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
+    supabase.from('talentone_creatives').select('id, bild_url, bild_ohne_logo_url, format, typ, quelle').eq('job_id', job.id).neq('archiviert', true),
     supabase.from('talentone_adcopies').select('id, stil').eq('job_id', job.id),
   ]);
   const kommentare_snapshot = {};
@@ -654,7 +654,7 @@ router.post('/review/:token', async (req, res) => {
     if (key.startsWith('creative_')) {
       const id = key.slice('creative_'.length);
       const c = creativesNow.find(x => x.id === id);
-      if (c) kommentare_snapshot[key] = { bild_url: c.bild_url, format: c.format, typ: c.typ };
+      if (c) kommentare_snapshot[key] = { bild_url: c.bild_url, bild_ohne_logo_url: c.bild_ohne_logo_url, format: c.format, typ: c.typ, quelle: c.quelle };
     } else if (key.startsWith('adcopy_')) {
       const id = key.slice('adcopy_'.length);
       const a = adcopiesNow.find(x => x.id === id);
@@ -687,7 +687,7 @@ router.post('/review/:token', async (req, res) => {
         .from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
       // Creatives + Adcopies laden, damit die Mail Thumbnails + Style-Labels zeigen kann
       const [{ data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
-        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
+        supabase.from('talentone_creatives').select('id, bild_url, bild_ohne_logo_url, format, typ, quelle').eq('job_id', job.id).neq('archiviert', true),
         supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${job.kunde_id}/jobs/${job.id}/export`;
@@ -2329,7 +2329,7 @@ router.post('/portal/:token/creative/:id/ueberarbeitung', async (req, res) => {
     try {
       const [{ data: kundeFull }, { data: creatives = [] }, { data: adcopies = [] }] = await Promise.all([
         supabase.from('talentone_kunden').select('*').eq('id', kunde.id).maybeSingle(),
-        supabase.from('talentone_creatives').select('id, bild_url, format, typ').eq('job_id', job.id).neq('archiviert', true),
+        supabase.from('talentone_creatives').select('id, bild_url, bild_ohne_logo_url, format, typ, quelle').eq('job_id', job.id).neq('archiviert', true),
         supabase.from('talentone_adcopies').select('id, stil, text').eq('job_id', job.id),
       ]);
       const jobUrl = `${getPublicBaseUrl('talentone')}/kunden/${kunde.id}/jobs/${job.id}/export`;

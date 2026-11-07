@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fetchAsBuffer, uploadBuffer } from './storage.js';
 import { STORAGE_BUCKET } from './imagegen.js';
+import { FORMAT_DIMS } from './text-bloecke.js';
 
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
@@ -85,6 +86,73 @@ export async function generateReelLayered({ bgUrl, bgBuffer, overlayBuffer, jobI
       '-y', '-loop', '1', '-i', inFile, '-loop', '1', '-i', ovFile, '-t', '10', '-r', '30',
       '-filter_complex', filter, '-map', '[out]',
       '-c:v', 'libx264', '-crf', '19', '-preset', 'medium', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', outFile,
+    ]);
+
+    const mp4 = await readFile(outFile);
+    const uuid = randomUUID();
+    const url = await uploadBuffer({ bucket: STORAGE_BUCKET, path: `reels/${jobId}/${uuid}.mp4`, buffer: mp4, contentType: 'video/mp4' });
+
+    // Poster (erstes Frame) für Mail/Portal, wo <video> nicht zuverlässig spielt.
+    let posterUrl = null;
+    try {
+      await runFfmpeg(['-y', '-i', outFile, '-frames:v', '1', '-q:v', '3', posterFile]);
+      const poster = await readFile(posterFile);
+      posterUrl = await uploadBuffer({ bucket: STORAGE_BUCKET, path: `reels/${jobId}/${uuid}.jpg`, buffer: poster, contentType: 'image/jpeg' });
+    } catch (err) { console.warn('[overlayTextOnVideo] Poster fehlgeschlagen:', err.message); }
+
+    return { url, posterUrl };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Legt eine transparente Text-Overlay-Ebene über ein FERTIGES Video (z. B. Higgsfield-Clip).
+ * Das Video wird aufs Zielformat skaliert/beschnitten (cover), darüber kommt die statische
+ * Overlay-Ebene (Stellentitel/Pill/Logo); die Headline (optional) blendet nach 0,5 s weich ein.
+ *
+ * @param {{ videoBuffer?:Buffer, videoUrl?:string, staticOverlay:Buffer, hookOverlay?:Buffer|null,
+ *           format?:'quadrat'|'feed'|'story', jobId:string }} p
+ * @returns {Promise<{ url:string }>}
+ */
+export async function overlayTextOnVideo({ videoBuffer, videoUrl, staticOverlay, hookOverlay, format = 'story', jobId }) {
+  if (!staticOverlay) throw new Error('Keine statische Overlay-Ebene.');
+  const dims = FORMAT_DIMS[format] || FORMAT_DIMS.story;
+  const W = dims.w, H = dims.h;
+  const dir = await mkdtemp(path.join(tmpdir(), 'hfov-'));
+  const vidFile = path.join(dir, 'in.mp4');
+  const stFile = path.join(dir, 'static.png');
+  const hkFile = path.join(dir, 'hook.png');
+  const outFile = path.join(dir, 'out.mp4');
+  const posterFile = path.join(dir, 'poster.jpg');
+  try {
+    const vb = videoBuffer || (await fetchAsBuffer(videoUrl)).buffer;
+    await writeFile(vidFile, vb);
+    await writeFile(stFile, staticOverlay);
+    const hasHook = !!hookOverlay;
+    if (hasHook) await writeFile(hkFile, hookOverlay);
+
+    // Video auf Zielformat bringen (cover), statische Ebene drauf, dann Headline mit Alpha-Fade.
+    const parts = [
+      `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=30[v0]`,
+      `[1:v]scale=${W}:${H}[st]`,
+      `[v0][st]overlay=0:0${hasHook ? '[v1]' : '[out]'}`,
+    ];
+    if (hasHook) {
+      parts.push(`[2:v]scale=${W}:${H},format=rgba,fade=t=in:st=0.5:d=0.4:alpha=1[hk]`);
+      parts.push(`[v1][hk]overlay=0:0[out]`);
+    }
+    const filter = parts.join(';');
+
+    const inputs = ['-i', vidFile, '-loop', '1', '-i', stFile];
+    if (hasHook) inputs.push('-loop', '1', '-i', hkFile);
+
+    await runFfmpeg([
+      '-y', ...inputs,
+      '-filter_complex', filter, '-map', '[out]',
+      '-an', '-shortest',
+      '-c:v', 'libx264', '-crf', '20', '-preset', 'medium', '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart', outFile,
     ]);
 

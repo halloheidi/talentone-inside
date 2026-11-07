@@ -12,6 +12,7 @@ import TextPositionModal from '../../components/TextPositionModal.jsx';
 import LogoRefreshModal from '../../components/LogoRefreshModal.jsx';
 import CreativeEditModal from '../../components/CreativeEditModal.jsx';
 import LayoutVorlageModal from '../../components/LayoutVorlageModal.jsx';
+import AnimierenModal from '../../components/AnimierenModal.jsx';
 import { FreigabeBadge, istGesperrt } from '../../components/FreigabeBadge.jsx';
 
 // Mini-Schema-Thumbnails der deterministischen Layout-Vorlagen (rein CSS, kein Asset).
@@ -67,6 +68,9 @@ export default function JobCreatives() {
   const [personId, setPersonId] = useState(null);     // ausgewählte Person (Modus KI)
   const [fotoId, setFotoId] = useState(null);         // ausgewähltes Hintergrund-Foto (Modus Foto)
   const [verbessernFoto, setVerbessernFoto] = useState(null); // r-Objekt für Modal
+  const [animierenFoto, setAnimierenFoto] = useState(null);   // r-Objekt für "Animieren"-Modal
+  const [retryBusy, setRetryBusy] = useState(new Set());      // laufende Animations-Retries
+  const animatePollRef = useRef(null);
 
   // Upload
   const [logoUploading, setLogoUploading] = useState(false);
@@ -271,6 +275,38 @@ export default function JobCreatives() {
     reelPollRefs.current.forEach(timer => clearTimeout(timer));
     reelPollRefs.current.clear();
   }, []);
+
+  // ── Animierte Variante: pollt, solange ein higgsfield_video noch 'processing' ist ──
+  function startAnimatePolling() {
+    if (animatePollRef.current) return;
+    const startedAt = Date.now();
+    async function tick() {
+      try {
+        const res = await api(`/creatives?job_id=${job.id}`);
+        const list = res.creatives || [];
+        setCreatives(list);
+        const pending = list.some(c => c.quelle === 'higgsfield_video' && c.status === 'processing');
+        if (!pending) { clearTimeout(animatePollRef.current); animatePollRef.current = null; return; }
+      } catch (err) { console.warn('[animate-poll]', err.message); }
+      const elapsedMin = (Date.now() - startedAt) / 60_000;
+      animatePollRef.current = setTimeout(tick, elapsedMin > 6 ? 15_000 : 6_000);
+    }
+    animatePollRef.current = setTimeout(tick, 6_000);
+  }
+  useEffect(() => () => { if (animatePollRef.current) clearTimeout(animatePollRef.current); }, []);
+
+  async function onAnimateRetry(creative) {
+    if (retryBusy.has(creative.id)) return;
+    setRetryBusy(prev => { const n = new Set(prev); n.add(creative.id); return n; });
+    try {
+      await api(`/creatives/${creative.id}/animieren-retry`, { method: 'POST' });
+      startAnimatePolling();
+    } catch (err) {
+      alert(`Erneuter Versuch fehlgeschlagen: ${err.message}`);
+    } finally {
+      setRetryBusy(prev => { const n = new Set(prev); n.delete(creative.id); return n; });
+    }
+  }
 
   async function downloadCreative(c, e) {
     e?.stopPropagation();
@@ -991,6 +1027,27 @@ export default function JobCreatives() {
                       cursor: 'pointer', letterSpacing: 0.03, textTransform: 'uppercase',
                     }}>✨ Verbessern</button>
                 )}
+                {(() => {
+                  const animGrund = gesperrt ? 'Vom Kunden gesperrt'
+                    : kunde?.keine_ki_bilder ? 'KI-Bilder für diesen Kunden deaktiviert'
+                    : r.ki_verarbeitung_erlaubt === false ? 'KI-Verarbeitung für dieses Foto nicht erlaubt'
+                    : null;
+                  const erlaubt = !animGrund;
+                  return (
+                    <button
+                      type="button"
+                      disabled={!erlaubt}
+                      title={erlaubt ? 'Aus diesem Foto eine animierte Variante (Video) erzeugen' : `Animieren gesperrt: ${animGrund}`}
+                      onClick={e => { e.stopPropagation(); if (erlaubt) setAnimierenFoto(r); }}
+                      style={{
+                        position: 'absolute', bottom: 4, left: 4,
+                        background: erlaubt ? '#0a0a0a' : '#9a9a9a', color: erlaubt ? '#8ad4ff' : '#efefef',
+                        border: 'none', padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                        cursor: erlaubt ? 'pointer' : 'not-allowed', opacity: erlaubt ? 1 : 0.8,
+                        letterSpacing: 0.03, textTransform: 'uppercase',
+                      }}>🎬 Animieren</button>
+                  );
+                })()}
                 <div className="ref-caption">
                   {r.beschreibung || <em style={{ color: 'var(--ink-4)' }}>ohne Beschreibung</em>}
                 </div>
@@ -1322,7 +1379,17 @@ export default function JobCreatives() {
                   aria-label="Vollansicht öffnen"
                 >
                   {!c.bild_url ? (
-                    <div className="creative-thumb-empty">kein Bild</div>
+                    c.quelle === 'higgsfield_video' && c.status === 'processing' ? (
+                      <div className="creative-thumb-empty" style={{ textAlign: 'center', padding: 10, fontSize: 12, lineHeight: 1.4 }}>
+                        🎬 Wird animiert…<br /><small style={{ color: 'var(--ink-4)' }}>1–3 Min, erscheint automatisch</small>
+                      </div>
+                    ) : c.quelle === 'higgsfield_video' && c.status === 'fehler' ? (
+                      <div className="creative-thumb-empty" style={{ textAlign: 'center', padding: 10, fontSize: 12, lineHeight: 1.4, color: '#b91c1c' }}>
+                        ⚠️ Animation fehlgeschlagen<br /><small style={{ color: 'var(--ink-4)' }}>{(c.fehler || '').slice(0, 80) || 'Unbekannter Fehler'}</small>
+                      </div>
+                    ) : (
+                      <div className="creative-thumb-empty">kein Bild</div>
+                    )
                   ) : c.typ === 'video' ? (
                     <>
                       <video src={c.bild_url} preload="metadata" muted playsInline />
@@ -1343,8 +1410,14 @@ export default function JobCreatives() {
                     <img src={c.bild_url} alt="" loading="lazy" />
                   )}
                   <span className={`format-badge format-${c.format}`}>
-                    {c.typ === 'video' ? 'REEL' : (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : c.format === 'sonstiges' ? '?' : '1:1')}
+                    {c.quelle === 'higgsfield_video' ? (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : '1:1')
+                      : c.typ === 'video' ? 'REEL'
+                      : (c.format === 'story' ? '9:16' : c.format === 'feed' ? '4:5' : c.format === 'sonstiges' ? '?' : '1:1')}
                   </span>
+                  {c.quelle === 'higgsfield_video' && (
+                    <span style={{ position: 'absolute', top: 8, left: 8, background: '#0a0a0a', color: '#8ad4ff', padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}
+                      title="Enthält KI-bearbeitetes Bildmaterial (animiert)">🤖 KI-bewegt</span>
+                  )}
                   {c.typ === 'overlay' && (
                     <span style={{ position: 'absolute', top: 8, left: 8, background: '#0a0a0a', color: '#d4ff00', padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, letterSpacing: 0.05, textTransform: 'uppercase' }}>
                       📐 Overlay
@@ -1368,6 +1441,16 @@ export default function JobCreatives() {
                     </button>
                   )}
                 </button>
+                {c.quelle === 'higgsfield_video' && c.status === 'fehler' && (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    style={{ marginTop: 6 }}
+                    disabled={retryBusy.has(c.id)}
+                    onClick={() => onAnimateRetry(c)}
+                    title="Animation erneut versuchen (nutzt vorhandenes Rohvideo, falls vorhanden — keine neuen Credits)"
+                  >{retryBusy.has(c.id) ? 'Starte…' : '↻ Erneut versuchen'}</button>
+                )}
                 {(() => {
                   const kommentar = (reviewKommentare[`creative_${c.id}`] || '').trim();
                   if (!kommentar) return null;
@@ -1617,6 +1700,14 @@ export default function JobCreatives() {
             setPersonen(prev => [neu, ...prev]);
             setVerbessernFoto(null);
           }}
+        />
+      )}
+      {animierenFoto && (
+        <AnimierenModal
+          photo={animierenFoto}
+          job={job}
+          onClose={() => setAnimierenFoto(null)}
+          onStarted={() => { loadGalerie(); startAnimatePolling(); }}
         />
       )}
     </div>

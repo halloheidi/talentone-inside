@@ -765,13 +765,23 @@ export async function sendReviewBenachrichtigung({ kunde, job, status, kommentar
       const c = (snap && snap.bild_url) ? snap : creativesById.get(id);
       if (c?.bild_url) {
         const fmt = FORMAT_LABEL[c.format] || c.format || '';
-        const typ = c.typ === 'video' ? 'Video' : 'Bild';
+        const istVideo = c.typ === 'video';
+        const typ = istVideo ? 'Video' : 'Bild';
+        // Video: Poster (erstes Frame) als Vorschau, verlinkt auf den Clip — <video> ist
+        // in E-Mail-Clients unzuverlässig. Poster liegt in bild_ohne_logo_url.
+        const posterSrc = istVideo ? (c.bild_ohne_logo_url || null) : c.bild_url;
+        const thumb = posterSrc
+          ? `<a href="${escape(c.bild_url)}" style="position:relative;display:inline-block;text-decoration:none;">
+               <img src="${escape(posterSrc)}" alt="Creative" width="120" style="display:block;width:120px;height:auto;border-radius:8px;border:1px solid #ececea;" />
+               ${istVideo ? '<span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:26px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.6);">▶</span>' : ''}
+             </a>`
+          : `<a href="${escape(c.bild_url)}" style="display:flex;width:120px;height:120px;border-radius:8px;border:1px solid #ececea;background:#0a0a0a;color:#8ad4ff;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-decoration:none;">🎬 Clip ansehen</a>`;
         return `
           <div style="display:flex;align-items:flex-start;gap:10px;">
-            <img src="${escape(c.bild_url)}" alt="Creative" width="120" style="display:block;width:120px;height:auto;border-radius:8px;border:1px solid #ececea;" />
+            ${thumb}
             <div style="font-size:12px;color:#5a5955;line-height:1.4;">
               <span style="display:inline-block;padding:2px 8px;background:#0a0a0a;color:#fff;border-radius:100px;font-weight:700;font-size:10px;letter-spacing:0.04em;">${escape(fmt || '—')}</span>
-              <div style="margin-top:4px;color:#9a9994;font-size:10.5px;">${escape(typ)} · ${escape(id.slice(0, 8))}…</div>
+              <div style="margin-top:4px;color:#9a9994;font-size:10.5px;">${escape(typ)} · ${escape(id.slice(0, 8))}…${istVideo ? ' · enthält KI-bearbeitetes Bildmaterial' : ''}</div>
             </div>
           </div>`;
       }
