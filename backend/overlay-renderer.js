@@ -6,6 +6,7 @@
 import { uploadBuffer } from './storage.js';
 import { STORAGE_BUCKET } from './imagegen.js';
 import { randomUUID } from 'node:crypto';
+import { ciRollen } from './creative-ci.js';
 
 const FORMAT_DIMS = {
   '1:1':  { w: 1080, h: 1080 },
@@ -110,9 +111,9 @@ function buildOverlayHtml(ctx) {
     max-height: 96px;
     max-width: 220px;
     background: #fff;
-    padding: 10px 14px;
+    padding: 16px;
     border-radius: 12px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
     object-fit: contain;
     z-index: 5;
   }
@@ -147,7 +148,6 @@ function buildOverlayHtml(ctx) {
     line-height: 1.05;
     letter-spacing: -0.02em;
     margin: 0 0 14px;
-    text-transform: uppercase;
   }
   .meta-row {
     display: flex;
@@ -269,8 +269,8 @@ export async function generateOverlays({ job, kunde, spruch, benefits, formats =
 
   try {
     const logoDataUri = await logoAsDataUri(kunde?.logo_url);
-    const primary = kunde?.farben?.primaer || '#0a0a0a';
-    const ink = pickTextInk(primary);
+    // Regel 4: exakte, kräftigste CI-Farbe (nicht blass-primär → z. B. K&S-Rot statt Rosa).
+    const { fill: primary, ink } = ciRollen(kunde?.farben, '#0a0a0a');
 
     const stelle = job?.stelle || 'Neue Stelle';
     const fd = job?.formdata_komplett || {};
@@ -301,16 +301,3 @@ export async function generateOverlays({ job, kunde, spruch, benefits, formats =
   }
 }
 
-/**
- * Kleine Helferin: bestimmt Textfarbe (ink) auf einem Marken-Primary.
- * Hell auf Dunkel, Dunkel auf Hell — grober Luminanz-Test.
- */
-function pickTextInk(primaryHex) {
-  const hex = String(primaryHex || '#000').replace('#', '');
-  if (!/^[0-9a-f]{6}$/i.test(hex)) return '#ffffff';
-  const r = parseInt(hex.slice(0, 2), 16) / 255;
-  const g = parseInt(hex.slice(2, 4), 16) / 255;
-  const b = parseInt(hex.slice(4, 6), 16) / 255;
-  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return luminance > 0.6 ? '#0a0a0a' : '#ffffff';
-}

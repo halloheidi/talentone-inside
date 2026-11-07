@@ -24,6 +24,7 @@ import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWa
 import { TEXT_STILE, renderTextOverlay } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponierePositionen, safeFrac } from '../text-bloecke.js';
+import { pickFillColor } from '../creative-ci.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -790,7 +791,7 @@ router.get('/:id/text-bloecke', async (req, res) => {
 
   const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
   const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
-  const accent = spec.accent || kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
+  const accent = spec.accent || pickFillColor(kunde?.farben);
 
   let baseBildUrl = null;
   if (kind === 'strikt') baseBildUrl = spec.base_url || c.bild_ohne_logo_url || c.bild_url;
@@ -1504,7 +1505,7 @@ router.post('/:id/reel-v2', async (req, res) => {
       // Hintergrund = textfreies Motiv (zoomt); Overlay = Schriftzug im 9:16 (statisch).
       const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
       const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
-      const accent = spec.accent || kunde?.farben?.primaer || '#e2001a';
+      const accent = spec.accent || pickFillColor(kunde?.farben);
       const overlayBuffer = await renderTextOverlay({ overlayOnly: true, format: 'story', stil: spec.text_stil, hook: spec.hook, accent });
       ({ url } = await generateReelLayered({ bgUrl: spec.base_url, overlayBuffer, jobId: c.job_id }));
     } else {

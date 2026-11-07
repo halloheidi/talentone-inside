@@ -15,6 +15,11 @@ import { STORAGE_BUCKET } from './imagegen.js';
 import { callClaudeWithRetry, parseJsonContent } from './claude.js';
 import { randomUUID } from 'node:crypto';
 import { FORMAT_DIMS, SAFE, mergePositionen } from './text-bloecke.js';
+import {
+  ciRollen, TITLE_SHADOW,
+  fotoDimAlpha, dimLayerHtml, topScrimHtml, bottomScrimHtml,
+  logoPlateCss, logoGround, dataUriToBuffer,
+} from './creative-ci.js';
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
@@ -145,24 +150,6 @@ function dim(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Markenfarbe fürs Neon-Fill aufhellen, damit dunkle CI-Töne (z.B. Marineblau)
-// auf dunklem Foto lesbar leuchten. amt=0 → Original, amt=1 → Weiß.
-function lighten(hex, amt) {
-  const h = String(hex || '').replace('#', '');
-  if (!/^[0-9a-f]{6}$/i.test(h)) return '#5ab0ff';
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  const mix = c => Math.round(c + (255 - c) * amt);
-  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
-}
-
-function pickInk(hex) {
-  const h = String(hex || '').replace('#', '');
-  if (!/^[0-9a-f]{6}$/i.test(h)) return '#ffffff';
-  const r = parseInt(h.slice(0, 2), 16) / 255, g = parseInt(h.slice(2, 4), 16) / 255, b = parseInt(h.slice(4, 6), 16) / 255;
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum > 0.6 ? '#0a0a0a' : '#ffffff';
-}
-
 const FONT_STACK = `"Liberation Sans","DejaVu Sans","Segoe UI",Roboto,Arial,sans-serif`;
 
 // Gemeinsamer <head> + Glow-Definition.
@@ -188,63 +175,69 @@ function sc(base, scale) { return Math.round(base * (scale || 1)); }
 // layer: undefined = volles Komposit; 'bg' = nur Hintergrund (Foto+Scrim+Cutout,
 // für die Ken-Burns-Ebene); 'overlay' = nur Hook/Titel/Badge/Logo auf transparent
 // (statische Reel-Overlay-Ebene).
-// Vorlage A — Frage + Glow-Headline + Team unten.
-function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos, layer }) {
-  // Strikt: EXAKTE Markenfarbe (kein Aufhellen). Sonst helles, lesbares Neon-Fill.
-  const neon = strikt ? accent : lighten(accent, 0.5);
+// Vorlage A — Frage-Headline (Marken-Balken) + Stellentitel (Weiß) + Team unten.
+// Regeln: keine Vollflächen-Abdunklung (≤10% nur bei hellem Foto) + lokale Verläufe;
+// Headline in Versalien, Stellentitel in Groß-/Kleinschreibung in Weiß mit dezentem
+// Schatten (kein Glow); exakte CI-Füllfarbe; Logo auf weißer Platte.
+function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer, dimAlpha = 0, logoG = '#ffffff' }) {
   const P = pos;
   const hookLines = String(slots.hook || '').split('\n').filter(l => l.trim().length);
   const hookFs = sc(52, P.hook?.scale);
+  // Headline-Box = Versalien, exakte CI-Füllfarbe mit kontrastsicherer Textfarbe.
   const bars = hookLines.map((line, i) => `
     <div style="display:inline-block; max-width:100%; background:${accent}; color:${ink};
       padding:14px 26px; border-radius:12px; font-weight:800; font-size:1em; line-height:1.12;
-      text-transform:none; margin-left:${i * 34}px; box-shadow:0 10px 30px rgba(0,0,0,0.35);">${nl2br(line)}</div>`)
+      text-transform:uppercase; margin-left:${i * 34}px; box-shadow:0 10px 30px rgba(0,0,0,0.30);">${nl2br(line)}</div>`)
     .join('<div style="height:12px"></div>');
 
   const hookBlock = hookLines.length ? blockWrap(P.hook, 3,
     `<div data-autofit data-max="${hookFs}" data-min="26" style="width:100%;font-size:${hookFs}px;">${bars}</div>`) : '';
 
+  // Stellenbezeichnung: Weiß, Groß-/Kleinschreibung (wie eingegeben), dezenter Schatten.
   const stelleFs = sc(150, P.stelle?.scale);
   const stelleBlock = blockWrap(P.stelle, 3,
     `<div data-autofit data-max="${stelleFs}" data-min="60"
-      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:0.98;letter-spacing:-0.02em;
-      text-transform:uppercase;color:${neon};
-      text-shadow:0 0 4px ${dim(accent, 0.9)}, 0 0 16px ${accent}, 0 0 40px ${accent}, 0 2px 8px rgba(0,0,0,0.6);">${escapeHtml(slots.stelle || '')}</div>`);
+      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:1.0;letter-spacing:-0.02em;
+      color:#ffffff;text-shadow:${TITLE_SHADOW};">${escapeHtml(slots.stelle || '')}</div>`);
 
   const pillFs = sc(30, P.pill?.scale);
   const pillBlock = slots.pill ? blockWrap(P.pill, 3,
     `<span class="pill" style="font-size:${pillFs}px;padding:12px 30px;">${escapeHtml(slots.pill)}</span>`) : '';
 
-  const zeigeBg = layer !== 'overlay';     // Foto + Scrim + Cutout (zoomende Ebene)
+  const zeigeBg = layer !== 'overlay';     // Foto + lokale Verläufe + Cutout (zoomende Ebene)
   const zeigeOverlay = layer !== 'bg';     // Hook/Titel/Badge + Logo (statische Ebene)
   return `<!doctype html><html><head>${head(accent)}</head>
   <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:${layer === 'overlay' ? 'transparent' : '#000'};">
-    ${zeigeBg ? `<!-- Foto-Hintergrund, stark abgedunkelt + Vignette -->
+    ${zeigeBg ? `<!-- Foto bleibt erkennbar: ≤10% Dimmung nur bei hellem Foto + lokale Verläufe -->
     <img src="${fotoUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
-    <div style="position:absolute;inset:0;background:
-      radial-gradient(120% 90% at 50% 30%, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.78) 100%),
-      linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 42%, rgba(0,0,0,0.85) 100%);"></div>
-    ${cutoutUri ? `<img src="${cutoutUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.42)}px;transform:translateX(-50%);height:52%;max-width:96%;object-fit:contain;object-position:bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));">` : ''}` : ''}
+    ${dimLayerHtml(dimAlpha, 1)}
+    ${topScrimHtml(0.55, 1)}
+    ${bottomScrimHtml(0.72, 1)}
+    ${cutoutUri ? `<img src="${cutoutUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.42)}px;transform:translateX(-50%);height:52%;max-width:96%;object-fit:contain;object-position:bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));z-index:2;">` : ''}` : ''}
 
     ${zeigeOverlay ? `<!-- Text-Ebene (frei positionierbare Blöcke) -->
     ${hookBlock}
     ${stelleBlock}
     ${pillBlock}
-    ${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.55)}px;transform:translateX(-50%);max-width:34%;max-height:${Math.round(dims.h * 0.09)}px;object-fit:contain;z-index:4;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}` : ''}
+    ${logoUri ? `<div style="position:absolute;left:50%;bottom:${Math.round(safe.bottom * 0.55)}px;transform:translateX(-50%);z-index:4;${logoPlateCss(logoG)}">
+      <img src="${logoUri}" style="display:block;max-width:${Math.round(dims.w * 0.30)}px;max-height:${Math.round(dims.h * 0.09)}px;object-fit:contain;">
+    </div>` : ''}` : ''}
   </body></html>`;
 }
 
 // Vorlage B — Person links + Textblock rechts. layer wie htmlVorlageA.
-function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer }) {
+// Mit Freisteller: dunkler Marken-Verlauf als GRUND (kein Foto → keine Abdunklung nötig).
+// Ohne Freisteller: Foto bleibt erkennbar (≤10% Dimmung nur bei hellem Foto) + lokale Verläufe.
+function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer, dimAlpha = 0, logoG = '#ffffff' }) {
   const hasCut = !!cutoutUri;
   const P = pos;
-  // Mit Freisteller: dunkler Marken-Verlauf als Grund + Person links.
-  // Ohne Freisteller: Foto als abgedunkelter Vollhintergrund, Textlayout identisch.
   const bg = hasCut
     ? `<div style="position:absolute;inset:0;background:
          radial-gradient(90% 80% at 20% 60%, ${dim(accent, 0.28)} 0%, rgba(10,10,12,0.96) 60%), #0a0a0c;"></div>`
     : `<img src="${fotoUri}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
-       <div style="position:absolute;inset:0;background:linear-gradient(to right, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.82) 62%);"></div>`;
+       ${dimLayerHtml(dimAlpha, 1)}
+       ${topScrimHtml(0.52, 1)}
+       ${bottomScrimHtml(0.72, 1)}`;
 
   const tbFs = sc(76, P.textblock?.scale);
   const textBlock = blockWrap(P.textblock, 4,
@@ -252,11 +245,12 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, 
       style="width:100%;font-weight:900;font-size:${tbFs}px;line-height:1.06;letter-spacing:-0.01em;
       text-transform:uppercase;color:#fff;">${highlightMarkup(slots.textblock || '', accent)}</div>`);
 
+  // Stellenbezeichnung: Weiß, Groß-/Kleinschreibung, dezenter Schatten (KEIN Glow).
   const stelleFs = sc(120, P.stelle?.scale);
   const stelleBlock = blockWrap(P.stelle, 4,
     `<div data-autofit data-max="${stelleFs}" data-min="52"
-      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:0.98;letter-spacing:-0.02em;
-      text-transform:uppercase;color:#fff;" class="glow-white">${escapeHtml(slots.stelle || '')}</div>`);
+      style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:1.0;letter-spacing:-0.02em;
+      color:#ffffff;text-shadow:${TITLE_SHADOW};">${escapeHtml(slots.stelle || '')}</div>`);
 
   const pillFs = sc(30, P.pill?.scale);
   const pillBlock = slots.pill ? blockWrap(P.pill, 4,
@@ -269,7 +263,9 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, 
     ${zeigeBg ? `${bg}
     ${hasCut ? `<img src="${cutoutUri}" style="position:absolute;left:0;bottom:${Math.round(safe.bottom * 0.5)}px;height:64%;max-width:56%;object-fit:contain;object-position:left bottom;filter:drop-shadow(0 12px 30px rgba(0,0,0,0.6));z-index:2;">` : ''}` : ''}
 
-    ${zeigeOverlay ? `${logoUri ? `<img src="${logoUri}" style="position:absolute;left:50%;top:${safe.top}px;transform:translateX(-50%);max-width:32%;max-height:${Math.round(dims.h * 0.08)}px;object-fit:contain;z-index:5;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.5));">` : ''}
+    ${zeigeOverlay ? `${logoUri ? `<div style="position:absolute;left:50%;top:${safe.top}px;transform:translateX(-50%);z-index:5;${logoPlateCss(logoG)}">
+      <img src="${logoUri}" style="display:block;max-width:${Math.round(dims.w * 0.28)}px;max-height:${Math.round(dims.h * 0.08)}px;object-fit:contain;">
+    </div>` : ''}
     ${textBlock}
     ${stelleBlock}
     ${pillBlock}` : ''}
@@ -300,7 +296,7 @@ function autofitScript() {
 /**
  * Rendert EIN Format einer Vorlage → PNG-Buffer.
  */
-async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides, layer }) {
+async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides, layer, dimAlpha = 0, logoG = '#ffffff' }) {
   const dims = FORMAT_DIMS[format];
   if (!dims) throw new Error(`Unbekanntes Format: ${format}`);
   const safe = SAFE[format] || SAFE.quadrat;
@@ -308,8 +304,8 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
   const pos = mergePositionen('layout', vorlage, format, overrides);
 
   const html = vorlage === 'B'
-    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer })
-    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos, layer });
+    ? htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, pos, layer, dimAlpha, logoG })
+    : htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, safe, strikt, pos, layer, dimAlpha, logoG });
 
   const page = await browser.newPage();
   await page.setViewport({ width: dims.w, height: dims.h, deviceScaleFactor: 1 });
@@ -329,8 +325,11 @@ async function renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri
 // Einzel-Layer-Buffer (für die Reel-Ableitung): layer='bg' (Foto+Scrim+Cutout) oder
 // 'overlay' (Hook/Titel/Badge/Logo, transparent). fotoUri bei 'overlay' optional.
 export async function renderLayoutLayerBuffer({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, format = 'story', overrides = null, layer, strikt = false }) {
-  const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
-  const ink = pickInk(accent);
+  const { fill: accent, ink } = ciRollen(kunde?.farben);
+  // Foto ist Hintergrund bei A immer, bei B nur ohne Freisteller.
+  const fotoIstBg = layer !== 'overlay' && (vorlage === 'A' || !cutoutUri);
+  const dimAlpha = fotoIstBg ? await fotoDimAlpha(dataUriToBuffer(fotoUri)) : 0;
+  const logoG = await logoGround(dataUriToBuffer(logoUri), accent);
   const puppeteer = (await import('puppeteer')).default;
   const browser = await puppeteer.launch({
     headless: true,
@@ -338,7 +337,7 @@ export async function renderLayoutLayerBuffer({ vorlage, kunde, fotoUri, cutoutU
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
   try {
-    return await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri: fotoUri || '', cutoutUri, logoUri, strikt, overrides, layer });
+    return await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri: fotoUri || '', cutoutUri, logoUri, strikt, overrides, layer, dimAlpha, logoG });
   } finally {
     await browser.close();
   }
@@ -362,8 +361,11 @@ export async function renderLayoutLayerBuffer({ vorlage, kunde, fotoUri, cutoutU
 // Formaten gilt derselbe Override-Satz je Format (Initial-Render hat keine
 // Overrides → Defaults; Re-Render läuft pro Format mit dessen Overrides).
 export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, logoUri, slots, formats = ['quadrat'], jobId, strikt = false, overrides = null }) {
-  const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || '#e2001a';
-  const ink = pickInk(accent);
+  const { fill: accent, ink } = ciRollen(kunde?.farben);
+  // Foto ist Hintergrund bei A immer, bei B nur ohne Freisteller. Einmal messen.
+  const fotoIstBg = vorlage === 'A' || !cutoutUri;
+  const dimAlpha = fotoIstBg ? await fotoDimAlpha(dataUriToBuffer(fotoUri)) : 0;
+  const logoG = await logoGround(dataUriToBuffer(logoUri), accent);
 
   const puppeteer = (await import('puppeteer')).default;
   const browser = await puppeteer.launch({
@@ -374,7 +376,7 @@ export async function renderLayoutVorlage({ vorlage, kunde, fotoUri, cutoutUri, 
   try {
     const out = [];
     for (const format of formats) {
-      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides });
+      const buffer = await renderOne(browser, { vorlage, format, accent, ink, slots, fotoUri, cutoutUri, logoUri, strikt, overrides, dimAlpha, logoG });
       const key = `layout/${jobId}/${randomUUID()}_${vorlage}_${format}.png`;
       const url = await uploadBuffer({ bucket: STORAGE_BUCKET, path: key, buffer, contentType: 'image/png' });
       out.push({ format, bild_url: url });

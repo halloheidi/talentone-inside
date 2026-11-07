@@ -10,6 +10,7 @@ import { supabase } from './supabase.js';
 import { makeTransparent, composeLogoOverlay } from './logo.js';
 import { extendTo9x16, cropTo4x5, normalizeImageForOpenAI } from './imageops.js';
 import { renderTextOverlay, assertExactColors } from './text-overlay.js';
+import { pickFillColor } from './creative-ci.js';
 import sharp from 'sharp';
 
 const OPENAI_IMAGES_API = 'https://api.openai.com/v1/images/generations';
@@ -1021,12 +1022,14 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
   // Schriftzug später verschoben/neu gerendert werden kann.
   let farbCheck = null;
   let renderSpec = null;
-  if (strikt && (spruch || '').trim() && kunde?.farben?.primaer) {
+  // Regel 4: exakte CI-Füllfarbe (kräftigste CI-Farbe, falls primär zu blass → z. B. K&S-Rot).
+  const ciFill = pickFillColor(kunde?.farben, null);
+  if (strikt && (spruch || '').trim() && ciFill) {
     try {
       const baseFilename = `${job.id}/strikt-base-${format}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
       const baseUrl = await uploadToStorage(rawBuffer, baseFilename);
-      renderSpec = { kind: 'strikt', base_url: baseUrl, hook: spruch, text_stil: textStil || null, accent: kunde.farben.primaer };
-      rawBuffer = await renderTextOverlay({ baseBuffer: rawBuffer, format, stil: textStil, hook: spruch, accent: kunde.farben.primaer });
+      renderSpec = { kind: 'strikt', base_url: baseUrl, hook: spruch, text_stil: textStil || null, accent: ciFill };
+      rawBuffer = await renderTextOverlay({ baseBuffer: rawBuffer, format, stil: textStil, hook: spruch, accent: ciFill });
     } catch (err) { console.warn('[strikt-overlay]', err.message); }
   }
 
@@ -1062,9 +1065,11 @@ export async function generateOneCreative({ job, kunde, motiv, format, mode = 'k
 
   // Farb-Check (Assertion, kein Toleranzband): exakter Akten-Hex MUSS als Fläche
   // im gerenderten Creative vorkommen.
-  if (strikt && kunde?.farben?.primaer) {
+  if (strikt && ciFill) {
     try {
-      const hexList = [kunde.farben.primaer, kunde.farben.sekundaer, kunde.farben.akzent].filter(Boolean);
+      // Geprüft wird die tatsächlich gerenderte Füllfarbe zuerst, dann die übrigen CI-Farben.
+      const hexList = [ciFill, kunde?.farben?.primaer, kunde?.farben?.sekundaer, kunde?.farben?.akzent]
+        .filter(Boolean).filter((h, i, a) => a.indexOf(h) === i);
       farbCheck = await assertExactColors(finalBuffer, hexList);
       console.log(`[strikt-farbcheck] ${format}: ${JSON.stringify(farbCheck.treffer)}`);
     } catch (err) { console.warn('[strikt-farbcheck]', err.message); }
@@ -1279,7 +1284,8 @@ export async function generateSzenenKomposition({ job, kunde, fotoUrl, spruch, f
   enlivened = await sharp(enlivened).resize({ width: w, height: h, fit: 'cover' }).png().toBuffer();
 
   // Hook serverseitig (text-overlay) — lokale Verarbeitung, kein weiterer externer Call.
-  const accent = kunde?.farben?.primaer || kunde?.farben?.akzent || null;
+  // Regel 4: exakte, kräftigste CI-Farbe (nicht blass-primär).
+  const accent = pickFillColor(kunde?.farben, null);
   if ((spruch || '').trim() && accent) {
     try { enlivened = await renderTextOverlay({ baseBuffer: enlivened, format, stil: textStil, hook: spruch, accent }); }
     catch (err) { console.warn('[szene-overlay]', err.message); }

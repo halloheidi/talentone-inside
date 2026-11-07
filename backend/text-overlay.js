@@ -7,6 +7,7 @@
 import sharp from 'sharp';
 import { FONT_FACE_CSS, FONT_STACK } from './fonts.js';
 import { FORMAT_DIMS, SAFE, mergePositionen } from './text-bloecke.js';
+import { fotoDimAlpha, dimLayerHtml, topScrimHtml } from './creative-ci.js';
 
 export const TEXT_STILE = [
   { id: 'neon',    name: 'Neon-Glow',  beschreibung: 'Versalien mit weichem, mehrschichtigem Schein in Markenfarbe.' },
@@ -45,9 +46,10 @@ function buildLinesHtml(zeilen, stil, accent, fontMax) {
     // mit Sicherheits-Padding (data-safety → ≥24px je Seite) in die Box passt. Verhindert
     // den Randbeschnitt (u. a. beim 'clean'-Stil).
     if (stil === 'neon') {
+      // Regel 5: kein Glow/Farbschein — Markenfarbe mit dezentem Legibilitäts-Schatten.
       return `<div data-fit data-safety style="width:100%;white-space:nowrap;overflow:hidden;font-family:${FONT_STACK.anton};font-size:${fontMax}px;line-height:1.02;letter-spacing:0.01em;
         text-transform:uppercase;color:${accent};
-        text-shadow:0 0 6px ${accent},0 0 18px ${accent},0 0 42px ${dim(accent, 0.85)},0 0 80px ${dim(accent, 0.6)};">${txt}</div>`;
+        text-shadow:0 2px 8px rgba(0,0,0,0.45);">${txt}</div>`;
     }
     if (stil === 'outline') {
       return `<div data-fit data-safety style="width:100%;white-space:nowrap;overflow:hidden;font-family:${FONT_STACK.archivo};font-size:${fontMax}px;line-height:1.04;
@@ -91,14 +93,17 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
   const fontMax = Math.round(baseFont * (pos.scale || 1));
 
   let baseImg = '';
+  let dimLayer = '';
   if (!overlayOnly) {
     const base = await sharp(baseBuffer).resize(dims.w, dims.h, { fit: 'cover' }).png().toBuffer();
     baseImg = `<img src="data:image/png;base64,${base.toString('base64')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">`;
+    // Regel 1: Foto bleibt erkennbar — ≤10% Dimmung nur bei sehr hellem Foto.
+    dimLayer = dimLayerHtml(await fotoDimAlpha(base), 1);
   }
 
-  const scrim = s === 'balken' ? '' :
-    `<div style="position:absolute;left:0;right:0;top:0;height:${Math.round(dims.h * 0.5)}px;
-       background:linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 100%);"></div>`;
+  // Regel 2: Lesbarkeit NUR lokal — weicher Verlauf über der oberen Textzone (Schriftzug
+  // sitzt oben), keine Vollflächen-Abdunklung. 'balken' trägt eigenen Grund.
+  const scrim = (s === 'balken' || overlayOnly) ? '' : topScrimHtml(0.55, 1);
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>
     ${FONT_FACE_CSS}
@@ -106,6 +111,7 @@ export async function renderTextOverlay({ baseBuffer, format = 'quadrat', stil =
   </style></head>
   <body style="width:${dims.w}px;height:${dims.h}px;position:relative;overflow:hidden;background:${overlayOnly ? 'transparent' : '#000'};">
     ${baseImg}
+    ${dimLayer}
     ${scrim}
     <div style="position:absolute;left:${(pos.x * 100).toFixed(3)}%;top:${(pos.y * 100).toFixed(3)}%;
       width:${(pos.w * 100).toFixed(3)}%;display:flex;flex-direction:column;align-items:flex-start;z-index:2;">

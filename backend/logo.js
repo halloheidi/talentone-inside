@@ -100,15 +100,16 @@ export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, posi
     ]).png().toBuffer();
   }
 
-  // Backdrop: abgerundetes Rechteck hinter dem Logo. Farbe je nach Logo-Helligkeit.
-  const pad = Math.round(Math.min(lw, lh) * 0.18);
+  // Regel 3: Logo auf definiertem Grund — weiße Platte, 16px Innenabstand, 12px Radius,
+  // (nahezu) deckend. Helle/weiße Logos bekommen einen dunklen Grund, damit sie sichtbar bleiben.
+  const pad = 16;
   const backdropW = lw + pad * 2;
   const backdropH = lh + pad * 2;
-  const backdropRadius = Math.round(Math.min(backdropW, backdropH) * 0.18);
+  const backdropRadius = 12;
 
   const brightness = await logoBrightness(transparentLogoBuffer);
   const isDarkLogo = brightness < 128;
-  const bgColor = isDarkLogo ? 'rgba(255,255,255,0.75)' : 'rgba(20,20,20,0.55)';
+  const bgColor = isDarkLogo ? 'rgba(255,255,255,0.95)' : 'rgba(20,20,20,0.88)';
 
   const backdropSvg = Buffer.from(
     `<svg width="${backdropW}" height="${backdropH}" xmlns="http://www.w3.org/2000/svg">
