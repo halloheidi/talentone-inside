@@ -52,6 +52,8 @@ export default function TextPositionModal({ open, creative, onClose, onSaved }) 
   const catKey = data ? (data.kind === 'layout' ? `layout:${data.vorlage}` : 'strikt') : null;
   const meta = data?.positionen || {};   // enthält w/align je Block
   const safe = data?.safe || { top: 0.04, bottom: 0.04 };
+  // Stil-Spec kommt aus creative-ci.js (Server) — eine Quelle für Vorschau + Render.
+  const stil = data?.stil || { fill: data?.accent || '#e2001a', ink: '#ffffff', titleShadow: '0 2px 8px rgba(0,0,0,0.45)', dimAlpha: 0, scrimTop: 0.55, scrimBottom: data?.kind === 'layout' ? 0.72 : 0 };
 
   const startDrag = useCallback((key, e) => {
     if (!stageRef.current) return;
@@ -170,9 +172,16 @@ export default function TextPositionModal({ open, creative, onClose, onSaved }) 
               <img src={data.base_bild_url} alt="" draggable={false}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
             )}
-            {data.dunkel && (
-              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-                background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 42%, rgba(0,0,0,0.85) 100%)' }} />
+            {/* Regel 1+2: ≤10% Dimmung (nur sehr helle Fotos) + lokale Verläufe oben 35% / unten 25%
+                — exakt wie die Renderer (creative-ci.js), keine Vollflächen-Abdunklung. */}
+            {stil.dimAlpha > 0 && (
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `rgba(0,0,0,${stil.dimAlpha})` }} />
+            )}
+            <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: '35%', pointerEvents: 'none',
+              background: `linear-gradient(to bottom, rgba(0,0,0,${stil.scrimTop}) 0%, rgba(0,0,0,0) 100%)` }} />
+            {stil.scrimBottom > 0 && (
+              <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '25%', pointerEvents: 'none',
+                background: `linear-gradient(to top, rgba(0,0,0,${stil.scrimBottom}) 0%, rgba(0,0,0,0) 100%)` }} />
             )}
 
             {/* Safe-Zonen (nur 9:16 relevant sichtbar) */}
@@ -200,7 +209,7 @@ export default function TextPositionModal({ open, creative, onClose, onSaved }) 
               const p = pos[b.key]; if (!p) return null;
               const m = meta[b.key] || { w: 0.8, align: 'left' };
               const isSel = sel === b.key;
-              const txt = String(data.slots?.[b.key] || '').replace(/\*/g, '');
+              const txt = String(data.slots?.[b.key] || '');
               return (
                 <div key={b.key}
                   onMouseDown={(e) => startDrag(b.key, e)}
@@ -213,7 +222,7 @@ export default function TextPositionModal({ open, creative, onClose, onSaved }) 
                     outlineOffset: 2, borderRadius: 4, zIndex: isSel ? 6 : 5,
                   }}>
                   <ProxyText blockKey={b.key} catKey={catKey} text={txt}
-                    accent={data.accent} px={pxFor(b.key)} align={m.align || 'left'} />
+                    stil={stil} px={pxFor(b.key)} align={m.align || 'left'} />
                 </div>
               );
             })}
@@ -248,35 +257,54 @@ export default function TextPositionModal({ open, creative, onClose, onSaved }) 
   );
 }
 
-// Grobe CSS-Nachbildung der Server-Blockstile — nur zur Positionierung, nicht
-// pixelgenau (der Server rendert die Wahrheit).
-function ProxyText({ blockKey, catKey, text, accent, px, align }) {
+// CSS-Spiegel der Server-Blockstile — Farben/Schatten kommen aus der Stil-Spec
+// (creative-ci.js, via API). Keine eigene Farb-/Glow-/Versal-Logik mehr, damit die
+// Vorschau denselben Regeln folgt wie der Renderer (nur Position/Größe bleibt Proxy).
+function ProxyText({ blockKey, catKey, text, stil, px, align }) {
+  const fill = stil?.fill || '#e2001a';
+  const ink = stil?.ink || '#ffffff';
+  const titleShadow = stil?.titleShadow || '0 2px 8px rgba(0,0,0,0.45)';
   const common = {
-    fontWeight: 900, lineHeight: 1.05, textTransform: 'uppercase',
-    fontSize: `${Math.max(6, px)}px`, wordBreak: 'break-word', display: 'inline-block',
-    maxWidth: '100%',
+    fontWeight: 900, lineHeight: 1.05,
+    fontSize: `${Math.max(6, px)}px`, wordBreak: 'break-word', display: 'inline-block', maxWidth: '100%',
   };
+  // Headline-Box (Vorlage A/B hook): Versalien, exakte CI-Füllfarbe + kontrastsichere Textfarbe.
   if (catKey?.startsWith('layout:') && blockKey === 'hook') {
-    // Marken-Balken je Zeile
     return (
       <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, maxWidth: '100%' }}>
-        {String(text).split('\n').filter(Boolean).map((l, i) => (
-          <span key={i} style={{ ...common, textTransform: 'none', background: accent, color: '#fff',
-            padding: '3px 8px', borderRadius: 5, marginLeft: i * 8 }}>{l}</span>
+        {String(text).replace(/\*/g, '').split('\n').filter(Boolean).map((l, i) => (
+          <span key={i} style={{ ...common, textTransform: 'uppercase', background: fill, color: ink,
+            padding: '4px 10px', borderRadius: 6, marginLeft: i * 8 }}>{l}</span>
         ))}
       </span>
     );
   }
+  // Pill-Badge: Rahmen (A weiß, B CI-Füllfarbe), Versalien — wie .pill im Renderer.
   if (blockKey === 'pill') {
-    return <span style={{ display: 'inline-block', border: '2px solid #fff', color: '#fff', borderRadius: 40,
-      padding: '2px 10px', fontSize: `${Math.max(6, px)}px`, fontWeight: 800, whiteSpace: 'nowrap' }}>{text}</span>;
+    const borderCol = catKey === 'layout:B' ? fill : 'rgba(255,255,255,0.9)';
+    return <span style={{ display: 'inline-block', border: `2px solid ${borderCol}`, color: '#fff', borderRadius: 40,
+      padding: '2px 10px', fontSize: `${Math.max(6, px)}px`, fontWeight: 800, letterSpacing: '0.04em',
+      textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{String(text).replace(/\*/g, '')}</span>;
   }
-  if (blockKey === 'stelle' && catKey === 'layout:A') {
-    return <span style={{ ...common, color: accent, textShadow: `0 0 6px ${accent}` }}>{text}</span>;
+  // Stellenbezeichnung (A + B): Weiß, Groß-/Kleinschreibung, dezenter Schatten — KEIN Glow.
+  if (blockKey === 'stelle') {
+    return <span style={{ ...common, color: '#fff', textShadow: titleShadow, textAlign: align }}>{String(text).replace(/\*/g, '')}</span>;
   }
-  if (blockKey === 'stelle' || blockKey === 'textblock') {
-    return <span style={{ ...common, color: '#fff', textAlign: align }}>{text}</span>;
+  // Textblock (B): Versalien in Weiß, *Wort* in CI-Füllfarbe hervorgehoben.
+  if (blockKey === 'textblock') {
+    const parts = String(text).split('\n');
+    return (
+      <span style={{ ...common, textTransform: 'uppercase', color: '#fff', textAlign: align }}>
+        {parts.map((line, li) => (
+          <span key={li} style={{ display: 'block' }}>
+            {line.split(/(\*[^*]+\*)/g).filter(Boolean).map((seg, si) => seg.startsWith('*') && seg.endsWith('*')
+              ? <em key={si} style={{ color: fill, fontStyle: 'italic' }}>{seg.slice(1, -1)}</em>
+              : <span key={si}>{seg}</span>)}
+          </span>
+        ))}
+      </span>
+    );
   }
-  // strikt hook
-  return <span style={{ ...common, color: accent, textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>{text}</span>;
+  // Strikt-Hook: Text in CI-Füllfarbe mit dunklem Schatten (kein Glow).
+  return <span style={{ ...common, textTransform: 'uppercase', color: fill, textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>{String(text).replace(/\*/g, '')}</span>;
 }

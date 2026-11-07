@@ -24,7 +24,7 @@ import { LAYOUT_VORLAGEN, istLayoutVorlage, buildSlotDefaults, pruefeSlotTexteWa
 import { TEXT_STILE, renderTextOverlay } from '../text-overlay.js';
 import { getOrCreateFreisteller, freistellerVerfuegbar } from '../bg-removal.js';
 import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponierePositionen, safeFrac } from '../text-bloecke.js';
-import { pickFillColor } from '../creative-ci.js';
+import { pickFillColor, ciRollen, TITLE_SHADOW, fotoDimAlpha } from '../creative-ci.js';
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -791,7 +791,9 @@ router.get('/:id/text-bloecke', async (req, res) => {
 
   const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
   const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
-  const accent = spec.accent || pickFillColor(kunde?.farben);
+  // Exakt dieselbe CI-Logik wie die Renderer (creative-ci.js) — eine Quelle.
+  const rollen = ciRollen(kunde?.farben);
+  const accent = spec.accent || rollen.fill;
 
   let baseBildUrl = null;
   if (kind === 'strikt') baseBildUrl = spec.base_url || c.bild_ohne_logo_url || c.bild_url;
@@ -800,6 +802,11 @@ router.get('/:id/text-bloecke', async (req, res) => {
       .neq('kunde_freigabe', 'nein').maybeSingle();  // gesperrte Fotos nicht neu einrendern
     baseBildUrl = ref?.bild_url || c.bild_url;
   }
+
+  // Dimm-Deckung am echten Basisfoto messen (Regel 1: ≤10 %, nur sehr helle Fotos) —
+  // damit die Vorschau denselben leichten Dimm-Layer zeigt wie der Renderer.
+  let dimAlpha = 0;
+  try { if (baseBildUrl) dimAlpha = await fotoDimAlpha((await fetchAsBuffer(baseBildUrl)).buffer); } catch { dimAlpha = 0; }
 
   res.json({
     kind, vorlage, format,
@@ -811,7 +818,16 @@ router.get('/:id/text-bloecke', async (req, res) => {
     accent,
     base_bild_url: baseBildUrl,
     current_bild_url: c.bild_url,
-    dunkel: kind === 'layout', // Layout dunkelt das Foto ab → Proxy zeigt Scrim
+    // Stil-Spec aus creative-ci.js → Vorschau rendert exakt mit den Renderer-Regeln:
+    stil: {
+      fill: rollen.fill,            // CI-Füllfarbe (Headline-Box, Pill-Rand B)
+      ink: rollen.ink,              // kontrastsichere Textfarbe auf der Füllfarbe
+      titleShadow: TITLE_SHADOW,    // dezenter Stellentitel-Schatten (kein Glow)
+      dimAlpha,                     // ≤0.10 Vollflächen-Dimmung (meist 0)
+      scrimTop: 0.55,               // Regel 2: oberer Verlauf (obere 35 %)
+      scrimBottom: kind === 'layout' ? 0.72 : 0, // unterer Verlauf nur bei Layout (untere 25 %)
+    },
+    dunkel: kind === 'layout', // (bleibt für ältere Clients; Vorschau nutzt jetzt stil)
   });
 });
 

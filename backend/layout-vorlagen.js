@@ -172,6 +172,15 @@ function blockWrap(p, z, inner) {
 }
 function sc(base, scale) { return Math.round(base * (scale || 1)); }
 
+// Höhenlimit für den Stellentitel: Abstand (px) von seiner Oberkante bis zur Pill
+// darunter, 18px Sicherheitsabstand. Verhindert, dass ein langer Titel die Pill
+// überläuft; 0 = kein ableitbares Limit (Pill fehlt/über dem Titel).
+function stelleMaxH(P, dims) {
+  const sy = P?.stelle?.y, py = P?.pill?.y;
+  if (sy == null || py == null || py <= sy) return 0;
+  return Math.max(0, Math.round((py - sy) * dims.h) - 18);
+}
+
 // layer: undefined = volles Komposit; 'bg' = nur Hintergrund (Foto+Scrim+Cutout,
 // für die Ken-Burns-Ebene); 'overlay' = nur Hook/Titel/Badge/Logo auf transparent
 // (statische Reel-Overlay-Ebene).
@@ -194,9 +203,11 @@ function htmlVorlageA({ dims, accent, ink, slots, fotoUri, cutoutUri, logoUri, s
     `<div data-autofit data-max="${hookFs}" data-min="26" style="width:100%;font-size:${hookFs}px;">${bars}</div>`) : '';
 
   // Stellenbezeichnung: Weiß, Groß-/Kleinschreibung (wie eingegeben), dezenter Schatten.
+  // Autofit max. 2 Zeilen und nie über die Pill hinaus (Höhenlimit).
   const stelleFs = sc(150, P.stelle?.scale);
+  const stelleMaxHpx = stelleMaxH(P, dims);
   const stelleBlock = blockWrap(P.stelle, 3,
-    `<div data-autofit data-max="${stelleFs}" data-min="60"
+    `<div data-autofit data-max="${stelleFs}" data-min="60" data-maxlines="2"${stelleMaxHpx ? ` data-maxh="${stelleMaxHpx}"` : ''}
       style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:1.0;letter-spacing:-0.02em;
       color:#ffffff;text-shadow:${TITLE_SHADOW};">${escapeHtml(slots.stelle || '')}</div>`);
 
@@ -246,9 +257,11 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, 
       text-transform:uppercase;color:#fff;">${highlightMarkup(slots.textblock || '', accent)}</div>`);
 
   // Stellenbezeichnung: Weiß, Groß-/Kleinschreibung, dezenter Schatten (KEIN Glow).
+  // Autofit max. 2 Zeilen und nie über die Pill hinaus (Höhenlimit).
   const stelleFs = sc(120, P.stelle?.scale);
+  const stelleMaxHpx = stelleMaxH(P, dims);
   const stelleBlock = blockWrap(P.stelle, 4,
-    `<div data-autofit data-max="${stelleFs}" data-min="52"
+    `<div data-autofit data-max="${stelleFs}" data-min="52" data-maxlines="2"${stelleMaxHpx ? ` data-maxh="${stelleMaxHpx}"` : ''}
       style="width:100%;font-weight:900;font-size:${stelleFs}px;line-height:1.0;letter-spacing:-0.02em;
       color:#ffffff;text-shadow:${TITLE_SHADOW};">${escapeHtml(slots.stelle || '')}</div>`);
 
@@ -273,20 +286,25 @@ function htmlVorlageB({ dims, accent, slots, fotoUri, cutoutUri, logoUri, safe, 
 }
 
 // Auto-Skalierung im Browser: Schrift verkleinern bis Text in seine Box passt.
+// data-maxlines = harte Zeilengrenze (z. B. Stellentitel max. 2 Zeilen),
+// data-maxh = absolute Höhengrenze in px (z. B. Abstand bis zur Pill, kein Überlapp).
 function autofitScript() {
   document.querySelectorAll('[data-autofit]').forEach(el => {
     const max = parseFloat(el.getAttribute('data-max')) || 120;
     const min = parseFloat(el.getAttribute('data-min')) || 30;
+    const maxLines = parseFloat(el.getAttribute('data-maxlines')) || 0;
+    const maxH = parseFloat(el.getAttribute('data-maxh')) || 0;
     let size = max;
     el.style.fontSize = size + 'px';
-    // parent-Box als Höhen-Limit
-    const parent = el.parentElement;
-    const maxH = parent ? parent.getBoundingClientRect().height : el.getBoundingClientRect().height;
     let guard = 0;
     while (size > min && guard < 200) {
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || (size * 1.1);
+      const h = el.getBoundingClientRect().height;
+      const lines = lh > 0 ? Math.round(h / lh) : 1;
       const overflowW = el.scrollWidth > el.clientWidth + 1;
-      const overflowH = el.getBoundingClientRect().height > maxH + 1;
-      if (!overflowW && !overflowH) break;
+      const overflowLines = maxLines ? lines > maxLines : false;
+      const overflowH = maxH ? h > maxH + 1 : false;
+      if (!overflowW && !overflowLines && !overflowH) break;
       size -= 2; el.style.fontSize = size + 'px';
       guard++;
     }
