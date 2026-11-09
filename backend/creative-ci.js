@@ -143,18 +143,35 @@ export function dataUriToBuffer(uri) {
   try { return Buffer.from(m[1], 'base64'); } catch { return null; }
 }
 
-// Logo-Grund (Regel 3): dunkle Logos → weiße Platte; helle/weiße Logos → CI-Füllfarbe,
-// damit das Logo auf definiertem Grund sichtbar bleibt.
-export async function logoGround(logoBuffer, fillHex) {
-  if (!logoBuffer) return '#ffffff';
+// Ist das Logo praktisch weiß (würde es auf weißer Platte verschwinden)? NUR dann
+// braucht es einen dunklen / CI-farbenen Grund. Gemessen am Anteil sichtbarer Pixel,
+// die dunkel genug sind, um auf Weiß lesbar zu sein — robust gegen bunte, aber gut
+// sichtbare Logos (z. B. gelbe Sonne + blaue Schrift), die ein reiner Helligkeits-
+// Mittelwert fälschlich als „hell" einstuft und dann mit schwarzer Platte hinterlegt.
+export async function logoIstHell(logoBuffer) {
+  if (!logoBuffer) return false;
   try {
     const { data } = await sharp(logoBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    let sum = 0, n = 0;
+    // Nur die entschiedenen Pixel zählen: klar helle (würden auf Weiß verschwinden)
+    // vs. klar dunkle (auf Weiß gut lesbar). Mittelgraue Anti-Aliasing-Ränder werden
+    // ignoriert, sonst stuft ein dunkler Kantensaum ein weißes Logo falsch ein.
+    let vis = 0, hell = 0, dunkel = 0;
     for (let i = 0; i < data.length; i += 4) {
       if (data[i + 3] < 32) continue;
-      sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; n++;
+      vis++;
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum > 215) hell++;
+      else if (lum < 140) dunkel++;
     }
-    const mean = n ? sum / n : 128;
-    return mean >= 150 ? (fillHex || '#0a0a0a') : '#ffffff';   // helles Logo → CI-Grund
-  } catch { return '#ffffff'; }
+    if (!vis) return false;
+    // Weißes Logo: helle Pixel dominieren UND fast keine klar dunklen Pixel vorhanden.
+    return (hell / vis) > 0.5 && (dunkel / vis) < 0.08;
+  } catch { return false; }
+}
+
+// Logo-Grund (Regel 3): normale (dunkle oder bunte) Logos → weiße Platte;
+// nur praktisch weiße Logos → CI-Füllfarbe, damit das Logo sichtbar bleibt.
+export async function logoGround(logoBuffer, fillHex) {
+  if (!logoBuffer) return '#ffffff';
+  return (await logoIstHell(logoBuffer)) ? (fillHex || '#0a0a0a') : '#ffffff';
 }

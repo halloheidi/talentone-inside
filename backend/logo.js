@@ -3,31 +3,112 @@
 // selbst ein Logo, das Original wird pixelgenau aufgesetzt.
 
 import sharp from 'sharp';
+import { logoIstHell } from './creative-ci.js';
 
 // Pixel als "weiß" behandeln, wenn alle drei Kanäle >= 240 sind.
 // Zusätzlich Toleranz gegenüber leichtem Grau am Anti-Aliasing-Rand.
 const WHITE_MIN = 240;
+// Farbabstand (euklidisch, 0..441) zum erkannten Rand-Hintergrund, ab dem ein
+// Pixel noch als Hintergrund gilt — moderat, damit die Logo-Kanten stehen bleiben.
+const EDGE_TOL = 44;
 
 /**
- * Macht den weißen/nahezu-weißen Hintergrund eines Logos transparent.
- * Liefert einen PNG-Buffer mit Alpha-Kanal.
+ * Macht den einfarbigen Hintergrund eines Logos transparent und liefert ein
+ * PNG mit Alpha-Kanal. Erkennt die dominante Randfarbe und entfernt per
+ * Flood-Fill von den Bildrändern genau diesen Hintergrund — so werden sowohl
+ * weiße ALS AUCH farbige Hintergründe (z. B. ein dunkles Logo-Rechteck) sauber
+ * freigestellt, ohne gleichfarbige Flächen im Logo-Inneren anzufassen.
+ *
+ * Ist der Rand uneinheitlich (Foto/Verlauf statt Vollfläche), bleibt es beim
+ * bewährten, konservativen Weiß-Schwellwert.
  *
  * Idempotent: bereits transparente PNGs werden nicht verschlechtert.
  */
 export async function makeTransparent(logoBuffer) {
   const src = sharp(logoBuffer).ensureAlpha();
   const { data, info } = await src.raw().toBuffer({ resolveWithObject: true });
+  const w = info.width, h = info.height;
 
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    if (r >= WHITE_MIN && g >= WHITE_MIN && b >= WHITE_MIN) {
-      data[i + 3] = 0;
+  const bg = dominanteRandfarbe(data, w, h);
+
+  if (bg && bg.uniform && !istFastWeiss(bg.r, bg.g, bg.b)) {
+    // Farbiger, einheitlicher Hintergrund → randbasierter Flood-Fill.
+    floodFillHintergrund(data, w, h, bg, EDGE_TOL);
+  } else {
+    // Weißer (oder uneinheitlicher) Hintergrund → globaler Weiß-Schwellwert.
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (r >= WHITE_MIN && g >= WHITE_MIN && b >= WHITE_MIN) data[i + 3] = 0;
     }
   }
 
   return await sharp(data, {
-    raw: { width: info.width, height: info.height, channels: 4 },
+    raw: { width: w, height: h, channels: 4 },
   }).png().toBuffer();
+}
+
+function istFastWeiss(r, g, b) { return r >= WHITE_MIN && g >= WHITE_MIN && b >= WHITE_MIN; }
+
+/**
+ * Dominante Randfarbe (Mittel der sichtbaren Rahmenpixel) + Aussage, ob der Rand
+ * einfarbig genug ist, um ihn als Hintergrund zu behandeln.
+ */
+function dominanteRandfarbe(data, w, h) {
+  const band = 2;
+  let r = 0, g = 0, b = 0, n = 0;
+  const acc = (x, y) => {
+    const i = (y * w + x) * 4;
+    if (data[i + 3] < 32) return;
+    r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+  };
+  for (let x = 0; x < w; x++) for (let d = 0; d < band; d++) { acc(x, d); acc(x, h - 1 - d); }
+  for (let y = 0; y < h; y++) for (let d = 0; d < band; d++) { acc(d, y); acc(w - 1 - d, y); }
+  if (!n) return null;
+  r /= n; g /= n; b /= n;
+
+  // Varianz der Rahmenpixel → Einheitlichkeit.
+  let varSum = 0, m = 0;
+  const vacc = (x, y) => {
+    const i = (y * w + x) * 4;
+    if (data[i + 3] < 32) return;
+    varSum += (data[i] - r) ** 2 + (data[i + 1] - g) ** 2 + (data[i + 2] - b) ** 2; m++;
+  };
+  for (let x = 0; x < w; x++) for (let d = 0; d < band; d++) { vacc(x, d); vacc(x, h - 1 - d); }
+  for (let y = 0; y < h; y++) for (let d = 0; d < band; d++) { vacc(d, y); vacc(w - 1 - d, y); }
+  const variance = m ? varSum / m : 1e9;
+
+  return { r: Math.round(r), g: Math.round(g), b: Math.round(b), uniform: variance < 600 };
+}
+
+/**
+ * Entfernt den vom Bildrand zusammenhängenden Hintergrund (Alpha → 0), solange
+ * er nah an der erkannten Randfarbe liegt. Eingeschlossene, gleichfarbige
+ * Flächen im Logo-Inneren bleiben erhalten (kein globaler Schwellwert).
+ */
+function floodFillHintergrund(data, w, h, bg, tol) {
+  const tol2 = tol * tol;
+  const near = (p) => {
+    const i = p * 4;
+    const dr = data[i] - bg.r, dg = data[i + 1] - bg.g, db = data[i + 2] - bg.b;
+    return dr * dr + dg * dg + db * db <= tol2;
+  };
+  const visited = new Uint8Array(w * h);
+  const stack = [];
+  const seed = (x, y) => {
+    const p = y * w + x;
+    if (!visited[p] && near(p)) { visited[p] = 1; stack.push(p); }
+  };
+  for (let x = 0; x < w; x++) { seed(x, 0); seed(x, h - 1); }
+  for (let y = 0; y < h; y++) { seed(0, y); seed(w - 1, y); }
+  while (stack.length) {
+    const p = stack.pop();
+    data[p * 4 + 3] = 0;
+    const x = p % w, y = (p - x) / w;
+    if (x > 0) seed(x - 1, y);
+    if (x < w - 1) seed(x + 1, y);
+    if (y > 0) seed(x, y - 1);
+    if (y < h - 1) seed(x, y + 1);
+  }
 }
 
 /**
@@ -107,9 +188,13 @@ export async function composeLogoOverlay(baseBuffer, transparentLogoBuffer, posi
   const backdropH = lh + pad * 2;
   const backdropRadius = 12;
 
-  const brightness = await logoBrightness(transparentLogoBuffer);
-  const isDarkLogo = brightness < 128;
-  const bgColor = isDarkLogo ? 'rgba(255,255,255,0.95)' : 'rgba(20,20,20,0.88)';
+  // Regel 3: weiße Platte als Default. Nur ein praktisch WEISSES Logo (das auf
+  // Weiß verschwinden würde) bekommt einen dunklen Grund — ein buntes Logo
+  // (gelb/blau o. ä.) ist auf Weiß gut lesbar und darf NIE eine schwarze Fläche
+  // bekommen. (logoBrightness-Mittelwert war hier zu grob und hat bunte Logos
+  // fälschlich als „hell" eingestuft.)
+  const hellesLogo = await logoIstHell(transparentLogoBuffer);
+  const bgColor = hellesLogo ? 'rgba(20,20,20,0.90)' : 'rgba(255,255,255,0.95)';
 
   const backdropSvg = Buffer.from(
     `<svg width="${backdropW}" height="${backdropH}" xmlns="http://www.w3.org/2000/svg">
