@@ -9,9 +9,36 @@
 //  onFeedback(patch)     → Kundenfeedback (Status/VG) — im Portal immer vorhanden
 //  onKommentar(text)     → neuer Kommentar in den gemeinsamen Verlauf (beide Modi)
 //  onReload()            → Daten nach einer Mutation neu laden
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { t } from '../lib/anrede.js';
 import { personenGruppen } from '../lib/dubletten.js';
+import { openAnhang } from '../lib/api.js';
+
+/* ── Bewerber-Anhänge (Unterlagen): Dateityp-Badge + klickbarer Download ── */
+function anhangExt(name = '') {
+  const m = String(name).toLowerCase().match(/\.([a-z0-9]+)(?:[?#]|$)/);
+  return m ? m[1] : '';
+}
+function AnhangBadge({ name }) {
+  const ext = anhangExt(name);
+  const farbe = ext === 'pdf' ? '#c0392b'
+    : (ext === 'doc' || ext === 'docx') ? '#2b579a'
+    : /^(jpe?g|png|webp|gif|heic|tiff?)$/.test(ext) ? '#0f8a5f' : '#6b7280';
+  return <span style={{ display: 'inline-block', fontSize: 9, fontWeight: 800, letterSpacing: 0.4, color: '#fff', background: farbe, borderRadius: 4, padding: '1px 5px' }}>{ext ? ext.toUpperCase() : 'DATEI'}</span>;
+}
+// Ein Anhang als klickbarer Eintrag. Portal-Links tragen den Token → direkt als
+// <a> öffnen. Interne Links sind login-geschützt (a.auth) → openAnhang() holt per
+// authentifiziertem Fetch eine frische Signed URL und öffnet sie.
+function anhangUrl(a) { return a?.url || a?.download_url || null; }
+function AnhangItem({ a, index }) {
+  const name = a?.dateiname || a?.name || `Anhang ${index + 1}`;
+  const url = anhangUrl(a);
+  if (!url) return null;
+  const style = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '4px 0', color: '#1b3f80', cursor: 'pointer', background: 'none', border: 0, textAlign: 'left', fontFamily: 'inherit' };
+  const inner = <><AnhangBadge name={name} /><span style={{ textDecoration: 'underline' }}>{name}</span><span aria-hidden="true">⬇</span></>;
+  if (a.auth) return <button type="button" style={style} onClick={() => openAnhang(url)}>{inner}</button>;
+  return <a href={url} target="_blank" rel="noreferrer" style={{ ...style, textDecoration: 'none' }}>{inner}</a>;
+}
 
 /* ── Status-Bucket (interner Fortschritt) ── */
 export function portalStatusBucket(notiz) {
@@ -306,6 +333,7 @@ function FilterBar({ cols, bewerbungen, filters, setFilters, primary }) {
 export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde', ampelFilter, onAmpelFilter, akteBewId, onAkte, onPatch, onFeedback, onKommentar, onSpalte, onVorqual, onStandardVorqual, onAnruf, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
   const [filter, setFilter] = useState('alle');
   const [gwDialogBewId, setGwDialogBewId] = useState(null);
+  const [akteFocus, setAkteFocus] = useState(null);  // 'anhaenge' → Akte beim Öffnen zu den Unterlagen scrollen
   // Filter-Chips nach abgeleitetem Bearbeitungsstatus (gleiche Ableitung wie die Spalte).
   let gefiltert = filter === 'alle' ? bewerbungen : bewerbungen.filter(b => bearbeitungStatus(b).key === filter);
   if (ampelFilter) gefiltert = gefiltert.filter(b => ampelOf(b.notiz) === ampelFilter);
@@ -420,6 +448,14 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
   if (intern) columns.push({ id: 'ampel', label: 'Ampel', stop: true, sortType: 'num', sortVal: b => AMPEL_ORDER[ampelOf(b.notiz)], filter: { type: 'select', val: b => AMPELN.find(a => a.key === ampelOf(b.notiz))?.label || '' }, cell: b => <select value={ampelOf(b.notiz)} onChange={e => savePatch(b.id, { ampel: e.target.value === 'offen' ? null : e.target.value })} style={inlineSel}>{AMPELN.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}</select> });
   columns.push({ id: 'kriterien', label: 'Kriterien', sortType: 'num', sortVal: b => Object.values(b.notiz?.kriterien_check || {}).filter(v => v === true).length, tdStyle: { color: kriterienDa ? undefined : '#9a9994' }, cell: b => trefferText(job.kriterien_struktur, b.notiz?.kriterien_check) });
   columns.push({ id: 'feedback', label: 'Feedback', stop: true, sortType: 'num', sortVal: b => FEEDBACK_OPTIONS.findIndex(o => o.key === feedbackStatusOf(b)), filter: { type: 'select', val: b => FEEDBACK_LABEL[feedbackStatusOf(b)] || '' }, cell: feedbackCell });
+  // Unterlagen (Lebenslauf etc.) direkt nach Feedback — 📎 + Anzahl, Klick öffnet
+  // die Akte bei den Anhängen. In Portal UND intern.
+  const anzahlUnterlagen = b => (Array.isArray(b.anhaenge) ? b.anhaenge.filter(a => a?.url || a?.download_url).length : 0);
+  columns.push({ id: 'unterlagen', label: 'Unterlagen', stop: true, sortType: 'num', sortVal: anzahlUnterlagen, thStyle: { textAlign: 'center' }, tdStyle: { textAlign: 'center' }, cell: b => {
+    const anz = anzahlUnterlagen(b);
+    if (!anz) return <span style={{ color: '#cfcdc7' }}>—</span>;
+    return <button type="button" title="Unterlagen in der Akte öffnen" onClick={() => { onAkte?.(b.id); setAkteFocus('anhaenge'); }} style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 13, color: primary, fontWeight: 700, fontFamily: 'inherit' }}>📎 {anz}</button>;
+  } });
   if (intern) columns.push({ id: 'vgtermin', label: 'VG-Termin', cls: 'bl-inline-extra', stop: true, sortType: 'date', sortVal: b => b.notiz?.vg_vereinbart_am ? new Date(b.notiz.vg_vereinbart_am).getTime() : null, cell: b => <input type="date" value={(b.notiz?.vg_vereinbart_am || '').slice(0, 10)} title="VG-Termin" onChange={e => savePatch(b.id, { vg_vereinbart_am: e.target.value || null })} style={{ ...inlineSel, maxWidth: 130 }} /> });
   if (intern) columns.push({ id: 'kundekontaktiert', label: 'Kunde kontaktiert', cls: 'bl-inline-extra', stop: true, sortType: 'num', sortVal: b => b.notiz?.kunde_kontaktiert ? 1 : 0, thStyle: { textAlign: 'center' }, tdStyle: { textAlign: 'center' }, cell: b => <input type="checkbox" checked={!!b.notiz?.kunde_kontaktiert} title="Dem Kunden vorgestellt" onChange={e => savePatch(b.id, { kunde_kontaktiert: e.target.checked ? new Date().toISOString().slice(0, 10) : '' })} /> });
   if (intern) columns.push({ id: 'naechsteaktion', label: 'Nächste Aktion', cls: 'bl-inline-extra', stop: true, sortType: 'text', sortVal: b => (b.notiz?.naechste_aktion || '').toLowerCase(), cell: b => <input defaultValue={b.notiz?.naechste_aktion || ''} placeholder="…" onBlur={e => (e.target.value || '') !== (b.notiz?.naechste_aktion || '') && savePatch(b.id, { naechste_aktion: e.target.value || null })} style={{ ...inlineSel, maxWidth: 150 }} /> });
@@ -556,7 +592,8 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
       )}
       {akte && <BewerberAkte bewerbung={akte} job={job} kunde={kunde} primary={primary} modus={modus}
         fruehere={dubletten(akte).filter(x => x.id !== akte.id)}
-        onClose={() => onAkte?.(null)}
+        focus={akteFocus} onFocusHandled={() => setAkteFocus(null)}
+        onClose={() => { onAkte?.(null); setAkteFocus(null); }}
         onPatch={onPatch ? (patch) => onPatch(akte.id, patch) : undefined}
         onFeedback={onFeedback ? (patch) => onFeedback(akte.id, patch) : undefined}
         onKommentar={onKommentar ? (text) => onKommentar(akte.id, text) : undefined}
@@ -574,7 +611,15 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
 }
 
 /* ══════════════════════ Kandidatenakte (rechts einfahrender Drawer) ══════════════════════ */
-export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], onClose, onPatch, onFeedback, onKommentar, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
+export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde', fruehere = [], focus = null, onFocusHandled, onClose, onPatch, onFeedback, onKommentar, onGesellenwerk, onGesellenwerkOptin, gwMailReady = false, onReload }) {
+  const anhaengeRef = useRef(null);
+  // Beim Öffnen via „Unterlagen"-Spalte zu den Anhängen scrollen.
+  useEffect(() => {
+    if (focus === 'anhaenge' && anhaengeRef.current) {
+      anhaengeRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      onFocusHandled?.();
+    }
+  }, [focus]);  // eslint-disable-line react-hooks/exhaustive-deps
   const n = b.notiz || {};
   const intern = modus === 'intern';
   const [gwBusy, setGwBusy] = useState(false);
@@ -772,8 +817,8 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
           </>}
 
           {anhaenge.length > 0 && <>
-            <h3 style={h3}>Anhänge</h3>
-            {anhaenge.map((a, i) => <div key={i} style={{ fontSize: 13 }}><a href={a.download_url || a.url} target="_blank" rel="noreferrer">📎 {a.dateiname || a.name || `Anhang ${i + 1}`}</a></div>)}
+            <h3 ref={anhaengeRef} style={h3}>Anhänge</h3>
+            {anhaenge.map((a, i) => <div key={i}><AnhangItem a={a} index={i} /></div>)}
           </>}
 
           {n.notizen && <>

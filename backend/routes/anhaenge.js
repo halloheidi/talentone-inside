@@ -56,13 +56,25 @@ router.get('/:bewerbungId/:index', async (req, res) => {
   // ── Autorisierung ──────────────────────────────────────────────
   const token = typeof req.query.token === 'string' ? req.query.token.trim() : '';
   if (token) {
-    // Portal: Token muss zu dem Job gehören, dem die Bewerbung zugeordnet ist.
+    // Portal: der Token ist entweder der stellen-spezifische bewerbungen_token
+    // ODER der kunde-weite portal_token (Portal-Aggregat /portal/:token). In
+    // beiden Fällen muss der Anhang zum Scope dieses Tokens gehören.
     const { data: job } = await supabase
       .from('talentone_jobs')
-      .select('id, bewerbungen_token')
-      .eq('bewerbungen_token', token)
+      .select('id, kunde_id, bewerbungen_token')
+      .eq('id', bew.job_id)
       .maybeSingle();
-    if (!job || job.id !== bew.job_id) {
+    let ok = !!job && !!job.bewerbungen_token && job.bewerbungen_token === token;
+    if (!ok && job) {
+      const { data: k } = await supabase
+        .from('talentone_kunden')
+        .select('id')
+        .eq('id', job.kunde_id)
+        .eq('portal_token', token)
+        .maybeSingle();
+      ok = !!k;
+    }
+    if (!ok) {
       return cleanError(req, res, 403, 'Kein Zugriff auf diesen Anhang.');
     }
   } else {

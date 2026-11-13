@@ -2170,7 +2170,14 @@ router.get('/portal/:token', async (req, res) => {
       },
       jobs: jobsOut,
       anfragen: anfragenOut,
-      bewerbungen: (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null, feedback: feedbackByBew[b.id] || null, kommentare: kommentareByBew[b.id] || [], spalten_werte: spaltenWerteByBew[b.id] || {} })),
+      // Anhänge als STABILE Download-Links (kein Ablauf): der Link zeigt auf den
+      // Download-Endpoint mit dem Portal-Token, die frische Signed URL entsteht
+      // erst beim Klick. (Dieses Aggregat hatte die Transformation beim Umbau auf
+      // die geteilte BewerberListe verloren → anhaenge kamen ohne `url` an.)
+      bewerbungen: attachStableAnhaenge(
+        (bewerbungenRes.data || []).map(b => ({ ...b, vorqualifizierung_werte: vorqualWerteByBew[b.id] || {}, ...(kontaktByBew[b.id] || { kontaktversuche: [], erreicht_am: null }), notiz: notizByBew[b.id] || null, feedback: feedbackByBew[b.id] || null, kommentare: kommentareByBew[b.id] || [], spalten_werte: spaltenWerteByBew[b.id] || {} })),
+        { token: req.params.token }
+      ),
       creatives: creativesRes.data || [],
       adcopies: adcopiesRes.data || [],
       avv: {
