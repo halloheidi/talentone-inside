@@ -46,6 +46,22 @@ export async function downloadAuthed(path, filename = 'download') {
   } catch { alert('Download fehlgeschlagen.'); }
 }
 
+/**
+ * Request gegen einen Anhang-/Share-Endpoint (volle Pfade wie /api/anhaenge/…).
+ * Dual: Portal trägt den Token in der URL (auth=false), intern per Bearer (auth=true).
+ */
+export async function anhangShareRequest(url, { method = 'GET', auth = false } = {}) {
+  const headers = auth ? { ...(await authHeader()) } : {};
+  const res = await fetch(url, { method, headers });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const err = new Error(e.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
 export async function api(path, { method = 'GET', body, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,

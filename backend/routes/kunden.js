@@ -466,14 +466,14 @@ router.get('/:id/stellen', async (req, res) => {
     if (bewIds.length) {
       const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }] = await Promise.all([
         supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check').in('bewerbung_id', bewIds),
-        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am').in('bewerbung_id', bewIds),
         supabase.from('talentone_bewerber_kommentare').select('bewerbung_id').in('bewerbung_id', bewIds),
       ]);
       notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
-      fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f]));
       hatKomm = new Set((komm || []).map(k => k.bewerbung_id));
       for (const n of (notizen || [])) if (n.eingestellt === 'ja') eingestelltSet.add(n.bewerbung_id);
-      for (const [bid, st] of Object.entries(fbByBew)) if (st === 'eingestellt') eingestelltSet.add(bid);
+      for (const [bid, f] of Object.entries(fbByBew)) if (f?.status === 'eingestellt') eingestelltSet.add(bid);
     }
     const keyVon = b => deriveBearbeitung(notizByBew[b.id] || {}, fbByBew[b.id] || null, hatKomm.has(b.id));
 

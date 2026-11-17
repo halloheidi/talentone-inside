@@ -20,7 +20,7 @@ export const GW_EINWILLIGUNG_ART = ['telefon', 'optin_mail'];
 export const gwMailReady = () => process.env.GW_MAIL_READY === 'true';
 
 // Kundenfeedback-Status, die eine Absage/Nichteignung bedeuten → Automatik-Auslöser.
-const ABSAGE_STATI = new Set(['absage', 'ungeeignet', 'abgesagt']);
+const ABSAGE_STATI = new Set(['absage', 'absage_nach_vg', 'ungeeignet', 'abgesagt']);
 
 // Gewerk = Bezeichnung der Stelle (keine eigene Taxonomie).
 export function gewerkAusStelle(stelle) {

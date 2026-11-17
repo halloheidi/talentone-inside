@@ -12,11 +12,12 @@ export const KUNDEN_STATUS = {
   eingestellt:           { label: 'Eingestellt',     cls: 'kf-eingestellt' },
   ungeeignet:            { label: 'Ungeeignet',      cls: 'kf-ungeeignet' },
   absage:                { label: 'Absage',          cls: 'kf-absage' },
+  absage_nach_vg:        { label: 'Absage nach Vorstellung', cls: 'kf-absage' },
   abgesagt:              { label: 'Absage',          cls: 'kf-absage' },
 };
 export function kundenStatusLabel(s) { return KUNDEN_STATUS[s]?.label || s || ''; }
 // Reihenfolge für Filter-Dropdowns.
-export const KUNDEN_STATUS_FILTER = ['eingestellt', 'vorstellungsgespraech', 'interessant', 'neu', 'ungeeignet', 'absage'];
+export const KUNDEN_STATUS_FILTER = ['eingestellt', 'vorstellungsgespraech', 'interessant', 'neu', 'ungeeignet', 'absage', 'absage_nach_vg'];
 
 function fmt(d, withTime) {
   if (!d) return '';

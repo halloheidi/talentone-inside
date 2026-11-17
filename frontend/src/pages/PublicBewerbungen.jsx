@@ -12,12 +12,15 @@ const STATUS_OPTIONS = [
   { value: 'interessant',            label: 'Interessant' },
   { value: 'vorstellungsgespraech',  label: 'Vorstellungsgespräch' },
   { value: 'eingestellt',            label: 'Eingestellt' },
-  { value: 'ungeeignet',             label: 'Ungeeignet' },
   { value: 'absage',                 label: 'Absage' },
+  { value: 'absage_nach_vg',         label: 'Absage nach Vorstellung' },
+  { value: 'ungeeignet',             label: 'Ungeeignet' },
 ];
+// Erklärt die beiden Absage-Arten (Dropdown-Tooltip).
+const STATUS_HINWEIS = 'Absage = ohne Gespräch · Absage nach Vorstellung = nach Gespräch';
 
 // Stati, die einen Bewerber als "erledigt/abgeschlossen" markieren
-const STATUS_ABGESCHLOSSEN = new Set(['ungeeignet', 'absage']);
+const STATUS_ABGESCHLOSSEN = new Set(['ungeeignet', 'absage', 'absage_nach_vg']);
 
 const AMPEL_INFO = {
   gruen: { emoji: '🟢', label: 'Grün', desc: 'Dieser Kandidat passt — jetzt Kontakt aufnehmen!' },
@@ -50,6 +53,7 @@ function StatusSelect({ value, onChange }) {
     <select
       className={`pub-status-select pub-status-${value || 'neu'}`}
       value={value || 'neu'}
+      title={STATUS_HINWEIS}
       onChange={e => onChange(e.target.value)}
       onClick={e => e.stopPropagation()}
     >
@@ -328,7 +332,7 @@ function BewerberSlideOver({ bewerbung, normalized, feedback, spalten, werte, re
             <div className="pub-slideover-form">
               <label>
                 <span>Status</span>
-                <select value={fb.status || 'neu'} onChange={e => onPatchFeedback({ status: e.target.value })}>
+                <select value={fb.status || 'neu'} title={STATUS_HINWEIS} onChange={e => onPatchFeedback({ status: e.target.value })}>
                   {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>

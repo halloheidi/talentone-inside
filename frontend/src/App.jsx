@@ -16,6 +16,7 @@ import PublicAvv from './pages/PublicAvv.jsx';
 import PublicAngebot from './pages/PublicAngebot.jsx';
 import PublicFeedback from './pages/PublicFeedback.jsx';
 import GwOptin from './pages/GwOptin.jsx';
+import PublicAnhangShare from './pages/PublicAnhangShare.jsx';
 import DashboardLayout from './layout/DashboardLayout.jsx';
 import KundenList from './pages/KundenList.jsx';
 import KundeDetail from './pages/KundeDetail.jsx';
@@ -86,6 +87,7 @@ export default function App() {
       <Route path="/avv/:token" element={<PublicAvv />} />
       <Route path="/angebot/:token" element={<PublicAngebot />} />
       <Route path="/gw-optin/:token" element={<GwOptin />} />
+      <Route path="/u/:token" element={<PublicAnhangShare />} />
       <Route
         path="/"
         element={

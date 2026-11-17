@@ -5255,8 +5255,10 @@ textarea.cell-input { resize: vertical; min-height: 28px; }
 /* Neue Status-Farben (Ungeeignet / Absage) */
 .pub-status-select.pub-status-ungeeignet { background-color: #ececea; color: #5a5955; }
 .pub-status-select.pub-status-absage     { background-color: #f4d6d6; color: #80201f; }
+.pub-status-select.pub-status-absage_nach_vg { background-color: #f4d6d6; color: #80201f; }
 .pub-status-badge.pub-status-ungeeignet  { background: #ececea; color: #5a5955; }
 .pub-status-badge.pub-status-absage      { background: #f4d6d6; color: #80201f; }
+.pub-status-badge.pub-status-absage_nach_vg { background: #f4d6d6; color: #80201f; }
 
 /* ─── Bewerbungen-Übersicht: Telefonisten-Quickfilter ─── */
 .bew-overview-head { gap: 16px; flex-wrap: wrap; }

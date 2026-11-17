@@ -153,7 +153,7 @@ router.patch('/:id/notiz', async (req, res) => {
 // Funnel: Mapping danebengegriffen oder Kandidat umentschieden). Setzt zuordnung_unklar zurück.
 // PATCH /api/bewerbungen/:id/feedback — intern den Kundenfeedback-Status setzen (z. B. KO → 'ungeeignet').
 router.patch('/:id/feedback', async (req, res) => {
-  const STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'abgesagt'];
+  const STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'absage_nach_vg', 'abgesagt'];
   const patch = { bewerbung_id: req.params.id, updated_at: new Date().toISOString() };
   if (req.body?.status !== undefined) patch.status = STATI.includes(req.body.status) ? req.body.status : 'neu';
   if (req.body?.vorstellungsgespraech_am !== undefined) patch.vorstellungsgespraech_am = req.body.vorstellungsgespraech_am || null;
@@ -539,12 +539,12 @@ router.get('/uebersicht', async (req, res) => {
       const bewJob = Object.fromEntries(bew.map(b => [b.id, b.job_id]));
       const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }, { data: logs = [] }] = await Promise.all([
         bewIds.length ? supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check, updated_at').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
-        bewIds.length ? supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
+        bewIds.length ? supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
         bewIds.length ? supabase.from('talentone_bewerber_kommentare').select('bewerbung_id, autor_typ, created_at').in('bewerbung_id', bewIds) : Promise.resolve({ data: [] }),
         supabase.from('talentone_kriterien_log').select('job_id, von, created_at').in('job_id', jobIds).eq('von', 'kunde'),
       ]);
       const notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
-      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f]));
       const kommByBew = {};
       for (const k of (komm || [])) (kommByBew[k.bewerbung_id] ||= []).push(k);
       // Letzte Kunden-Kriterienänderung je Job + letzter Recruiter-Check je Job.

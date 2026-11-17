@@ -404,11 +404,11 @@ router.get('/:id/tab-status', async (req, res) => {
     if (bewIds.length) {
       const [{ data: notizen = [] }, { data: fbs = [] }, { data: komm = [] }] = await Promise.all([
         supabase.from('talentone_bewerber_notizen').select('bewerbung_id, ampel, notizen, anrufversuche, vg_vereinbart_am, eingestellt, kunde_kontaktiert, nw_kontaktiert, kriterien_check').in('bewerbung_id', bewIds),
-        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status').in('bewerbung_id', bewIds),
+        supabase.from('talentone_bewerber_kundenfeedback').select('bewerbung_id, status, vorstellungsgespraech_am').in('bewerbung_id', bewIds),
         supabase.from('talentone_bewerber_kommentare').select('bewerbung_id').in('bewerbung_id', bewIds),
       ]);
       const notizByBew = Object.fromEntries((notizen || []).map(n => [n.bewerbung_id, n]));
-      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f.status]));
+      const fbByBew = Object.fromEntries((fbs || []).map(f => [f.bewerbung_id, f]));
       const hatKomm = new Set((komm || []).map(k => k.bewerbung_id));
       const keyVon = b => deriveBearbeitung(notizByBew[b.id] || {}, fbByBew[b.id] || null, hatKomm.has(b.id));
       for (const gruppe of personenGruppen(bew)) {

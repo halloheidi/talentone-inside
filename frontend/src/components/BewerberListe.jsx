@@ -12,7 +12,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { t } from '../lib/anrede.js';
 import { personenGruppen } from '../lib/dubletten.js';
-import { openAnhang } from '../lib/api.js';
+import { openAnhang, anhangShareRequest } from '../lib/api.js';
 
 /* ── Bewerber-Anhänge (Unterlagen): Dateityp-Badge + klickbarer Download ── */
 function anhangExt(name = '') {
@@ -40,6 +40,91 @@ function AnhangItem({ a, index }) {
   return <a href={url} target="_blank" rel="noreferrer" style={{ ...style, textDecoration: 'none' }}>{inner}</a>;
 }
 
+/* ── Teilbarer Unterlagen-Link: pro Anhang „Link zum Teilen" + Widerrufen-Liste ──
+   Der /u/:token-Link läuft 30 Tage, erzeugt beim Aufruf eine frische Signed URL
+   (kein Login, kein Portal-Token) und zeigt NUR die Datei. Funktioniert im Portal
+   (Token in a.url) und intern (a.auth → Bearer). */
+function anhangEndpoint(a) {
+  const u = anhangUrl(a) || '';
+  const m = u.match(/\/api\/anhaenge\/([^/?#]+)\/(\d+)/);
+  if (!m) return null;
+  const tk = u.match(/[?&]token=([^&]+)/);
+  return { base: `/api/anhaenge/${m[1]}/${m[2]}`, token: tk ? tk[1] : null, auth: !!a.auth };
+}
+function shareUrlVon(token) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/u/${token}`;
+}
+function ShareControls({ a }) {
+  const ep = anhangEndpoint(a);
+  const [open, setOpen] = useState(false);
+  const [shares, setShares] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [kopiert, setKopiert] = useState(null);
+  if (!ep) return null;
+  const suffix = ep.token ? `?token=${ep.token}` : '';
+
+  async function laden() {
+    try { const r = await anhangShareRequest(`${ep.base}/shares${suffix}`, { auth: ep.auth }); setShares(r.shares || []); }
+    catch { setShares([]); }
+  }
+  async function erzeugen() {
+    setBusy(true);
+    try {
+      const r = await anhangShareRequest(`${ep.base}/share${suffix}`, { method: 'POST', auth: ep.auth });
+      if (!open) setOpen(true);
+      await laden();
+      const link = shareUrlVon(r.share.share_token);
+      try { await navigator.clipboard?.writeText(link); setKopiert(r.share.id); setTimeout(() => setKopiert(null), 2500); } catch { /* clipboard evtl. blockiert */ }
+    } catch (e) { alert(e.message || 'Link konnte nicht erzeugt werden.'); }
+    finally { setBusy(false); }
+  }
+  async function widerrufen(id) {
+    if (!window.confirm('Diesen Teil-Link widerrufen? Er funktioniert danach nicht mehr.')) return;
+    try { await anhangShareRequest(`/api/anhaenge/shares/${id}/widerrufen${suffix}`, { method: 'POST', auth: ep.auth }); await laden(); }
+    catch (e) { alert(e.message); }
+  }
+  function toggle() { const next = !open; setOpen(next); if (next && shares === null) laden(); }
+
+  const aktive = (shares || []).filter(s => !s.widerrufen_am);
+  return (
+    <div style={{ marginTop: 2 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button type="button" onClick={erzeugen} disabled={busy}
+          style={{ fontSize: 11.5, color: '#1b3f80', background: 'none', border: 0, padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>
+          {busy ? '…' : '🔗 Link zum Teilen'}
+        </button>
+        <button type="button" onClick={toggle}
+          style={{ fontSize: 11, color: '#9a9994', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
+          {open ? 'Links ausblenden' : (aktive.length ? `${aktive.length} Link${aktive.length > 1 ? 's' : ''}` : 'Links')}
+        </button>
+      </div>
+      {open && shares && (
+        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {shares.length === 0 && <span style={{ fontSize: 11, color: '#9a9994' }}>Noch keine Links erzeugt.</span>}
+          {shares.map(s => {
+            const link = shareUrlVon(s.share_token);
+            const abgelaufen = s.gueltig_bis && new Date(s.gueltig_bis) < new Date();
+            const tot = !!s.widerrufen_am || abgelaufen;
+            return (
+              <div key={s.id} style={{ fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', opacity: tot ? 0.55 : 1 }}>
+                <input readOnly value={link} onFocus={e => e.target.select()}
+                  style={{ flex: '1 1 220px', minWidth: 160, fontSize: 11, border: '1px solid #ececea', borderRadius: 6, padding: '3px 6px', color: tot ? '#9a9994' : '#0a0a0a', textDecoration: tot ? 'line-through' : 'none' }} />
+                {!tot && <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(link); setKopiert(s.id); setTimeout(() => setKopiert(null), 2000); } catch {} }}
+                  style={{ fontSize: 11, background: 'none', border: 0, color: '#1b3f80', cursor: 'pointer' }}>{kopiert === s.id ? '✓ kopiert' : 'kopieren'}</button>}
+                {s.widerrufen_am ? <span style={{ color: '#b91c1c' }}>widerrufen</span>
+                  : abgelaufen ? <span style={{ color: '#b45309' }}>abgelaufen</span>
+                  : <button type="button" onClick={() => widerrufen(s.id)} style={{ fontSize: 11, background: 'none', border: 0, color: '#b91c1c', cursor: 'pointer' }}>widerrufen</button>}
+                <span style={{ color: '#9a9994' }}>· {s.aufrufe || 0}×</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Status-Bucket (interner Fortschritt) ── */
 export function portalStatusBucket(notiz) {
   if (!notiz) return 'neu';
@@ -59,11 +144,15 @@ export const FEEDBACK_OPTIONS = [
   { key: 'vorstellungsgespraech', label: 'Vorstellungsgespräch' },
   { key: 'eingestellt', label: 'Eingestellt' },
   { key: 'absage', label: 'Absage' },
+  { key: 'absage_nach_vg', label: 'Absage nach Vorstellung' },
   { key: 'ungeeignet', label: 'Ungeeignet' },
 ];
-const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsgespraech: 'Vorstellungsgespräch', eingestellt: 'Eingestellt', ungeeignet: 'Ungeeignet', absage: 'Absage', abgesagt: 'Absage' };
-const FEEDBACK_COLOR = { interessant: '#1e40af', vorstellungsgespraech: '#5b21b6', eingestellt: '#166534', absage: '#b91c1c', abgesagt: '#b91c1c', ungeeignet: '#b45309' };
+// Erklärt die beiden Absage-Arten (Dropdown-Tooltip).
+export const FEEDBACK_HINWEIS = 'Absage = ohne Gespräch · Absage nach Vorstellung = nach Gespräch';
+const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsgespraech: 'Vorstellungsgespräch', eingestellt: 'Eingestellt', ungeeignet: 'Ungeeignet', absage: 'Absage', absage_nach_vg: 'Absage nach Vorstellung', abgesagt: 'Absage' };
+const FEEDBACK_COLOR = { interessant: '#1e40af', vorstellungsgespraech: '#5b21b6', eingestellt: '#166534', absage: '#b91c1c', absage_nach_vg: '#b91c1c', abgesagt: '#b91c1c', ungeeignet: '#b45309' };
 // Normalisiert auf die Filter-/Dropdown-Werte (abgesagt→absage, leer→neu).
+// 'absage_nach_vg' bleibt ein EIGENER Wert (nicht auf 'absage' zusammenziehen).
 export function feedbackStatusOf(b) { const s = b?.feedback?.status || 'neu'; return s === 'abgesagt' ? 'absage' : s; }
 // Abgeleiteter Bearbeitungsstatus (NICHT bewerber_notizen.status). Erster Treffer gilt.
 export const BEARBEITUNG = [
@@ -81,13 +170,17 @@ const BEARB_BY_KEY = Object.fromEntries(BEARBEITUNG.map(x => [x.key, x]));
 export function istEingestellt(b) {
   return b?.notiz?.eingestellt === 'ja' || (b?.feedback?.status || null) === 'eingestellt';
 }
+// Kundenfeedback-Status, die eine echte Vorstellung belegen (siehe Backend
+// bewerber-bearbeitung.js): 'absage'/'ungeeignet' allein heben NICHT auf „Vorgestellt".
+const VORGESTELLT_FB = new Set(['interessant', 'vorstellungsgespraech', 'absage_nach_vg', 'eingestellt']);
 export function bearbeitungStatus(b) {
   const n = b?.notiz || {};
   const fb = b?.feedback?.status || null;
+  const fbVgDatum = b?.feedback?.vorstellungsgespraech_am || null;
   const av = Array.isArray(n.anrufversuche) ? n.anrufversuche.filter(a => a?.datum) : [];
   if (istEingestellt(b)) return { key: 'eingestellt' };
-  if (n.vg_vereinbart_am || fb === 'vorstellungsgespraech') return { key: 'vg' };
-  if (n.kunde_kontaktiert || (fb && fb !== 'neu')) return { key: 'vorgestellt' };
+  if (n.vg_vereinbart_am || fb === 'vorstellungsgespraech' || fbVgDatum) return { key: 'vg' };
+  if (n.kunde_kontaktiert || VORGESTELLT_FB.has(fb)) return { key: 'vorgestellt' };
   if (n.nw_kontaktiert || av.some(a => a.erreicht === true || a.ergebnis === 'erreicht')) return { key: 'vorqualifiziert' };
   if (av.length > 0) return { key: 'kontaktversuch', n: av.length };
   const check = n.kriterien_check || {};
@@ -383,7 +476,7 @@ export function BewerberListe({ job, bewerbungen, kunde, primary, modus = 'kunde
     const fbSel = feedbackStatusOf(b); const fb = b.feedback?.status || '';
     return onFeedback ? (
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        <select value={fbSel} onChange={e => saveFeedback(b.id, { status: e.target.value })} style={inlineSel}>
+        <select value={fbSel} title={FEEDBACK_HINWEIS} onChange={e => saveFeedback(b.id, { status: e.target.value })} style={inlineSel}>
           {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
         {fbSel === 'vorstellungsgespraech' && (
@@ -770,7 +863,7 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <label style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}>Status
                   <select value={b.feedback?.status && FEEDBACK_OPTIONS.some(o => o.key === b.feedback.status) ? b.feedback.status : ''}
-                    onChange={e => setFeedback({ status: e.target.value || 'neu' })}
+                    onChange={e => setFeedback({ status: e.target.value || 'neu' })} title={FEEDBACK_HINWEIS}
                     style={{ border: '1px solid #ccd3e6', borderRadius: 8, padding: '5px 8px', fontSize: 12 }}>
                     {FEEDBACK_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
                   </select>
@@ -818,7 +911,7 @@ export function BewerberAkte({ bewerbung: b, job, kunde, primary, modus = 'kunde
 
           {anhaenge.length > 0 && <>
             <h3 ref={anhaengeRef} style={h3}>Anhänge</h3>
-            {anhaenge.map((a, i) => <div key={i}><AnhangItem a={a} index={i} /></div>)}
+            {anhaenge.map((a, i) => <div key={i} style={{ marginBottom: 6 }}><AnhangItem a={a} index={i} /><ShareControls a={a} /></div>)}
           </>}
 
           {n.notizen && <>

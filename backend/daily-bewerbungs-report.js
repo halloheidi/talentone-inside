@@ -123,7 +123,7 @@ async function collectRows() {
 
 // Kunden-Feedback-Änderungen der letzten 24h, gruppiert je Kunde mit Status-Aufschlüsselung.
 // Quelle: talentone_bewerber_kundenfeedback.updated_at (vom Kunden im Portal gepflegt).
-const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsgespraech: 'Gespräch', eingestellt: 'Eingestellt', ungeeignet: 'ungeeignet', absage: 'Absage', abgesagt: 'Absage' };
+const FEEDBACK_LABEL = { neu: 'Neu', interessant: 'Interessant', vorstellungsgespraech: 'Gespräch', eingestellt: 'Eingestellt', ungeeignet: 'ungeeignet', absage: 'Absage', absage_nach_vg: 'Absage nach Vorstellung', abgesagt: 'Absage' };
 async function collectKundenFeedbackAenderungen() {
   const seit24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { data: fb = [] } = await supabase.from('talentone_bewerber_kundenfeedback')

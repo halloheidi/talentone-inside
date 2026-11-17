@@ -9,7 +9,7 @@ import { normalizeKriterien, kundenVorqualSpalten, syncKriterienMitFeldern, norm
 import { laufzeitStatus } from '../laufzeit.js';
 import { invalidateKanban, invalidateLaufzeit } from '../kanban-cache.js';
 import { uploadBuffer, deleteFromBucket, safeFilenameStem } from '../storage.js';
-import { attachStableAnhaenge } from '../anhaenge.js';
+import { attachStableAnhaenge, resolveAnhangDownload } from '../anhaenge.js';
 import { normalizeImageForStorage } from '../imageops.js';
 import { extractFromUrl, extractFromFile } from '../extractor.js';
 import { extractColorsFromUrl, extractColorsFromImageBuffer } from '../colors.js';
@@ -1106,7 +1106,7 @@ router.post('/feedback/:token', async (req, res) => {
 
 /* ════════════════════ Public Bewerberliste (Token) ════════════════════ */
 
-const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'abgesagt'];
+const FEEDBACK_STATI = ['neu', 'interessant', 'vorstellungsgespraech', 'eingestellt', 'ungeeignet', 'absage', 'absage_nach_vg', 'abgesagt'];
 
 async function loadJobByToken(token) {
   const { data } = await supabase
@@ -2721,5 +2721,44 @@ router.post('/gw-optin/:token/bestaetigen', async (req, res) => {
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// GET /api/public/u/:sharetoken — teilbarer Anhang-Link (kein Login, kein Portal-Token).
+// Liefert eine frische Signed URL NUR für diesen einen Anhang (keine Bewerberdaten).
+// Jeder Aufruf wird protokolliert. Widerrufen/abgelaufen → 410.
+router.get('/u/:sharetoken', async (req, res) => {
+  try {
+    const wantsJson = req.query.format === 'json' || String(req.headers.accept || '').includes('application/json');
+    const fehler = (status, msg) => wantsJson ? res.status(status).json({ error: msg }) : res.status(status).type('html').send(
+      `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link nicht verfügbar</title></head><body style="margin:0;font-family:-apple-system,Helvetica,Arial,sans-serif;background:#f0efed;color:#0a0a0a;"><div style="max-width:420px;margin:12vh auto;padding:28px 26px;background:#fff;border-radius:14px;text-align:center;"><div style="font-size:34px;margin-bottom:10px;">📄</div><h1 style="font-size:17px;margin:0 0 8px;">${msg}</h1></div></body></html>`);
+
+    const { data: share } = await supabase.from('talentone_anhang_shares')
+      .select('id, bewerbung_id, anhang_index, gueltig_bis, widerrufen_am').eq('share_token', req.params.sharetoken).maybeSingle();
+    if (!share) return fehler(404, 'Dieser Link ist ungültig.');
+    if (share.widerrufen_am) return fehler(410, 'Dieser Link wurde widerrufen.');
+    if (share.gueltig_bis && new Date(share.gueltig_bis) < new Date()) return fehler(410, 'Dieser Link ist abgelaufen.');
+
+    const { data: bew } = await supabase.from('talentone_bewerbungen')
+      .select('id, anhaenge').eq('id', share.bewerbung_id).maybeSingle();
+    const anhang = Array.isArray(bew?.anhaenge) ? bew.anhaenge[share.anhang_index] : null;
+    if (!anhang) return fehler(404, 'Die Datei ist nicht mehr verfügbar.');
+
+    const result = await resolveAnhangDownload({ bewerbungId: share.bewerbung_id, anhang, index: share.anhang_index });
+    if (result.dead || !result.url) return fehler(410, 'Datei beim Anbieter nicht mehr verfügbar.');
+
+    // Aufruf protokollieren (best-effort, blockiert den Download nicht).
+    try {
+      await supabase.from('talentone_anhang_shares')
+        .update({ aufrufe: await zaehleAufrufe(share.id), letzter_aufruf_am: new Date().toISOString() })
+        .eq('id', share.id);
+    } catch (e) { console.warn('[anhang-share] aufruf-log:', e.message); }
+
+    if (wantsJson) return res.json({ url: result.url, dateiname: result.dateiname });
+    return res.redirect(302, result.url);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+async function zaehleAufrufe(id) {
+  const { data } = await supabase.from('talentone_anhang_shares').select('aufrufe').eq('id', id).maybeSingle();
+  return (data?.aufrufe || 0) + 1;
+}
 
 export default router;
