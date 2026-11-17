@@ -415,7 +415,7 @@ const TABS = [
 // Icons für die eingeklappte Stellen-Sidebar (<1100px nur Icon + Tooltip).
 const JOB_NAV_ICON = {
   stelle: '📋', vertrag: '🤝', bewerber: '👥', creatives: '🎨',
-  'creatives-v2': '🎨', adcopies: '✍️', funnel: '🧭', export: '🚀', meta: '📣',
+  'creatives-v2': '🎨', reel: '🎬', adcopies: '✍️', funnel: '🧭', export: '🚀', meta: '📣',
 };
 
 const STATUS_LABELS = {
@@ -624,14 +624,16 @@ export default function JobView() {
     const bew = sp.get('bewerbung');
     navigate(`/kunden/${kundeId}/jobs/${jobId}/bewerber${bew ? `?bewerbung=${bew}` : ''}`, { replace: true });
   }, [sp, kundeId, jobId, navigate]);
-  const { me, user, flags } = useAuth();
+  const { me, user, flags, isAdmin } = useAuth();
   // Creative-Wizard V2 (Test): Reiter per Flag. Alt-Reiter „Creatives" wird bei
   // hide_creatives_v1 ausgeblendet (nicht gelöscht — Rückweg bleibt jederzeit).
+  // Reel-Modul (Test): Reiter nach Creatives V2, nur für Admins.
   const sichtbareTabs = TABS.flatMap(t => {
     if (t.to !== 'creatives') return [t];
     const alt = flags?.hide_creatives_v1 ? [] : [t];
     const v2 = flags?.creative_wizard_v2 ? [{ to: 'creatives-v2', label: 'Creatives V2 (Test)' }] : [];
-    return [...alt, ...v2];
+    const reel = isAdmin ? [{ to: 'reel', label: 'Reel (Test)' }] : [];
+    return [...alt, ...v2, ...reel];
   });
   const [job, setJob] = useState(null);
   const [kunde, setKunde] = useState(null);

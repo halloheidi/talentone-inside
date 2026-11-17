@@ -33,6 +33,7 @@ import JobVertragStatus from './pages/job/JobVertragStatus.jsx';
 import JobBewerber from './pages/job/JobBewerber.jsx';
 import JobCreatives from './pages/job/JobCreatives.jsx';
 import JobCreativesV2 from './pages/job/JobCreativesV2.jsx';
+import JobReel from './pages/job/JobReel.jsx';
 import JobAdCopies from './pages/job/JobAdCopies.jsx';
 import JobFunnel from './pages/job/JobFunnel.jsx';
 import JobExport from './pages/job/JobExport.jsx';
@@ -128,6 +129,7 @@ export default function App() {
           <Route path="bewerber" element={<JobBewerber />} />
           <Route path="creatives" element={<JobCreatives />} />
           <Route path="creatives-v2" element={<JobCreativesV2 />} />
+          <Route path="reel" element={<JobReel />} />
           <Route path="adcopies" element={<JobAdCopies />} />
           <Route path="funnel" element={<JobFunnel />} />
           <Route path="export" element={<JobExport />} />
