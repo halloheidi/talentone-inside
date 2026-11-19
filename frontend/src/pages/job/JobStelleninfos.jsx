@@ -638,7 +638,7 @@ function PruefungVersand({ job, kunde, reload }) {
         footer={
           <>
             <button type="button" className="btn-ghost" onClick={() => setShow(false)} disabled={busy}>Abbrechen</button>
-            <button type="button" className="btn-primary" onClick={send}
+            <button type="button" className="btn-primary" onClick={() => send()}
               disabled={busy || anredeMissing || (!wantPruefung && !wantUpload) || (wantPruefung && !form.to.trim())}>
               {busy ? 'Sende…' : 'Absenden'}
             </button>

@@ -326,7 +326,9 @@ export default function JobExport() {
           adcopy_ids: Array.from(selectedAdcopies),
           include_funnel: mailForm.include_funnel,
           resend_mode: mailForm.resend_mode || undefined,
-          leak_bestaetigt: leakBestaetigt || undefined,
+          // Nur ein echtes `true` (aus dem Leak-Modal) zählt — niemals ein versehentlich
+          // durchgereichtes Click-Event, das sonst als zirkuläre Struktur den JSON-Body sprengt.
+          leak_bestaetigt: leakBestaetigt === true ? true : undefined,
         },
       });
       setMailErr(false);
@@ -921,14 +923,14 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
         footer={
           <>
             <button className="btn-ghost" onClick={() => setShowMail(false)} disabled={mailBusy}>Abbrechen</button>
-            <button className="btn-ghost" onClick={vorschauMail} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
+            <button className="btn-ghost" onClick={() => vorschauMail()} disabled={mailBusy || anredeOffen(mailKunde || kunde)}
               title="Fertig gerenderte Mail in neuem Tab ansehen (kein Versand)">👁 Vorschau</button>
             {mailForm.mailKontext === 'update' ? (
-              <button className="btn-primary" onClick={sendMail} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
+              <button className="btn-primary" onClick={() => sendMail()} disabled={mailBusy || !mailForm.to.trim() || selectedCreatives.size === 0 || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : '📬 Update senden'}
               </button>
             ) : (
-              <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim() || anredeOffen(mailKunde || kunde)}>
+              <button className="btn-primary" onClick={() => setShowPreflight(true)} disabled={mailBusy || !mailForm.to.trim() || selectedCreatives.size === 0 || anredeOffen(mailKunde || kunde)}>
                 {mailBusy ? 'Sende…' : 'Weiter zum Check…'}
               </button>
             )}
@@ -937,10 +939,15 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
       >
         <p className="pane-hint">
           {mailForm.mailKontext === 'update'
-            ? <>Neue/optimierte Anzeigen ({selectedCreatives.size} Creatives, {selectedAdcopies.size} Ad-Copies) gehen an den Kunden zur <strong>Freigabe</strong>. Die Kampagne läuft weiter — erst nach dem Go des Kunden schalten wir die neuen Anzeigen live.</>
-            : <>Mail mit den ausgewählten Creatives ({selectedCreatives.size}), Ad-Copies ({selectedAdcopies.size})
-              {mailForm.include_funnel && funnel?.veroeffentlicht ? ' und Funnel-Link' : ''} wird an den Kunden gesendet.</>}
+            ? <><strong>{selectedCreatives.size} Creative{selectedCreatives.size === 1 ? '' : 's'}, {selectedAdcopies.size} Ad-Cop{selectedAdcopies.size === 1 ? 'y' : 'ies'}</strong> gehen an den Kunden zur <strong>Freigabe</strong> (genau die angehakten). Die Kampagne läuft weiter — erst nach dem Go des Kunden schalten wir die neuen Anzeigen live.</>
+            : <><strong>{selectedCreatives.size} Creative{selectedCreatives.size === 1 ? '' : 's'}, {selectedAdcopies.size} Ad-Cop{selectedAdcopies.size === 1 ? 'y' : 'ies'}</strong> gehen an den Kunden (genau die angehakten)
+              {mailForm.include_funnel && funnel?.veroeffentlicht ? ' — plus Funnel-Link' : ''}.</>}
         </p>
+        {selectedCreatives.size === 0 && (
+          <p className="pane-hint" style={{ color: '#9a5a00', margin: '0 0 8px' }}>
+            Kein Creative angehakt — bitte oben mindestens eines auswählen. (Die Testmail unten nutzt dieselbe Auswahl.)
+          </p>
+        )}
 
         {/* Anrede zuerst — der Mail-Text wird erst nach der Du/Sie-Wahl erzeugt. */}
         <AnredeAbfrage kunde={mailKunde || kunde} onSaved={onMailAnredeSaved} />
@@ -980,7 +987,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
                 <input type="email" style={{ flex: '1 1 220px', minWidth: 0 }} value={testMailTo}
                   onChange={e => setTestMailTo(e.target.value)} placeholder="dein.name@nowagwirth.de" />
                 <button type="button" className="btn-ghost btn-sm" style={{ flex: '0 0 auto' }}
-                  onClick={testMail} disabled={mailBusy || !testMailTo.trim()}>
+                  onClick={() => testMail()} disabled={mailBusy || !testMailTo.trim()}>
                   ✉️ Testmail senden
                 </button>
               </div>
@@ -1213,7 +1220,7 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
             <button className="btn-ghost" onClick={() => setShowReak(false)} disabled={reakBusy}>Abbrechen</button>
             <button
               className="btn-primary"
-              onClick={sendReak}
+              onClick={() => sendReak()}
               disabled={reakBusy || !reakForm.to.trim() || reakForm.selected.size === 0 || anredeOffen(kunde)}
             >
               {reakBusy ? 'Sende…' : 'Absenden'}
@@ -1583,7 +1590,7 @@ function PauseFieldset({ kunde, job, letzteKampagnePause, onSent, onKundeUpdated
             />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
               <button className="btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Abbrechen</button>
-              <button className="btn-primary" onClick={send} disabled={busy}>
+              <button className="btn-primary" onClick={() => send()} disabled={busy}>
                 {busy ? 'Sende…' : '⏸ Jetzt senden'}
               </button>
             </div>

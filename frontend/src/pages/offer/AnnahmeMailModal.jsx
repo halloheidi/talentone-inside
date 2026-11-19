@@ -67,7 +67,7 @@ export default function AnnahmeMailModal({ offer, onClose, onSent }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button className="btn-ghost" onClick={onClose} disabled={busy}>Abbrechen</button>
           <button className="btn-ghost" onClick={() => entwurfLaden(absender)} disabled={busy || laden}>KI neu entwerfen</button>
-          <button className="btn-primary" onClick={senden} disabled={busy || laden}>{busy ? 'Sende…' : 'Mit Annahme-Link senden'}</button>
+          <button className="btn-primary" onClick={() => senden()} disabled={busy || laden}>{busy ? 'Sende…' : 'Mit Annahme-Link senden'}</button>
         </div>
       </div>
     </Modal>

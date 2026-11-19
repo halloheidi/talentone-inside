@@ -58,6 +58,15 @@ function filterByIds(list, ids) {
   return list.filter(x => set.has(x.id));
 }
 
+// Strikte Variante für kundengerichteten Versand: es geht AUSSCHLIESSLICH raus, was
+// explizit angehakt wurde. Kein Fallback auf „alle" — eine leere/fehlende Auswahl
+// ergibt eine leere Liste (der Button ist im Frontend dann deaktiviert).
+function filterByIdsStrict(list, ids) {
+  if (!Array.isArray(ids)) return [];
+  const set = new Set(ids);
+  return list.filter(x => set.has(x.id));
+}
+
 /* GET /api/jobs/:id/export — Übersichts-Daten für den Export-Tab */
 router.get('/jobs/:id/export', async (req, res) => {
   try {
@@ -153,8 +162,8 @@ router.post('/jobs/:id/export/email', async (req, res) => {
   try {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
     const baseUrl = getPublicBaseUrl(kunde?.agentur);
-    const selCreatives = filterByIds(creatives, creative_ids);
-    const selAdcopies = filterByIds(adcopies, adcopy_ids);
+    const selCreatives = filterByIdsStrict(creatives, creative_ids);
+    const selAdcopies = filterByIdsStrict(adcopies, adcopy_ids);
     const funnelUrl = !include_funnel || !funnel?.id ? null
       : (funnel.extern && funnel.extern_url) ? funnel.extern_url
       : `${baseUrl}/f/${funnel.id}`;
@@ -388,8 +397,8 @@ async function bereiteEntwurfInputs(jobId, body) {
   } catch (e) { console.warn('[entwurf-vorschau avv]', e.message); }
   return {
     job, kunde,
-    selCreatives: filterByIds(creatives, creative_ids),
-    selAdcopies: filterByIds(adcopies, adcopy_ids),
+    selCreatives: filterByIdsStrict(creatives, creative_ids),
+    selAdcopies: filterByIdsStrict(adcopies, adcopy_ids),
     funnelUrl, sheetUrl, reviewUrl, avvUrl,
     finalBetreff, anschreiben: anschreiben || null,
     variant: istUpdate ? 'update' : 'entwurf',
@@ -445,8 +454,8 @@ router.post('/jobs/:id/export/kampagne-update', async (req, res) => {
   try {
     const { job, kunde, creatives, adcopies, funnel } = await loadFullJob(req.params.id);
     const baseUrl = getPublicBaseUrl(kunde?.agentur);
-    const selCreatives = filterByIds(creatives, creative_ids);
-    const selAdcopies = filterByIds(adcopies, adcopy_ids);
+    const selCreatives = filterByIdsStrict(creatives, creative_ids);
+    const selAdcopies = filterByIdsStrict(adcopies, adcopy_ids);
     const funnelUrl = !include_funnel || !funnel?.id ? null
       : (funnel.extern && funnel.extern_url) ? funnel.extern_url
       : `${baseUrl}/f/${funnel.id}`;

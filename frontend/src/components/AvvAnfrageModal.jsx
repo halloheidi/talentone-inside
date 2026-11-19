@@ -50,7 +50,7 @@ export default function AvvAnfrageModal({ open, kunde: kundeProp, onClose, onSen
       footer={
         <>
           <button className="btn-ghost" onClick={() => onClose?.()} disabled={busy}>Abbrechen</button>
-          <button className="btn-primary" onClick={send} disabled={busy || !to.trim() || anredeOffen(kunde)}>
+          <button className="btn-primary" onClick={() => send()} disabled={busy || !to.trim() || anredeOffen(kunde)}>
             {busy ? 'Sende…' : 'AVV-Anfrage senden'}
           </button>
         </>
