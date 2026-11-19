@@ -25,6 +25,14 @@ export function identitaet(job, kunde) {
     website_domain: null,
     website_url: null,
     perspective_brand_id: a.perspective_brand_id ?? null,
+    // Echte Kunden-PII niemals am neutralen Identitätsobjekt mitschleppen — sonst
+    // leakt sie, sobald ein (künftiger) kandidatensichtbarer Renderer eines dieser
+    // Felder liest. Für den anonymen Absender steht absenderName() bereit.
+    ansprechpartner: a.absender_name || null,
+    nachname: null,
+    vorname: null,
+    email: null,
+    telefon: null,
     // Marker für Hard-Stop / Badges (nicht kandidatensichtbar):
     _anonym: true,
     _echter_firmenname: kunde?.firmenname || '',
