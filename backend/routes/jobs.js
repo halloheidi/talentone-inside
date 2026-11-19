@@ -15,8 +15,40 @@ import { laufzeitStatus } from '../laufzeit.js';
 import { invalidateKanban } from '../kanban-cache.js';
 import { anzahlPersonen, personenGruppen } from '../dubletten.js';
 import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
+import { uploadBuffer } from '../storage.js';
+import { makeTransparent } from '../logo.js';
 
 const router = Router();
+
+// POST /api/jobs/:id/anonym/logo  body: { base64, filename? }
+// Lädt ein Logo für die NEUTRALE Identität einer anonymen Stelle in einen EIGENEN Pfad hoch
+// (nicht talentone_kunden.logo_url). Liefert logo_url + logo_transparent_url; die Frontend-UI
+// speichert sie ins job.anonym-Objekt per PATCH.
+router.post('/:id/anonym/logo', async (req, res) => {
+  try {
+    const { base64 } = req.body || {};
+    if (!base64) return res.status(400).json({ error: 'base64 fehlt.' });
+    const buf = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!buf.length) return res.status(400).json({ error: 'Bild leer.' });
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const logo_url = await uploadBuffer({
+      bucket: 'talentone-logos', path: `anonym/${req.params.id}/${stamp}.png`,
+      buffer: buf, contentType: 'image/png',
+    });
+    let logo_transparent_url = null;
+    try {
+      const trans = await makeTransparent(buf);
+      logo_transparent_url = await uploadBuffer({
+        bucket: 'talentone-logos', path: `anonym/${req.params.id}/${stamp}-transparent.png`,
+        buffer: trans, contentType: 'image/png',
+      });
+    } catch (e) { console.warn('[anonym-logo] transparent skip:', e.message); }
+    res.json({ logo_url, logo_transparent_url });
+  } catch (err) {
+    console.error('[anonym-logo]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* Umbau „Projekt in die Stelle": jede Stelle hat genau ein verknüpftes Projekt.
    Idempotent: projekt_id gesetzt → laden; sonst bestehendes (kunde_id, stelle) teilen;
@@ -321,6 +353,8 @@ const ALLOWED_JOB_FIELDS = [
   'projekt_id',
   // Daten-nach-Creatives-geändert-Warnung (Migration 051) — zum Ausblenden per PATCH
   'daten_geaendert_nach_creatives_at',
+  // Anonyme Stelle: neutrale Identität (Migration 118)
+  'anonym',
 ];
 
 router.patch('/:id', async (req, res) => {

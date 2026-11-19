@@ -228,12 +228,23 @@ export async function sendDatenPruefungMail({ to, betreff, customText, kunde, jo
     ? `<p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">${escape(fotoSatz)}</p>`
     : '';
 
+  // Anonyme Stelle: Hinweis, dass Bewerber die neutrale Identität sehen (nicht den echten Namen).
+  const anonymHinweis = job?.anonym?.aktiv
+    ? t(k,
+      `Hinweis: Diese Stelle läuft anonym als „${job.anonym.name || 'neutrale Identität'}". Bewerber sehen diese neutrale Identität — nicht euren Firmennamen.`,
+      `Hinweis: Diese Stelle läuft anonym als „${job.anonym.name || 'neutrale Identität'}". Bewerber sehen diese neutrale Identität — nicht Ihren Firmennamen.`)
+    : '';
+  const anonymHinweisHtml = anonymHinweis
+    ? `<tr><td style="padding:0 32px 18px;"><p style="font-size:13px;line-height:1.6;color:#5a5955;margin:0;background:#f4f3f0;border-radius:8px;padding:10px 14px;">🕵️ ${escape(anonymHinweis)}</p></td></tr>`
+    : '';
+
   const content = `
     <tr><td style="padding:28px 32px 8px;">
       <p style="font-size:15px;line-height:1.55;color:#0a0a0a;margin:0 0 14px;">${escape(grusszeile)},</p>
       <p style="font-size:15px;line-height:1.6;color:#2a2a2a;margin:0 0 22px;">${escape(intro).replace(/\n/g, '<br>')}</p>
       ${fotoSatzHtml}
     </td></tr>
+    ${anonymHinweisHtml}
     <tr><td align="center" style="padding:0 32px 28px;">
       <a href="${escape(pruefungUrl)}" style="display:inline-block;background:${brand.accent};color:${brand.accentInk};text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:100px;letter-spacing:0.02em;">Angaben prüfen &amp; ergänzen →</a>
       <p style="font-size:11px;color:#9a9994;margin:14px 0 0;">Der Link zeigt immer den aktuellen Stand — ${t(k, 'du kannst ihn jederzeit erneut öffnen', 'Sie können ihn jederzeit erneut öffnen')}.</p>
@@ -245,7 +256,7 @@ export async function sendDatenPruefungMail({ to, betreff, customText, kunde, jo
     </td></tr>`;
 
   const html = brandedShell({ brand, contentHtml: content });
-  const text = `${grusszeile},\n\n${intro}\n${fotoSatz ? `\n${fotoSatz}\n` : ''}\nAngaben prüfen & ergänzen: ${pruefungUrl}\n${uploadUrl ? `\nLogo & Fotos hochladen: ${uploadUrl}\n` : ''}\n(Der Link zeigt immer den aktuellen Stand.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
+  const text = `${grusszeile},\n\n${intro}\n${fotoSatz ? `\n${fotoSatz}\n` : ''}${anonymHinweis ? `\n${anonymHinweis}\n` : ''}\nAngaben prüfen & ergänzen: ${pruefungUrl}\n${uploadUrl ? `\nLogo & Fotos hochladen: ${uploadUrl}\n` : ''}\n(Der Link zeigt immer den aktuellen Stand.)\n\n${t(k, 'Euer', 'Ihr')} ${brand.name}-Team`;
 
   const response = await fetch(RESEND_API, {
     method: 'POST',

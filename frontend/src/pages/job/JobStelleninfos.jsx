@@ -299,6 +299,9 @@ export default function JobStelleninfos() {
         <PruefungVersand job={job} kunde={kunde} reload={reload} />
       </div>
 
+      {/* Anonyme Stelle: neutrale Identität statt echtem Kunden */}
+      <AnonymeStelleSection job={job} kunde={kunde} reload={reload} />
+
       {/* ───────── Logo-Header ───────── */}
       <div className={`stelle-header ${kunde?.logo_url ? 'has-logo' : 'no-logo'}`}>
         <button
@@ -1016,5 +1019,137 @@ function FunnelStats({ jobId }) {
         </>
       ))}
     </fieldset>
+  );
+}
+
+// ───────── Anonyme Stelle: neutrale Identität am Job ─────────
+// Schalter + Felder + Logo-Upload (eigener Pfad) + Farben + Vorschau. Speichert das
+// komplette anonym-Objekt per PATCH /jobs/:id. Wirkt serverseitig über identitaet(job).
+const ANON_DEFAULT_FARBEN = { primaer: '#6b8e23', sekundaer: '#2f2a22', akzent: '#c4a066' };
+function AnonymeStelleSection({ job, kunde, reload }) {
+  const initial = () => ({
+    aktiv: false, name: '', ort_anzeige: '', branche: '', absender_name: '',
+    facebook_seite: 'Hofjobs', logo_url: null, logo_transparent_url: null,
+    ...(job.anonym || {}),
+    farben: { ...ANON_DEFAULT_FARBEN, ...(job.anonym?.farben || {}) },
+  });
+  const [a, setA] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const logoRef = useRef(null);
+
+  useEffect(() => { setA(initial()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [job.id]);
+
+  async function save(next) {
+    setBusy(true); setMsg('');
+    try { await api(`/jobs/${job.id}`, { method: 'PATCH', body: { anonym: next } }); setMsg('gespeichert ✓'); reload?.(); }
+    catch (e) { setMsg('Fehler: ' + e.message); }
+    finally { setBusy(false); setTimeout(() => setMsg(''), 2500); }
+  }
+  function upd(patch) { const next = { ...a, ...patch }; setA(next); return next; }
+
+  async function onLogo(e) {
+    const file = e.target.files?.[0]; if (!file) return;
+    setLogoBusy(true); setMsg('');
+    try {
+      const base64 = await fileToBase64(file);
+      const r = await api(`/jobs/${job.id}/anonym/logo`, { method: 'POST', body: { base64 } });
+      await save(upd({ logo_url: r.logo_url, logo_transparent_url: r.logo_transparent_url }));
+    } catch (err) { setMsg('Logo-Upload fehlgeschlagen: ' + err.message); }
+    finally { setLogoBusy(false); if (logoRef.current) logoRef.current.value = ''; }
+  }
+
+  const box = { border: '1px solid #e5e7eb', borderRadius: 12, padding: 16, marginBottom: 16, background: a.aktiv ? '#fafaf7' : '#fff' };
+  const lbl = { display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 };
+  const inp = { width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' };
+
+  return (
+    <div style={box}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!a.aktiv} disabled={busy}
+          onChange={e => save(upd({ aktiv: e.target.checked }))} />
+        <span style={{ fontWeight: 700, fontSize: 15 }}>🕵️ Anonyme Stelle</span>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>
+          — zeigt Bewerbern eine neutrale Identität statt „{kunde?.firmenname || 'dem Kunden'}"
+        </span>
+      </label>
+
+      {a.aktiv && (
+        <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px' }}>
+            Gilt nur für diese Stelle. Funnel, Creatives, Ad-Copies und die Prüfungsseite nutzen die neutrale Identität. Das Kunden-Portal bleibt beim echten Kunden.
+          </div>
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={lbl}>Neutraler Name *</label>
+            <input style={inp} value={a.name || ''} placeholder="z. B. Reiterhof am Niederrhein"
+              onChange={e => setA({ ...a, name: e.target.value })} onBlur={() => save(a)} />
+          </div>
+
+          <div>
+            <label style={lbl}>Anzeige-Ort</label>
+            <input style={inp} value={a.ort_anzeige || ''} placeholder={job.region || 'Region'}
+              onChange={e => setA({ ...a, ort_anzeige: e.target.value })} onBlur={() => save(a)} />
+          </div>
+          <div>
+            <label style={lbl}>Branche (neutral)</label>
+            <input style={inp} value={a.branche || ''} placeholder="z. B. Landwirtschaft / Pferdebetrieb"
+              onChange={e => setA({ ...a, branche: e.target.value })} onBlur={() => save(a)} />
+          </div>
+
+          <div>
+            <label style={lbl}>Absendername (Mails)</label>
+            <input style={inp} value={a.absender_name || ''} placeholder={a.name || 'neutraler Absender'}
+              onChange={e => setA({ ...a, absender_name: e.target.value })} onBlur={() => save(a)} />
+          </div>
+          <div>
+            <label style={lbl}>Facebook-Seite (Hinweis)</label>
+            <input style={inp} value={a.facebook_seite || ''} placeholder="Hofjobs"
+              onChange={e => setA({ ...a, facebook_seite: e.target.value })} onBlur={() => save(a)} />
+            <span style={{ fontSize: 11, color: '#9ca3af' }}>Nur Hinweis fürs manuelle Schalten — steuert keine Ads automatisch.</span>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={lbl}>Logo (eigener Upload)</label>
+              <button type="button" onClick={() => !logoBusy && logoRef.current?.click()}
+                style={{ ...inp, width: 120, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: '#fff' }}>
+                {a.logo_url ? <img src={a.logo_url} alt="" style={{ maxWidth: '100%', maxHeight: '100%' }} /> : <span style={{ color: '#9ca3af', fontSize: 12 }}>{logoBusy ? '…' : '+ Logo'}</span>}
+              </button>
+              <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" style={{ display: 'none' }} onChange={onLogo} />
+            </div>
+            {['primaer', 'sekundaer', 'akzent'].map(k => (
+              <div key={k}>
+                <label style={lbl}>{k === 'primaer' ? 'Primär' : k === 'sekundaer' ? 'Sekundär' : 'Akzent'}</label>
+                <input type="color" value={a.farben?.[k] || ANON_DEFAULT_FARBEN[k]} style={{ width: 54, height: 40, border: 'none', background: 'none', cursor: 'pointer' }}
+                  onChange={e => setA({ ...a, farben: { ...a.farben, [k]: e.target.value } })}
+                  onBlur={() => save(a)} />
+              </div>
+            ))}
+          </div>
+
+          {/* Vorschau-Kachel */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={lbl}>Vorschau (so sehen Bewerber die Identität)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12,
+              background: a.farben?.primaer || ANON_DEFAULT_FARBEN.primaer, color: '#fff' }}>
+              {a.logo_url
+                ? <img src={a.logo_url} alt="" style={{ height: 40, background: '#fff', borderRadius: 6, padding: 4 }} />
+                : <span style={{ height: 40, width: 40, borderRadius: 6, background: '#ffffff33', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{(a.name || '?').slice(0, 1).toUpperCase()}</span>}
+              <div>
+                <div style={{ fontWeight: 700 }}>{a.name || 'Neutraler Name'}</div>
+                <div style={{ fontSize: 12, opacity: 0.85 }}>{job.stelle} · {a.ort_anzeige || job.region}</div>
+              </div>
+              <span style={{ marginLeft: 'auto', fontSize: 12, background: a.farben?.akzent || ANON_DEFAULT_FARBEN.akzent, color: '#111', padding: '4px 10px', borderRadius: 999, fontWeight: 600 }}>Jetzt bewerben</span>
+            </div>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1', fontSize: 12, color: busy ? '#6b7280' : (msg.startsWith('Fehler') ? '#b91c1c' : '#16a34a') }}>
+            {busy ? 'speichert…' : msg}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -132,6 +132,33 @@ export async function findOrCreateBrandForKunde(kunde) {
 }
 
 /**
+ * Erstellt eine NEUTRALE Brand aus einer Beschreibung (ohne Domain) — für anonyme Stellen.
+ * Kein Domain-Scraping => kein Leak der echten Kundenidentität (Logo/Name/Farben).
+ * @param {object} p
+ * @param {string} p.name           Anzeige-/Identitätsname (z. B. "Reiterhof am Niederrhein")
+ * @param {string} p.industry       Branche/Kontext der neutralen Identität
+ * @param {string} p.targetAudience Zielgruppe (Bewerber:innen)
+ * @returns {Promise<{brand_id:string}>}
+ */
+export async function createDescriptionBrand({ name, industry, targetAudience }) {
+  const data = {
+    source: 'description',
+    brandName: String(name || 'Unternehmen').slice(0, 120),
+    industry: String(industry || '').slice(0, 120),
+    targetAudience: String(targetAudience || '').slice(0, 500) || 'Fachkräfte und Bewerber:innen in der Region',
+  };
+  const { tool_uses, tool_results, text } = await askClaudeWithPerspective(
+    `Rufe create_brand mit exakt { "data": ${JSON.stringify(data)} } auf (neutrale Identität, KEINE Domain, kein Domain-Scraping). Antworte am Ende NUR mit { "brand_id": "<id>" }.`,
+    { maxTokens: 2048 }
+  );
+  const created = findToolResult(tool_uses, tool_results, 'create_brand');
+  if (created?.id || created?.brand_id) return { brand_id: String(created.id || created.brand_id) };
+  const m = text.match(/\{[\s\S]*"brand_id"[\s\S]*\}/);
+  if (m) { try { const p = JSON.parse(m[0]); if (p.brand_id) return { brand_id: String(p.brand_id) }; } catch {} }
+  throw new Error('create_brand (description): keine brand_id. Text: ' + text.slice(0, 300));
+}
+
+/**
  * Loest create_funnel mit dem Recruiting-Prompt aus und gibt die job_id zurueck,
  * die dann per get_funnel_job_status gepollt werden kann.
  * @param {object} p

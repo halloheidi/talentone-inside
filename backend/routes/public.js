@@ -457,10 +457,19 @@ router.get('/funnel/:id', async (req, res) => {
   }
   if (!funnel.veroeffentlicht) return res.status(403).json({ error: 'Funnel ist noch nicht veröffentlicht.' });
   const { data: job } = await supabase
-    .from('talentone_jobs').select('id, stelle, region, gehalt, benefits, kunde_id').eq('id', funnel.job_id).maybeSingle();
+    .from('talentone_jobs').select('id, stelle, region, gehalt, benefits, kunde_id, anonym').eq('id', funnel.job_id).maybeSingle();
   const { data: kunde } = job ? await supabase
     .from('talentone_kunden').select('id, firmenname, branche, logo_url, farben, agentur').eq('id', job.kunde_id).maybeSingle() : { data: null };
-  res.json({ funnel, job, kunde });
+  // Anonyme Stelle: neutrale Identität statt echtem Kunden an den Kandidaten ausliefern.
+  const { identitaet, anzeigeOrt, anonymAktiv } = await import('../identitaet.js');
+  const kandidatenKunde = identitaet(job, kunde);
+  const jobAnzeige = job ? { ...job, region: anzeigeOrt(job) } : job;
+  // agentur bleibt für den (neutralen) Footer erhalten; interne Marker nicht nach außen geben.
+  const kundeOut = kandidatenKunde
+    ? { id: kandidatenKunde.id, firmenname: kandidatenKunde.firmenname, branche: kandidatenKunde.branche,
+        logo_url: kandidatenKunde.logo_url, farben: kandidatenKunde.farben, agentur: kunde?.agentur }
+    : null;
+  res.json({ funnel, job: anonymAktiv(job) ? { ...jobAnzeige, kunde_id: undefined } : jobAnzeige, kunde: kundeOut });
 });
 
 // POST /api/public/funnel/:id/bewerbung  body: { name, email, telefon, antworten, ko_kriterium }
@@ -585,6 +594,9 @@ router.get('/review/:token', async (req, res) => {
   res.json({
     job: { id: job.id, stelle: job.stelle, region: job.region, projekttyp: job.projekttyp || 'mitarbeitergewinnung', url: job.url || null },
     kunde,
+    // Review-Seite ist kundengerichtet (echter Kunde). Hinweis, dass Creatives die
+    // neutrale Anonym-Identität tragen und Bewerber diese sehen – nicht den echten Namen.
+    anonym: job.anonym?.aktiv ? { aktiv: true, name: job.anonym.name || null } : null,
     ...brandForKunde(kunde),
     creatives,
     adcopies,
@@ -797,6 +809,13 @@ router.get('/pruefung/:token', async (req, res) => {
       neukunden_daten: job.neukunden_daten || null,
     },
     kunde,
+    // Anonyme Stelle: Prüfungsseite zeigt die neutrale Identität + Hinweis (statt des Kunden).
+    anonym: job.anonym?.aktiv ? {
+      aktiv: true,
+      name: job.anonym?.name || null,
+      logo_url: job.anonym?.logo_url || null,
+      hinweis: `Diese Stelle läuft anonym als „${job.anonym?.name || ''}". Bewerber sehen diese neutrale Identität statt „${kunde?.firmenname || ''}".`,
+    } : null,
     avv: {
       erforderlich: !!avvVersion && !avvAnnahme,
       akzeptiert: !!avvAnnahme,

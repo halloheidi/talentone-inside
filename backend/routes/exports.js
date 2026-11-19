@@ -259,6 +259,27 @@ router.post('/jobs/:id/export/email', async (req, res) => {
       }
     } catch (e) { console.warn('[entwurf avv]', e.message); }
 
+    // ── Hard-Stop: anonyme Stelle, aber echte Kundenidentität in kandidatensichtbaren
+    //    Inhalten (Ad-Copies/Creatives)? Versand stoppen bis bestätigt. ──
+    const { anonymAktiv, identitaetsTokens, findeLeaks } = await import('../identitaet.js');
+    if (anonymAktiv(job) && !req.body?.leak_bestaetigt) {
+      const tokens = identitaetsTokens(kunde); // kunde = echter Kunde aus loadFullJob
+      const texte = [];
+      for (const a of (selAdcopies || [])) {
+        if (a?.text) texte.push(a.text);
+        for (const u of (a?.ueberschriften || [])) texte.push(u);
+      }
+      for (const c of (selCreatives || [])) { if (c?.prompt) texte.push(c.prompt); }
+      const treffer = findeLeaks(texte, tokens);
+      if (treffer.length) {
+        return res.status(409).json({
+          error: 'identitaets_leak',
+          treffer,
+          hinweis: `Anonyme Stelle „${job.anonym?.name || ''}": In den Entwürfen taucht die echte Identität auf (${treffer.join(', ')}). Versand gestoppt — bitte Texte prüfen oder bewusst bestätigen.`,
+        });
+      }
+    }
+
     await sendEntwurfsMail({
       to: to.trim(),
       betreff: finalBetreff, anschreiben: finalAnschreiben,

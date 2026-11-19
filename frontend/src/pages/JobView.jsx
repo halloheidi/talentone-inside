@@ -835,6 +835,13 @@ export default function JobView() {
         <Link to={`/kunden/${kundeId}`}>{kunde?.firmenname || 'Kunde'}</Link>
         <span aria-hidden>›</span>
         <span>{job.stelle || 'Projekt'}</span>
+        {job?.anonym?.aktiv && (
+          <span title={`Diese Stelle läuft anonym als „${job.anonym?.name || ''}" — Bewerber sehen nicht ${kunde?.firmenname || 'den Kunden'}.`}
+            style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: '#7c3aed',
+              background: '#f3e8ff', border: '1px solid #e9d5ff', borderRadius: 999, padding: '2px 10px' }}>
+            🕵️ anonym · als {job.anonym?.name || '—'}
+          </span>
+        )}
       </div>
 
       {/* Formular-Ausgefüllt-Hinweis — dezenter grüner Info-Banner wenn der

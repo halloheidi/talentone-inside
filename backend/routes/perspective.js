@@ -17,9 +17,10 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import {
-  findOrCreateBrandForKunde, createFunnel, getFunnelJobStatus,
+  findOrCreateBrandForKunde, createDescriptionBrand, createFunnel, getFunnelJobStatus,
   publishFunnel, updateFunnel, listDomains, buildRecruitingPrompt, slugify,
 } from '../perspective.js';
+import { identitaet, anonymAktiv, anzeigeOrt } from '../identitaet.js';
 
 const router = Router();
 
@@ -40,24 +41,49 @@ router.post('/create', async (req, res) => {
       .select('*').eq('id', job.kunde_id).maybeSingle();
     if (!kunde) return res.status(404).json({ error: 'Kunde nicht gefunden.' });
 
+    const anon = anonymAktiv(job);
+    const ident = identitaet(job, kunde); // neutrale Identität bei anonymer Stelle, sonst = kunde
+
     // Domain am Kunden speichern, wenn im Request mitgeschickt (User-Editable im Modal).
+    // Bei anonymer Stelle NICHT — die darf keine Kundendomain bekommen.
     let kundenMitDomain = kunde;
-    if (website_domain && website_domain.trim() && website_domain !== kunde.website_domain) {
+    if (!anon && website_domain && website_domain.trim() && website_domain !== kunde.website_domain) {
       const { data: upd } = await supabase.from('talentone_kunden')
         .update({ website_domain: website_domain.trim() }).eq('id', kunde.id)
         .select().single();
       if (upd) kundenMitDomain = upd;
     }
 
-    // 1. Brand ermitteln / erstellen
-    const { brand_id, created: brandCreated } = await findOrCreateBrandForKunde(kundenMitDomain);
-    if (brandCreated && brand_id !== kundenMitDomain.perspective_brand_id) {
-      await supabase.from('talentone_kunden')
-        .update({ perspective_brand_id: brand_id }).eq('id', kundenMitDomain.id);
+    // 1. Brand ermitteln / erstellen.
+    //    Anonyme Stelle: eigene NEUTRALE description-Brand (ohne Domain-Scraping), ID am Job
+    //    gespeichert — NICHT am Kunden (sonst würde der echte Kunde überschrieben).
+    let brand_id;
+    if (anon) {
+      brand_id = job.anonym?.perspective_brand_id;
+      if (!brand_id) {
+        ({ brand_id } = await createDescriptionBrand({
+          name: ident.firmenname,
+          industry: ident.branche || job.stelle || '',
+          targetAudience: `Bewerber:innen für ${job.stelle || 'die Stelle'} in ${anzeigeOrt(job)}`,
+        }));
+        const anonNeu = { ...(job.anonym || {}), perspective_brand_id: brand_id };
+        await supabase.from('talentone_jobs').update({ anonym: anonNeu }).eq('id', job.id);
+        job.anonym = anonNeu;
+      }
+    } else {
+      const r = await findOrCreateBrandForKunde(kundenMitDomain);
+      brand_id = r.brand_id;
+      if (r.created && brand_id !== kundenMitDomain.perspective_brand_id) {
+        await supabase.from('talentone_kunden')
+          .update({ perspective_brand_id: brand_id }).eq('id', kundenMitDomain.id);
+      }
     }
 
-    // 2. Referenzbilder + fertige Creatives einsammeln (letzte 6, nicht-archivierte)
+    // 2. Referenzbilder + fertige Creatives einsammeln (letzte 6, nicht-archivierte).
+    //    Anonyme Stelle: KEINE rohen Referenzfotos (könnten Firmen-Branding tragen) — nur die
+    //    bereits anonymisierten Creatives.
     const [{ data: refs = [] }, { data: creatives = [] }] = await Promise.all([
+      anon ? Promise.resolve({ data: [] }) :
       supabase.from('talentone_referenzbilder').select('bild_url')
         .eq('kunde_id', kunde.id).neq('kunde_freigabe', 'nein').limit(6),  // gesperrte Fotos nie an KI
       supabase.from('talentone_creatives').select('bild_url')
@@ -65,9 +91,10 @@ router.post('/create', async (req, res) => {
     ]);
     const bildUrls = [...refs, ...creatives].map(r => r.bild_url).filter(Boolean).slice(0, 8);
 
-    // 3. Prompt bauen
-    const prompt = buildRecruitingPrompt({ job, kunde: kundenMitDomain, schema, bildUrls });
-    const funnelName = `${kundenMitDomain.firmenname} — ${job.stelle || 'Recruiting-Funnel'}`.slice(0, 120);
+    // 3. Prompt bauen — bei anonymer Stelle mit neutraler Identität + Anzeige-Ort.
+    const jobFuerPrompt = anon ? { ...job, region: anzeigeOrt(job) } : job;
+    const prompt = buildRecruitingPrompt({ job: jobFuerPrompt, kunde: anon ? ident : kundenMitDomain, schema, bildUrls });
+    const funnelName = `${(anon ? ident.firmenname : kundenMitDomain.firmenname)} — ${job.stelle || 'Recruiting-Funnel'}`.slice(0, 120);
 
     // 4. Funnel-Row anlegen ODER die (per Typ-Auswahl vorab angelegte) Row
     //    wiederverwenden — sonst entstehen zwei Funnel-Rows pro Job.

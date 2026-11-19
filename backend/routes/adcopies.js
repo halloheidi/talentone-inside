@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { generateAdCopy, ensureLinkInText, isValidStyle, STYLES, generateHeadlines } from '../adcopies.js';
 import { getPublicBaseUrl } from '../branding.js';
+import { identitaet } from '../identitaet.js';
 
 const router = Router();
 
@@ -42,9 +43,10 @@ async function loadJobAndKunde(job_id) {
   const { data: job, error: jE } = await supabase
     .from('talentone_jobs').select('*').eq('id', job_id).single();
   if (jE || !job) throw new Error('Job nicht gefunden.');
-  const { data: kunde } = await supabase
+  const { data: kundeEcht } = await supabase
     .from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
-  return { job, kunde };
+  // Anonyme Stelle: neutrale Identität in alle Ad-Copy-Prompts (firmenname, branche).
+  return { job, kunde: identitaet(job, kundeEcht) };
 }
 
 // Konsistenz: bereits gewählte Bild-Sprüche/Hooks aus vorhandenen (nicht
@@ -267,8 +269,9 @@ router.post('/headlines/generate', async (req, res) => {
     const { data: job, error: jE } = await supabase
       .from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase
+    const { data: kundeEcht } = await supabase
       .from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = identitaet(job, kundeEcht);
 
     const headlines = await generateHeadlines({ job, kunde });
 

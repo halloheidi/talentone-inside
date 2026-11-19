@@ -75,6 +75,8 @@ export default function JobExport() {
   const [mailBusy, setMailBusy] = useState(false);
   const [mailMsg, setMailMsg] = useState('');
   const [mailErr, setMailErr] = useState(false); // Fehler (rot) vs. Erfolg (neutral)
+  // Hard-Stop „Echte Identität gefunden" (anonyme Stelle, 409 identitaets_leak).
+  const [leakWarnung, setLeakWarnung] = useState(null); // { treffer:[], hinweis } | null
   const [anschreibensBusy, setAnschreibensBusy] = useState(false);
   const [mailIntent, setMailIntent] = useState({ mode: 'first', kontext: 'entwurf' });
   const [mailKunde, setMailKunde] = useState(null); // Kunde-Override nach Anrede-Wahl im Modal
@@ -306,11 +308,12 @@ export default function JobExport() {
     setReminderText(buildReminderText(k));
   }
 
-  async function sendMail() {
+  async function sendMail(leakBestaetigt = false) {
     if (!mailForm.to.trim()) { setMailErr(true); setMailMsg('Empfänger-Mail fehlt.'); return; }
     setMailBusy(true);
     setMailMsg('');
     setMailErr(false);
+    setLeakWarnung(null);
     try {
       const endpoint = mailForm.mailKontext === 'update' ? 'kampagne-update' : 'email';
       await api(`/jobs/${job.id}/export/${endpoint}`, {
@@ -323,6 +326,7 @@ export default function JobExport() {
           adcopy_ids: Array.from(selectedAdcopies),
           include_funnel: mailForm.include_funnel,
           resend_mode: mailForm.resend_mode || undefined,
+          leak_bestaetigt: leakBestaetigt || undefined,
         },
       });
       setMailErr(false);
@@ -333,10 +337,16 @@ export default function JobExport() {
       api(`/jobs/${job.id}/aktivitaet`).then(a => setAktivitaet(a.events || [])).catch(() => {});
       setTimeout(() => setShowMail(false), 1200);
     } catch (err) {
-      // Fehler sichtbar machen (rot) + Button wieder freigeben. Der stumme
-      // Zustand "es passiert nichts" ist selbst ein Bug.
-      setMailErr(true);
-      setMailMsg(`Versand fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
+      // Anonyme Stelle: echte Kundenidentität in den Entwürfen gefunden → nicht als
+      // genereller Fehler zeigen, sondern mit expliziter „trotzdem senden"-Bestätigung.
+      if (err.status === 409 && err.body?.error === 'identitaets_leak') {
+        setLeakWarnung({ treffer: err.body.treffer || [], hinweis: err.body.hinweis || '' });
+      } else {
+        // Fehler sichtbar machen (rot) + Button wieder freigeben. Der stumme
+        // Zustand "es passiert nichts" ist selbst ein Bug.
+        setMailErr(true);
+        setMailMsg(`Versand fehlgeschlagen: ${err.body?.error || err.message || 'Unbekannter Fehler.'}`);
+      }
     } finally {
       setMailBusy(false);
     }
@@ -1157,6 +1167,41 @@ Sollen wir kurz telefonieren? ${t(k, 'Antworte', 'Antworten Sie')} einfach auf d
           await sendMail();
         }}
       />
+
+      {/* ─────── Hard-Stop: echte Identität in anonymer Stelle ─────── */}
+      <Modal
+        open={!!leakWarnung}
+        onClose={() => !mailBusy && setLeakWarnung(null)}
+        title="⚠️ Echte Identität in den Entwürfen gefunden"
+        footer={
+          <>
+            <button className="btn-ghost" onClick={() => setLeakWarnung(null)} disabled={mailBusy}>Abbrechen &amp; Texte prüfen</button>
+            <button className="btn-primary" style={{ background: '#b91c1c', borderColor: '#b91c1c' }}
+              onClick={() => sendMail(true)} disabled={mailBusy}>
+              {mailBusy ? 'Sende…' : 'Trotzdem senden'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ marginTop: 0, fontSize: 14, color: '#2a2a2a' }}>
+          Diese Stelle läuft <strong>anonym</strong>. In den ausgewählten Ad-Copies/Creatives taucht die
+          echte Kundenidentität auf — Bewerber würden sie so sehen.
+        </p>
+        {!!(leakWarnung?.treffer || []).length && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '12px 0' }}>
+            {leakWarnung.treffer.map((w, i) => (
+              <span key={i} style={{
+                background: '#fee2e2', color: '#b91c1c', fontWeight: 600,
+                fontSize: 13, padding: '3px 10px', borderRadius: 100,
+              }}>{w}</span>
+            ))}
+          </div>
+        )}
+        <p style={{ fontSize: 13, color: '#5a5955', marginBottom: 0 }}>
+          Bitte die Texte korrigieren und erneut senden — oder, falls das bewusst so gewollt ist,
+          „Trotzdem senden".
+        </p>
+      </Modal>
 
       {/* ─────── Reaktivierungs-Modal ─────── */}
       <Modal

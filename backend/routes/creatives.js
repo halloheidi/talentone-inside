@@ -27,6 +27,16 @@ import { blockDefs, catalogKey, defaultPositionen, mergePositionen, transponiere
 import { pickFillColor, ciRollen, TITLE_SHADOW, fotoDimAlpha } from '../creative-ci.js';
 import { higgsfieldKonfiguriert } from '../higgsfield.js';
 import { erzeugeAnimiertesCreative } from '../animate.js';
+import { identitaet } from '../identitaet.js';
+
+// Lädt den Kunden eines Jobs und wendet die neutrale Identität an, falls die Stelle anonym ist.
+// EINE Quelle für alle Creative-/Overlay-/Prompt-Stellen — so leakt keine echte Kundenidentität
+// in anonyme Stellen. Voraussetzung: `job` wurde mit Spalte `anonym` geladen.
+async function ladeIdentitaet(job) {
+  if (!job?.kunde_id) return null;
+  const { data: kundeEcht } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+  return identitaet(job, kundeEcht);
+}
 
 // ─────────────── Logo-Layer neu rendern (geteilt) ───────────────
 // Kern des Logo-Tauschs: Basisbild + AKTUELLES Logo neu kompositieren, ohne das
@@ -44,11 +54,15 @@ async function resolveTransparentLogo(kunde) {
   }
   const { buffer: origBuf } = await fetchAsBuffer(kunde.logo_url);
   const transparent = await makeTransparent(origBuf);
-  try {
-    const path = `${kunde.id}/transparent-${Date.now()}.png`;
-    const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer: transparent, contentType: 'image/png' });
-    await supabase.from('talentone_kunden').update({ logo_transparent_url: publicUrl }).eq('id', kunde.id);
-  } catch (err) { console.warn('[logo-refresh] transparent-Upload skip:', err.message); }
+  // Bei anonymer Identität NICHT in die echte Kundenzeile zurückschreiben (würde das echte
+  // Kundenlogo überschreiben) — on-the-fly verwenden.
+  if (!kunde._anonym) {
+    try {
+      const path = `${kunde.id}/transparent-${Date.now()}.png`;
+      const publicUrl = await uploadBuffer({ bucket: 'talentone-logos', path, buffer: transparent, contentType: 'image/png' });
+      await supabase.from('talentone_kunden').update({ logo_transparent_url: publicUrl }).eq('id', kunde.id);
+    } catch (err) { console.warn('[logo-refresh] transparent-Upload skip:', err.message); }
+  }
   return transparent;
 }
 
@@ -348,7 +362,7 @@ router.post('/motiv-vorschlaege', async (req, res) => {
   try {
     const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = await ladeIdentitaet(job);
     const motive = await generateMotivVorschlaege(job, kunde);
     res.json({ motive });
   } catch (err) {
@@ -365,7 +379,7 @@ router.post('/v2/motiv-vorschlaege', async (req, res) => {
   try {
     const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = await ladeIdentitaet(job);
     const { motive, hinweis } = await generateMotivVorschlaegeV2(job, kunde);
     res.json({ motive, hinweis });
   } catch (err) {
@@ -386,7 +400,7 @@ router.post('/spruch-vorschlaege', async (req, res) => {
   try {
     const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = await ladeIdentitaet(job);
 
     // Wenn nur eine Referenzbild-ID kam, URL nachschlagen
     let resolvedBildUrl = bild_url || null;
@@ -417,7 +431,7 @@ router.post('/spruch-verbessern', async (req, res) => {
   try {
     const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
     if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = await ladeIdentitaet(job);
     const varianten = await verbessereSpruch({ spruch, job, kunde });
     res.json({ varianten });
   } catch (err) {
@@ -451,7 +465,9 @@ router.post('/generate', async (req, res) => {
   // Job + Kunde vorab laden, damit Validation-Fehler sofort kommen.
   const { data: job, error: jE } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
   if (jE || !job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const { data: kundeEcht } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  // Anonyme Stelle: neutrale Identität statt echtem Kunden in alle Overlays/Prompts/Logo-Platte.
+  const kunde = identitaet(job, kundeEcht);
 
   // Strikte CI-Farben: expliziter Request-Override, sonst Kunden-Default.
   const strikt = (typeof ci_farben_strikt === 'boolean') ? ci_farben_strikt : !!kunde?.ci_farben_strikt;
@@ -614,7 +630,7 @@ async function prepLayoutContext({ job_id, vorlage, foto_id, slots, freisteller 
 
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
   if (!job) { const e = new Error('Job nicht gefunden.'); e.status = 404; throw e; }
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+  const kunde = await ladeIdentitaet(job);
   const { data: ref } = await supabase.from('talentone_referenzbilder')
     .select('id, kunde_id, bild_url, beschreibung, kunde_freigabe').eq('id', foto_id).maybeSingle();
   if (!ref?.bild_url) { const e = new Error('Foto nicht gefunden.'); e.status = 404; throw e; }
@@ -791,8 +807,8 @@ router.get('/:id/text-bloecke', async (req, res) => {
   };
   const bloecke = blockDefs(kind, vorlage).filter(d => hatText(d.key)).map(d => ({ key: d.key, label: d.label }));
 
-  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
-  const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id, anonym').eq('id', c.job_id).maybeSingle();
+  const kunde = await ladeIdentitaet(job);
   // Exakt dieselbe CI-Logik wie die Renderer (creative-ci.js) — eine Quelle.
   const rollen = ciRollen(kunde?.farben);
   const accent = spec.accent || rollen.fill;
@@ -855,7 +871,7 @@ router.patch('/:id/text-positionen', async (req, res) => {
   }
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   try {
     const oldUrl = existing.bild_url, oldRaw = existing.bild_ohne_logo_url;
@@ -887,7 +903,7 @@ router.post('/:id/regenerate', async (req, res) => {
       .from('talentone_creatives').select('*').eq('id', req.params.id).single();
     if (e1 || !existing) return res.status(404).json({ error: 'Creative nicht gefunden.' });
     const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+    const kunde = await ladeIdentitaet(job);
 
     const referenceImages = [];
     if (kunde?.logo_url) referenceImages.push({ url: kunde.logo_url, name: 'logo', isLogo: true });
@@ -1187,7 +1203,7 @@ router.post('/:id/story-ableiten', async (req, res) => {
 
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   clearGenError(existing.job_id);
   res.status(202).json({ accepted: true, parent_id: existing.id, message: 'Story-Ableitung gestartet — die 9:16-Version erscheint automatisch in der Galerie.' });
@@ -1219,7 +1235,7 @@ router.post('/story-ableiten-alle', async (req, res) => {
 
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   clearGenError(job_id);
   res.status(202).json({ accepted: true, started: todo.length, message: `${todo.length} Story-Ableitung(en) gestartet.` });
@@ -1243,7 +1259,7 @@ router.post('/:id/feed-ableiten', async (req, res) => {
 
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   clearGenError(existing.job_id);
   res.status(202).json({ accepted: true, parent_id: existing.id, message: '4:5-Ableitung gestartet — die Feed-Version erscheint automatisch in der Galerie.' });
@@ -1296,9 +1312,8 @@ router.patch('/:id/logo-position', async (req, res) => {
     return res.status(409).json({ error: 'Kein Roh-Bild (bild_ohne_logo_url) gespeichert — Logo-Position lässt sich für dieses Creative nicht nachjustieren. Bitte neu generieren.' });
   }
 
-  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', existing.job_id).single();
-  const { data: kunde } = await supabase.from('talentone_kunden')
-    .select('id, logo_url, logo_transparent_url').eq('id', job.kunde_id).single();
+  const { data: job } = await supabase.from('talentone_jobs').select('kunde_id, anonym').eq('id', existing.job_id).single();
+  const kunde = await ladeIdentitaet(job);
   if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
 
   // Effektive Flächen-Wahl: expliziter Toggle > bisheriger Creative-Wert. „Ohne Fläche"
@@ -1343,10 +1358,9 @@ router.get('/logo-refresh-info', async (req, res) => {
   const { job_id } = req.query;
   if (!job_id) return res.status(400).json({ error: 'job_id ist Pflicht.' });
 
-  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id').eq('id', job_id).single();
+  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id, anonym').eq('id', job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden')
-    .select('id, logo_url, logo_uploaded_at').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   const { data: creatives = [] } = await supabase.from('talentone_creatives')
     .select('id, format, typ, created_at, bild_url, bild_ohne_logo_url, logo_position')
@@ -1396,10 +1410,9 @@ router.post('/logo-refresh', async (req, res) => {
     return res.status(400).json({ error: 'creative_ids (nicht leer) ist Pflicht.' });
   }
 
-  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id').eq('id', job_id).single();
+  const { data: job } = await supabase.from('talentone_jobs').select('id, kunde_id, anonym').eq('id', job_id).single();
   if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-  const { data: kunde } = await supabase.from('talentone_kunden')
-    .select('id, logo_url, logo_transparent_url').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
   if (!kunde?.logo_url) return res.status(400).json({ error: 'Kunde hat kein Logo hinterlegt.' });
 
   const { data: creatives = [] } = await supabase.from('talentone_creatives')
@@ -1451,7 +1464,7 @@ router.post('/:id/edit-preview', async (req, res) => {
   if (existing.typ === 'video') return res.status(400).json({ error: 'Videos können nicht gezielt geändert werden.' });
 
   const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', existing.job_id).single();
-  const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).single();
+  const kunde = await ladeIdentitaet(job);
 
   try {
     // Overlay (Modus C): deterministisch neu rendern — pixelperfekter Text.
@@ -1540,7 +1553,7 @@ router.post('/v2/szenen-komposition', async (req, res) => {
   try {
     const { data: job } = await supabase.from('talentone_jobs').select('*').eq('id', job_id).maybeSingle();
     if (!job) return res.status(404).json({ error: 'Job nicht gefunden.' });
-    const { data: kunde } = await supabase.from('talentone_kunden').select('*').eq('id', job.kunde_id).maybeSingle();
+    const kunde = await ladeIdentitaet(job);
     const { data: foto } = await supabase.from('talentone_referenzbilder').select('*').eq('id', foto_id).maybeSingle();
     if (!foto?.bild_url) return res.status(404).json({ error: 'Foto nicht gefunden.' });
     if (foto.kunde_freigabe === 'nein') return res.status(403).json({ error: 'Dieses Foto hat der Kunde gesperrt und darf nicht verwendet werden.' });
@@ -1596,8 +1609,8 @@ router.post('/:id/reel-v2', async (req, res) => {
       ({ url } = await generateReelLayered({ bgBuffer, overlayBuffer, jobId: c.job_id }));
     } else if (spec?.kind === 'strikt' && spec.base_url) {
       // Hintergrund = textfreies Motiv (zoomt); Overlay = Schriftzug im 9:16 (statisch).
-      const { data: job } = await supabase.from('talentone_jobs').select('kunde_id').eq('id', c.job_id).maybeSingle();
-      const { data: kunde } = job ? await supabase.from('talentone_kunden').select('farben').eq('id', job.kunde_id).maybeSingle() : { data: null };
+      const { data: job } = await supabase.from('talentone_jobs').select('kunde_id, anonym').eq('id', c.job_id).maybeSingle();
+      const kunde = await ladeIdentitaet(job);
       const accent = spec.accent || pickFillColor(kunde?.farben);
       const overlayBuffer = await renderTextOverlay({ overlayOnly: true, format: 'story', stil: spec.text_stil, hook: spec.hook, accent });
       ({ url } = await generateReelLayered({ bgUrl: spec.base_url, overlayBuffer, jobId: c.job_id }));

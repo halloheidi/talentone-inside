@@ -170,6 +170,16 @@ export default function PublicReview() {
             : t(kunde,
                 'Schau dir die ersten Entwürfe in Ruhe an. Bei Bedarf kannst du pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.',
                 'Schauen Sie sich die ersten Entwürfe in Ruhe an. Bei Bedarf können Sie pro Element kommentieren und dann unten alles freigeben oder Änderungswünsche schicken.')}</p>
+          {data.anonym?.aktiv && (
+            <p style={{
+              fontSize: 13, lineHeight: 1.6, color: 'var(--rv-ink, #2a2a2a)',
+              background: 'rgba(0,0,0,0.05)', borderRadius: 10, padding: '10px 14px', margin: '4px 0 0',
+            }}>
+              🕵️ {t(kunde,
+                `Diese Stelle läuft anonym als „${data.anonym.name || 'neutrale Identität'}". In den Entwürfen siehst du diese neutrale Identität — genau so sehen sie auch die Bewerber. Dein Firmenname taucht dort bewusst nicht auf.`,
+                `Diese Stelle läuft anonym als „${data.anonym.name || 'neutrale Identität'}". In den Entwürfen sehen Sie diese neutrale Identität — genau so sehen sie auch die Bewerber. Ihr Firmenname taucht dort bewusst nicht auf.`)}
+            </p>
+          )}
         </div>
 
         {done && (
