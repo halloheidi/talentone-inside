@@ -17,8 +17,24 @@ import { anzahlPersonen, personenGruppen } from '../dubletten.js';
 import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
 import { uploadBuffer } from '../storage.js';
 import { makeTransparent } from '../logo.js';
+import { suggestPixel } from '../pixel-mapping.js';
 
 const router = Router();
+
+// Neue Stelle beim Anlegen mit einem Meta-Pixel vorbelegen (Gewerk-Vorschlag,
+// sonst Fallback-Pixel). Best-effort: schlägt es fehl, bleibt pixel_id NULL.
+// Bestehende Stellen werden NIE automatisch umgehängt (nur Hinweis in der UI).
+async function prefillPixelFuerJob(job, kunde) {
+  try {
+    if (!job || job.pixel_id) return;
+    const { data: pixel = [] } = await supabase.from('talentone_pixel').select('*');
+    if (!pixel.length) return;
+    const { vorschlag } = suggestPixel({ stelle: job.stelle, branche: kunde?.branche }, pixel);
+    if (!vorschlag) return;
+    await supabase.from('talentone_jobs').update({ pixel_id: vorschlag.id }).eq('id', job.id);
+    job.pixel_id = vorschlag.id;
+  } catch (e) { console.warn('[prefillPixelFuerJob]', e.message); }
+}
 
 // POST /api/jobs/:id/anonym/logo  body: { base64, filename? }
 // Lädt ein Logo für die NEUTRALE Identität einer anonymen Stelle in einen EIGENEN Pfad hoch
@@ -301,6 +317,9 @@ router.post('/quick-create', async (req, res) => {
       job.projekt_id = projektRow.id;
     }
 
+    // Neue Stelle mit passendem Meta-Pixel vorbelegen (Gewerk-Vorschlag/Fallback).
+    await prefillPixelFuerJob(job, kunde);
+
     res.status(201).json({ job });
   } catch (err) {
     console.error('[jobs/quick-create]', err.message);
@@ -335,6 +354,10 @@ router.post('/', async (req, res) => {
   let projekt = null;
   try { projekt = await ensureProjektFuerJob(data); if (projekt) data.projekt_id = projekt.id; }
   catch (e) { console.warn('[jobs POST ensureProjekt]', e.message); }
+  // Kunde für den Pixel-Vorschlag laden (Branche) und neue Stelle vorbelegen.
+  const { data: kundeFuerPixel } = await supabase
+    .from('talentone_kunden').select('branche').eq('id', data.kunde_id).maybeSingle();
+  await prefillPixelFuerJob(data, kundeFuerPixel);
   res.status(201).json({ job: data, projekt });
 });
 
@@ -355,6 +378,8 @@ const ALLOWED_JOB_FIELDS = [
   'daten_geaendert_nach_creatives_at',
   // Anonyme Stelle: neutrale Identität (Migration 118)
   'anonym',
+  // Meta-Pixel-Zuordnung je Stelle (Migration 120)
+  'pixel_id',
 ];
 
 router.patch('/:id', async (req, res) => {
@@ -494,6 +519,54 @@ const SUGGESTIBLE_FIELDS = {
   ausbildung:                'Welche Ausbildung / Qualifikation passt zur Stelle? (1 Satz, konkret)',
   kandidat_eigenschaften:    'Welche Eigenschaften sollte der ideale Kandidat mitbringen? (2-3 Stichpunkte als Fließtext)',
 };
+
+/* GET /api/jobs/:id/pixel-context
+   Interner Kontext für die Meta-Pixel-Zuordnung (Stelle-Dropdown + Kacheln in
+   Funnel/Meta). NUR intern (requireAuth). Liefert aktive Pixel, aktuellen,
+   Gewerk-Vorschlag, den projekte.pixel-Freitext und den CAPI-Token.
+   WICHTIG: Dieser Endpoint ist intern. Der Token taucht NIE in Portal-/Public-/
+   Review-/Mail-Antworten auf. */
+function maskToken(tok) {
+  if (!tok) return null;
+  const s = String(tok);
+  if (s.length <= 4) return '••••';
+  return '••••••••' + s.slice(-4);
+}
+router.get('/:id/pixel-context', async (req, res) => {
+  try {
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('id, stelle, kunde_id, projekt_id, pixel_id').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+
+    const [{ data: pixel = [] }, { data: kunde }, projektRes] = await Promise.all([
+      supabase.from('talentone_pixel').select('*').order('fallback', { ascending: false }).order('name'),
+      supabase.from('talentone_kunden').select('branche').eq('id', job.kunde_id).maybeSingle(),
+      job.projekt_id
+        ? supabase.from('talentone_projekte').select('pixel').eq('id', job.projekt_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const aktive = pixel.filter(p => p.aktiv);
+    const byId = Object.fromEntries(pixel.map(p => [p.id, p]));
+    const { vorschlag, gewerk, viaFallback } = suggestPixel({ stelle: job.stelle, branche: kunde?.branche }, pixel);
+    const aktuell = job.pixel_id ? byId[job.pixel_id] : null;
+    const token = process.env.META_CAPI_TOKEN || null;
+
+    res.json({
+      aktiv_liste: aktive.map(p => ({ id: p.id, name: p.name, gewerk: p.gewerk, meta_pixel_id: p.meta_pixel_id, fallback: p.fallback })),
+      aktueller: job.pixel_id || null,
+      aktueller_pixel: aktuell ? { id: aktuell.id, name: aktuell.name, gewerk: aktuell.gewerk, meta_pixel_id: aktuell.meta_pixel_id, aktiv: aktuell.aktiv, fallback: aktuell.fallback } : null,
+      vorschlag: vorschlag ? { id: vorschlag.id, name: vorschlag.name, gewerk: vorschlag.gewerk, meta_pixel_id: vorschlag.meta_pixel_id, via_fallback: viaFallback } : null,
+      vorschlag_gewerk: gewerk,
+      projekt_pixel_freitext: projektRes?.data?.pixel || null,
+      capi_token: token,                 // intern: Kopier-Button
+      capi_token_masked: maskToken(token),
+    });
+  } catch (e) {
+    console.error('[jobs/pixel-context]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 /* POST /api/jobs/:id/felder-vorschlaege  body: { felder?: string[] }
    Generiert plausible Texte für leere Felder basierend auf allen vorhandenen Job- und Kundeninfos. */

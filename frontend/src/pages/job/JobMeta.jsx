@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useJob } from '../JobView.jsx';
 import { api } from '../../lib/api.js';
+import PixelKachel from '../../components/PixelKachel.jsx';
 
 // Job-Tab „Meta": Zuordnungs-Übersicht (Prüf-Block) + Laufphasen-Zeitleiste +
 // Tages-/Wochen-Zahlen + Sprungmarken. Konsumiert GET /meta/projekt/:id/tab.
@@ -40,10 +41,13 @@ export default function JobMeta() {
   // ── Kein Projekt / keine Verknüpfung ──
   if (!projektId) {
     return (
-      <div className="card">
-        <h2 className="section-title" style={{ marginTop: 0 }}>Meta</h2>
-        <p className="pane-hint">Dieser Job hat kein Projekt — ohne Projekt gibt es keine Meta-Zuordnung.
-          Zuordnung erfolgt unter <Link to="/admin/meta">/admin/meta</Link>.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PixelKachel jobId={job.id} />
+        <div className="card">
+          <h2 className="section-title" style={{ marginTop: 0 }}>Meta</h2>
+          <p className="pane-hint">Dieser Job hat kein Projekt — ohne Projekt gibt es keine Meta-Zuordnung.
+            Zuordnung erfolgt unter <Link to="/admin/meta">/admin/meta</Link>.</p>
+        </div>
       </div>
     );
   }
@@ -60,19 +64,23 @@ export default function JobMeta() {
   // ── Ohne Verknüpfung: Zuordnungs-Zustand ──
   if (!data.hat_verknuepfung) {
     return (
-      <div className="card">
-        <h2 className="section-title" style={{ marginTop: 0 }}>Meta</h2>
-        <p className="pane-hint" style={{ marginBottom: 12 }}>
-          <strong>Kein Werbekonto/keine Kampagne zugeordnet.</strong> Sobald eine Meta-Kampagne (oder Anzeigengruppe)
-          diesem Projekt zugeordnet ist, erscheinen hier die Zahlen.
-        </p>
-        <Link className="btn-primary btn-sm" to="/admin/meta">Zur Meta-Zuordnung</Link>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PixelKachel jobId={job.id} />
+        <div className="card">
+          <h2 className="section-title" style={{ marginTop: 0 }}>Meta</h2>
+          <p className="pane-hint" style={{ marginBottom: 12 }}>
+            <strong>Kein Werbekonto/keine Kampagne zugeordnet.</strong> Sobald eine Meta-Kampagne (oder Anzeigengruppe)
+            diesem Projekt zugeordnet ist, erscheinen hier die Zahlen.
+          </p>
+          <Link className="btn-primary btn-sm" to="/admin/meta">Zur Meta-Zuordnung</Link>
+        </div>
       </div>
     );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PixelKachel jobId={job.id} />
       {/* ═══ 1. Zuordnungs-Übersicht (Prüf-Block) ═══ */}
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>

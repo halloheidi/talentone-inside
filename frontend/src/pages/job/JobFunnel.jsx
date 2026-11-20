@@ -6,6 +6,7 @@ import FunnelView from '../../components/FunnelView.jsx';
 import Modal from '../../components/Modal.jsx';
 import StickySaveBar from '../../components/StickySaveBar.jsx';
 import CropModal from '../../components/CropModal.jsx';
+import PixelKachel from '../../components/PixelKachel.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
 import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
@@ -485,6 +486,9 @@ export default function JobFunnel() {
 
   return (
     <div className="funnel-editor">
+      <div style={{ marginBottom: 16 }}>
+        <PixelKachel jobId={job.id} perspectiveHinweis={istPerspective} />
+      </div>
       {(reviewFunnelKommentar || reviewAllgemeinKommentar) && (
         <div className="creative-kommentar" style={{ marginBottom: 16 }}>
           <div className="creative-kommentar-head">📝 Änderungswunsch vom Kunden zum Funnel</div>

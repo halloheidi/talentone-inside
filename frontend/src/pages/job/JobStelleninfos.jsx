@@ -71,6 +71,8 @@ export default function JobStelleninfos() {
     besonderheiten: job.besonderheiten || '',
     reisebereitschaft: reiseFromJob(job, fd),
     quereinsteiger: !!job.quereinsteiger,
+    // Meta-Pixel-Zuordnung (Migration 120)
+    pixel_id: job.pixel_id || '',
     // Branche (auf Kunde-Ebene)
     branche: kunde?.branche || '',
     // Benefits
@@ -101,6 +103,14 @@ export default function JobStelleninfos() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiFields, setAiFields] = useState(new Set()); // Keys mit "KI-Vorschlag"-Badge
+
+  // Meta-Pixel: aktive Liste + Gewerk-Vorschlag (nur Hinweis, nie automatisch setzen)
+  const [pixelCtx, setPixelCtx] = useState(null);
+  useEffect(() => {
+    let aktiv = true;
+    api(`/jobs/${job.id}/pixel-context`).then(r => { if (aktiv) setPixelCtx(r); }).catch(() => {});
+    return () => { aktiv = false; };
+  }, [job.id]);
 
   async function dismissCreativeWarnung() {
     try {
@@ -163,6 +173,7 @@ export default function JobStelleninfos() {
       besonderheiten: job.besonderheiten || '',
       reisebereitschaft: reiseFromJob(job, fd),
       quereinsteiger: !!job.quereinsteiger,
+      pixel_id: job.pixel_id || '',
       branche: kunde?.branche || '',
       benefits: Array.isArray(job.benefits) ? job.benefits.filter(Boolean) : [],
       benefits_zusatz: fd.benefits_zusatz || '',
@@ -256,6 +267,7 @@ export default function JobStelleninfos() {
           besonderheiten: form.besonderheiten || null,
           reisebereitschaft: form.reisebereitschaft !== 'keine',
           quereinsteiger: form.quereinsteiger,
+          pixel_id: form.pixel_id || null,
           benefits: form.benefits.length ? form.benefits : null,
           formdata_komplett: newFormdata,
         },
@@ -364,6 +376,23 @@ export default function JobStelleninfos() {
           <label className="field field-full">
             <span>Stellenanzeigen-URL</span>
             <input type="url" placeholder="https://…" value={form.url} onChange={e => setF('url', e.target.value)} />
+          </label>
+          <label className="field field-full">
+            <span>Meta-Pixel</span>
+            <select value={form.pixel_id || ''} onChange={e => setF('pixel_id', e.target.value)}>
+              <option value="">— kein Pixel —</option>
+              {(pixelCtx?.aktiv_liste || []).map(p => (
+                <option key={p.id} value={p.id}>{p.name}{p.fallback ? ' (Fallback)' : ''} · {p.meta_pixel_id}</option>
+              ))}
+            </select>
+            {pixelCtx?.vorschlag && pixelCtx.vorschlag.id !== (form.pixel_id || null) && (
+              <p className="pane-hint" style={{ marginTop: 4, fontSize: 12 }}>
+                💡 Vorschlag{pixelCtx.vorschlag_gewerk ? ` (Gewerk: ${pixelCtx.vorschlag_gewerk})` : ' (Fallback)'}:{' '}
+                <strong>{pixelCtx.vorschlag.name}</strong>{' '}
+                <button type="button" className="btn-ghost btn-sm" style={{ padding: '1px 8px' }}
+                  onClick={() => setF('pixel_id', pixelCtx.vorschlag.id)}>übernehmen</button>
+              </p>
+            )}
           </label>
           <label className="field">
             <span>Reisebereitschaft</span>

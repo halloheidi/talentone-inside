@@ -46,6 +46,7 @@ import EmailVorlagen from './pages/admin/EmailVorlagen.jsx';
 import MetaIntegration from './pages/admin/Meta.jsx';
 import GmailKonten from './pages/admin/GmailKonten.jsx';
 import VorqualStandardfelder from './pages/admin/VorqualStandardfelder.jsx';
+import PixelAdmin from './pages/admin/Pixel.jsx';
 import Bestandskunden from './pages/Bestandskunden.jsx';
 import ControllingDashboard from './pages/ControllingDashboard.jsx';
 import OfferWizard from './pages/OfferWizard.jsx';
@@ -120,6 +121,7 @@ export default function App() {
         <Route path="admin/meta" element={<AdminOnly><MetaIntegration /></AdminOnly>} />
         <Route path="admin/gmail" element={<AdminOnly><GmailKonten /></AdminOnly>} />
         <Route path="admin/vorqualifizierung" element={<AdminOnly><VorqualStandardfelder /></AdminOnly>} />
+        <Route path="admin/pixel" element={<AdminOnly><PixelAdmin /></AdminOnly>} />
         <Route path="bestandskunden" element={<AdminOnly><Bestandskunden /></AdminOnly>} />
         <Route path="kunden/:kundeId" element={<KundeDetail />} />
         <Route path="kunden/:kundeId/jobs/:jobId" element={<JobView />}>
