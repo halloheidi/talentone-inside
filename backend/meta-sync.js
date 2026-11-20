@@ -129,16 +129,40 @@ async function sammleWerbekonten() {
   return [...set];
 }
 
-// Leads aus dem actions-Array bestmöglich ableiten (nur Referenz — die Wahrheit für
-// CPL sind unsere talentone_bewerbungen, nicht Metas Lead-Zahl).
+// Conversion-/Lead-Events aus dem actions-Array ableiten. Breite Menge, damit
+// auch Bewerbungen über Pixel-Standard-Events (submit_application,
+// complete_registration) und Custom Conversions (offsite_conversion.custom.*)
+// gezählt werden — nicht nur die 4 Lead-Ad-Typen von früher.
+// (Referenzwert fürs Tracking — die Wahrheit für CPL bleibt talentone_bewerbungen.)
+const LEAD_ACTION_TYPES = new Set([
+  'lead',
+  'onsite_conversion.lead_grouped',
+  'offsite_conversion.fb_pixel_lead',
+  'leadgen.other',
+  'submit_application',
+  'complete_registration',
+  'onsite_web_lead',
+  'onsite_conversion.lead',
+]);
+// Zählt ein action_type als Bewerbung/Lead? (inkl. aller Custom Conversions)
+export function istLeadActionType(t) {
+  if (!t) return false;
+  return LEAD_ACTION_TYPES.has(t)
+    || t.startsWith('offsite_conversion.custom.')
+    || t.startsWith('offsite_conversion.fb_pixel_custom');
+}
 function leadsAusActions(actions) {
   if (!Array.isArray(actions)) return null;
-  const leadTypes = new Set(['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'leadgen.other']);
   let n = 0, gefunden = false;
   for (const a of actions) {
-    if (leadTypes.has(a.action_type)) { n += Number(a.value) || 0; gefunden = true; }
+    if (istLeadActionType(a.action_type)) { n += Number(a.value) || 0; gefunden = true; }
   }
   return gefunden ? n : null;
+}
+// Rohes actions[] fürs Speichern normalisieren (nur action_type + value behalten).
+function normActions(actions) {
+  if (!Array.isArray(actions) || !actions.length) return null;
+  return actions.map(a => ({ action_type: a.action_type, value: Number(a.value) || 0 }));
 }
 
 /**
@@ -290,6 +314,7 @@ async function syncAdSetsEiner(campaignId, konto, token, since, until) {
       clicks: row.clicks != null ? Number(row.clicks) : null,
       ctr: row.ctr != null ? Number(row.ctr) : null,
       cpm: row.cpm != null ? Number(row.cpm) : null,
+      actions: normActions(row.actions),
       leads: leadsAusActions(row.actions),
       results: leadsAusActions(row.actions),   // Ergebnisse (= Leads) analog Kampagnen-Insights
       updated_at: new Date().toISOString(),
@@ -622,6 +647,7 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
             clicks: row.clicks != null ? Number(row.clicks) : null,
             ctr: row.ctr != null ? Number(row.ctr) : null,
             cpm: row.cpm != null ? Number(row.cpm) : null,
+            actions: normActions(row.actions),
             leads: leadsAusActions(row.actions),
             results: leadsAusActions(row.actions),
             updated_at: new Date().toISOString(),

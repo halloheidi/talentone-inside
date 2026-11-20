@@ -18,6 +18,7 @@ import { BEARB_RANK, deriveBearbeitung } from '../bewerber-bearbeitung.js';
 import { uploadBuffer } from '../storage.js';
 import { makeTransparent } from '../logo.js';
 import { suggestPixel } from '../pixel-mapping.js';
+import { trackingFuerJob } from '../meta-tracking.js';
 
 const router = Router();
 
@@ -551,6 +552,8 @@ router.get('/:id/pixel-context', async (req, res) => {
     const { vorschlag, gewerk, viaFallback } = suggestPixel({ stelle: job.stelle, branche: kunde?.branche }, pixel);
     const aktuell = job.pixel_id ? byId[job.pixel_id] : null;
     const token = process.env.META_CAPI_TOKEN || null;
+    let tracking = null;
+    try { tracking = await trackingFuerJob(job.id, 14); } catch (e) { console.warn('[pixel-context tracking]', e.message); }
 
     res.json({
       aktiv_liste: aktive.map(p => ({ id: p.id, name: p.name, gewerk: p.gewerk, meta_pixel_id: p.meta_pixel_id, fallback: p.fallback })),
@@ -561,6 +564,7 @@ router.get('/:id/pixel-context', async (req, res) => {
       projekt_pixel_freitext: projektRes?.data?.pixel || null,
       capi_token: token,                 // intern: Kopier-Button
       capi_token_masked: maskToken(token),
+      tracking,                          // { bewerbungen, events, quote, pixel_feuert_nicht, … } letzte 14 T
     });
   } catch (e) {
     console.error('[jobs/pixel-context]', e.message);

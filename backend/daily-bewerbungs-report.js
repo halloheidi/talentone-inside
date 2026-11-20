@@ -7,6 +7,7 @@
 import { supabase } from './supabase.js';
 import { getNotificationRecipients } from './mail.js';
 import { metaMetrikenBatch, garantieStatus } from './meta-metriken.js';
+import { pixelWaechter } from './meta-tracking.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
@@ -225,7 +226,13 @@ async function collectMetaWarnungen() {
   } catch (e) { console.warn('[daily-bewerbungs-report] meta-verbindung:', e.message); }
 
   const ueberfaelligMeldungen = await collectUeberfaellig();
-  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen, verbindungsWarnungen };
+
+  // Pixel-Wächter: Stellen mit Bewerbungen, aber 0 Meta-Events (letzte 3 Tage).
+  let pixelFeuertNicht = [];
+  try { pixelFeuertNicht = await pixelWaechter(3); }
+  catch (e) { console.warn('[daily-bewerbungs-report] pixel-waechter:', e.message); }
+
+  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen, verbindungsWarnungen, pixelFeuertNicht };
 }
 
 // Überfällige Projekte: geplanter Livegang liegt in der Vergangenheit, aber es gibt keinen
@@ -267,8 +274,21 @@ async function collectUeberfaellig() {
   return meldungen;
 }
 
-function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [], verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] } }) {
+function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [], verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] }, pixelFeuertNicht = [] }) {
   let html = '';
+  if (pixelFeuertNicht.length) {
+    const rows = pixelFeuertNicht.map(z => `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(z.firmenname)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(z.stelle)}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b91c1c;font-weight:700;">${z.bewerbungen} Bewerbungen · 0 Events</td>
+      </tr>`).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b91c1c;">🎯 Pixel feuert nicht (Bewerbungen ohne Events, letzte 3 Tage)</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fdecea;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Stelle</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Befund</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
   const vw = verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
   const verbRows = [
     ...vw.keineVerbindung.map(e => ({ ...e, text: 'Keine Meta-Verbindung — Laufzeit wird nicht gezählt', farbe: '#b91c1c' })),
@@ -418,7 +438,8 @@ export async function runDailyBewerbungsReport() {
     try { feedbackGruppen = await collectKundenFeedbackAenderungen(); } catch (e) { console.warn('[daily-bewerbungs-report] kunden-feedback:', e.message); }
     const vw = metaWarnungen.verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
     const verbindungN = vw.keineVerbindung.length + vw.objektPausiert.length + vw.keineInsights.length;
-    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length || verbindungN;
+    const pixelN = (metaWarnungen.pixelFeuertNicht || []).length;
+    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length || verbindungN || pixelN;
     if (!rows.length && neu24hTotal === 0 && !anyMeta && !feedbackGruppen.length) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
@@ -432,7 +453,7 @@ export async function runDailyBewerbungsReport() {
     const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
       + (fbEinst ? ` · ${fbEinst} Einstellung${fbEinst === 1 ? '' : 'en'}🎉` : '')
       + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '')
-      + (verbindungN ? ` · ${verbindungN} Meta🔌` : '');
+      + (verbindungN ? ` · ${verbindungN} Meta🔌` : '') + (pixelN ? ` · ${pixelN} Pixel🎯` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };
     lastRunAt = new Date().toISOString();

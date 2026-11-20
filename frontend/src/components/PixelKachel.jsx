@@ -60,6 +60,9 @@ export default function PixelKachel({ jobId, perspectiveHinweis = false }) {
               </>
             ) : <span className="pane-hint" style={{ fontSize: 12 }}>nicht in der Env gesetzt</span>}
           </Zeile>
+          <Zeile label="Tracking">
+            <TrackingBadge t={ctx.tracking} />
+          </Zeile>
         </div>
       ) : (
         <p className="pane-hint" style={{ marginTop: 10 }}>
@@ -92,6 +95,21 @@ function Zeile({ label, children }) {
       {children}
     </div>
   );
+}
+
+// Tracking-Quote: Meta-Events vs. Tool-Bewerbungen (14 T). Rot wenn Pixel nicht feuert.
+function TrackingBadge({ t }) {
+  if (!t) return <span className="pane-hint" style={{ fontSize: 12 }}>—</span>;
+  const basis = <span className="pane-hint" style={{ fontSize: 12 }}>{t.events}/{t.bewerbungen} Events · {t.tage} T</span>;
+  if (t.pixel_feuert_nicht) {
+    return <span style={{ fontSize: 12.5, color: '#c1272d', fontWeight: 600 }}>⚠️ Pixel feuert nicht — {t.bewerbungen} Bewerbungen, 0 Events ({t.tage} T)</span>;
+  }
+  if (t.bewerbungen === 0) {
+    return <span className="pane-hint" style={{ fontSize: 12 }}>keine Bewerbungen im Zeitraum ({t.tage} T)</span>;
+  }
+  const q = t.quote ?? 0;
+  const farbe = q >= 70 ? '#1a7f37' : q >= 30 ? '#b7791f' : '#c1272d';
+  return <span style={{ fontSize: 12.5, fontWeight: 600, color: farbe }}>{q}% {basis}</span>;
 }
 
 function KopierBtn({ aktiv, onClick }) {

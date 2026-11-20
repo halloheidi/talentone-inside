@@ -6,6 +6,8 @@
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
 import { suggestPixel } from '../pixel-mapping.js';
+import { trackingReport } from '../meta-tracking.js';
+import { syncMetaKampagnen } from '../meta-sync.js';
 
 const router = Router();
 
@@ -123,6 +125,24 @@ router.get('/bericht', async (req, res) => {
     });
 
     res.json({ zeilen });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/pixel/tracking?tage=14 — Abgleich Tool-Bewerbungen vs. Meta-Events
+// je Stelle + Tracking-Quote + Liste „Pixel feuert nicht".
+router.get('/tracking', async (req, res) => {
+  try {
+    const tage = Math.max(1, Math.min(90, Number(req.query.tage) || 14));
+    res.json(await trackingReport(tage));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/pixel/meta-backfill — Insights der letzten Tage neu ziehen
+// (actions + leads/results nachtragen). backfill=true → 90 Tage.
+router.post('/meta-backfill', async (req, res) => {
+  try {
+    const r = await syncMetaKampagnen({ backfill: true });
+    res.json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -21,6 +21,15 @@ const gewerkLabel = g => (GEWERKE.find(([k]) => k === g) || [, g])[1];
 
 const LEER = { name: '', gewerk: 'shk_kaelte', meta_pixel_id: '', aktiv: true, fallback: false, notiz: '' };
 
+function Stat({ label, value, color }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: color || undefined }}>{value}</div>
+    </div>
+  );
+}
+
 export default function PixelAdmin() {
   const [list, setList] = useState([]);
   const [error, setError] = useState('');
@@ -28,6 +37,10 @@ export default function PixelAdmin() {
   const [busy, setBusy] = useState(false);
   const [bericht, setBericht] = useState(null);
   const [berichtBusy, setBerichtBusy] = useState(false);
+  const [tracking, setTracking] = useState(null);
+  const [trackingBusy, setTrackingBusy] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState('');
 
   async function load() {
     setError('');
@@ -59,6 +72,24 @@ export default function PixelAdmin() {
     try { const r = await api('/pixel/bericht'); setBericht(r.zeilen || []); }
     catch (e) { setError(e.body?.error || e.message); }
     finally { setBerichtBusy(false); }
+  }
+
+  async function ladeTracking(tage = 14) {
+    setTrackingBusy(true); setError('');
+    try { setTracking(await api(`/pixel/tracking?tage=${tage}`)); }
+    catch (e) { setError(e.body?.error || e.message); }
+    finally { setTrackingBusy(false); }
+  }
+  useEffect(() => { ladeTracking(14); }, []);
+
+  async function backfill() {
+    setBackfillBusy(true); setBackfillMsg(''); setError('');
+    try {
+      const r = await api('/pixel/meta-backfill', { method: 'POST' });
+      setBackfillMsg(r.skipped ? `Übersprungen: ${r.reason}` : `Fertig: ${r.insights ?? 0} Insight-Tage, ${r.kampagnen ?? 0} Kampagnen.`);
+      await ladeTracking(14);
+    } catch (e) { setError(e.body?.error || e.message); }
+    finally { setBackfillBusy(false); }
   }
 
   return (
@@ -141,6 +172,76 @@ export default function PixelAdmin() {
           </div>
         </div>
       )}
+
+      {/* ── Tracking-Abgleich: Bewerbungen vs. Meta-Events ── */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <h2 className="section-title" style={{ margin: 0 }}>Tracking-Abgleich (Bewerbungen vs. Meta-Events)</h2>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {[7, 14, 30].map(t => (
+              <button key={t} className={`btn-ghost btn-sm ${tracking?.tage === t ? 'is-active' : ''}`}
+                style={tracking?.tage === t ? { fontWeight: 700 } : undefined}
+                onClick={() => ladeTracking(t)} disabled={trackingBusy}>{t} T</button>
+            ))}
+            <button className="btn-ghost btn-sm" onClick={backfill} disabled={backfillBusy} title="Insights der letzten 90 Tage neu ziehen (actions + leads)">
+              {backfillBusy ? 'Backfill läuft…' : '↻ Meta-Backfill'}
+            </button>
+          </div>
+        </div>
+        {backfillMsg && <div className="pane-hint" style={{ marginBottom: 8 }}>{backfillMsg}</div>}
+        {tracking && (
+          <>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 12 }}>
+              <Stat label={`Bewerbungen (${tracking.tage} T)`} value={tracking.summary.gesamt_bewerbungen} />
+              <Stat label="Meta-Events" value={tracking.summary.gesamt_events} />
+              <Stat label="Tracking-Quote" value={tracking.summary.quote == null ? '—' : `${tracking.summary.quote}%`}
+                color={tracking.summary.quote == null ? undefined : (tracking.summary.quote >= 70 ? '#1a7f37' : tracking.summary.quote >= 30 ? '#b7791f' : '#c1272d')} />
+              <Stat label="Pixel feuert nicht" value={tracking.summary.pixel_feuert_nicht.length}
+                color={tracking.summary.pixel_feuert_nicht.length ? '#c1272d' : '#1a7f37'} />
+            </div>
+            {tracking.summary.pixel_feuert_nicht.length > 0 && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13 }}>
+                <strong style={{ color: '#991b1b' }}>⚠️ Pixel feuert nicht</strong> — Stellen mit Bewerbungen, aber 0 Meta-Events:
+                <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                  {tracking.summary.pixel_feuert_nicht.map(z => (
+                    <li key={z.job_id}><Link to={`/jobs/${z.job_id}`}>{z.stelle}</Link> · {z.firmenname} — {z.bewerbungen} Bewerbungen</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--ink-3)' }}>
+                    <th style={{ padding: '6px 8px' }}>Stelle</th><th style={{ padding: '6px 8px' }}>Kunde</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>Bewerbungen</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>Events</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>Quote</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tracking.zeilen.map(z => (
+                    <tr key={z.job_id} style={{ borderTop: '1px solid var(--line)', background: z.pixel_feuert_nicht ? '#fef2f2' : undefined }}>
+                      <td style={{ padding: '6px 8px' }}><Link to={`/jobs/${z.job_id}`}>{z.stelle}</Link></td>
+                      <td style={{ padding: '6px 8px' }}>{z.firmenname}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{z.bewerbungen}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{z.events}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600,
+                        color: z.quote == null ? 'var(--ink-3)' : (z.quote >= 70 ? '#1a7f37' : z.quote >= 30 ? '#b7791f' : '#c1272d') }}>
+                        {z.quote == null ? '—' : `${z.quote}%`}
+                      </td>
+                    </tr>
+                  ))}
+                  {tracking.zeilen.length === 0 && <tr><td colSpan={5} style={{ padding: 10, color: 'var(--ink-3)' }}>Keine aktiven Stellen im Zeitraum.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <p className="pane-hint" style={{ marginTop: 8, fontSize: 11.5 }}>
+              „Events" = von Meta gemeldete Conversion-Events (Pixel/CAPI). „Bewerbungen" = Eingänge im Tool. Quote &gt; 100 % möglich, wenn Meta mehrere Event-Typen pro Bewerbung zählt.
+            </p>
+          </>
+        )}
+      </div>
 
       {/* ── Bericht: Vorschlag je Stelle (nur Anzeige) ── */}
       <div className="card">
