@@ -381,6 +381,9 @@ const ALLOWED_JOB_FIELDS = [
   'anonym',
   // Meta-Pixel-Zuordnung je Stelle (Migration 120)
   'pixel_id',
+  // Go-Live-Checkliste (Migration 122) — i. d. R. via PATCH /:id/golive gepflegt,
+  // aber im Allowlist, damit ein direktes Setzen (z. B. Reset) möglich bleibt.
+  'golive_checkliste',
 ];
 
 router.patch('/:id', async (req, res) => {
@@ -572,6 +575,76 @@ router.get('/:id/pixel-context', async (req, res) => {
   }
 });
 
+/* ═════════════════════ Go-Live-Checkliste (Migration 122) ═════════════════════
+   GET  /api/jobs/:id/golive  → funnel_typ + auto-Signale + gespeicherte Haken.
+   PATCH/api/jobs/:id/golive  body { key, done } → ein manueller Haken (Datum+Nutzer).
+   Auto-Signale werden live berechnet (nie gespeichert):
+     funnel_live        = Funnel veröffentlicht ODER Live-URL gesetzt
+     test_bewerbung     = eine Bewerbung mit raw.test=true ist eingegangen
+     pixel_event        = Tracking-Report zeigt Events > 0 (letzte 90 T)
+     kampagne_zugeordnet= dem Job ist eine Meta-Kampagne/Ad-Set zugeordnet */
+async function goliveAutoSignale(jobId, funnel) {
+  const [tracking, testRes] = await Promise.all([
+    trackingFuerJob(jobId, 90).catch(() => ({ events: 0, hat_kampagne: false })),
+    supabase.from('talentone_bewerbungen')
+      .select('id', { count: 'exact', head: true })
+      .eq('job_id', jobId).filter('raw->>test', 'eq', 'true'),
+  ]);
+  return {
+    funnel_live: !!(funnel?.veroeffentlicht || (funnel?.extern_url || '').trim()),
+    test_bewerbung: (testRes?.count || 0) > 0,
+    pixel_event: (tracking?.events || 0) > 0,
+    kampagne_zugeordnet: !!tracking?.hat_kampagne,
+  };
+}
+
+router.get('/:id/golive', async (req, res) => {
+  try {
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('id, golive_checkliste').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+    const { data: funnel } = await supabase
+      .from('talentone_funnels')
+      .select('funnel_typ, veroeffentlicht, extern, extern_url, manual_webhook_done, manual_pixel_done')
+      .eq('job_id', req.params.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+    const auto = await goliveAutoSignale(req.params.id, funnel);
+    res.json({
+      funnel_typ: funnel?.funnel_typ || null,
+      checkliste: (job.golive_checkliste && typeof job.golive_checkliste === 'object') ? job.golive_checkliste : {},
+      auto,
+      // Alt-Haken aus der Funnel-Zeile — zum Vorbelegen, falls die Checkliste noch leer ist.
+      legacy: { webhook_eingetragen: !!funnel?.manual_webhook_done, pixel_hinterlegt: !!funnel?.manual_pixel_done },
+    });
+  } catch (e) {
+    console.error('[jobs/golive GET]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch('/:id/golive', async (req, res) => {
+  const { key, done } = req.body || {};
+  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key ist Pflicht.' });
+  try {
+    const { data: job } = await supabase
+      .from('talentone_jobs').select('golive_checkliste').eq('id', req.params.id).maybeSingle();
+    if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
+    const cl = (job.golive_checkliste && typeof job.golive_checkliste === 'object') ? { ...job.golive_checkliste } : {};
+    if (done) {
+      cl[key] = { done: true, at: new Date().toISOString(), by: req.user?.email || null };
+    } else {
+      delete cl[key];
+    }
+    const { error: uErr } = await supabase
+      .from('talentone_jobs').update({ golive_checkliste: cl }).eq('id', req.params.id);
+    if (uErr) return res.status(500).json({ error: uErr.message });
+    res.json({ checkliste: cl });
+  } catch (e) {
+    console.error('[jobs/golive PATCH]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /* POST /api/jobs/:id/felder-vorschlaege  body: { felder?: string[] }
    Generiert plausible Texte für leere Felder basierend auf allen vorhandenen Job- und Kundeninfos. */
 router.post('/:id/felder-vorschlaege', async (req, res) => {
@@ -589,6 +662,12 @@ router.post('/:id/felder-vorschlaege', async (req, res) => {
     const benefits = Array.isArray(job.benefits) ? job.benefits : [];
 
     const briefing = `BRIEFING:
+
+★ WICHTIGSTE QUELLE — Besonderheiten der Stelle (aus dem Import/Briefing; hier stecken die echten Infos zu Unterschied, Kultur, Aufgaben, Anforderungen):
+${job.besonderheiten || '(leer)'}
+Benefits: ${benefits.join(', ') || '-'}
+
+Ergänzender Kontext:
 Firma: ${kunde?.firmenname || '-'}
 Branche: ${kunde?.branche || '-'}
 Mitarbeiterzahl: ${fd.mitarbeiter_anzahl || '-'}
@@ -596,8 +675,7 @@ Website: ${kunde?.website_url || '-'}
 Stelle: ${job.stelle || '-'}
 Region: ${job.region || '-'}
 Gehalt: ${job.gehalt || '-'}
-Benefits: ${benefits.join(', ') || '-'}
-Besonderheiten der Stelle: ${job.besonderheiten || '-'}
+
 Bisherige Antworten:
 - Unterschied: ${fd.unterschied || '(leer)'}
 - Mitarbeiter-gerne-hier: ${fd.mitarbeiter_gerne || '(leer)'}
@@ -618,7 +696,8 @@ Generiere konkrete Vorschläge für folgende Felder (nur die, die hier gelistet 
 ${feldBeschreibung}
 
 Wichtig:
-- Nutze die vorhandenen Briefing-Infos (Branche, Benefits, Besonderheiten…) als Basis
+- Nutze VORRANGIG die "Besonderheiten der Stelle" als Quelle — dort stehen die konkreten, echten Angaben dieses Betriebs. Greife Formulierungen und Fakten daraus auf, statt Allgemeinplätze aus der Branche zu erfinden.
+- Branche/Website/Stelle sind nur ergänzender Kontext, wenn die Besonderheiten zu einem Feld nichts hergeben.
 - Plausibel und konkret, kein Stock-Sprech
 - Wenn bestehende "bisherige Antworten" hilfreich sind, baue darauf auf, statt zu widersprechen
 

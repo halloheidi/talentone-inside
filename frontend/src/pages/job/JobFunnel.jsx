@@ -7,6 +7,7 @@ import Modal from '../../components/Modal.jsx';
 import StickySaveBar from '../../components/StickySaveBar.jsx';
 import CropModal from '../../components/CropModal.jsx';
 import PixelKachel from '../../components/PixelKachel.jsx';
+import GoLiveCheckliste from '../../components/GoLiveCheckliste.jsx';
 import KriterienPanel from '../../components/KriterienPanel.jsx';
 import { MitarbeiterStimmenVorschlag } from '../../components/MitarbeiterStimmen.jsx';
 import { getBrandBaseUrl, getApiBaseUrl } from '../../lib/branding.js';
@@ -542,22 +543,16 @@ export default function JobFunnel() {
             </label>
           </div>
 
-          {istPerspective && <PixelPresetCopyList presets={pixelPresets} />}
           <WebhookInfo jobId={job.id} perspective={istPerspective} />
-          {istPerspective && (
-            <div style={{ marginTop: 10, padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#78350f', marginBottom: 6 }}>In Perspective manuell erledigen:</div>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
-                <input type="checkbox" checked={manualWebhookDone} onChange={e => setManualWebhookDone(e.target.checked)} />
-                Webhook (oben) in Perspective eingetragen
-              </label>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                <input type="checkbox" checked={manualPixelDone} onChange={e => setManualPixelDone(e.target.checked)} />
-                Meta Pixel + CAPI im Funnel hinterlegt
-              </label>
-              <p className="pane-hint" style={{ marginTop: 6, marginBottom: 0 }}>Haken werden beim Speichern übernommen.</p>
-            </div>
-          )}
+          {/* Go-Live-Checkliste (ersetzt die alten zwei „manuell erledigen"-Haken) —
+              für Perspective und Onepage, mit angepassten Punkten je Funnel-Typ. */}
+          <GoLiveCheckliste
+            jobId={job.id}
+            funnelTyp={istPerspective ? 'perspective' : 'onepage'}
+            webhookUrl={`${getApiBaseUrl()}/api/webhooks/ingest?job_id=${job.id}`}
+            funnelLiveHint={istPerspective ? perspectiveLive : !!externUrl.trim()}
+            reloadToken={savedAt}
+          />
           <MultiStellenMapping kunde={kunde} />
           <MitarbeiterStimmenVorschlag kundeId={kunde?.id} />
 
@@ -1019,47 +1014,6 @@ function BewerbungenLink({ token, agentur }) {
         <a className="btn-ghost btn-sm" href={url} target="_blank" rel="noreferrer">Öffnen</a>
       </div>
       <p className="bewerbungen-link-hint">Diesen Link an den Kunden weitergeben — er zeigt alle Bewerbungen in Echtzeit. Status, Vorstellungsgespräch-Termin und Notizen kann der Kunde direkt eintragen.</p>
-    </div>
-  );
-}
-
-/* ═════════════════════ Pixel-Presets (Copy für externe Funnel) ═════════════════════ */
-
-function CopyChip({ value, label = 'Kopieren' }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* noop */ }
-  }
-  return (
-    <button type="button" className="btn-ghost btn-sm" onClick={copy}>
-      {copied ? '✓ Kopiert' : label}
-    </button>
-  );
-}
-
-// Copy-Liste der vordefinierten Pixel — zum Einfügen in Perspective o.ä.
-function PixelPresetCopyList({ presets }) {
-  if (!presets?.length) return null;
-  return (
-    <div className="bewerbungen-link-box" style={{ marginTop: 12 }}>
-      <div className="bewerbungen-link-title">Meta-Pixel zum Kopieren (für Perspective)</div>
-      <p className="bewerbungen-link-hint" style={{ marginTop: 0 }}>
-        Passenden Pixel wählen und die <strong>Dataset-/Pixel-ID</strong> in die Pixel-Einstellungen des Perspective-Funnels einfügen.
-      </p>
-      <div style={{ display: 'grid', gap: 6 }}>
-        {presets.map(p => (
-          <div key={p.dataset_id} className="bewerbungen-link-row" style={{ flexWrap: 'wrap' }}>
-            <span style={{ minWidth: 150, fontSize: 13, fontWeight: 600 }}>{p.name}</span>
-            <code className="bewerbungen-link-url" style={{ flex: 1 }}>{p.dataset_id}</code>
-            <CopyChip value={p.dataset_id} label="ID kopieren" />
-            {p.capi_token && <CopyChip value={p.capi_token} label="CAPI-Token kopieren" />}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

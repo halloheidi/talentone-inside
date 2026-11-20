@@ -12,24 +12,20 @@ const ALLOWED = [
   'perspective_editor_url', 'perspective_funnel_id', 'manual_pixel_done', 'manual_webhook_done',
 ];
 
-// Vordefinierte Meta-Pixel (Dataset-IDs) zur schnellen Auswahl in der
-// Funnel-Erstellung bzw. zum Kopieren in externe Funnel (Perspective).
-// CAPI-Tokens sind Secrets → NICHT im Code, sondern aus der Env
-// (backend/.env.local): META_CAPI_<KEY>. Fehlt die Env, bleibt der Token null.
-const PIXEL_PRESETS = [
-  { name: 'Elektriker + Photovoltaik', dataset_id: '320604426514508', capi_env: 'META_CAPI_ELEKTRIKER_PV' },
-  { name: 'Handwerker Allgemein',      dataset_id: '682693863186780', capi_env: 'META_CAPI_HANDWERKER' },
-  { name: 'KFZ',                       dataset_id: '867043814427952', capi_env: 'META_CAPI_KFZ' },
-  { name: 'SHK',                       dataset_id: '497660425380244', capi_env: 'META_CAPI_SHK' },
-];
-
 // GET /api/funnels/pixel-presets — vor /:id, sonst schluckt der Wildcard-Match.
-router.get('/pixel-presets', (req, res) => {
+// Quelle sind jetzt die zentral verwalteten Pixel (talentone_pixel, Migration 120) —
+// KEINE hartcodierten IDs mehr. CAPI-Token kommt aus der Env (META_CAPI_TOKEN); er
+// ist ein Secret und steht nie in Portal-/Public-/Mail-Antworten.
+router.get('/pixel-presets', async (req, res) => {
+  const { data: pixel = [] } = await supabase
+    .from('talentone_pixel').select('name, gewerk, meta_pixel_id, fallback, aktiv')
+    .eq('aktiv', true).order('fallback', { ascending: false }).order('name');
+  const capiToken = process.env.META_CAPI_TOKEN || null;
   res.json({
-    presets: PIXEL_PRESETS.map(p => ({
-      name: p.name,
-      dataset_id: p.dataset_id,
-      capi_token: p.capi_env ? (process.env[p.capi_env] || null) : null,
+    presets: (pixel || []).map(p => ({
+      name: p.name + (p.fallback ? ' (Fallback)' : ''),
+      dataset_id: p.meta_pixel_id,
+      capi_token: capiToken,
     })),
   });
 });

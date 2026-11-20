@@ -27,6 +27,8 @@ Extrahiere die Informationen und antworte NUR mit einem JSON-Objekt, ohne Markdo
   "ausbildung": "Geforderte Ausbildung/Qualifikation oder leer",
   "kenntnisse": "Wichtigste 2-3 fachliche Kenntnisse als kurze Aufzählung oder leer",
   "aufgaben": "Wichtigste typische Aufgaben als kurze Aufzählung oder leer",
+  "soft_skills": ["Array der gewünschten persönlichen Soft Skills des idealen Kandidaten. Bevorzugt aus dieser Standardliste wählen, wenn sie passen: Teamfähigkeit, Zuverlässigkeit, Eigeninitiative, Kommunikationsstärke, Belastbarkeit, Lernbereitschaft, Organisationstalent, Kundenorientierung. Nur was der Text nennt oder klar impliziert ('Sie sind zuverlässig und teamfähig…'). Sonst leeres Array."],
+  "kandidat_eigenschaften": "Welche persönlichen Eigenschaften / welche Haltung der ideale Kandidat mitbringen soll, als kurzer Freitext (1-2 Sätze). Aus dem Anforderungsprofil ('Wir wünschen uns…', 'Sie bringen mit…'). Nur wenn im Text. Sonst leer.",
   "benefits": ["Liste der erwähnten Benefits als Array"],
   "unterschied": "Was den Betrieb von anderen ARBEITGEBERN unterscheidet (Alleinstellung als Arbeitgeber) — aus Formulierungen wie 'Bei uns...', 'Was uns ausmacht', 'Wir über uns'. Nur wenn im Text. Sonst leer.",
   "mitarbeiter_gerne": "Warum Mitarbeiter GERNE hier arbeiten: Team-Events, Zusammenhalt, Kultur-Extras die KEINE harten Benefits sind. Nur wenn im Text. Sonst leer.",
@@ -36,7 +38,7 @@ Extrahiere die Informationen und antworte NUR mit einem JSON-Objekt, ohne Markdo
   "quereinsteiger": false
 }
 
-WICHTIG: Extrahiere NUR, was tatsächlich im Text steht — nichts erfinden oder raten. Fehlt eine Angabe, lass das Feld leer ("" bzw. leeres Array). Gerade die "Über uns"-Felder (unterschied, mitarbeiter_gerne, unternehmenskultur, mitarbeiterzahl) nur befüllen, wenn der Text dazu wirklich etwas hergibt.`;
+WICHTIG: Extrahiere NUR, was tatsächlich im Text steht — nichts erfinden oder raten. Fehlt eine Angabe, lass das Feld leer ("" bzw. leeres Array). Gerade die "Über uns"-Felder (unterschied, mitarbeiter_gerne, unternehmenskultur, mitarbeiterzahl) und die Kandidaten-Felder (soft_skills, kandidat_eigenschaften) nur befüllen, wenn der Text dazu wirklich etwas hergibt.`;
 
 // Prompt für Neukunden-Extraktion (Landingpages, Angebots-PDFs, Firmen-Websites).
 // Andere Semantik: Produkt/Dienstleistung + Zielgruppe + USP statt Stellendaten.
@@ -150,6 +152,11 @@ export function toKunde(extracted) {
 // Mappt das extrahierte Objekt auf eine talentone_jobs-Zeile (ohne kunde_id)
 export function toJob(extracted, eingabeMethode, sourceUrl = null) {
   const benefits = Array.isArray(extracted.benefits) ? extracted.benefits : [];
+  // soft_skills kann je nach Modell-Antwort Array oder String sein — für die
+  // Chips-UI (Array.isArray-Guard) immer auf ein Array normalisieren.
+  const softSkills = Array.isArray(extracted.soft_skills)
+    ? extracted.soft_skills.map(s => String(s).trim()).filter(Boolean)
+    : (extracted.soft_skills ? [String(extracted.soft_skills).trim()] : []);
   const besonderheitenParts = [
     extracted.unterschied && `Unterschied: ${extracted.unterschied}`,
     extracted.unternehmenskultur && `Kultur: ${extracted.unternehmenskultur}`,
@@ -167,6 +174,14 @@ export function toJob(extracted, eingabeMethode, sourceUrl = null) {
     quereinsteiger: !!extracted.quereinsteiger,
     eingabe_methode: eingabeMethode,
     url: sourceUrl,
-    formdata_komplett: extracted,
+    // Vollständige Rohdaten als formdata_komplett — speist die Boxen „Über das
+    // Unternehmen" (unterschied/mitarbeiter_gerne/unternehmenskultur/mitarbeiter_anzahl)
+    // und „Idealer Kandidat" (ausbildung/soft_skills/kandidat_eigenschaften).
+    // Der Prompt liefert „mitarbeiterzahl", die UI liest „mitarbeiter_anzahl" → spiegeln.
+    formdata_komplett: {
+      ...extracted,
+      soft_skills: softSkills,
+      mitarbeiter_anzahl: extracted.mitarbeiter_anzahl || extracted.mitarbeiterzahl || '',
+    },
   };
 }

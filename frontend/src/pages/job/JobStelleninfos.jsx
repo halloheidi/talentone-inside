@@ -122,6 +122,10 @@ export default function JobStelleninfos() {
   const SUGGESTIBLE_KEYS = ['unterschied', 'mitarbeiter_gerne', 'unternehmenskultur', 'ausbildung', 'kandidat_eigenschaften'];
   const emptySuggestible = SUGGESTIBLE_KEYS.filter(k => !(form[k] || '').trim());
   const allSuggestibleFull = emptySuggestible.length === 0;
+  // Hinweis-Banner: Besonderheiten getippt, aber ALLE vorschlagbaren Felder noch leer
+  // (typisch für manuell angelegte Stellen ohne Import) → KI-Vorbefüllung aktiv anbieten.
+  const zeigeKiBanner = (form.besonderheiten || '').trim().length > 0
+    && emptySuggestible.length === SUGGESTIBLE_KEYS.length && !aiBusy;
 
   async function requestAiSuggestions() {
     if (allSuggestibleFull || aiBusy) return;
@@ -414,6 +418,20 @@ export default function JobStelleninfos() {
       {/* ───────── Über das Unternehmen ───────── */}
       <fieldset className="formular-section">
         <legend>Über das Unternehmen</legend>
+        {/* Manuell angelegte Stelle (ohne Import): Besonderheiten getippt, aber die
+            strukturierten Felder sind noch leer → aktiv anbieten statt stiller leerer Box. */}
+        {zeigeKiBanner && (
+          <div className="ai-suggest-banner" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>✨</span>
+            <div style={{ flex: 1, minWidth: 220, fontSize: 13, color: '#3730a3', lineHeight: 1.45 }}>
+              Diese Felder sind noch leer, aber bei <strong>Besonderheiten</strong> stehen schon Infos.
+              Die KI kann „Über das Unternehmen" und „Idealer Kandidat" daraus vorbefüllen — du passt nur noch an.
+            </div>
+            <button type="button" className="btn-primary btn-sm" onClick={requestAiSuggestions} disabled={aiBusy}>
+              {aiBusy ? 'KI denkt nach…' : 'Jetzt vorschlagen'}
+            </button>
+          </div>
+        )}
         <div className="ai-suggest-bar">
           <button
             type="button"
@@ -425,7 +443,7 @@ export default function JobStelleninfos() {
             {aiBusy ? 'KI denkt nach…' : '✨ Felder per KI vorschlagen lassen'}
           </button>
           {!allSuggestibleFull && !aiBusy && (
-            <span className="ai-suggest-hint">{emptySuggestible.length} leere{emptySuggestible.length === 1 ? 's' : ''} Feld{emptySuggestible.length === 1 ? '' : 'er'} • Vorschlag basiert auf Stelle, Branche, Benefits und Website</span>
+            <span className="ai-suggest-hint">{emptySuggestible.length} leere{emptySuggestible.length === 1 ? 's' : ''} Feld{emptySuggestible.length === 1 ? '' : 'er'} • Vorschlag nutzt vorrangig die Besonderheiten der Stelle, dann Branche/Benefits/Website</span>
           )}
           {aiError && <span className="form-msg" style={{ color: 'var(--danger)' }}>{aiError}</span>}
         </div>

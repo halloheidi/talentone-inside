@@ -6,13 +6,23 @@ import { api } from '../lib/api.js';
 // Zeigt den der Stelle zugeordneten Meta-Pixel (Name + Pixel-ID zum Kopieren)
 // und den CAPI-Token (maskiert, zum Kopieren). NUR intern — der Token kommt aus
 // der Env und taucht nie in Portal-/Public-/Mail-Antworten auf.
+// Zuordnung direkt aus der Kachel: Gewerk-Vorschlag „übernehmen" oder per
+// aufklappbarer Liste einen anderen Pixel aus talentone_pixel wählen (PATCH jobs.pixel_id).
 // Prop `perspectiveHinweis`: zeigt zusätzlich den Hinweis, dass der Pixel in
 // Perspective manuell unter Integrationen → Meta-Pixel eingetragen werden muss
 // (die Perspective-API nimmt keine Pixel-ID entgegen).
-export default function PixelKachel({ jobId, perspectiveHinweis = false }) {
+export default function PixelKachel({ jobId, perspectiveHinweis = false, onChange }) {
   const [ctx, setCtx] = useState(null);
   const [error, setError] = useState('');
   const [kopiert, setKopiert] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [waehlenOffen, setWaehlenOffen] = useState(false);
+
+  function ladeCtx() {
+    return api(`/jobs/${jobId}/pixel-context`)
+      .then(r => { setCtx(r); return r; })
+      .catch(e => { setError(e.body?.error || e.message); });
+  }
 
   useEffect(() => {
     let aktiv = true;
@@ -27,12 +37,28 @@ export default function PixelKachel({ jobId, perspectiveHinweis = false }) {
     catch { /* Clipboard evtl. blockiert */ }
   }
 
+  // Pixel der Stelle zuordnen/wechseln. null = Zuordnung entfernen (zurück auf Vorschlag/Fallback).
+  async function setzePixel(pixelId) {
+    setBusy(true); setError('');
+    try {
+      await api(`/jobs/${jobId}`, { method: 'PATCH', body: { pixel_id: pixelId } });
+      setWaehlenOffen(false);
+      await ladeCtx();
+      onChange?.();
+    } catch (e) {
+      setError(e.body?.error || e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error) return <div className="card"><div className="alert alert-error">Pixel: {error}</div></div>;
   if (!ctx) return <div className="card"><p className="pane-hint">Lade Pixel…</p></div>;
 
   const p = ctx.aktueller_pixel;
   const v = ctx.vorschlag;
   const token = ctx.capi_token || null;
+  const liste = Array.isArray(ctx.aktiv_liste) ? ctx.aktiv_liste : [];
 
   return (
     <div className="card">
@@ -65,17 +91,77 @@ export default function PixelKachel({ jobId, perspectiveHinweis = false }) {
           </Zeile>
         </div>
       ) : (
-        <p className="pane-hint" style={{ marginTop: 10 }}>
-          Noch kein Pixel zugeordnet.
-          {v && <> Vorschlag: <strong>{v.name}</strong>{v.via_fallback ? ' (Fallback)' : ''} — im Bereich „Stelle" zuordnen.</>}
+        <div style={{ marginTop: 10 }}>
+          <p className="pane-hint" style={{ margin: 0 }}>Noch kein Pixel zugeordnet.</p>
+          {v && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#f4f6fb', border: '1px solid #dbe3f3', borderRadius: 8, padding: '10px 12px' }}>
+              <span style={{ fontSize: 13 }}>
+                💡 Vorschlag{ctx.vorschlag_gewerk ? ` (Gewerk: ${ctx.vorschlag_gewerk})` : (v.via_fallback ? ' (Fallback)' : '')}:{' '}
+                <strong>{v.name}</strong> · <code style={{ fontSize: 12 }}>{v.meta_pixel_id}</code>
+              </span>
+              <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={() => setzePixel(v.id)}>
+                {busy ? '…' : 'übernehmen'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Hinweis bei abweichendem Vorschlag (nur Anzeige — Wechsel unten per Liste). */}
+      {p && v && v.id !== p.id && (
+        <p className="pane-hint" style={{ marginTop: 10, fontSize: 12 }}>
+          💡 Vorschlag laut Gewerk wäre <strong>{v.name}</strong>{v.via_fallback ? ' (Fallback)' : ''}. Laufende Kampagnen bleiben beim bisherigen Pixel bis zum nächsten Start.
         </p>
       )}
 
-      {/* Hinweis bei abweichendem Vorschlag (nur Anzeige, nichts wird umgehängt). */}
-      {p && v && v.id !== p.id && (
-        <p className="pane-hint" style={{ marginTop: 10, fontSize: 12 }}>
-          💡 Vorschlag laut Gewerk wäre <strong>{v.name}</strong>{v.via_fallback ? ' (Fallback)' : ''}. Änderung im Bereich „Stelle" — laufende Kampagnen bleiben beim bisherigen Pixel bis zum nächsten Start.
-        </p>
+      {/* Aufklappbar: anderen Pixel aus talentone_pixel wählen. */}
+      {liste.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="pane-hint"
+            onClick={() => setWaehlenOffen(o => !o)}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12.5, color: '#33415c', fontWeight: 600 }}
+          >
+            {waehlenOffen ? '▾' : '▸'} {p ? 'anderen Pixel wählen' : 'Pixel manuell wählen'}
+          </button>
+          {waehlenOffen && (
+            <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+              {liste.map(px => {
+                const aktiv = ctx.aktueller === px.id;
+                return (
+                  <button
+                    key={px.id}
+                    type="button"
+                    disabled={busy || aktiv}
+                    onClick={() => setzePixel(px.id)}
+                    style={{
+                      textAlign: 'left', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between',
+                      border: `1px solid ${aktiv ? 'var(--brand, #2563eb)' : 'var(--line, #e5e5e5)'}`,
+                      background: aktiv ? '#eef2ff' : '#fff', borderRadius: 8, padding: '7px 10px',
+                      cursor: aktiv ? 'default' : 'pointer', fontSize: 13,
+                    }}
+                  >
+                    <span>
+                      <strong>{px.name}</strong>
+                      {px.gewerk && <span className="pane-hint" style={{ marginLeft: 6, fontSize: 11 }}>{px.gewerk}</span>}
+                      {px.fallback && <span className="pane-hint" style={{ marginLeft: 6, fontSize: 11 }}>(Fallback)</span>}
+                    </span>
+                    <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <code style={{ fontSize: 11 }}>{px.meta_pixel_id}</code>
+                      {aktiv && <span style={{ fontSize: 11, color: 'var(--brand, #2563eb)', fontWeight: 700 }}>✓ aktiv</span>}
+                    </span>
+                  </button>
+                );
+              })}
+              {p && (
+                <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setzePixel(null)} style={{ marginTop: 2, alignSelf: 'flex-start' }}>
+                  Zuordnung entfernen (zurück auf Vorschlag)
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {perspectiveHinweis && (
