@@ -1839,6 +1839,10 @@ button { font-family: inherit; }
 .review-creative-thumb {
   position: relative;
   width: 100%;
+  /* Einheitlicher 4:5-Rahmen fuer alle Formate. Hochformate (9:16) werden
+     nicht mehr zum Quadrat angeschnitten (Headline oben bleibt sichtbar) —
+     stattdessen `contain` auf neutralem Grund. Klick -> Vollansicht im Original. */
+  aspect-ratio: 4 / 5;
   background: #f0efed;
   border: 1px solid #ececea;
   border-radius: var(--radius-sm);
@@ -1847,7 +1851,7 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .review-creative-thumb img,
-.review-creative-thumb video { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.review-creative-thumb video { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 .review-adcopies { display: flex; flex-direction: column; gap: 14px; }
 .review-adcopy { background: #fafaf8; border: 1px solid #ececea; border-radius: var(--radius-sm); padding: 14px; }
