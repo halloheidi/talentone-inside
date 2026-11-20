@@ -224,6 +224,12 @@ router.post('/jobs/:id/export/email', async (req, res) => {
         .eq('id', latestReview.id);
     }
 
+    // Gesendete Auswahl an der aktuellen Runde festhalten: die Review-Seite zeigt
+    // ausschliesslich genau diese Creatives/Ad-Copies (nicht alle der Stelle).
+    await supabase.from('talentone_reviews')
+      .update({ auswahl: { creative_ids: selCreatives.map(c => c.id), adcopy_ids: selAdcopies.map(a => a.id) } })
+      .eq('job_id', job.id).eq('kontext', 'entwurf').eq('runde', neueRundeNr);
+
     // ── Drei klar getrennte Varianten ──
     const rundePrefix = istNeueRunde ? `[Runde ${neueRundeNr}] ` : '';
     // Betreff + Intro-Prefix aus editierbaren Vorlagen (entwurf_runde / _neue_runde /
@@ -499,6 +505,12 @@ router.post('/jobs/:id/export/kampagne-update', async (req, res) => {
                   updated_at: new Date().toISOString() })
         .eq('id', latestReview.id);
     }
+
+    // Gesendete Auswahl an der aktuellen Update-Runde festhalten (Review-Seite
+    // zeigt ausschliesslich diese).
+    await supabase.from('talentone_reviews')
+      .update({ auswahl: { creative_ids: selCreatives.map(c => c.id), adcopy_ids: selAdcopies.map(a => a.id) } })
+      .eq('job_id', job.id).eq('kontext', 'update').eq('runde', neueRundeNr);
 
     // Projekttyp-Weiche: Neukunden → kampagne_update_neukunden (Text bereits neutral,
     // „Werbeanzeigen/Kampagne"). Fehlt die Neukunden-Variante komplett → abbrechen,

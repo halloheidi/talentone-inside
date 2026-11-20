@@ -575,6 +575,23 @@ router.get('/review/:token', async (req, res) => {
   const review = alleReviews[0] || null;
   const vorherige_runden = alleReviews.slice(1);
 
+  // Nur die beim Versand angehakten Creatives/Ad-Copies anzeigen. Die aktuelle
+  // Runde hält ihre Auswahl in `review.auswahl` { creative_ids, adcopy_ids }.
+  // Alte Runden ohne gespeicherte Auswahl (NULL) zeigen weiterhin ALLE (Fallback).
+  let creativesAnzeige = creatives;
+  let adcopiesAnzeige = adcopies;
+  const auswahl = review?.auswahl;
+  if (auswahl && typeof auswahl === 'object') {
+    if (Array.isArray(auswahl.creative_ids)) {
+      const cset = new Set(auswahl.creative_ids);
+      creativesAnzeige = creatives.filter(c => cset.has(c.id));
+    }
+    if (Array.isArray(auswahl.adcopy_ids)) {
+      const aset = new Set(auswahl.adcopy_ids);
+      adcopiesAnzeige = adcopies.filter(a => aset.has(a.id));
+    }
+  }
+
   // AVV-Status für die Click-Wrap-Checkbox auf der Review-Seite. `erforderlich`
   // = es gibt eine aktive Version UND der Kunde hat noch nicht akzeptiert.
   const avvVersion = kunde ? await getAktuelleVersion(kunde.agentur) : null;
@@ -598,8 +615,8 @@ router.get('/review/:token', async (req, res) => {
     // neutrale Anonym-Identität tragen und Bewerber diese sehen – nicht den echten Namen.
     anonym: job.anonym?.aktiv ? { aktiv: true, name: job.anonym.name || null } : null,
     ...brandForKunde(kunde),
-    creatives,
-    adcopies,
+    creatives: creativesAnzeige,
+    adcopies: adcopiesAnzeige,
     funnel_url: funnelUrl,
     sheet_url: sheetUrl,
     review,
