@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { getMetaToken, setMetaToken, getMetaSyncStatus, syncMetaKampagnen, braucheBackfill, ladeAdAccounts, matchKampagnen, adsetsNachladen, matchAdSets } from '../meta-sync.js';
+import { getMetaToken, setMetaToken, getMetaSyncStatus, syncMetaKampagnen, braucheBackfill, ladeAdAccounts, matchKampagnen, adsetsNachladen, matchAdSets, istFreigabeFehlt, werbekontenHinweise } from '../meta-sync.js';
 import { aktuellePhaseInfo, laufphasenAktualisieren, berechnePhasen } from '../meta-laufphasen.js';
 import { metaMetrikenFuerProjekt } from '../meta-metriken.js';
 
@@ -105,17 +105,32 @@ router.get('/adaccounts', async (req, res) => {
   }
 });
 
-// GET /api/meta/konten — gespeicherte Konto-Zuordnungen (Typ + Kunde).
+// GET /api/meta/konten — gespeicherte Konto-Zuordnungen (Typ + Kunde + Sync-Status).
 router.get('/konten', async (req, res) => {
   const { data, error } = await supabase.from('talentone_meta_konten')
-    .select('konto_id, name, typ, kunde_id, account_status, disable_reason, zahlungsproblem, zahlungsproblem_seit, status_gesynct, talentone_kunden(firmenname)');
+    .select('konto_id, name, typ, kunde_id, account_status, disable_reason, zahlungsproblem, zahlungsproblem_seit, status_gesynct, letzter_sync_fehler, letzter_sync_am, talentone_kunden(firmenname)');
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ konten: (data || []).map(k => ({
-    ...k,
-    kunde_name: k.talentone_kunden?.firmenname || null,
-    status_label: k.account_status != null ? (STATUS_LABEL[k.account_status] || `Status ${k.account_status}`) : null,
-    talentone_kunden: undefined,
-  })) });
+  res.json({ konten: (data || []).map(k => {
+    const freigabe_fehlt = istFreigabeFehlt(k.letzter_sync_fehler);
+    return {
+      ...k,
+      kunde_name: k.talentone_kunden?.firmenname || null,
+      status_label: k.account_status != null ? (STATUS_LABEL[k.account_status] || `Status ${k.account_status}`) : null,
+      freigabe_fehlt,
+      // Sprechender Sync-Status statt rohem Fehlercode. 403/Permission → „Freigabe fehlt".
+      sync_label: freigabe_fehlt
+        ? 'Freigabe fehlt (System-User nicht zugewiesen)'
+        : (k.letzter_sync_fehler ? 'Sync-Fehler' : (k.account_status == null ? 'noch nie gesynct' : null)),
+      talentone_kunden: undefined,
+    };
+  }) });
+});
+
+// GET /api/meta/werbekonten-hinweise — drei Aufmerksamkeits-Zahlen (nur > 0 anzeigen):
+// Konten ohne Kunde · aktive Kampagnen ohne Stellen-Zuordnung · Konten ohne erfolgreichen Sync.
+router.get('/werbekonten-hinweise', async (req, res) => {
+  try { res.json(await werbekontenHinweise()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/meta/konten/zahlungsprobleme — Konten mit aktivem Zahlungsproblem (rotes Badge).

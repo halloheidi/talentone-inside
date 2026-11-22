@@ -40,6 +40,9 @@ export default function Meta() {
   const [zahlungsprobleme, setZahlungsprobleme] = useState([]);
   const [reakBusy, setReakBusy] = useState(null);   // meta_campaign_id während Request
 
+  // Aufmerksamkeits-Zahlen (Werbekonten-Hinweiskasten)
+  const [hinweise, setHinweise] = useState(null);
+
   async function load() {
     try { setStatus(await api('/meta/status')); }
     catch (e) { setErr(e.body?.error || e.message); }
@@ -55,6 +58,10 @@ export default function Meta() {
   async function loadKonten() {
     try { const r = await api('/meta/konten'); setKonten(r.konten || []); }
     catch (e) { setErr(e.body?.error || e.message); }
+  }
+  async function loadHinweise() {
+    try { setHinweise(await api('/meta/werbekonten-hinweise')); }
+    catch { /* best effort — Hinweiskasten bleibt dann leer */ }
   }
   async function loadKampagnen() {
     try {
@@ -77,6 +84,7 @@ export default function Meta() {
   useEffect(() => {
     load();
     loadKonten();
+    loadHinweise();
     loadKampagnen();
     loadOffeneAdsets();
     loadReaktivierungen();
@@ -151,7 +159,7 @@ export default function Meta() {
       setMsg(res.skipped
         ? `Übersprungen: ${res.reason}`
         : `Sync ok — ${res.konten} Konten, ${res.kampagnen} Kampagnen, ${res.insights} Insight-Tage${res.konto_fehler?.length ? `, ${res.konto_fehler.length} Kontofehler` : ''}.`);
-      await load();
+      await Promise.all([load(), loadKonten(), loadKampagnen(), loadHinweise()]);
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setBusy(false); }
   }
@@ -183,7 +191,7 @@ export default function Meta() {
         body: { name: row.name || '', typ: d.typ, kunde_id: d.typ === 'exklusiv' ? d.kunde_id : null },
       });
       setMsg('Konto-Zuordnung gespeichert.');
-      await loadKonten();
+      await Promise.all([loadKonten(), loadHinweise()]);
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setSavingKonto(null); }
   }
@@ -194,7 +202,7 @@ export default function Meta() {
       await api(`/meta/konten/${encodeURIComponent(row.konto_id)}`, { method: 'DELETE' });
       setDrafts(p => { const n = { ...p }; delete n[row.konto_id]; return n; });
       setMsg('Zuordnung entfernt.');
-      await loadKonten();
+      await Promise.all([loadKonten(), loadHinweise()]);
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setSavingKonto(null); }
   }
@@ -208,7 +216,7 @@ export default function Meta() {
         method: 'PUT', body: { projekt_id: projektId },
       });
       setMsg('Kampagne zugeordnet.');
-      await loadKampagnen();
+      await Promise.all([loadKampagnen(), loadHinweise()]);
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setSavingKamp(null); }
   }
@@ -217,9 +225,13 @@ export default function Meta() {
     try {
       await api('/meta/match', { method: 'POST' });
       setMsg('Matching gelaufen.');
-      await Promise.all([loadKampagnen(), loadKonten()]);
+      await Promise.all([loadKampagnen(), loadKonten(), loadHinweise()]);
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setMatchBusy(false); }
+  }
+
+  function scrollZuKampagnen() {
+    document.getElementById('kampagnen-zuordnung')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   const gesetzt = !!status?.token_gesetzt;
@@ -347,6 +359,40 @@ export default function Meta() {
       {/* ══ Werbekonten ══ */}
       <div className="card">
         <h2 className="section-title" style={{ marginTop: 0 }}>Werbekonten</h2>
+
+        {/* Hinweiskasten: woher die Liste kommt + wie fehlende Konten freigegeben werden. */}
+        <div className="alert" style={{ background: '#eef4ff', color: '#274690', fontSize: 13, marginBottom: 12 }}>
+          ℹ️ Diese Liste wird aus Meta synchronisiert. Fehlt ein Konto, muss es im Business Manager mit dem
+          System-User geteilt werden (<strong>Konten → Werbekonten → Zugriff anfordern</strong>, dann System-User
+          zuweisen).
+        </div>
+
+        {/* Drei Aufmerksamkeits-Zahlen — nur sichtbar, wenn > 0. */}
+        {hinweise && (hinweise.konten_ohne_kunde > 0 || hinweise.kampagnen_ohne_zuordnung > 0 || hinweise.konten_ohne_sync > 0) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {hinweise.konten_ohne_kunde > 0 && (
+              <span style={{ background: '#fff4e5', color: '#8a4b00', border: '1px solid #ffd8a8', borderRadius: 8, padding: '4px 10px', fontSize: 12.5, fontWeight: 600 }}>
+                Konten ohne Kunde ({hinweise.konten_ohne_kunde})
+              </span>
+            )}
+            {hinweise.kampagnen_ohne_zuordnung > 0 && (
+              <button
+                type="button"
+                onClick={scrollZuKampagnen}
+                style={{ background: '#fff4e5', color: '#8a4b00', border: '1px solid #ffd8a8', borderRadius: 8, padding: '4px 10px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                title="Zur Zuordnung springen"
+              >
+                Aktive Kampagnen ohne Stellen-Zuordnung ({hinweise.kampagnen_ohne_zuordnung}) →
+              </button>
+            )}
+            {hinweise.konten_ohne_sync > 0 && (
+              <span style={{ background: '#fdecea', color: '#8a1c1c', border: '1px solid #f5c2c0', borderRadius: 8, padding: '4px 10px', fontSize: 12.5, fontWeight: 600 }}>
+                Konten ohne erfolgreichen Sync ({hinweise.konten_ohne_sync})
+              </span>
+            )}
+          </div>
+        )}
+
         <p className="section-sub">
           Ordne jedem Werbekonto einen Typ zu: <strong>Exklusiv für Kunde</strong> (das Konto gehört einem Kunden;
           seine Projekte erben es automatisch) oder <strong>Pool-Konto</strong> (mehrere Kunden; die Zuordnung
@@ -356,6 +402,9 @@ export default function Meta() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <button className="btn-primary btn-sm" onClick={ladeAdaccounts} disabled={adBusy}>
             {adBusy ? 'Lade…' : '📥 Konten aus Meta laden'}
+          </button>
+          <button className="btn-ghost btn-sm" onClick={() => jetztSyncen(false)} disabled={busy || !gesetzt}>
+            {busy ? 'Sync läuft…' : '🔄 Jetzt synchronisieren'}
           </button>
         </div>
 
@@ -390,14 +439,25 @@ export default function Meta() {
                           ⚠️ {row.status_label} seit {row.zahlungsproblem_seit}
                         </span>
                       )}
+                      {row.freigabe_fehlt && (
+                        <span title={row.letzter_sync_fehler || ''} style={{ flex: '0 0 auto', background: '#fdecea', color: '#8a1c1c', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
+                          ⛔ Freigabe fehlt
+                        </span>
+                      )}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 8, overflowWrap: 'anywhere' }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: row.sync_label ? 2 : 8, overflowWrap: 'anywhere' }}>
                       {row.konto_id}
                       {row.status_label ? ` · ${row.status_label}` : ''}
                       {row.currency ? ` · ${row.currency}` : ''}
                       {gespeichert && row.typ === 'exklusiv' && ` · exklusiv → ${row.kunde_name || row.kunde_id || '?'}`}
                       {gespeichert && row.typ === 'pool' && ' · Pool-Konto'}
                     </div>
+                    {row.sync_label && (
+                      <div title={row.letzter_sync_fehler || ''} style={{ fontSize: 11.5, color: row.freigabe_fehlt ? '#8a1c1c' : '#8a4b00', marginBottom: 8 }}>
+                        {row.freigabe_fehlt ? '⛔' : '⚠️'} {row.sync_label}
+                        {row.freigabe_fehlt && ' — im Business Manager den System-User dem Werbekonto zuweisen.'}
+                      </div>
+                    )}
                     {/* Bedienzeile */}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <select
@@ -451,7 +511,7 @@ export default function Meta() {
       </div>
 
       {/* ══ Nicht zugeordnete Kampagnen ══ */}
-      <div className="card">
+      <div className="card" id="kampagnen-zuordnung">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h2 className="section-title" style={{ marginTop: 0, marginBottom: 0 }}>Nicht zugeordnete Kampagnen</h2>
           <button className="btn-ghost btn-sm" onClick={matchingLaufen} disabled={matchBusy}>

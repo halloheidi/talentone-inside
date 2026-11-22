@@ -112,6 +112,59 @@ function normKonto(id) {
   return s.startsWith('act_') ? s : `act_${s}`;
 }
 
+/**
+ * Deutet ein Konto-Sync-Fehler auf eine fehlende Freigabe hin (System-User nicht
+ * mehr/nie dem Werbekonto zugewiesen)? Graph meldet das als HTTP 403 bzw. mit den
+ * Permission-Fehlercodes 10 / 200 / 272 / 298. Dann zeigen wir den sprechenden
+ * Status "Freigabe fehlt" statt des rohen Fehlercodes.
+ */
+export function istFreigabeFehlt(fehler) {
+  const s = String(fehler || '');
+  if (!s) return false;
+  return /\b403\b/.test(s)
+    || /\((?:10|200|272|298)[/)]/.test(s)
+    || /permission|do(?:es)? not have|nicht.*(?:berechtigt|zugewiesen|freigeg)/i.test(s);
+}
+
+/** Letzten Konto-Sync-Status festhalten (nur bestehende Konto-Zeilen, keine neuen). */
+async function markKontoSync(konto, fehler) {
+  await supabase.from('talentone_meta_konten')
+    .update({ letzter_sync_fehler: fehler || null, letzter_sync_am: new Date().toISOString() })
+    .eq('konto_id', konto);
+}
+
+/**
+ * Drei Aufmerksamkeits-Zahlen für die Werbekonten-Seite (und das Heute-Badge),
+ * ausschließlich aus der DB (damit ohne Live-Meta-Call konsistent berechenbar):
+ *  1. konten_ohne_kunde       — Werbekonto in Kampagnen gesehen, aber nicht kategorisiert
+ *                               (keine Zeile) bzw. als exklusiv ohne Kunde. Pool zählt als zugeordnet.
+ *  2. kampagnen_ohne_zuordnung — aktive (ACTIVE) Kampagnen ohne Projekt-/Stellen-Zuordnung.
+ *  3. konten_ohne_sync        — account_status NULL ODER letzter Sync = Freigabe-Fehler (403).
+ */
+export async function werbekontenHinweise() {
+  const [{ data: konten }, { data: kampOffen }, { data: kampKonten }] = await Promise.all([
+    supabase.from('talentone_meta_konten').select('konto_id, typ, kunde_id, account_status, letzter_sync_fehler'),
+    supabase.from('talentone_meta_kampagnen').select('werbekonto_id, effective_status').is('projekt_id', null).eq('gemischt', false),
+    supabase.from('talentone_meta_kampagnen').select('werbekonto_id'),
+  ]);
+  const kontenMap = new Map((konten || []).map(k => [normKonto(k.konto_id), k]));
+  const alleKonten = new Set([...kontenMap.keys()]);
+  for (const r of (kampKonten || [])) { const id = normKonto(r.werbekonto_id); if (id) alleKonten.add(id); }
+
+  let ohneKunde = 0;
+  for (const konto of alleKonten) {
+    const row = kontenMap.get(konto);
+    if (!row) { ohneKunde++; continue; }                 // in Kampagne gesehen, nie kategorisiert
+    if (row.typ === 'pool') continue;                    // Pool = bewusst ohne Einzelkunde
+    if (row.typ === 'exklusiv' && !row.kunde_id) ohneKunde++; // exklusiv ohne Kunde = Lücke
+  }
+
+  const aktivOffen = (kampOffen || []).filter(k => /ACTIVE/i.test(k.effective_status || '')).length;
+  const ohneSync = (konten || []).filter(k => k.account_status == null || istFreigabeFehlt(k.letzter_sync_fehler)).length;
+
+  return { konten_ohne_kunde: ohneKunde, kampagnen_ohne_zuordnung: aktivOffen, konten_ohne_sync: ohneSync };
+}
+
 // Alle zu synchronisierenden Werbekonten: registrierte Konten (talentone_meta_konten,
 // exklusiv + pool) plus Zuordnungen an Kunde/Projekt/Job (Robustheit/Alt-Bestand).
 async function sammleWerbekonten() {
@@ -655,10 +708,12 @@ export async function syncMetaKampagnen({ backfill = false } = {}) {
           beruehrteKampagnen.add(row.campaign_id);
           insightsGesamt++;
         }
+        await markKontoSync(konto, null); // Konto diesmal erfolgreich gelesen → Fehler löschen
         await sleep(600); // Pause zwischen Konten — Rate-Limit-schonend
       } catch (err) {
         console.warn(`[meta-sync] Konto ${konto}: ${err.message}`);
         kontoFehler.push({ konto, fehler: err.message });
+        await markKontoSync(konto, err.message); // 403/Freigabe-Fehler je Konto festhalten
       }
     }
 

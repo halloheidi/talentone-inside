@@ -5,6 +5,7 @@
 
 import { supabase } from './supabase.js';
 import { computeOpsOverview } from './routes/controlling-ops.js';
+import { werbekontenHinweise } from './meta-sync.js';
 import { ermittleFaelligeKampagnen } from './campaign-reminder.js';
 import { listOpenTasksSplit, listUsers, getCloseKey } from './close.js';
 import { getInstantlyOverview } from './instantly.js';
@@ -340,7 +341,7 @@ Antworte als JSON: {"text": "<3-5 Sätze inkl. 'Heute zuerst: …'>", "top3": ["
 
 /* ═══════════ Haupt-Aggregator ═══════════ */
 export async function buildHeute({ userEmail }) {
-  const [ssl, kritischCockpit, zahlung, kampagnen, bewerber, close, instantly] = await Promise.all([
+  const [ssl, kritischCockpit, zahlung, kampagnen, bewerber, close, instantly, metaHinweise] = await Promise.all([
     sslProbleme().then(list => list.map(s => ({
       key: `kritisch:ssl:${s.host}`, section: 'kritisch', severity: 'kritisch',
       title: `🔒 SSL-Problem — ${s.host}`, meta: `${s.grund} (geprüft ${s.checked_at ? new Date(s.checked_at).toLocaleString('de-DE') : '—'}) — Webhooks/OAuth/Portal betroffen`,
@@ -352,6 +353,7 @@ export async function buildHeute({ userEmail }) {
     collectBewerber().catch(e => { console.warn('[heute] bewerber:', e.message); return []; }),
     collectClose(userEmail),
     collectInstantly(),
+    werbekontenHinweise().catch(e => { console.warn('[heute] meta-hinweise:', e.message); return { konten_ohne_kunde: 0, kampagnen_ohne_zuordnung: 0, konten_ohne_sync: 0 }; }),
   ]);
 
   // SSL-/Infrastruktur-Probleme ganz oben, dann Zahlungsprobleme, dann Cockpit-Ampeln.
@@ -370,6 +372,7 @@ export async function buildHeute({ userEmail }) {
     },
     close,
     instantly,
+    meta_hinweise: metaHinweise,
     counts: {
       kritisch: kritisch.filter(i => i.severity === 'kritisch').length,
       heute: kampagnen.length,

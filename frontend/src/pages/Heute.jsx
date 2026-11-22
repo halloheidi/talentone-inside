@@ -211,6 +211,7 @@ export default function Heute() {
       const items = [...overdueTodos, ...sichtbar(s.kritisch)];
       return <>
         <QontoBar data={qontoData} onReload={loadQonto} />
+        <MetaBar hinweise={data.meta_hinweise} />
         {items.length ? items.map(i => <Row key={i.key} item={i} onHide={i.key.startsWith('todo-') ? null : hideRow} />) : <div className="heute-empty">Nichts brennt. 🎉</div>}
       </>;
     }
@@ -506,6 +507,24 @@ function TerminRow({ mail, onHide, onReload }) {
           : <span style={{ fontSize: 11, color: '#9a9994' }}>Einladung erkannt (keine RSVP-Kennung)</span>}
       </div>
       {err && <div style={{ fontSize: 11, color: '#b42318', marginTop: 3 }}>{err}</div>}
+    </div>
+  );
+}
+
+// Drei Meta-Werbekonten-Aufmerksamkeitszahlen als Badge-Leiste (nur sichtbar, wenn > 0).
+function MetaBar({ hinweise }) {
+  if (!hinweise) return null;
+  const { konten_ohne_kunde = 0, kampagnen_ohne_zuordnung = 0, konten_ohne_sync = 0 } = hinweise;
+  if (!konten_ohne_kunde && !kampagnen_ohne_zuordnung && !konten_ohne_sync) return null;
+  const chip = (bg, color, border) => ({ background: bg, color, border: `1px solid ${border}`, borderRadius: 100, padding: '2px 9px', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap' });
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '6px 8px', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <Link to="/admin/meta" style={{ fontSize: 12, fontWeight: 600, textDecoration: 'none', color: '#0a0a0a' }}>📊 Werbekonten</Link>
+        {konten_ohne_kunde > 0 && <Link to="/admin/meta" style={{ textDecoration: 'none' }}><span style={chip('#fff4e5', '#8a4b00', '#ffd8a8')}>ohne Kunde {konten_ohne_kunde}</span></Link>}
+        {kampagnen_ohne_zuordnung > 0 && <Link to="/admin/meta" style={{ textDecoration: 'none' }}><span style={chip('#fff4e5', '#8a4b00', '#ffd8a8')}>Kampagnen ohne Stelle {kampagnen_ohne_zuordnung}</span></Link>}
+        {konten_ohne_sync > 0 && <Link to="/admin/meta" style={{ textDecoration: 'none' }}><span style={chip('#fdecea', '#8a1c1c', '#f5c2c0')}>ohne Sync {konten_ohne_sync}</span></Link>}
+      </div>
     </div>
   );
 }
