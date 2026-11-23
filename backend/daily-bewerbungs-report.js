@@ -7,7 +7,7 @@
 import { supabase } from './supabase.js';
 import { getNotificationRecipients } from './mail.js';
 import { metaMetrikenBatch, garantieStatus } from './meta-metriken.js';
-import { pixelWaechter } from './meta-tracking.js';
+import { pixelWaechter, pixelOhneBewerbungWaechter } from './meta-tracking.js';
 
 const RESEND_API = 'https://api.resend.com/emails';
 const INSIDE_BASE = process.env.INSIDE_BASE_URL || 'https://inside.talent-one.de';
@@ -227,12 +227,16 @@ async function collectMetaWarnungen() {
 
   const ueberfaelligMeldungen = await collectUeberfaellig();
 
-  // Pixel-Wächter: Stellen mit Bewerbungen, aber 0 Meta-Events (letzte 3 Tage).
-  let pixelFeuertNicht = [];
-  try { pixelFeuertNicht = await pixelWaechter(3); }
+  // Pixel-Wächter (7 Tage, action-basiert):
+  //  Stufe 1 „Pixel feuert nicht"           — aktive Kampagne, Spend > 0, keine fb_pixel_*-Action.
+  //  Stufe 2 „Pixel feuert, keine Bewerbung" — fb_pixel_* vorhanden, keine fb_pixel_custom, Spend > 50 €.
+  let pixelFeuertNicht = [], pixelOhneBewerbung = [];
+  try { pixelFeuertNicht = await pixelWaechter(7); }
   catch (e) { console.warn('[daily-bewerbungs-report] pixel-waechter:', e.message); }
+  try { pixelOhneBewerbung = await pixelOhneBewerbungWaechter(7); }
+  catch (e) { console.warn('[daily-bewerbungs-report] pixel-ohne-bewerbung:', e.message); }
 
-  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen, verbindungsWarnungen, pixelFeuertNicht };
+  return { budgetWarnungen, garantieHinweise, ueberfaelligMeldungen, verbindungsWarnungen, pixelFeuertNicht, pixelOhneBewerbung };
 }
 
 // Überfällige Projekte: geplanter Livegang liegt in der Vergangenheit, aber es gibt keinen
@@ -274,19 +278,32 @@ async function collectUeberfaellig() {
   return meldungen;
 }
 
-function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [], verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] }, pixelFeuertNicht = [] }) {
+function renderMetaSektionen({ budgetWarnungen, garantieHinweise, ueberfaelligMeldungen = [], verbindungsWarnungen = { keineVerbindung: [], objektPausiert: [], keineInsights: [] }, pixelFeuertNicht = [], pixelOhneBewerbung = [] }) {
   let html = '';
   if (pixelFeuertNicht.length) {
     const rows = pixelFeuertNicht.map(z => `<tr style="border-bottom:1px solid #ececea;">
         <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(z.firmenname)}</td>
         <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(z.stelle)}</td>
-        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b91c1c;font-weight:700;">${z.bewerbungen} Bewerbungen · 0 Events</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b91c1c;font-weight:700;">${Number(z.spend).toFixed(2)} € Spend · 0 Pixel-Events</td>
       </tr>`).join('');
-    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b91c1c;">🎯 Pixel feuert nicht (Bewerbungen ohne Events, letzte 3 Tage)</h2>
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b91c1c;">🎯 Pixel feuert nicht (aktive Kampagne mit Spend, keine fb_pixel_*-Action, letzte 7 Tage)</h2>
       <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fdecea;border-bottom:2px solid #ececea;">
         <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Kunde</th>
         <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Stelle</th>
         <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#8a1c1c;">Befund</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  if (pixelOhneBewerbung.length) {
+    const rows = pixelOhneBewerbung.map(z => `<tr style="border-bottom:1px solid #ececea;">
+        <td style="padding:8px 10px;font-size:13px;font-weight:600;">${escape(z.firmenname)}</td>
+        <td style="padding:8px 10px;font-size:12px;color:#5a5955;">${escape(z.stelle)}</td>
+        <td style="padding:8px 10px;font-size:13px;text-align:right;color:#b26b00;font-weight:700;">${Number(z.spend).toFixed(2)} € Spend · Pixel feuert, keine Bewerbungs-Conversion</td>
+      </tr>`).join('');
+    html += `<h2 style="margin:22px 0 6px;font-size:16px;color:#b26b00;">🎯 Pixel feuert, aber keine Bewerbung (fb_pixel_* ohne fb_pixel_custom, Spend > 50 €, letzte 7 Tage)</h2>
+      <table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#fff4e5;border-bottom:2px solid #ececea;">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a4b00;">Kunde</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;color:#8a4b00;">Stelle</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;color:#8a4b00;">Befund</th>
       </tr></thead><tbody>${rows}</tbody></table>`;
   }
   const vw = verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
@@ -439,7 +456,8 @@ export async function runDailyBewerbungsReport() {
     const vw = metaWarnungen.verbindungsWarnungen || { keineVerbindung: [], objektPausiert: [], keineInsights: [] };
     const verbindungN = vw.keineVerbindung.length + vw.objektPausiert.length + vw.keineInsights.length;
     const pixelN = (metaWarnungen.pixelFeuertNicht || []).length;
-    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length || verbindungN || pixelN;
+    const pixelOhneN = (metaWarnungen.pixelOhneBewerbung || []).length;
+    const anyMeta = metaWarnungen.budgetWarnungen.length || metaWarnungen.garantieHinweise.length || metaWarnungen.ueberfaelligMeldungen.length || verbindungN || pixelN || pixelOhneN;
     if (!rows.length && neu24hTotal === 0 && !anyMeta && !feedbackGruppen.length) {
       lastResult = { checked: 0, sent: false, reason: 'no_data', duration_ms: Date.now() - t0 };
       lastRunAt = new Date().toISOString();
@@ -453,7 +471,8 @@ export async function runDailyBewerbungsReport() {
     const subject = `📊 Bewerbungs-Report ${datumLabel}: ${neu24hTotal} neue Bewerbung${neu24hTotal === 1 ? '' : 'en'}`
       + (fbEinst ? ` · ${fbEinst} Einstellung${fbEinst === 1 ? '' : 'en'}🎉` : '')
       + (ueberN ? ` · ${ueberN} überfällig⏰` : '') + (budgetN ? ` · ${budgetN} Budget⚠️` : '') + (garantieN ? ` · ${garantieN} Garantie🛡️` : '')
-      + (verbindungN ? ` · ${verbindungN} Meta🔌` : '') + (pixelN ? ` · ${pixelN} Pixel🎯` : '');
+      + (verbindungN ? ` · ${verbindungN} Meta🔌` : '') + (pixelN ? ` · ${pixelN} Pixel🎯` : '')
+      + (pixelOhneN ? ` · ${pixelOhneN} Pixel-Conv🎯` : '');
     const sent = await sendMail({ subject, html });
     lastResult = { checked: rows.length, sent: !!sent, neu24h: neu24hTotal, duration_ms: Date.now() - t0 };
     lastRunAt = new Date().toISOString();

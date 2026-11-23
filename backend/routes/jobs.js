@@ -542,12 +542,17 @@ router.get('/:id/pixel-context', async (req, res) => {
       .from('talentone_jobs').select('id, stelle, kunde_id, projekt_id, pixel_id').eq('id', req.params.id).maybeSingle();
     if (!job) return res.status(404).json({ error: 'Stelle nicht gefunden.' });
 
-    const [{ data: pixel = [] }, { data: kunde }, projektRes] = await Promise.all([
+    const [{ data: pixel = [] }, { data: kunde }, projektRes, funnelRes] = await Promise.all([
       supabase.from('talentone_pixel').select('*').order('fallback', { ascending: false }).order('name'),
       supabase.from('talentone_kunden').select('branche').eq('id', job.kunde_id).maybeSingle(),
       job.projekt_id
         ? supabase.from('talentone_projekte').select('pixel').eq('id', job.projekt_id).maybeSingle()
         : Promise.resolve({ data: null }),
+      // Neuester Funnel der Stelle: dessen hinterlegte Pixel-ID + Herkunft (gelesen/angenommen),
+      // bzw. für Onepage-Funnels der Hinweis „im Builder prüfen".
+      supabase.from('talentone_funnels')
+        .select('funnel_typ, pixel_id, pixel_id_quelle')
+        .eq('job_id', job.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
 
     const aktive = pixel.filter(p => p.aktiv);
@@ -556,7 +561,16 @@ router.get('/:id/pixel-context', async (req, res) => {
     const aktuell = job.pixel_id ? byId[job.pixel_id] : null;
     const token = process.env.META_CAPI_TOKEN || null;
     let tracking = null;
-    try { tracking = await trackingFuerJob(job.id, 14); } catch (e) { console.warn('[pixel-context tracking]', e.message); }
+    try { tracking = await trackingFuerJob(job.id, 7); } catch (e) { console.warn('[pixel-context tracking]', e.message); }
+
+    const funnel = funnelRes?.data || null;
+    const funnelPixel = funnel ? {
+      typ: funnel.funnel_typ || null,
+      pixel_id: funnel.pixel_id || null,
+      quelle: funnel.pixel_id_quelle || null,            // 'gelesen' | 'angenommen' | null
+      // Onepage ohne hinterlegte Pixel-Info → im Onepage-Builder prüfen (nicht auslesbar).
+      onepage_pruefen: funnel.funnel_typ === 'onepage' && !funnel.pixel_id,
+    } : null;
 
     res.json({
       aktiv_liste: aktive.map(p => ({ id: p.id, name: p.name, gewerk: p.gewerk, meta_pixel_id: p.meta_pixel_id, fallback: p.fallback })),
@@ -565,9 +579,10 @@ router.get('/:id/pixel-context', async (req, res) => {
       vorschlag: vorschlag ? { id: vorschlag.id, name: vorschlag.name, gewerk: vorschlag.gewerk, meta_pixel_id: vorschlag.meta_pixel_id, via_fallback: viaFallback } : null,
       vorschlag_gewerk: gewerk,
       projekt_pixel_freitext: projektRes?.data?.pixel || null,
+      funnel_pixel: funnelPixel,         // Funnel-hinterlegter Pixel (gelesen/angenommen) + Onepage-Hinweis
       capi_token: token,                 // intern: Kopier-Button
       capi_token_masked: maskToken(token),
-      tracking,                          // { bewerbungen, events, quote, pixel_feuert_nicht, … } letzte 14 T
+      tracking,                          // { bewerbungen, events, quote, pixel_feuert_nicht, pixel_ohne_bewerbung, … } letzte 7 T
     });
   } catch (e) {
     console.error('[jobs/pixel-context]', e.message);

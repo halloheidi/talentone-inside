@@ -107,6 +107,28 @@ export default function PixelKachel({ jobId, perspectiveHinweis = false, onChang
         </div>
       )}
 
+      {/* Funnel-hinterlegter Pixel (aus dem 20.11-Abgleich): gelesen vs. angenommen,
+          bzw. Onepage-Hinweis „im Builder prüfen". */}
+      {ctx.funnel_pixel && (ctx.funnel_pixel.onepage_pruefen || ctx.funnel_pixel.pixel_id) && (
+        ctx.funnel_pixel.onepage_pruefen ? (
+          <div style={{ marginTop: 10, background: '#fff4e5', border: '1px solid #ffd8a8', borderRadius: 8, padding: '8px 11px', fontSize: 12.5, color: '#8a4b00' }}>
+            📄 <strong>Onepage-Funnel:</strong> Pixel im Onepage-Builder prüfen (nicht automatisch auslesbar).
+          </div>
+        ) : (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>Im Funnel hinterlegt: <code style={{ fontSize: 12 }}>{ctx.funnel_pixel.pixel_id}</code></span>
+            {ctx.funnel_pixel.quelle === 'angenommen'
+              ? <span style={{ background: '#fff4e5', color: '#8a4b00', border: '1px solid #ffd8a8', borderRadius: 100, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>angenommen</span>
+              : ctx.funnel_pixel.quelle === 'gelesen'
+                ? <span style={{ background: '#e7f6ec', color: '#0a5c2b', border: '1px solid #b7e4c7', borderRadius: 100, padding: '1px 8px', fontSize: 11, fontWeight: 600 }}>ausgelesen</span>
+                : null}
+            {p && ctx.funnel_pixel.pixel_id !== p.meta_pixel_id && (
+              <span style={{ color: '#c1272d', fontSize: 11.5 }}>· weicht vom zugeordneten Pixel ab</span>
+            )}
+          </div>
+        )
+      )}
+
       {/* Hinweis bei abweichendem Vorschlag (nur Anzeige — Wechsel unten per Liste). */}
       {p && v && v.id !== p.id && (
         <p className="pane-hint" style={{ marginTop: 10, fontSize: 12 }}>
@@ -183,12 +205,17 @@ function Zeile({ label, children }) {
   );
 }
 
-// Tracking-Quote: Meta-Events vs. Tool-Bewerbungen (14 T). Rot wenn Pixel nicht feuert.
+// Tracking-Quote: Meta-Events/-Actions vs. Tool-Bewerbungen (7 T, action-basiert).
+// Stufe 1 (rot): aktive Kampagne mit Spend, aber keine fb_pixel_*-Action.
+// Stufe 2 (orange): Pixel feuert, aber keine fb_pixel_custom-Conversion (Spend > 50 €).
 function TrackingBadge({ t }) {
   if (!t) return <span className="pane-hint" style={{ fontSize: 12 }}>—</span>;
   const basis = <span className="pane-hint" style={{ fontSize: 12 }}>{t.events}/{t.bewerbungen} Events · {t.tage} T</span>;
   if (t.pixel_feuert_nicht) {
-    return <span style={{ fontSize: 12.5, color: '#c1272d', fontWeight: 600 }}>⚠️ Pixel feuert nicht — {t.bewerbungen} Bewerbungen, 0 Events ({t.tage} T)</span>;
+    return <span style={{ fontSize: 12.5, color: '#c1272d', fontWeight: 600 }}>⚠️ Pixel feuert nicht — Spend läuft, keine Pixel-Events ({t.tage} T)</span>;
+  }
+  if (t.pixel_ohne_bewerbung) {
+    return <span style={{ fontSize: 12.5, color: '#b26b00', fontWeight: 600 }}>⚠️ Pixel feuert, aber keine Bewerbung — keine fb_pixel_custom-Conversion ({t.tage} T)</span>;
   }
   if (t.bewerbungen === 0) {
     return <span className="pane-hint" style={{ fontSize: 12 }}>keine Bewerbungen im Zeitraum ({t.tage} T)</span>;
