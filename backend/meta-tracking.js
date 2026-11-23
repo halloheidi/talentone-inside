@@ -50,7 +50,7 @@ export async function trackingFuerJobs(jobIds, tage = 14) {
   const projektIds = [...new Set(jobs.map(j => j.projekt_id).filter(Boolean))];
 
   const [{ data: kamps = [] }, { data: adsets = [] }] = await Promise.all([
-    projektIds.length ? supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, projekt_id, effective_status').in('projekt_id', projektIds) : Promise.resolve({ data: [] }),
+    projektIds.length ? supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, projekt_id, effective_status').in('projekt_id', projektIds).eq('ignoriert', false) : Promise.resolve({ data: [] }),
     projektIds.length ? supabase.from('talentone_meta_adsets').select('meta_adset_id, projekt_id, effective_status').in('projekt_id', projektIds) : Promise.resolve({ data: [] }),
   ]);
   const campByProjekt = {}, adsetByProjekt = {};

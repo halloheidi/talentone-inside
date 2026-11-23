@@ -43,6 +43,10 @@ export default function Meta() {
   // Aufmerksamkeits-Zahlen (Werbekonten-Hinweiskasten)
   const [hinweise, setHinweise] = useState(null);
 
+  // Als „nicht relevant" markierte Kampagnen
+  const [ignorierte, setIgnorierte] = useState([]);
+  const [ignBusy, setIgnBusy] = useState(null); // meta_campaign_id während Request
+
   async function load() {
     try { setStatus(await api('/meta/status')); }
     catch (e) { setErr(e.body?.error || e.message); }
@@ -62,6 +66,10 @@ export default function Meta() {
   async function loadHinweise() {
     try { setHinweise(await api('/meta/werbekonten-hinweise')); }
     catch { /* best effort — Hinweiskasten bleibt dann leer */ }
+  }
+  async function loadIgnorierte() {
+    try { const r = await api('/meta/kampagnen/ignoriert'); setIgnorierte(r.kampagnen || []); }
+    catch { /* best effort */ }
   }
   async function loadKampagnen() {
     try {
@@ -85,6 +93,7 @@ export default function Meta() {
     load();
     loadKonten();
     loadHinweise();
+    loadIgnorierte();
     loadKampagnen();
     loadOffeneAdsets();
     loadReaktivierungen();
@@ -220,6 +229,31 @@ export default function Meta() {
     } catch (e) { setErr(e.body?.error || e.message); }
     finally { setSavingKamp(null); }
   }
+  async function markiereIgnoriert(kamp) {
+    const grund = prompt(`Kampagne „${kamp.name || kamp.meta_campaign_id}" als nicht relevant markieren.\nGrund (optional):`, kamp.ignoriert_grund || '');
+    if (grund === null) return; // abgebrochen
+    setIgnBusy(kamp.meta_campaign_id); setErr(''); setMsg('');
+    try {
+      await api(`/meta/kampagnen/${encodeURIComponent(kamp.meta_campaign_id)}/ignoriert`, {
+        method: 'PUT', body: { ignoriert: true, grund: grund.trim() || null },
+      });
+      setMsg('Als nicht relevant markiert.');
+      await Promise.all([loadKampagnen(), loadIgnorierte(), loadHinweise()]);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setIgnBusy(null); }
+  }
+  async function wiederAufnehmen(kamp) {
+    setIgnBusy(kamp.meta_campaign_id); setErr(''); setMsg('');
+    try {
+      await api(`/meta/kampagnen/${encodeURIComponent(kamp.meta_campaign_id)}/ignoriert`, {
+        method: 'PUT', body: { ignoriert: false },
+      });
+      setMsg('Kampagne wieder aufgenommen.');
+      await Promise.all([loadKampagnen(), loadIgnorierte(), loadHinweise()]);
+    } catch (e) { setErr(e.body?.error || e.message); }
+    finally { setIgnBusy(null); }
+  }
+
   async function matchingLaufen() {
     setMatchBusy(true); setErr(''); setMsg('');
     try {
@@ -533,11 +567,23 @@ export default function Meta() {
                 return (
                   <div key={kamp.meta_campaign_id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12, minWidth: 0, overflow: 'hidden' }}>
                     {/* Kopfbereich */}
-                    <div
-                      title={kamp.name || ''}
-                      style={{ fontWeight: 600, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    >
-                      {kamp.name || '(ohne Name)'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, minWidth: 0 }}>
+                      <span
+                        title={kamp.name || ''}
+                        style={{ fontWeight: 600, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {kamp.name || '(ohne Name)'}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        style={{ flex: '0 0 auto' }}
+                        title="Als nicht relevant markieren — raus aus Wächtern, Badges und Laufzeit"
+                        disabled={ignBusy === kamp.meta_campaign_id}
+                        onClick={() => markiereIgnoriert(kamp)}
+                      >
+                        {ignBusy === kamp.meta_campaign_id ? '…' : '🚫 nicht relevant'}
+                      </button>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 2, overflowWrap: 'anywhere' }}>
                       {kamp.konto_name ? `${kamp.konto_name} (${kamp.werbekonto_id})` : (kamp.werbekonto_id || '?')}
@@ -611,6 +657,39 @@ export default function Meta() {
             </div>
           )}
       </div>
+
+      {/* ══ Ignorierte Kampagnen (nicht relevant) ══ */}
+      {ignorierte.length > 0 && (
+        <div className="card">
+          <h2 className="section-title" style={{ marginTop: 0 }}>🚫 Nicht relevante Kampagnen</h2>
+          <p className="section-sub">
+            Diese Kampagnen sind aus Wächtern, Zuordnungs-Badges und der Laufzeit-/Kennzahlen-Rechnung
+            ausgenommen (z. B. Produkt-/Showroom-Kampagnen im selben Werbekonto).
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+            {ignorierte.map(kamp => {
+              const rowBusy = ignBusy === kamp.meta_campaign_id;
+              return (
+                <div key={kamp.meta_campaign_id} style={{ display: 'flex', gap: 8, alignItems: 'center', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', minWidth: 0 }}>
+                  <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <div title={kamp.name || ''} style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {kamp.name || '(ohne Name)'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>
+                      {kamp.konto_name ? `${kamp.konto_name} · ` : ''}{kamp.effective_status || ''}
+                      {kamp.projekt_id ? ' · zugeordnet' : ''}
+                      {kamp.ignoriert_grund ? ` · „${kamp.ignoriert_grund}"` : ''}
+                    </div>
+                  </div>
+                  <button className="btn-ghost btn-sm" style={{ flex: '0 0 auto' }} disabled={rowBusy} onClick={() => wiederAufnehmen(kamp)}>
+                    {rowBusy ? '…' : 'wieder aufnehmen'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ══ Nicht zugeordnete Anzeigengruppen (gemischte Kampagnen) ══ */}
       {offeneAdsets.length > 0 && (

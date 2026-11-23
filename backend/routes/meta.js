@@ -185,7 +185,7 @@ router.delete('/konten/:kontoId', async (req, res) => {
 router.get('/kampagnen/nicht-zugeordnet', async (req, res) => {
   const { data, error } = await supabase.from('talentone_meta_kampagnen')
     .select('meta_campaign_id, name, werbekonto_id, effective_status, meta_start_time, gemischt, kunde_id, talentone_kunden(firmenname)')
-    .is('projekt_id', null).order('name');
+    .is('projekt_id', null).eq('ignoriert', false).order('name');
   if (error) return res.status(500).json({ error: error.message });
   const kn = await kontoNamen();
   const pm = await phasenMeta((data || []).map(k => k.meta_campaign_id));
@@ -200,11 +200,41 @@ router.get('/kampagnen/nicht-zugeordnet', async (req, res) => {
   })) });
 });
 
+// GET /api/meta/kampagnen/ignoriert — als „nicht relevant" markierte Kampagnen (zum Wieder-Aufnehmen).
+router.get('/kampagnen/ignoriert', async (req, res) => {
+  const { data, error } = await supabase.from('talentone_meta_kampagnen')
+    .select('meta_campaign_id, name, werbekonto_id, effective_status, projekt_id, ignoriert_grund, talentone_kunden(firmenname)')
+    .eq('ignoriert', true).order('name');
+  if (error) return res.status(500).json({ error: error.message });
+  const kn = await kontoNamen();
+  res.json({ kampagnen: (data || []).map(k => ({
+    ...k,
+    kunde_name: k.talentone_kunden?.firmenname || null,
+    konto_name: kn[normKonto(k.werbekonto_id)] || null,
+    talentone_kunden: undefined,
+  })) });
+});
+
+// PUT /api/meta/kampagnen/:metaCampaignId/ignoriert  body { ignoriert: bool, grund?: string }
+// Markiert eine Kampagne als „nicht relevant" (oder nimmt sie wieder auf). Ausgenommen
+// aus Wächtern, Zuordnungs-Badges und Laufzeit — siehe .eq('ignoriert', false)-Filter.
+router.put('/kampagnen/:metaCampaignId/ignoriert', async (req, res) => {
+  const ignoriert = req.body?.ignoriert === true;
+  const grund = ignoriert ? (String(req.body?.grund || '').trim() || null) : null;
+  try {
+    const { error } = await supabase.from('talentone_meta_kampagnen')
+      .update({ ignoriert, ignoriert_grund: grund, updated_at: new Date().toISOString() })
+      .eq('meta_campaign_id', req.params.metaCampaignId);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true, ignoriert });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/meta/kampagnen/reaktivierungen — offene Reaktivierungs-Nachfragen (Badge + Bestätigung).
 router.get('/kampagnen/reaktivierungen', async (req, res) => {
   const { data, error } = await supabase.from('talentone_meta_kampagnen')
     .select('meta_campaign_id, name, werbekonto_id, reaktivierung_am, reaktivierung_pause_tage, talentone_kunden(firmenname)')
-    .eq('reaktivierung_offen', true).order('reaktivierung_am', { ascending: false });
+    .eq('reaktivierung_offen', true).eq('ignoriert', false).order('reaktivierung_am', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   const kn = await kontoNamen();
   res.json({ kampagnen: (data || []).map(k => ({

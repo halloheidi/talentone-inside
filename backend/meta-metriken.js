@@ -11,7 +11,7 @@ export function monatsStart(d = new Date()) { const x = new Date(d); return `${x
 /** meta_campaign_ids eines Projekts (alle zugeordneten Kampagnen). */
 async function kampagnenIdsFuerProjekt(projektId) {
   const { data } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, werbekonto_id').eq('projekt_id', projektId);
+    .select('meta_campaign_id, werbekonto_id').eq('projekt_id', projektId).eq('ignoriert', false);
   return data || [];
 }
 
@@ -103,7 +103,7 @@ export async function metaMetrikenBatch(projektIds, heute = new Date()) {
 
   // Kampagnen des Projekts — OHNE gemischte (deren Attribution läuft pro Ad Set).
   const { data: kamps } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, projekt_id, werbekonto_id, name, effective_status').in('projekt_id', projektIds).eq('gemischt', false);
+    .select('meta_campaign_id, projekt_id, werbekonto_id, name, effective_status').in('projekt_id', projektIds).eq('gemischt', false).eq('ignoriert', false);
   const campIds = (kamps || []).map(k => k.meta_campaign_id);
   const campsVonProjekt = {};
   for (const k of (kamps || [])) (campsVonProjekt[k.projekt_id] ||= []).push(k.meta_campaign_id);
@@ -281,7 +281,7 @@ export async function metaMetrikenFuerProjekt(projektId, heute = new Date()) {
  */
 export async function aktuelleKampagneFuerProjekt(projektId, zSeitByKonto = {}) {
   const { data: kamps } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, name, werbekonto_id').eq('projekt_id', projektId);
+    .select('meta_campaign_id, name, werbekonto_id').eq('projekt_id', projektId).eq('ignoriert', false);
   let best = null;
   for (const k of (kamps || [])) {
     const info = await aktuellePhaseInfo(k.meta_campaign_id, zSeitByKonto[String(k.werbekonto_id || '').trim()] || null);

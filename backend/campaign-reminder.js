@@ -71,7 +71,7 @@ export async function ermittleFaelligeKampagnen(today = new Date(), nurProjektId
 
   // Meta-Kampagnen je Projekt + Zahlungsproblem-Datum je Werbekonto (für Pausen-Aufschlüsselung).
   const { data: metaKamps } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, werbekonto_id, projekt_id').in('projekt_id', projektIds);
+    .select('meta_campaign_id, werbekonto_id, projekt_id').in('projekt_id', projektIds).eq('ignoriert', false);
   const kampsByProjekt = {};
   for (const k of (metaKamps || [])) (kampsByProjekt[k.projekt_id] ||= []).push(k);
   const { data: konten } = await supabase.from('talentone_meta_konten').select('konto_id, zahlungsproblem_seit');

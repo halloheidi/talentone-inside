@@ -210,7 +210,7 @@ export async function aktiveLauftage(jobId, opts = {}) {
   // Reverse-FK-Fallback (keine explizite Zuordnung)
   const [{ data: kamp }, { data: adsets }] = await Promise.all([
     supabase.from('talentone_meta_kampagnen')
-      .select('meta_campaign_id').eq('job_id', jobId).eq('gemischt', false),
+      .select('meta_campaign_id').eq('job_id', jobId).eq('gemischt', false).eq('ignoriert', false),
     supabase.from('talentone_meta_adsets')
       .select('meta_adset_id').eq('job_id', jobId),
   ]);

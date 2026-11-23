@@ -43,7 +43,7 @@ export async function metaVerbindungBatch(projektIds) {
   // Reverse-FK-Quellen (für Jobs ohne explizite Zuordnung).
   const [{ data: kamps = [] }, { data: adsets = [] }] = await Promise.all([
     jobIds.length ? supabase.from('talentone_meta_kampagnen')
-      .select('meta_campaign_id, job_id, effective_status').in('job_id', jobIds).eq('gemischt', false) : { data: [] },
+      .select('meta_campaign_id, job_id, effective_status').in('job_id', jobIds).eq('gemischt', false).eq('ignoriert', false) : { data: [] },
     jobIds.length ? supabase.from('talentone_meta_adsets')
       .select('meta_adset_id, job_id, effective_status').in('job_id', jobIds) : { data: [] },
   ]);
@@ -66,7 +66,7 @@ export async function metaVerbindungBatch(projektIds) {
   const fehlCamps = [...campIds].filter(c => !(c in campStatus));
   const fehlAdsets = [...adsetIds].filter(a => !(a in adsetStatus));
   if (fehlCamps.length) {
-    const { data } = await supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, effective_status').in('meta_campaign_id', fehlCamps);
+    const { data } = await supabase.from('talentone_meta_kampagnen').select('meta_campaign_id, effective_status').in('meta_campaign_id', fehlCamps).eq('ignoriert', false);
     for (const k of (data || [])) campStatus[k.meta_campaign_id] = k.effective_status;
   }
   if (fehlAdsets.length) {

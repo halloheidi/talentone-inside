@@ -144,7 +144,7 @@ async function markKontoSync(konto, fehler) {
 export async function werbekontenHinweise() {
   const [{ data: konten }, { data: kampOffen }, { data: kampKonten }] = await Promise.all([
     supabase.from('talentone_meta_konten').select('konto_id, typ, kunde_id, account_status, letzter_sync_fehler'),
-    supabase.from('talentone_meta_kampagnen').select('werbekonto_id, effective_status').is('projekt_id', null).eq('gemischt', false),
+    supabase.from('talentone_meta_kampagnen').select('werbekonto_id, effective_status').is('projekt_id', null).eq('gemischt', false).eq('ignoriert', false),
     supabase.from('talentone_meta_kampagnen').select('werbekonto_id'),
   ]);
   const kontenMap = new Map((konten || []).map(k => [normKonto(k.konto_id), k]));
@@ -271,7 +271,7 @@ export async function matchKampagnen() {
   // Nur noch nicht zugeordnete Kampagnen (projekt_id null) automatisch matchen.
   // Gemischte Kampagnen NIE wholesale zuordnen — deren Attribution läuft pro Ad Set.
   const { data: kampagnen } = await supabase.from('talentone_meta_kampagnen')
-    .select('meta_campaign_id, name, werbekonto_id, projekt_id').is('projekt_id', null).eq('gemischt', false);
+    .select('meta_campaign_id, name, werbekonto_id, projekt_id').is('projekt_id', null).eq('gemischt', false).eq('ignoriert', false);
   if (!kampagnen?.length) return { geprueft: 0, zugeordnet: 0, offen: 0 };
 
   const [{ data: konten }, { data: kunden }, { data: kundenAcc }, { data: jobs }] = await Promise.all([
